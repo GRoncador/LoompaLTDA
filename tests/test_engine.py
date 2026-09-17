@@ -39,6 +39,7 @@ def factory(git_repo: Path, hub) -> Factory:
     f.config.quality.lint_command = ""
     f.config.quality.typecheck_command = ""
     f.config.schedule.max_parallel = 2
+    f.config.schedule.ops_retry_base_s = 0.01
     f.save()
     return Factory.open(git_repo)
 
@@ -162,7 +163,7 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     tiers = [r["key"] for r in ctx.store.usage_by("tier", factory.slug)]
     assert set(tiers) == {"tier1", "tier2"}
     assert seen_models.count("deepseek-chat") == 4 and seen_models.count("deepseek-reasoner") == 2
-    types = [e["type"] for e in ctx.store.events_since(0)]
+    types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
     assert types.count("story.retry") == 1 and types.count("story.escalated") == 1
     assert len(state.failure_history) == 2 and "assert 1 == 2" in state.failure_history[0]
     assert (
@@ -399,6 +400,54 @@ async def test_node_crash_isolates_story_and_scheduler_survives(factory: Factory
     msg = ctx.store.get_message(state.blocked_message_id)
     assert msg.executive_audit() == [] and "LLMError" not in msg.context
     assert any(e["type"] == "story.error" for e in ctx.store.events_since(0))
+    await ctx.aclose()
+
+
+async def test_ops_loompa_retries_transient_failure_and_tells_founder(factory: Factory):
+    calls = {"n": 0}
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect":
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise LLMError("gemini/x: cota/limite (429)", retryable=True)
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    ctx.router.max_retries = 0
+    tier = ctx.config.models.tier_for("architect")  # single-candidate tier, like a free-tier setup
+    ctx.config.models.tiers[tier] = ctx.config.models.tiers[tier][:1]
+    sid = seed_story(ctx, "Recupera sozinho")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    # the story went past PLAN by itself and reached the delivery gate
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
+    assert calls["n"] == 3 and "ops_incident" not in state.extra
+    types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
+    assert types.count("story.retry") == 2 and "story.recovered" in types
+    notes = [m for m in ctx.store.list_messages(ctx.slug) if m.sender == "Ops Loompa"]
+    assert len(notes) == 1 and notes[0].kind == "info" and not notes[0].requires_action
+    assert notes[0].executive_audit() == [] and "limite de uso" in notes[0].context
+    await ctx.aclose()
+
+
+async def test_ops_loompa_escalates_in_plain_language_after_max_recoveries(factory: Factory):
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect":
+            raise LLMError("gemini/x: em cooldown", retryable=True)
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    ctx.router.max_retries = 0
+    sid = seed_story(ctx, "Não recupera")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "persistent_failure"
+    types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
+    assert types.count("story.retry") == factory.config.schedule.ops_max_recoveries
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert msg.executive_audit() == [] and "Ops Loompa tentou" in msg.context
+    assert "cooldown" not in msg.context and "LLMError" not in msg.context
     await ctx.aclose()
 
 

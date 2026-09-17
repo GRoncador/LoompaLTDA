@@ -7,6 +7,7 @@ escalation ladder (Tier 2 -> Tier 1) is expressed via `tier_override`.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +24,8 @@ from loompa.llm.providers import (
     QuotaExhausted,
     build_provider,
 )
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -44,11 +47,16 @@ class ModelRouter:
         client: httpx.AsyncClient | None = None,
         on_call: Callable[[str, str, RoutedCall], None] | None = None,
         max_retries: int = 2,
+        max_cooldown_wait: float = 90.0,
     ):
         self.config = config
         self.tracker = tracker
         self.on_call = on_call
         self.max_retries = max_retries
+        # When every candidate of a tier is merely cooling down (typical with a single-model
+        # tier on a free-tier rate limit), wait up to this long for the earliest one instead
+        # of failing the story outright.
+        self.max_cooldown_wait = max_cooldown_wait
         self._client = client
         self._providers: dict[str, LLMProvider] = dict(providers or {})
         self._cooldown: dict[
@@ -88,6 +96,63 @@ class ModelRouter:
         loop = asyncio.get_running_loop()
         errors: list[str] = []
         attempts = 0
+        waited = 0.0
+        while True:
+            routed = await self._one_pass(
+                tier,
+                cands,
+                role,
+                messages,
+                agent,
+                story_id,
+                tools,
+                json_mode,
+                max_tokens,
+                temperature,
+                errors,
+                attempts,
+            )
+            if isinstance(routed, RoutedCall):
+                return routed
+            attempts = routed
+            # Nothing answered. If every candidate is only cooling down, wait for the first
+            # one to come back rather than failing the story on the spot.
+            cooling = [
+                self._cooldown[f"{c.provider}/{c.model}"]
+                for c in cands
+                if self._cooldown.get(f"{c.provider}/{c.model}", 0) > loop.time()
+            ]
+            if len(cooling) != len(cands):
+                break
+            wait = min(cooling) - loop.time() + 0.05
+            if waited + wait > self.max_cooldown_wait:
+                errors.append(f"cooldown de {wait:.0f}s excede o limite de espera")
+                break
+            log.warning("tier %s: todos os modelos em cooldown, aguardando %.0fs", tier, wait)
+            await asyncio.sleep(wait)
+            waited += wait
+        raise LLMError(
+            "todos os modelos do tier falharam: " + "; ".join(errors[-4:]), retryable=True
+        )
+
+    async def _one_pass(
+        self,
+        tier: str,
+        cands: list[ModelCandidate],
+        role: str,
+        messages: list[Message],
+        agent: str | None,
+        story_id: str | None,
+        tools: list[dict[str, Any]] | None,
+        json_mode: bool,
+        max_tokens: int | None,
+        temperature: float | None,
+        errors: list[str],
+        attempts: int,
+    ) -> RoutedCall | int:
+        """Try each candidate once (with per-candidate retries). Returns the RoutedCall, or
+        the updated attempt count when none answered."""
+        loop = asyncio.get_running_loop()
         for cand in cands:
             key = f"{cand.provider}/{cand.model}"
             if self._cooldown.get(key, 0) > loop.time():
@@ -118,7 +183,10 @@ class ModelRouter:
                     )
                 except QuotaExhausted as exc:
                     errors.append(str(exc))
-                    self._cooldown[key] = loop.time() + 300
+                    # Honour the provider's hint; otherwise a 429 is a per-minute rate limit,
+                    # anything else (402 billing, 503 overloaded) deserves a longer pause.
+                    pause = exc.retry_after or (60.0 if exc.status == 429 else 300.0)
+                    self._cooldown[key] = loop.time() + pause
                     break  # next candidate
                 except LLMError as exc:
                     errors.append(str(exc))
@@ -148,9 +216,7 @@ class ModelRouter:
                 if self.on_call:
                     self.on_call(role, agent or role, routed)
                 return routed
-        raise LLMError(
-            "todos os modelos do tier falharam: " + "; ".join(errors[-4:]), retryable=True
-        )
+        return attempts
 
     async def aclose(self) -> None:
         for p in self._providers.values():

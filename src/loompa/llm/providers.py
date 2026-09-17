@@ -24,8 +24,41 @@ class LLMError(RuntimeError):
 
 
 class QuotaExhausted(LLMError):
-    def __init__(self, message: str, *, status: int | None = None):
+    """Rate limit / quota. `retry_after` (seconds) is the provider's own hint when it gave one."""
+
+    def __init__(
+        self, message: str, *, status: int | None = None, retry_after: float | None = None
+    ):
         super().__init__(message, status=status, retryable=True)
+        self.retry_after = retry_after
+
+
+def _retry_after_seconds(resp: httpx.Response) -> float | None:
+    """Best-effort: `Retry-After` header, Gemini's `retryDelay: "23s"` detail, or an
+    OpenAI-style "try again in 12.3s" message. None when the provider gave no hint."""
+    header = resp.headers.get("retry-after")
+    if header:
+        try:
+            return max(0.0, float(header))
+        except ValueError:
+            pass
+    try:
+        err = resp.json().get("error") or {}
+    except ValueError:
+        return None
+    if isinstance(err, dict):
+        for detail in err.get("details") or []:
+            delay = detail.get("retryDelay") if isinstance(detail, dict) else None
+            if isinstance(delay, str) and delay.endswith("s"):
+                try:
+                    return float(delay[:-1])
+                except ValueError:
+                    pass
+        m = re.search(r"try again in ([\d.]+)\s*(ms|s)", str(err.get("message", "")))
+        if m:
+            secs = float(m.group(1))
+            return secs / 1000 if m.group(2) == "ms" else secs
+    return None
 
 
 @dataclass
@@ -185,7 +218,9 @@ class OpenAICompatibleProvider(LLMProvider):
         duration = int((time.monotonic() - start) * 1000)
         if resp.status_code == 429 or resp.status_code in (402, 503):
             raise QuotaExhausted(
-                f"{self.name}/{model}: cota/limite ({resp.status_code})", status=resp.status_code
+                f"{self.name}/{model}: cota/limite ({resp.status_code})",
+                status=resp.status_code,
+                retry_after=_retry_after_seconds(resp),
             )
         if resp.status_code >= 500:
             raise LLMError(
@@ -317,7 +352,9 @@ class AnthropicProvider(LLMProvider):
         duration = int((time.monotonic() - start) * 1000)
         if resp.status_code in (429, 529):
             raise QuotaExhausted(
-                f"{self.name}/{model}: limite ({resp.status_code})", status=resp.status_code
+                f"{self.name}/{model}: limite ({resp.status_code})",
+                status=resp.status_code,
+                retry_after=_retry_after_seconds(resp),
             )
         if resp.status_code >= 500:
             raise LLMError(

@@ -173,6 +173,46 @@ async def test_router_all_fail_raises():
         await router.complete("worker", [Message("user", "x")])
 
 
+async def test_router_waits_for_single_candidate_cooldown():
+    cfg = default_config()
+    cfg.models.tiers["tier2"] = cfg.models.tiers["tier2"][:1]
+    calls = {"n": 0}
+
+    def flaky(model, messages, tools):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return QuotaExhausted("cota", status=429, retry_after=0.05)
+        return "back"
+
+    router = ModelRouter(
+        cfg, providers={"deepseek": MockProvider("deepseek", script=flaky)}, max_retries=0
+    )
+    rc = await router.complete("worker", [Message("user", "x")])
+    assert rc.response.text == "back" and rc.attempts == 2 and calls["n"] == 2
+    # a cooldown longer than the wait budget is reported instead of awaited
+    calls["n"] = 0
+    router._cooldown.clear()
+    router.max_cooldown_wait = 0.01
+
+    def slow(model, messages, tools):
+        return QuotaExhausted("cota", status=429, retry_after=5)
+
+    router._providers["deepseek"] = MockProvider("deepseek", script=slow)
+    with pytest.raises(LLMError, match="excede o limite de espera"):
+        await router.complete("worker", [Message("user", "x")])
+
+
+def test_retry_after_is_parsed_from_header_and_gemini_body():
+    from loompa.llm.providers import _retry_after_seconds
+
+    assert _retry_after_seconds(httpx.Response(429, headers={"retry-after": "7"})) == 7.0
+    body = {"error": {"message": "quota", "details": [{"retryDelay": "23s"}]}}
+    assert _retry_after_seconds(httpx.Response(429, json=body)) == 23.0
+    body = {"error": {"message": "Rate limit reached. Please try again in 1.5s."}}
+    assert _retry_after_seconds(httpx.Response(429, json=body)) == 1.5
+    assert _retry_after_seconds(httpx.Response(429, text="nope")) is None
+
+
 def test_extract_json():
     assert extract_json('```json\n{"a": 1}\n```') == {"a": 1}
     assert extract_json('prefix {"a": [1, 2]} suffix') == {"a": [1, 2]}

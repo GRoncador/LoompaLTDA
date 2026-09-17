@@ -17,6 +17,7 @@ The story pipeline is a `StateGraph` over `StoryState`:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import traceback
 from typing import Any
@@ -27,6 +28,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from loompa.agents.ops import INCIDENT_KEY, OpsAgent
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import (
     BlockedReason,
@@ -89,15 +91,32 @@ def build_graph(
         fn = NODE_FUNCS[name]
 
         async def node(state: StoryState) -> dict[str, Any]:
-            try:
-                new_state = await fn(ctx, state)
-            except Exception as exc:  # noqa: BLE001 - a crash isolates this story only
-                log.exception("story %s failed in %s", state.story_id, name)
-                technical = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-3000:]}"
-                ctx.emit("story.error", story_id=state.story_id, node=name, error=str(exc)[:300])
-                new_state = await block(
-                    ctx, state, BlockedReason.PERSISTENT_FAILURE, technical, resume=state.stage
-                )
+            ops = OpsAgent(ctx)
+            while True:
+                try:
+                    new_state = await fn(ctx, state)
+                    ops.on_success(new_state)
+                    break
+                except Exception as exc:  # noqa: BLE001 - a crash isolates this story only
+                    log.exception("story %s failed in %s", state.story_id, name)
+                    technical = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-3000:]}"
+                    ctx.emit(
+                        "story.error", story_id=state.story_id, node=name, error=str(exc)[:300]
+                    )
+                    wait = ops.on_failure(state, name, exc)
+                    if wait is None:
+                        new_state = await block(
+                            ctx,
+                            state,
+                            BlockedReason.PERSISTENT_FAILURE,
+                            technical,
+                            resume=state.stage,
+                            executive=ops.executive_reason(state),
+                        )
+                        new_state.extra.pop(INCIDENT_KEY, None)
+                        break
+                    _project(ctx, state, f"node_{name}")  # dashboard sees the waiting story
+                    await asyncio.sleep(wait)
             _project(ctx, new_state, f"node_{name}")
             return new_state.model_dump()
 

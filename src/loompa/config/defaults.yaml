@@ -14,6 +14,8 @@ schedule:
   worker_max_iterations: 40 # tool calls per task before the Worker must wrap up
   worker_keep_tool_results: 6 # older tool outputs are collapsed to one line (token savings)
   work_hours: "09:00-17:30" # informational; `loompa run` executes whenever invoked
+  ops_max_recoveries: 3     # transient crashes (rate limit, network) the Ops Loompa retries by itself
+  ops_retry_base_s: 60      # wait before the first retry; doubles each time (max 10 min)
 
 budget:
   monthly_cap_usd: 30.0
