@@ -1,17 +1,21 @@
-"""Async scheduler: N stories at once, each an isolated task; a paused story never blocks others."""
+"""Async scheduler over the LangGraph runtime: N stories at once, one thread per story.
+
+A paused story (AWAITING_FOUNDER) simply ends its graph run; the scheduler picks the next
+runnable one. Nothing ever blocks the line.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
 from loompa.comms import FounderAnswer
 from loompa.engine.context import EngineContext
-from loompa.engine.graph import NODES, apply_founder_answer, block
-from loompa.engine.state import PAUSED, TERMINAL, BlockedReason, Stage, StoryState
+from loompa.engine.graph import apply_founder_answer
+from loompa.engine.langgraph_engine import GraphRuntime
+from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.finance import BudgetStatus
 
 log = logging.getLogger("loompa.scheduler")
@@ -49,33 +53,24 @@ def save_state(ctx: EngineContext, state: StoryState, node: str) -> None:
     ctx.emit("story.stage", story_id=state.story_id, stage=state.stage.value, node=node)
 
 
+def runtime_for(ctx: EngineContext) -> GraphRuntime:
+    rt = getattr(ctx, "_graph_runtime", None)
+    if rt is None:
+        rt = GraphRuntime(ctx)
+        ctx._graph_runtime = rt  # type: ignore[attr-defined]
+    return rt
+
+
 class StoryRunner:
+    """Runs one story's LangGraph thread until it pauses or finishes."""
+
     def __init__(self, ctx: EngineContext, story_id: str):
         self.ctx = ctx
         self.story_id = story_id
 
-    async def step(self, state: StoryState) -> StoryState:
-        node = NODES.get(state.stage)
-        if node is None:
-            return state
-        name = node.__name__
-        try:
-            state = await node(self.ctx, state)
-        except Exception as exc:  # noqa: BLE001 - any crash isolates this story only
-            log.exception("story %s failed in %s", state.story_id, name)
-            technical = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-3000:]}"
-            self.ctx.emit("story.error", story_id=state.story_id, node=name, error=str(exc)[:300])
-            state = await block(
-                self.ctx, state, BlockedReason.PERSISTENT_FAILURE, technical, resume=state.stage
-            )
-        save_state(self.ctx, state, name)
-        return state
-
     async def run(self) -> StoryState:
         state = load_state(self.ctx, self.story_id)
-        while state.stage not in TERMINAL and state.stage not in PAUSED:
-            state = await self.step(state)
-        return state
+        return await runtime_for(self.ctx).run_story(state)
 
 
 @dataclass
@@ -173,7 +168,7 @@ class Scheduler:
         return self.completed
 
     # --------------------------------------------------------------- founder
-    def answer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:
+    async def aanswer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:
         """Apply an inbox reply; returns the updated story state (None for non-story messages)."""
         msg = self.ctx.store.answer_message(message_id, answer)
         self.ctx.emit(
@@ -189,4 +184,9 @@ class Scheduler:
             return state
         state = apply_founder_answer(self.ctx, state, msg, answer)
         save_state(self.ctx, state, "founder_answer")
+        await runtime_for(self.ctx).inject_founder_answer(state)
         return state
+
+    def answer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:
+        """Sync facade for CLI code paths (no running event loop)."""
+        return asyncio.run(self.aanswer(message_id, answer))

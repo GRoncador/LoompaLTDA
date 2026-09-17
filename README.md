@@ -50,7 +50,7 @@ skips providers without keys or with exhausted quota:
 Every call is metered (exact tokens × configured pricing). The Finance Loompa alerts the inbox at
 80 % of `budget.monthly_cap_usd` (default US$ 30) and the scheduler pauses at 100 %.
 
-## How a story flows
+## How a story flows (LangGraph `StateGraph`, one thread per story)
 
 ```
 BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → TEST (Inspector)
@@ -90,4 +90,4 @@ cd dashboard-ui && npm install && npm run dev      # UI dev server proxied to :8
 npm run build                                      # writes src/loompa/dashboard/static (committed)
 ```
 
-Architecture decisions: `docs/adr/`. Brief → implementation map: `docs/STATUS.md`.
+Architecture decisions: `docs/adr/` (orchestration: ADR-0005, LangGraph). Brief → implementation map: `docs/STATUS.md`.

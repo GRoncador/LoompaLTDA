@@ -117,21 +117,21 @@ async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
     assert len(ctx.worktrees.list()) == 2 and not (factory.root / "loompa_dryrun").exists()
     # founder approves one delivery in the evening review
     approve = next(m for m in msgs if m.story_id == "S-001")
-    state = Scheduler(ctx).answer(approve.id, FounderAnswer(option_key="approve"))
+    state = await Scheduler(ctx).aanswer(approve.id, FounderAnswer(option_key="approve"))
     assert state.stage == Stage.DONE and state.merged_sha
     assert (factory.root / "loompa_dryrun").is_dir()
     assert "feat(s-001)" in git("log", "--oneline", "-1", cwd=factory.root)
     assert ctx.worktrees.get("S-001") is None and ctx.worktrees.get("S-002") is not None
     # and asks for changes on the other
     changes = next(m for m in msgs if m.story_id == "S-002")
-    state = Scheduler(ctx).answer(
+    state = await Scheduler(ctx).aanswer(
         changes.id, FounderAnswer(option_key="changes", text="quero também o formato Excel")
     )
     assert state.stage == Stage.DEV and "Excel" in state.founder_notes[0]
     assert ctx.store.checkpoints("S-002")[-1]["node"] == "founder_answer"
     # usage was metered per story
     assert ctx.store.usage_totals(factory.slug, story_id="S-001")["calls"] >= 3
-    ctx.close()
+    await ctx.aclose()
 
 
 # ------------------------------------------------------------------------- escalation
@@ -174,7 +174,7 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     assert "constitution.lesson" in types
     assert ctx.memory.search("suíte completa", kinds=("constitution",))
     assert any(row["kind"] == "resolution" for row in ctx.store.list_learnings())
-    ctx.close()
+    await ctx.aclose()
 
 
 async def test_persistent_failure_blocks_only_that_story(factory: Factory):
@@ -223,7 +223,7 @@ async def test_persistent_failure_blocks_only_that_story(factory: Factory):
     assert "quebrado de propósito" not in msg.context and msg.technical_ref.endswith(f"{bad}.log")
     assert (factory.paths.logs / f"{bad}.log").read_text().count("quebrado de propósito") >= 1
     # founder: retry with guidance -> attempts reset, resumes at DEV
-    state = Scheduler(ctx).answer(
+    state = await Scheduler(ctx).aanswer(
         msg.id, FounderAnswer(option_key="retry", text="pode remover esse teste")
     )
     assert state.stage == Stage.DEV and state.attempts_tier2 == 0 and state.current_tier == "tier2"
@@ -238,7 +238,7 @@ async def test_persistent_failure_blocks_only_that_story(factory: Factory):
         },
     )
     ctx.store.put_message(msg.model_copy(update={"status": MessageStatus.PENDING, "answer": None}))
-    state = Scheduler(ctx).answer(msg.id, FounderAnswer(option_key="skip"))
+    state = await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="skip"))
     assert state.stage == Stage.BACKLOG and ctx.store.get_story(bad)["priority"] == 900
     ctx.store.update_story(
         bad,
@@ -250,9 +250,9 @@ async def test_persistent_failure_blocks_only_that_story(factory: Factory):
         },
     )
     ctx.store.put_message(msg.model_copy(update={"status": MessageStatus.PENDING, "answer": None}))
-    state = Scheduler(ctx).answer(msg.id, FounderAnswer(option_key="drop"))
+    state = await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="drop"))
     assert state.stage == Stage.CANCELLED and ctx.worktrees.get(bad) is None
-    ctx.close()
+    await ctx.aclose()
 
 
 # ------------------------------------------------------------------- questions/kaizen
@@ -315,7 +315,7 @@ async def test_worker_question_pauses_and_resumes_with_guidance(factory: Factory
         and [o.label for o in msg.options][:2] == ["E-mail", "SMS"]
         or msg.options
     )
-    state = Scheduler(ctx).answer(msg.id, FounderAnswer(option_key=msg.options[1].key))
+    state = await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key=msg.options[1].key))
     assert state.stage == Stage.DEV and state.founder_notes
     await Scheduler(ctx).run()
     state = load_state(ctx, sid)
@@ -337,7 +337,7 @@ async def test_worker_question_pauses_and_resumes_with_guidance(factory: Factory
     assert load_state(ctx, cards[0]["id"]).stage == Stage.AWAITING_FOUNDER
     assert ctx.store.list_learnings()[0]["created_story_id"] == cards[0]["id"]
     assert ctx.memory.search("envio duplicado", kinds=("learning",))
-    ctx.close()
+    await ctx.aclose()
 
 
 async def test_product_decision_blocks_at_spec(factory: Factory):
@@ -364,14 +364,14 @@ async def test_product_decision_blocks_at_spec(factory: Factory):
     )
     msg = ctx.store.get_message(state.blocked_message_id)
     assert "assento" in msg.title.lower() or "assento" in msg.context.lower()
-    state = Scheduler(ctx).answer(msg.id, FounderAnswer(text="por uso, com franquia"))
+    state = await Scheduler(ctx).aanswer(msg.id, FounderAnswer(text="por uso, com franquia"))
     assert state.stage == Stage.SPEC and "por uso, com franquia" in state.founder_notes[0]
     await Scheduler(ctx).run()
     assert (
         load_state(ctx, sid).stage == Stage.AWAITING_FOUNDER
         and load_state(ctx, sid).blocked_reason == "delivery"
     )
-    ctx.close()
+    await ctx.aclose()
 
 
 # --------------------------------------------------------------------- robustness
@@ -399,7 +399,7 @@ async def test_node_crash_isolates_story_and_scheduler_survives(factory: Factory
     msg = ctx.store.get_message(state.blocked_message_id)
     assert msg.executive_audit() == [] and "LLMError" not in msg.context
     assert any(e["type"] == "story.error" for e in ctx.store.events_since(0))
-    ctx.close()
+    await ctx.aclose()
 
 
 async def test_budget_exhaustion_pauses_dispatch(factory: Factory):
@@ -423,30 +423,32 @@ async def test_budget_exhaustion_pauses_dispatch(factory: Factory):
     assert "scheduler.paused" in events
     alert = [m for m in ctx.store.list_messages(factory.slug) if m.kind == "finance"]
     assert len(alert) == 1 and alert[0].executive_audit() == []
-    state = Scheduler(ctx).answer(alert[0].id, FounderAnswer(option_key="raise_10"))
+    state = await Scheduler(ctx).aanswer(alert[0].id, FounderAnswer(option_key="raise_10"))
     assert state is None and Factory.open(factory.root).config.budget.monthly_cap_usd > 10
-    ctx.close()
+    await ctx.aclose()
 
 
 async def test_resume_from_checkpoint_after_interruption(factory: Factory):
+    from loompa.engine.scheduler import runtime_for
+
     ctx = make_ctx(factory, dry_run=True)
     sid = seed_story(ctx, "Retomável")
-    runner_state = load_state(ctx, sid)
-    from loompa.engine import StoryRunner
-
-    runner = StoryRunner(ctx, sid)
-    runner_state = await runner.step(runner_state)  # intake
-    runner_state = await runner.step(runner_state)  # spec
-    assert runner_state.stage == Stage.PLAN and ctx.store.get_story(sid)["stage"] == "PLAN"
-    ctx.close()
-    # "restart": a fresh context continues from the persisted stage
+    state = await runtime_for(ctx).run_until(load_state(ctx, sid), stop_after=["spec"])
+    assert state.stage == Stage.PLAN and ctx.store.get_story(sid)["stage"] == "PLAN"
+    await ctx.aclose()
+    # "restart": a fresh context continues from LangGraph's SQLite checkpoint
     ctx2 = make_ctx(factory, dry_run=True)
     await Scheduler(ctx2).run()
     state = load_state(ctx2, sid)
-    assert state.stage == Stage.AWAITING_FOUNDER and [
-        c["node"] for c in ctx2.store.checkpoints(sid)
-    ][:3] == ["node_intake", "node_spec", "node_plan"]
-    ctx2.close()
+    assert state.stage == Stage.AWAITING_FOUNDER
+    assert [c["node"] for c in ctx2.store.checkpoints(sid)][:3] == [
+        "node_intake",
+        "node_spec",
+        "node_plan",
+    ]
+    hist = await runtime_for(ctx2).history(sid)
+    assert hist and hist[0]["stage"] == "AWAITING_FOUNDER"
+    await ctx2.aclose()
 
 
 def test_end_of_day_report_is_executive(factory: Factory):

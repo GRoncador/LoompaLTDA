@@ -169,7 +169,7 @@ class Hub:
     async def shutdown(self) -> None:
         for slug in list(self.runtimes):
             await self.stop_engine(slug)
-            self.runtimes[slug].ctx.close()
+            await self.runtimes[slug].ctx.aclose()
         self.runtimes.clear()
 
 
@@ -354,10 +354,10 @@ def create_app(
         ]
 
     @app.post("/api/factories/{slug}/inbox/{message_id}/reply")
-    def reply(slug: str, message_id: str, body: ReplyBody) -> dict[str, Any]:
+    async def reply(slug: str, message_id: str, body: ReplyBody) -> dict[str, Any]:
         ctx = hub.get(slug).ctx
         try:
-            state = Scheduler(ctx).answer(
+            state = await Scheduler(ctx).aanswer(
                 message_id, FounderAnswer(option_key=body.option_key, text=body.text)
             )
         except KeyError:

@@ -179,5 +179,22 @@ class EngineContext:
         return {"chunks": n, **self.memory.stats()}
 
     def close(self) -> None:
+        rt = getattr(self, "_graph_runtime", None)
+        if rt is not None:
+            import asyncio
+
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                asyncio.run(rt.close())
+            self._graph_runtime = None  # type: ignore[attr-defined]
+        self.store.close()
+        self.memory.close()
+
+    async def aclose(self) -> None:
+        rt = getattr(self, "_graph_runtime", None)
+        if rt is not None:
+            await rt.close()
+            self._graph_runtime = None  # type: ignore[attr-defined]
         self.store.close()
         self.memory.close()

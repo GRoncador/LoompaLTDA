@@ -17,7 +17,7 @@ Status as of 2026-09-17 on branch `dev_fable`. ✅ built & tested · 🟡 partia
 | §8A Hybrid memory (AST/lexical + local vector RAG) | ✅ | `memory/` |
 | §8B CodeRabbit | 🟡 CLI hook when `quality.coderabbit.enabled` and the binary exists; no webhook receiver | `agents/inspector.py` |
 | §8B pytest gate + BDD acceptance judge (PASS/FAIL) | ✅ | `agents/inspector.py` |
-| §8C Async graph, non-blocking branches, SQLite checkpoints, interrupt/resume | ✅ (custom asyncio engine, see ADR-0001) | `engine/` |
+| §8C LangGraph async graph, non-blocking branches, SQLite checkpoints, interrupt/resume | ✅ (ADR-0005) | `engine/langgraph_engine.py` |
 | §8D Git worktree isolation | ✅ | `worktrees/` |
 | §8E Spec Kit triad | ✅ | `speckit/` |
 | §8F ACI (paginated reads, patches, compacted logs) | ✅ | `aci/` |
@@ -26,8 +26,8 @@ Status as of 2026-09-17 on branch `dev_fable`. ✅ built & tested · 🟡 partia
 
 ## Deliberate divergences from the brief
 
-1. **No LangGraph** — explicit asyncio state machine with SQLite checkpoints (ADR-0001). Same
-   vocabulary (graph, node, interrupt/resume), ~1/10 of the dependency surface, fully testable.
+1. ~~No LangGraph~~ — reverted: LangGraph adopted (ADR-0005) for industry alignment; the
+   custom engine was replaced by a `StateGraph` with LangGraph's SQLite checkpointer.
 2. **No LLM SDKs** — one OpenAI-compatible `httpx` adapter covers DeepSeek/Gemini/OpenRouter/Ollama;
    native Anthropic adapter is optional (ADR-0002). Model names are config, not code.
 3. **No ChromaDB/LanceDB** — SQLite + NumPy cosine; FastEmbed optional, hashed n-gram embedder

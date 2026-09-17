@@ -1,6 +1,6 @@
 # ADR-0001: Orchestration engine — explicit asyncio state machine instead of LangGraph
 
-**Status:** accepted · **Date:** 2026-09-17
+**Status:** superseded by ADR-0005 · **Date:** 2026-09-17
 
 ## Context
 
