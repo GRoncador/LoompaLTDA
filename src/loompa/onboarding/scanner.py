@@ -323,7 +323,7 @@ class BrownfieldScanner:
                     self._package_json(m, path)
                 elif m.kind == "requirements.txt":
                     m.dependencies = [
-                        re.split(r"[<>=!~\[; ]", line.strip(), 1)[0].lower()
+                        re.split(r"[<>=!~\[; ]", line.strip(), maxsplit=1)[0].lower()
                         for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()
                         if line.strip() and not line.startswith(("#", "-"))
                     ]
@@ -367,8 +367,8 @@ class BrownfieldScanner:
         deps.extend(k for k in (poetry.get("dependencies") or {}) if k != "python")
         for group in (poetry.get("group") or {}).values():
             dev.extend((group.get("dependencies") or {}).keys())
-        m.dependencies = [re.split(r"[<>=!~\[; ]", d, 1)[0].lower() for d in deps]
-        m.dev_dependencies = [re.split(r"[<>=!~\[; ]", d, 1)[0].lower() for d in dev]
+        m.dependencies = [re.split(r"[<>=!~\[; ]", d, maxsplit=1)[0].lower() for d in deps]
+        m.dev_dependencies = [re.split(r"[<>=!~\[; ]", d, maxsplit=1)[0].lower() for d in dev]
         tool = data.get("tool") or {}
         for name in ("ruff", "black", "mypy", "pytest", "isort", "pyright"):
             if name in tool:
