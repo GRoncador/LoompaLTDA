@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,21 +39,34 @@ async def run_command(
 ) -> CommandResult:
     loop = asyncio.get_running_loop()
     start = loop.time()
+    # Fresh bytecode cache per run: pytest's assertion-rewrite cache is keyed by (size, mtime in
+    # seconds), so a same-length fix written within the same second would run stale bytecode.
+    pyc_dir = tempfile.mkdtemp(prefix="loompa-pyc-")
     merged_env = {
         **os.environ,
         "CI": "1",
         "NO_COLOR": "1",
         "PYTHONUNBUFFERED": "1",
         "FORCE_COLOR": "0",
+        "PYTHONPYCACHEPREFIX": pyc_dir,
         **(env or {}),
     }
-    proc = await asyncio.create_subprocess_exec(
-        *shlex.split(command),
-        cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=merged_env,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *shlex.split(command),
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=merged_env,
+        )
+    except (FileNotFoundError, PermissionError, ValueError) as exc:
+        shutil.rmtree(pyc_dir, ignore_errors=True)
+        return CommandResult(
+            command=command,
+            returncode=127,
+            stdout="",
+            stderr=f"não foi possível executar `{command}`: {exc}",
+        )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         timed_out = False
@@ -60,6 +75,7 @@ async def run_command(
         out, err = await proc.communicate()
         timed_out = True
     duration = int((loop.time() - start) * 1000)
+    shutil.rmtree(pyc_dir, ignore_errors=True)
     return CommandResult(
         command=command,
         returncode=proc.returncode if proc.returncode is not None else -1,

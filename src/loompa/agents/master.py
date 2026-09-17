@@ -1,0 +1,226 @@
+"""Master Loompa (COO): morning meeting, executive translation, end-of-day report."""
+
+from __future__ import annotations
+
+import re
+from datetime import UTC, datetime
+from typing import Any
+
+from loompa.agents.base import LoompaAgent
+from loompa.comms import (
+    FounderMessage,
+    MessageKind,
+    Option,
+    audit_executive_text,
+    compose_blocked_message,
+    sanitize_for_founder,
+)
+from loompa.engine.state import Stage, StoryState
+
+MEETING_SYSTEM = """<!-- role:master -->
+You are the Master Loompa, COO of an autonomous software factory. The founder just gave you the goals
+for today. Decompose them into independent user stories that can be developed in parallel by separate
+engineers, each small enough to finish in a few hours with tests.
+Rules: 2-8 stories total, no duplicates of the existing backlog listed below, titles are short
+imperative phrases, descriptions carry every business detail the founder mentioned, `priority` is
+1 (urgent) to 5 (nice to have). Group related stories under an `epic` name.
+Respond with JSON only: {{"stories": [{{"title": str, "description": str, "epic": str, "priority": int}}],
+"clarifications": [str]}}. `clarifications` are questions ONLY if a goal is impossible to start without
+an answer; keep them in plain {language}. Write everything in {language}.
+"""
+
+EXEC_SYSTEM = """<!-- role:master -->
+Rewrite the technical problem below for a non-technical founder in {language}. Output JSON:
+{{"title": str (one sentence), "context": str (2-3 plain sentences: what we were doing, what happened),
+"impact": str (what it means for the product/business and what continues normally),
+"options": [{{"key": str, "label": str, "description": str, "recommended": bool}}]}} with 2-3 options.
+Absolutely no file names, code, error names or stack traces.
+"""
+
+
+class MasterAgent(LoompaAgent):
+    role = "master"
+    display = "Master Loompa"
+
+    # ------------------------------------------------------------------ meeting
+    async def meeting(self, goals: str) -> dict[str, Any]:
+        self.set_state("WORKING", detail="reunião matinal")
+        existing = [
+            s["title"]
+            for s in self.ctx.store.list_stories(self.ctx.slug)
+            if s["stage"] not in (Stage.DONE, Stage.CANCELLED)
+        ]
+        precedents = self.precedents(goals, kinds=("constitution", "adr", "learning", "doc"))
+        user = (
+            f"# Metas de hoje (Founder)\n{goals}\n\n## Backlog existente\n"
+            + ("\n".join(f"- {t}" for t in existing) or "(vazio)")
+            + f"\n\n## Constitution (excerpt)\n{self.constitution(2500)}\n\n{precedents}"
+        )
+        try:
+            data = await self.ask_json(MEETING_SYSTEM.format(language=self.language), user)
+            stories = [s for s in data.get("stories", []) if isinstance(s, dict) and s.get("title")]
+            clarifications = self._list(data, "clarifications")
+        except Exception:  # noqa: BLE001 - fall back to a deterministic split so the day still starts
+            stories = self._split_goals(goals)
+            clarifications = []
+        created = []
+        for s in stories:
+            title = str(s["title"]).strip()[:120]
+            if title.lower() in {t.lower() for t in existing}:
+                continue
+            story_id = self.ctx.store.next_story_id(self.ctx.slug)
+            state = StoryState(
+                story_id=story_id,
+                title=title,
+                description=str(s.get("description") or "").strip(),
+                epic=str(s.get("epic") or "").strip(),
+            )
+            priority = int(s.get("priority") or 3)
+            self.ctx.store.upsert_story(
+                {
+                    "id": story_id,
+                    "factory": self.ctx.slug,
+                    "title": title,
+                    "description": state.description,
+                    "epic": state.epic,
+                    "stage": Stage.BACKLOG,
+                    "priority": max(1, min(5, priority)) * 100,
+                    "origin": "founder",
+                    "state": state.model_dump(mode="json"),
+                }
+            )
+            self.ctx.emit(
+                "story.created", story_id=story_id, agent=self.name, title=title, origin="founder"
+            )
+            created.append(
+                {"id": story_id, "title": title, "epic": state.epic, "priority": priority}
+            )
+            existing.append(title)
+        for q in clarifications[:3]:
+            self.ctx.inbox(
+                FounderMessage(
+                    factory=self.ctx.slug,
+                    kind=MessageKind.DECISION,
+                    sender=self.name,
+                    title=sanitize_for_founder(q, max_chars=160),
+                    context="Surgiu ao planejar as metas de hoje. Enquanto isso, as outras histórias seguem.",
+                    options=[Option(key="answer", label="Responder abaixo", recommended=True)],
+                )
+            )
+        self.set_state("IDLE")
+        self.ctx.emit(
+            "meeting.done",
+            agent=self.name,
+            created=len(created),
+            clarifications=len(clarifications),
+        )
+        return {"stories": created, "clarifications": clarifications}
+
+    @staticmethod
+    def _split_goals(goals: str) -> list[dict[str, Any]]:
+        parts = [
+            p.strip(" -•*\t") for p in re.split(r"[;\n]+|\d+[.)]\s+", goals) if p.strip(" -•*\t")
+        ]
+        return [{"title": p[:100], "description": p, "epic": "", "priority": 3} for p in parts] or [
+            {"title": goals[:100], "description": goals, "epic": "", "priority": 3}
+        ]
+
+    # --------------------------------------------------------- executive rewrite
+    async def blocked_message(
+        self,
+        state: StoryState,
+        technical_reason: str,
+        *,
+        options: list[str] | None = None,
+        technical_ref: str | None = None,
+    ) -> FounderMessage:
+        """Compose a BLOCKED inbox message; LLM rewrite when possible, deterministic filter always."""
+        opts = [
+            Option(key=f"opt{i + 1}", label=o[:120], recommended=i == 0)
+            for i, o in enumerate(options or [])
+        ]
+        if not self.ctx.dry_run:
+            try:
+                data = await self.ask_json(
+                    EXEC_SYSTEM.format(language=self.language),
+                    f"Story: {state.title}\n\nProblem:\n{technical_reason[:3000]}\n\nSuggested options: {options or 'none'}",
+                    story=state,
+                    max_tokens=800,
+                )
+                llm_opts = [
+                    Option(
+                        key=str(o.get("key") or f"opt{i + 1}")[:20],
+                        label=str(o.get("label") or "")[:120],
+                        description=str(o.get("description") or "")[:300],
+                        recommended=bool(o.get("recommended")),
+                    )
+                    for i, o in enumerate(data.get("options") or [])
+                    if isinstance(o, dict) and o.get("label")
+                ]
+                title, context, impact = (
+                    str(data.get("title") or ""),
+                    str(data.get("context") or ""),
+                    str(data.get("impact") or ""),
+                )
+                if title and not audit_executive_text(f"{title}\n{context}\n{impact}"):
+                    msg = compose_blocked_message(
+                        factory=self.ctx.slug,
+                        story_id=state.story_id,
+                        story_title=state.title,
+                        reason=context,
+                        impact=impact,
+                        options=llm_opts or opts or None,
+                        technical_ref=technical_ref,
+                    )
+                    msg.title = title[:200]
+                    return msg
+            except Exception:  # noqa: BLE001 - fall through to deterministic composer
+                pass
+        return compose_blocked_message(
+            factory=self.ctx.slug,
+            story_id=state.story_id,
+            story_title=state.title,
+            reason=technical_reason,
+            options=opts or None,
+            technical_ref=technical_ref,
+        )
+
+    # ------------------------------------------------------------ daily report
+    def end_of_day_report(self) -> FounderMessage:
+        stories = self.ctx.store.list_stories(self.ctx.slug)
+        by_stage: dict[str, int] = {}
+        for s in stories:
+            by_stage[s["stage"]] = by_stage.get(s["stage"], 0) + 1
+        since = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        learnings = self.ctx.store.list_learnings(since_iso=since)
+        pending = [
+            m
+            for m in self.ctx.store.list_messages(self.ctx.slug, status="pending")
+            if m.requires_action
+        ]
+        finance = self.ctx.tracker.executive_daily_summary()
+        lines = [
+            f"Entregas prontas para sua revisão: {by_stage.get('AWAITING_FOUNDER', 0)}.",
+            f"Concluídas: {by_stage.get('DONE', 0)} · Em andamento: {sum(v for k, v in by_stage.items() if k in ('SPEC', 'PLAN', 'DEV', 'TEST', 'REVIEW'))} · No backlog: {by_stage.get('BACKLOG', 0)}.",
+            f"Decisões aguardando você: {len(pending)}.",
+            finance,
+        ]
+        if learnings:
+            lines.append(
+                f"Melhorias e problemas catalogados hoje (Loop Kaizen): {len(learnings)} — "
+                + "; ".join(sanitize_for_founder(l["title"], max_chars=80) for l in learnings[:3])
+                + "."
+            )
+        for tip in self.ctx.tracker.suggestions()[:2]:
+            lines.append(f"Dica de custo: {sanitize_for_founder(tip, max_chars=200)}")
+        msg = FounderMessage(
+            factory=self.ctx.slug,
+            kind=MessageKind.INFO,
+            sender=self.name,
+            title=f"Resumo do dia {datetime.now(UTC).date().isoformat()}",
+            context="\n".join(lines),
+            impact="",
+            options=[],
+            allow_free_text=False,
+        )
+        return self.ctx.inbox(msg)

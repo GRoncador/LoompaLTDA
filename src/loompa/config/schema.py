@@ -60,6 +60,7 @@ class ScheduleConfig(BaseModel):
     max_parallel: int = Field(3, ge=1, le=32)
     tier2_max_attempts: int = Field(2, ge=1)
     tier1_max_attempts: int = Field(1, ge=1)
+    worker_max_iterations: int = Field(40, ge=1)
     work_hours: str = "09:00-17:30"
 
 

@@ -150,11 +150,27 @@ class WorktreeManager:
         text = self.git("diff", f"{wt.base}...HEAD", cwd=wt.path, check=False)
         return text if len(text) <= max_chars else text[:max_chars] + "\n… (diff truncado)"
 
+    JUNK = (
+        ":!**/__pycache__/**",
+        ":!*.pyc",
+        ":!**/.pytest_cache/**",
+        ":!**/.ruff_cache/**",
+        ":!**/.mypy_cache/**",
+        ":!**/node_modules/**",
+        ":!.DS_Store",
+        ":!**/.DS_Store",
+        ":!**/*.egg-info/**",
+    )
+
     def commit_all(self, wt: Worktree, message: str) -> CommitResult | None:
-        self.git("add", "-A", cwd=wt.path)
-        if not self.status(wt) and not self.git("diff", "--cached", "--name-only", cwd=wt.path):
+        self.git("add", "-A", "--", ".", *self.JUNK, cwd=wt.path)
+        staged = [
+            f
+            for f in self.git("diff", "--cached", "--name-only", cwd=wt.path).splitlines()
+            if f.strip()
+        ]
+        if not staged:
             return None
-        files = len(self.git("diff", "--cached", "--name-only", cwd=wt.path).splitlines())
         self.git(
             "-c",
             "user.name=Loompa",
@@ -166,7 +182,9 @@ class WorktreeManager:
             message,
             cwd=wt.path,
         )
-        return CommitResult(sha=self.git("rev-parse", "--short", "HEAD", cwd=wt.path), files=files)
+        return CommitResult(
+            sha=self.git("rev-parse", "--short", "HEAD", cwd=wt.path), files=len(staged)
+        )
 
     def log(self, wt: Worktree, limit: int = 20) -> list[str]:
         return self.git(

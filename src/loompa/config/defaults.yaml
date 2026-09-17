@@ -11,6 +11,7 @@ schedule:
   max_parallel: 3           # stories executing simultaneously (each in its own worktree)
   tier2_max_attempts: 2     # failures at Tier 2 before escalating to Tier 1
   tier1_max_attempts: 1     # failures at Tier 1 before BLOCKED_AWAITING_INPUT
+  worker_max_iterations: 40 # tool calls per task before the Worker must wrap up
   work_hours: "09:00-17:30" # informational; `loompa run` executes whenever invoked
 
 budget:
