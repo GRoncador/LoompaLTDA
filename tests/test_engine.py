@@ -179,8 +179,7 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
 
 async def test_persistent_failure_blocks_only_that_story(factory: Factory):
     def worker(model: str, messages: list[Message]) -> Any:
-        title = messages[1].content.splitlines()[0]
-        if "boa" in title.lower():
+        if "história boa" in messages[0].content.lower():
             return (
                 [ToolCall("w2", "done", {"summary": "nada a fazer"})]
                 if tool_results(messages)

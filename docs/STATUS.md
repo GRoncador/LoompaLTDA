@@ -39,6 +39,21 @@ Status as of 2026-09-17 on branch `dev_fable`. ✅ built & tested · 🟡 partia
 6. **Baseline-aware Inspector** — brownfield suites that are already red on `main` are recorded as
    tech-debt cards instead of blocking every story (found during the CLI smoke test).
 
+## Token & cost optimizations
+
+Done (2026-09-17):
+- **Prompt-cache friendly Worker prompt** — the stable blocks (rules, constitution, spec, plan,
+  allowed paths) form the system prefix, identical across every task and retry of a story, so
+  DeepSeek/Gemini prefix caches hit automatically and Anthropic gets an explicit `cache_control`.
+- **Tool-history pruning** — after `schedule.worker_keep_tool_results` (default 6) tool results,
+  older outputs collapse to a one-line stub, so long tasks stop re-paying for every file read.
+
+Suggested next (not implemented):
+1. Send only the constitution/spec sections relevant to the task (semantic selection) and let
+   the Worker fetch the rest on demand via `read_file`.
+2. Per-role output caps: Product/Architect/Inspector judge rarely need more than ~1,500 tokens.
+3. Finance Loompa: record input tokens per tool step to point at agents that read too much.
+
 ## Known gaps / next steps
 
 - Real-LLM end-to-end run against DeepSeek/Gemini (all tests use scripted providers).

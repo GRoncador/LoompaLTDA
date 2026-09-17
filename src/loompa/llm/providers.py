@@ -42,6 +42,7 @@ class Message:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
+    cache: bool = False  # stable prefix block: providers with explicit prompt caching mark it
 
 
 @dataclass
@@ -283,7 +284,12 @@ class AnthropicProvider(LLMProvider):
             "messages": conv,
         }
         if system:
-            payload["system"] = system
+            if any(m.role == "system" and m.cache for m in messages):
+                payload["system"] = [
+                    {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+                ]
+            else:
+                payload["system"] = system
         if tools:
             payload["tools"] = [
                 {

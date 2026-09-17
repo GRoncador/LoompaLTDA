@@ -30,6 +30,21 @@ Never rewrite unrelated code, never add dependencies, keep diffs minimal, follow
 """
 
 
+def prune_tool_history(messages: list[Message], *, keep_last: int = 6, max_chars: int = 300) -> int:
+    """Collapse old tool results into one-line stubs so long tasks stop re-paying for every file
+    read. The model keeps a trace of what it did; only the last `keep_last` results stay verbatim."""
+    tool_idx = [i for i, m in enumerate(messages) if m.role == "tool"]
+    pruned = 0
+    for i in tool_idx[:-keep_last] if keep_last else tool_idx:
+        m = messages[i]
+        if len(m.content) <= max_chars or m.content.startswith("[resumido]"):
+            continue
+        first = m.content.strip().splitlines()[0][:120]
+        m.content = f"[resumido] resultado anterior de {m.name or 'ferramenta'} ({len(m.content)} chars): {first} …"
+        pruned += 1
+    return pruned
+
+
 class WorkerAgent(LoompaAgent):
     role = "worker"
     display = "Worker Loompa"
@@ -152,13 +167,19 @@ class WorkerAgent(LoompaAgent):
             if state.founder_notes
             else ""
         )
-        user = (
-            f"# Task T{number} of story {state.story_id} — {state.title}\n\n**{text}**\n{retry_ctx}{notes}\n"
-            f"## Allowed paths\n{json.dumps(state.allowed_paths, ensure_ascii=False)}\n\n"
-            f"## Spec\n{spec[:4000]}\n\n## Plan\n{plan[:4000]}\n\n## Checklist\n{tasks_md[:2000]}\n\n"
-            f"## Constitution (excerpt)\n{self.constitution(3000)}\n"
+        # Prompt-cache friendly layout: everything that is identical across the tasks of a story
+        # (rules, constitution, spec, plan, allowed paths) goes first, in the system block, so the
+        # provider's prefix cache (DeepSeek/Gemini automatic, Anthropic explicit) hits on every call.
+        # Only the task-specific part changes per call.
+        stable = (
+            SYSTEM.format(language=self.language)
+            + f"\n## Story {state.story_id} — {state.title}\n\n## Allowed paths\n{json.dumps(state.allowed_paths, ensure_ascii=False)}\n\n"
+            f"## Spec\n{spec[:4000]}\n\n## Plan\n{plan[:4000]}\n\n## Constitution (excerpt)\n{self.constitution(3000)}\n"
         )
-        messages = [Message("system", SYSTEM.format(language=self.language)), Message("user", user)]
+        user = (
+            f"# Task T{number}\n\n**{text}**\n{retry_ctx}{notes}\n## Checklist\n{tasks_md[:2000]}\n"
+        )
+        messages = [Message("system", stable, cache=True), Message("user", user)]
         max_iter = self.ctx.config.schedule.worker_max_iterations
         last_text = ""
         for i in range(max_iter):
@@ -208,6 +229,9 @@ class WorkerAgent(LoompaAgent):
                 messages.append(
                     Message("tool", result.output[:12000], tool_call_id=call.id, name=call.name)
                 )
+            prune_tool_history(
+                messages, keep_last=self.ctx.config.schedule.worker_keep_tool_results
+            )
         return AgentResult(ok=False, summary="limite de iterações atingido", blocked_reason=None)
 
     def _flush_learnings(self, state: StoryState, aci: ACI) -> None:
