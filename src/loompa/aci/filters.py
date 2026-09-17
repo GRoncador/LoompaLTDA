@@ -10,12 +10,14 @@ import re
 from dataclasses import dataclass, field
 
 _PYTEST_SUMMARY = re.compile(r"^=+ (.*?) =+$")
-_PYTEST_FAIL_HEADER = re.compile(r"^_{3,} (.+?) _{3,}$")
+_PYTEST_FAIL_HEADER = re.compile(r"^_{3,} (?:ERROR collecting )?(.+?) _{3,}$")
 _PYTEST_SHORT = re.compile(r"^(FAILED|ERROR) (\S+)(?: - (.*))?$")
 _PYTEST_COUNTS = re.compile(r"(\d+) (passed|failed|error|errors|skipped|xfailed|xpassed|warnings?)")
 _PY_FRAME = re.compile(r'^\s*File "(.+?)", line (\d+)')
 _PY_LOC = re.compile(r"^(\S+\.py):(\d+):")
-_ASSERT = re.compile(r"^(E\s+.*|assert .*|AssertionError.*|\w+Error: .*|\w+Exception: .*)$")
+_ASSERT = re.compile(
+    r"^(E\s+.*|assert .*|AssertionError.*|\w+Error: .*|\w+Exception: .*|ImportError while importing.*)$"
+)
 _JEST_FAIL = re.compile(r"^\s*(●|✕|FAIL) (.+)$")
 _JEST_COUNTS = re.compile(r"Tests:\s+(.*)$")
 _VITEST_COUNTS = re.compile(r"Tests\s+(\d+ failed.*|\d+ passed.*)$")
@@ -80,7 +82,7 @@ def summarize_tests(output: str, returncode: int, *, cwd_prefix: str = "") -> Co
     text = _strip_ansi(output)
     if "Tests:" in text or "●" in text or "✕" in text or "Test Files" in text:
         return _summarize_js(text, returncode)
-    if "test session starts" in text or re.search(r"\d+ (passed|failed)", text):
+    if "test session starts" in text or "ERROR collecting" in text or re.search(r"\d+ (passed|failed|error)", text):
         return _summarize_pytest(text, returncode)
     summary = CommandSummary(tool="tests", ok=returncode == 0)
     if returncode != 0:

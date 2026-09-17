@@ -20,7 +20,7 @@ htmlcov/
 # Dashboard
 dashboard-ui/node_modules/
 dashboard-ui/dist/
-src/loompa/dashboard/static/assets/
+# (built bundle under src/loompa/dashboard/static/ is committed so `pip install` ships the UI)
 
 # OS / editors
 .DS_Store

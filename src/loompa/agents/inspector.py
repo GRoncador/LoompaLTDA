@@ -26,6 +26,37 @@ class InspectorAgent(LoompaAgent):
     role = "inspector"
     display = "Inspector Loompa"
 
+    async def baseline(self, state: StoryState, wt: Worktree) -> dict:
+        """Run the Tier 3 checks on the untouched worktree so pre-existing failures are not
+        blamed on the story (brownfield repos are often red on main)."""
+        q = self.ctx.config.quality
+        base: dict = {"tests_ok": True, "failing": [], "lint_ok": True}
+        if q.test_command:
+            res = await run_command(q.test_command, wt.path, timeout=900)
+            summary = summarize_tests(res.output, res.returncode)
+            base["tests_ok"] = summary.ok and not res.timed_out
+            base["failing"] = sorted({f.name for f in summary.failures})
+        if q.lint_command:
+            res = await run_command(q.lint_command, wt.path, timeout=300)
+            base["lint_ok"] = summarize_lint(res.output, res.returncode).ok
+        if not base["tests_ok"] or not base["lint_ok"]:
+            state.learnings.append(
+                {
+                    "kind": "tech_debt",
+                    "title": "A suíte de verificações já falha na versão principal",
+                    "detail": "Falhas pré-existentes: "
+                    + (", ".join(base["failing"][:8]) or "lint")
+                    + ". A fábrica ignora essas falhas nas histórias até serem corrigidas.",
+                }
+            )
+            self.ctx.emit(
+                "inspector.baseline_red",
+                story_id=state.story_id,
+                agent=self.name,
+                failing=base["failing"][:20],
+            )
+        return base
+
     async def run(self, state: StoryState, wt: Worktree) -> AgentResult:
         self.set_state("TESTING", state, detail="rodando testes e linters")
         q = self.ctx.config.quality
@@ -38,8 +69,17 @@ class InspectorAgent(LoompaAgent):
                 ok = False
                 parts.append("[tests] FAIL: tempo esgotado")
             else:
-                ok = ok and summary.ok
-                parts.append(summary.compact())
+                baseline = set((state.extra.get("baseline") or {}).get("failing") or [])
+                new_failures = [f for f in summary.failures if f.name not in baseline]
+                if summary.ok or (baseline and not new_failures and not summary.errors):
+                    parts.append(
+                        summary.compact()
+                        if summary.ok
+                        else "[pytest] PASS (apenas falhas pré-existentes na base)"
+                    )
+                else:
+                    ok = False
+                    parts.append(summary.compact())
             self.ctx.emit(
                 "inspector.tests",
                 story_id=state.story_id,
@@ -53,8 +93,13 @@ class InspectorAgent(LoompaAgent):
         if q.lint_command:
             res = await run_command(q.lint_command, wt.path, timeout=300)
             s = summarize_lint(res.output, res.returncode)
-            ok = ok and s.ok
-            parts.append(s.compact())
+            if s.ok or (state.extra.get("baseline") or {}).get("lint_ok") is False:
+                parts.append(
+                    s.compact() if s.ok else "[lint] PASS (apontamentos pré-existentes na base)"
+                )
+            else:
+                ok = False
+                parts.append(s.compact())
         if q.typecheck_command:
             res = await run_command(q.typecheck_command, wt.path, timeout=600)
             s = summarize_typecheck(res.output, res.returncode)

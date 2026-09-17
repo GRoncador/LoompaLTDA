@@ -462,3 +462,19 @@ def test_end_of_day_report_is_executive(factory: Factory):
     )
     assert Store(factory.paths.state_db).list_messages(factory.slug)[0].id == msg.id
     ctx.close()
+
+
+async def test_red_baseline_is_not_blamed_on_story(factory: Factory):
+    # main already has a failing test: the story must still deliver, and the debt becomes a learning
+    (factory.root / "tests" / "test_legacy.py").write_text("def test_legacy():\n    assert False\n")
+    git("add", ".", cwd=factory.root)
+    git("commit", "-qm", "test: legacy red", cwd=factory.root)
+    ctx = make_ctx(factory, dry_run=True)
+    sid = seed_story(ctx, "Entrega com base vermelha")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
+    assert state.extra["baseline"]["failing"] == ["test_legacy"]
+    assert any("já falha" in row["title"] for row in ctx.store.list_learnings())
+    assert any(e["type"] == "inspector.baseline_red" for e in ctx.store.events_since(0))
+    ctx.close()

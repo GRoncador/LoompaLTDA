@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -77,6 +78,7 @@ class WorktreeManager:
 
     @staticmethod
     def slug(text: str) -> str:
+        text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
         return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40]
 
     # ------------------------------------------------------------------ lifecycle

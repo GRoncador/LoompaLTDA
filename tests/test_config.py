@@ -41,7 +41,7 @@ def test_find_factory_root_walks_up(tmp_path: Path):
 
 
 def test_slugify():
-    assert slugify("SaaS Finanças!") == "saas-finan-as"
+    assert slugify("SaaS Finanças!") == "saas-financas"
     assert slugify("") == "factory"
 
 

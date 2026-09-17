@@ -47,6 +47,7 @@ async def block(
     *,
     options: list[str] | None = None,
     resume: Stage | None = None,
+    executive: str | None = None,
 ) -> StoryState:
     """Isolate the story: write an executive inbox message and pause. Never blocks the line."""
     ref = _write_tech_log(ctx, state, technical)
@@ -69,7 +70,9 @@ async def block(
         )
         ctx.inbox(msg)
     else:
-        msg = await master.blocked_message(state, technical, options=options, technical_ref=ref)
+        msg = await master.blocked_message(
+            state, technical, options=options, technical_ref=ref, executive=executive
+        )
         ctx.inbox(msg)
     state.blocked_reason = reason
     state.blocked_message_id = msg.id
@@ -128,6 +131,8 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
             f"Não foi possível preparar o ambiente isolado: {exc}",
             resume=Stage.DEV,
         )
+    if "baseline" not in state.extra:
+        state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
     tier = "tier1" if state.current_tier == "tier1" else None
     worker = WorkerAgent(
         ctx, name=f"Worker Loompa {'Sr' if tier else ''}".strip(), tier_override=tier
@@ -185,11 +190,18 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
         ctx.emit("story.retry", story_id=state.story_id, tier="tier1", attempt=state.attempts_tier1)
         state.stage = Stage.DEV
         return state
-    technical = (
-        "As verificações automáticas continuam falhando após várias tentativas, inclusive com o especialista sênior.\n\n"
-        + res.summary
+    executive = (
+        "As verificações automáticas continuam falhando após várias tentativas, inclusive com o especialista sênior. "
+        "O detalhe técnico ficou registrado para a equipe."
     )
-    return await block(ctx, state, BlockedReason.PERSISTENT_FAILURE, technical, resume=Stage.DEV)
+    return await block(
+        ctx,
+        state,
+        BlockedReason.PERSISTENT_FAILURE,
+        res.summary,
+        resume=Stage.DEV,
+        executive=executive,
+    )
 
 
 async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:

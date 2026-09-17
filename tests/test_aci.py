@@ -155,3 +155,22 @@ async def test_aci_tests_and_signals(aci: ACI):
     await aci.call("note_learning", {"title": "bug em X", "kind": "bug"})
     assert aci.learnings == [{"title": "bug em X", "detail": "", "kind": "bug"}]
     assert "[lint] nenhum comando" in (await aci.call("run_lint", {})).output
+
+
+def test_pytest_collection_error_is_parsed():
+    out = """==================================== ERRORS ====================================
+_____________________ ERROR collecting tests/test_calc.py ______________________
+ImportError while importing test module '/w/tests/test_calc.py'.
+Traceback:
+  File "/w/tests/test_calc.py", line 1, in <module>
+    from app.calc import add
+ModuleNotFoundError: No module named 'app'
+=========================== short test summary info ============================
+ERROR tests/test_calc.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.05s ===============================
+"""
+    s = summarize_tests(out, 2)
+    assert not s.ok and s.errors == 1
+    assert s.failures[0].name == "tests/test_calc.py" and "ImportError" in s.failures[0].message
+    assert "====" not in s.compact() and "saída não reconhecida" not in s.compact()

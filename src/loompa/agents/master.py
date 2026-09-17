@@ -133,6 +133,7 @@ class MasterAgent(LoompaAgent):
         *,
         options: list[str] | None = None,
         technical_ref: str | None = None,
+        executive: str | None = None,
     ) -> FounderMessage:
         """Compose a BLOCKED inbox message; LLM rewrite when possible, deterministic filter always."""
         opts = [
@@ -180,7 +181,7 @@ class MasterAgent(LoompaAgent):
             factory=self.ctx.slug,
             story_id=state.story_id,
             story_title=state.title,
-            reason=technical_reason,
+            reason=executive or technical_reason,
             options=opts or None,
             technical_ref=technical_ref,
         )
@@ -208,7 +209,9 @@ class MasterAgent(LoompaAgent):
         if learnings:
             lines.append(
                 f"Melhorias e problemas catalogados hoje (Loop Kaizen): {len(learnings)} — "
-                + "; ".join(sanitize_for_founder(l["title"], max_chars=80) for l in learnings[:3])
+                + "; ".join(
+                    sanitize_for_founder(item["title"], max_chars=80) for item in learnings[:3]
+                )
                 + "."
             )
         for tip in self.ctx.tracker.suggestions()[:2]:
