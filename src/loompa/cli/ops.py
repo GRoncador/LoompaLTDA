@@ -310,6 +310,32 @@ def kaizen(factory: str | None = typer.Option(None, "--factory", "-f")) -> None:
     store.close()
 
 
+@app.command()
+def ask(
+    role: str = typer.Argument(..., help="compliance | metrics | storyteller"),
+    request: list[str] = typer.Argument(..., help="Pedido em linguagem livre."),
+    factory: str | None = typer.Option(None, "--factory", "-f"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    out: Path | None = typer.Option(None, "--out", help="Salva o resultado neste arquivo."),
+) -> None:
+    """Loompas de suporte sob demanda (LGPD, métricas/SQL, copy & documentação)."""
+    from loompa.agents.support import SupportAgent
+
+    f = resolve_factory(factory)
+    ctx = build_context(f, dry_run=dry_run)
+    try:
+        agent = SupportAgent(ctx, role)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    msg = asyncio.run(agent.ask(" ".join(request)))
+    console.print(Panel(msg.context, title=msg.title))
+    if out:
+        out.write_text(f"# {msg.title}\n\n{msg.context}\n", encoding="utf-8")
+        console.print(f"[green]✔[/green] salvo em {out}")
+    ctx.close()
+
+
 # ----------------------------------------------------------------------------- memory
 
 

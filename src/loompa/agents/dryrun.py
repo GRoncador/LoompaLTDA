@@ -134,6 +134,20 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
         return [ToolCall("c2", "done", {"summary": f"'{title}' registrada (simulação)"})]
     if role == "inspector":
         return json.dumps({"verdict": "PASS", "criteria": [], "summary": "ok"})
+    if role in ("compliance", "metrics", "storyteller"):
+        req = (
+            messages[-1]
+            .content.split("# Pedido do Founder\n", 1)[-1]
+            .split("\n\n## Constitution", 1)[0]
+            .strip()
+        )
+        out = {
+            "title": f"{role}: {req[:60]}",
+            "body": f"Resposta simulada do {role} Loompa para: {req}",
+        }
+        if role == "metrics":
+            out["sql"] = "SELECT COUNT(*) FROM users;"
+        return json.dumps(out)
     if role == "deployer":
         return json.dumps(
             {

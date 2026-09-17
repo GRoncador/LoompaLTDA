@@ -31,3 +31,27 @@ def test_meeting_run_inbox_dry_run(git_repo: Path, hub, monkeypatch):
     r = runner.invoke(app, ["memory", "search", "constituição"])
     assert r.exit_code == 0
     assert git("log", "--oneline", cwd=git_repo).count("\n") >= 1
+
+
+def test_ask_support_agents(git_repo: Path, hub, monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(git_repo)
+    assert runner.invoke(app, ["init", ".", "--yes", "--name", "Ask"]).exit_code == 0
+    out = tmp_path / "policy.md"
+    r = runner.invoke(
+        app,
+        [
+            "ask",
+            "compliance",
+            "política de privacidade para app de finanças",
+            "--dry-run",
+            "--out",
+            str(out),
+        ],
+    )
+    assert r.exit_code == 0, r.stdout
+    assert out.read_text().startswith("# compliance:") and "Resposta simulada" in out.read_text()
+    r = runner.invoke(app, ["ask", "metrics", "churn mensal", "--dry-run"])
+    assert r.exit_code == 0 and "SELECT COUNT" in r.stdout
+    assert runner.invoke(app, ["ask", "hacker", "x", "--dry-run"]).exit_code == 1
+    r = runner.invoke(app, ["inbox", "list"])
+    assert "INFO" in r.stdout and "Compliance Loompa" in r.stdout

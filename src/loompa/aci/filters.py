@@ -82,7 +82,11 @@ def summarize_tests(output: str, returncode: int, *, cwd_prefix: str = "") -> Co
     text = _strip_ansi(output)
     if "Tests:" in text or "●" in text or "✕" in text or "Test Files" in text:
         return _summarize_js(text, returncode)
-    if "test session starts" in text or "ERROR collecting" in text or re.search(r"\d+ (passed|failed|error)", text):
+    if (
+        "test session starts" in text
+        or "ERROR collecting" in text
+        or re.search(r"\d+ (passed|failed|error)", text)
+    ):
         return _summarize_pytest(text, returncode)
     summary = CommandSummary(tool="tests", ok=returncode == 0)
     if returncode != 0:
