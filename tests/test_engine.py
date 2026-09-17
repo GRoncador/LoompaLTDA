@@ -173,7 +173,7 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     assert f"{sid}] Sempre rodar a suíte completa" in constitution
     assert "constitution.lesson" in types
     assert ctx.memory.search("suíte completa", kinds=("constitution",))
-    assert any(l["kind"] == "resolution" for l in ctx.store.list_learnings())
+    assert any(row["kind"] == "resolution" for row in ctx.store.list_learnings())
     ctx.close()
 
 

@@ -47,7 +47,7 @@ def print_runtime_status(f: Factory, out: Console) -> None:
         col = kanban_column(s["stage"])
         counts[col] = counts.get(col, 0) + 1
     table = Table(title="Kanban", show_header=True)
-    for key, label in KANBAN_COLUMNS:
+    for _key, label in KANBAN_COLUMNS:
         table.add_column(label, justify="center")
     table.add_row(*[str(counts.get(key, 0)) for key, _ in KANBAN_COLUMNS])
     out.print(table)
