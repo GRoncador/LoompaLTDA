@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Loompa runtime state (per-factory)
+.loompa/worktrees/
+.loompa/*.db
+.loompa/*.db-*
+.loompa/cache/
+
+# Dashboard
+dashboard-ui/node_modules/
+dashboard-ui/dist/
+src/loompa/dashboard/static/assets/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.log
+.env
