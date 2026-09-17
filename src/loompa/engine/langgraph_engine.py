@@ -148,7 +148,9 @@ class GraphRuntime:
         if self._graph is None:
             path = self.ctx.factory.paths.loompa / "langgraph.db"
             path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = await aiosqlite.connect(str(path))
+            self._conn = await aiosqlite.connect(str(path), timeout=30.0)
+            await self._conn.execute("PRAGMA journal_mode=WAL")
+            await self._conn.execute("PRAGMA busy_timeout=10000")
             serde = JsonPlusSerializer(
                 allowed_msgpack_modules=[
                     ("loompa.engine.state", "Stage"),
