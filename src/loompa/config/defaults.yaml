@@ -1,0 +1,113 @@
+# Loompa LTDA default factory configuration.
+# Copied into <repo>/.loompa/config.yaml by `loompa init`; edit freely per factory.
+
+factory:
+  name: ""
+  slug: ""
+  mode: greenfield          # greenfield | brownfield
+  language: pt-BR           # language for Founder-facing messages (pt-BR | en)
+
+schedule:
+  max_parallel: 3           # stories executing simultaneously (each in its own worktree)
+  tier2_max_attempts: 2     # failures at Tier 2 before escalating to Tier 1
+  tier1_max_attempts: 1     # failures at Tier 1 before BLOCKED_AWAITING_INPUT
+  work_hours: "09:00-17:30" # informational; `loompa run` executes whenever invoked
+
+budget:
+  monthly_cap_usd: 30.0
+  warn_at_fraction: 0.8     # Finance Loompa alerts the inbox at 80% of the cap
+  hard_stop: true           # pause dispatch when cap reached (stories keep state, nothing lost)
+
+# Model matrix. Tiers are ordered candidate lists; the router falls through on quota/5xx.
+# Tier 3 is deterministic tooling (ruff, pytest, git) and never appears here - cost $0.
+models:
+  tiers:
+    tier1:                   # deep reasoning: Master (meeting), Architect, escalated bug fixes
+      - provider: deepseek
+        model: deepseek-reasoner
+      - provider: gemini
+        model: gemini-2.5-pro
+      - provider: anthropic
+        model: claude-sonnet-5
+    tier2:                   # high-throughput executors: Worker, Inspector, Product, Finance, Copy
+      - provider: deepseek
+        model: deepseek-chat
+      - provider: gemini
+        model: gemini-2.5-flash
+      - provider: anthropic
+        model: claude-haiku-4-5-20251001
+  roles:
+    master: tier1
+    architect: tier1
+    product: tier2
+    worker: tier2
+    inspector: tier2
+    deployer: tier2
+    finance: tier2
+    compliance: tier2
+    metrics: tier2
+    storyteller: tier2
+    kaizen: tier2
+  temperature: 0.2
+  max_output_tokens: 4096
+
+providers:
+  deepseek:
+    kind: openai_compatible
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+  gemini:
+    kind: openai_compatible
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+  anthropic:
+    kind: anthropic
+    base_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+  openrouter:
+    kind: openai_compatible
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+  ollama:
+    kind: openai_compatible
+    base_url: http://localhost:11434/v1
+    api_key_env: ""          # no key needed
+
+# USD per 1M tokens. Verify against each provider's pricing page; these are editable.
+pricing:
+  deepseek-chat:            { input: 0.27, output: 1.10, cached_input: 0.07 }
+  deepseek-reasoner:        { input: 0.55, output: 2.19, cached_input: 0.14 }
+  gemini-2.5-flash:         { input: 0.30, output: 2.50, cached_input: 0.075 }
+  gemini-2.5-pro:           { input: 1.25, output: 10.0, cached_input: 0.31 }
+  claude-sonnet-5:          { input: 3.00, output: 15.0, cached_input: 0.30 }
+  claude-haiku-4-5-20251001: { input: 1.00, output: 5.00, cached_input: 0.10 }
+  default:                  { input: 1.00, output: 3.00, cached_input: 0.25 }
+
+quality:
+  test_command: ""          # detected on init (e.g. "pytest -q", "npm test")
+  lint_command: ""          # e.g. "ruff check ."
+  typecheck_command: ""     # e.g. "mypy src"
+  format_command: ""        # e.g. "ruff format ."
+  coverage_min: 0           # 0 disables the coverage gate
+  coderabbit:
+    enabled: false
+    mode: cli               # cli | webhook
+  require_spec_before_code: true
+
+memory:
+  embedding_model: BAAI/bge-small-en-v1.5   # used when the `embeddings` extra is installed
+  chunk_size: 800
+  top_k: 6
+
+dashboard:
+  host: 127.0.0.1
+  port: 8765
+
+stack:                      # filled by the onboarding scanner
+  languages: []
+  frameworks: []
+  package_managers: []
+  test_frameworks: []
+  linters: []
+  ci: []
+  databases: []
