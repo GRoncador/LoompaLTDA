@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import getpass
+import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from loompa.config import ConfigStore
+from loompa.config import ConfigStore, default_config
+
+# Cheapest sensible model per provider for the live smoke test.
+LIVE_DEFAULT_MODEL = {
+    "gemini": "gemini-2.5-flash-lite",
+    "deepseek": "deepseek-chat",
+    "groq": "llama-3.1-8b-instant",
+    "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+    "anthropic": "claude-haiku-4-5",
+}
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -13,9 +25,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--live",
         action="store_true",
         default=False,
-        help="run tests marked `live` against a real provider (needs GEMINI_API_KEY in the "
-        "environment or in ~/.loompa/secrets.env). Never used in CI.",
+        help="run tests marked `live` against a real provider. Provider, model and API key are "
+        "asked in the terminal (hidden input) unless --live-provider/--live-model and the "
+        "provider's env var are given. Nothing is written to disk. Never used in CI.",
     )
+    parser.addoption("--live-provider", default=None, help="provider name (default: gemini)")
+    parser.addoption("--live-model", default=None, help="model id (default: cheapest of provider)")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -25,6 +40,58 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if "live" in item.keywords:
             item.add_marker(skip)
+
+
+@dataclass
+class LiveCredentials:
+    provider: str
+    model: str
+    api_key_env: str
+    api_key: str  # lives only in this process; never logged, never written
+
+
+def _ask_tty(prompt: str, *, hidden: bool = False) -> str:
+    """Prompt on the controlling terminal, bypassing pytest's stdin capture. Returns "" when
+    there is no terminal (CI, piped stdin), so the live tests simply skip there."""
+    try:
+        with open("/dev/tty", "r+") as tty:
+            if hidden:
+                return getpass.getpass(prompt, stream=tty).strip()
+            tty.write(prompt)
+            tty.flush()
+            return tty.readline().strip()
+    except (OSError, EOFError):
+        return ""
+
+
+@pytest.fixture(scope="session")
+def live_credentials(request: pytest.FixtureRequest) -> LiveCredentials:
+    """Provider + model + key for the `live` tests, asked interactively in the terminal so no
+    developer ever has to store a key to run them. `--live-provider/--live-model` plus the
+    provider's env var (e.g. GEMINI_API_KEY) skip the prompts for scripted runs."""
+    if not request.config.getoption("--live"):
+        pytest.skip("live provider test: pass --live")
+    cfg = default_config()
+    provider = request.config.getoption("--live-provider") or "gemini"
+    model = request.config.getoption("--live-model") or ""
+    interactive = not (request.config.getoption("--live-provider") and model)
+    if interactive:
+        _ask_tty("\n[live] Teste com modelo real. Nada do que você digitar é gravado.\n")
+        provider = _ask_tty(f"[live] Provedor {sorted(cfg.providers)} [{provider}]: ") or provider
+        default_model = LIVE_DEFAULT_MODEL.get(provider, "")
+        model = _ask_tty(f"[live] Modelo [{default_model}]: ") or default_model
+    if provider not in cfg.providers:
+        pytest.skip(f"provedor desconhecido: {provider}")
+    model = model or LIVE_DEFAULT_MODEL.get(provider, "")
+    if not model:
+        pytest.skip("informe --live-model")
+    env_name = cfg.providers[provider].api_key_env
+    key = os.environ.get(env_name, "") if env_name else ""
+    if env_name and not key:
+        key = _ask_tty(f"[live] Chave de API de {provider} ({env_name}, oculta): ", hidden=True)
+    if env_name and not key:
+        pytest.skip("sem chave: teste live pulado")
+    return LiveCredentials(provider, model, env_name, key)
 
 
 @pytest.fixture(autouse=True)

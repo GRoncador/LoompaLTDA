@@ -70,7 +70,8 @@ async def probe_provider(
         )
     except LLMError as exc:
         status = exc.status
-        if status in (401, 403):
+        text = str(exc).lower()
+        if status in (401, 403) or (status == 400 and "api key" in text or "api_key" in text):
             detail = "chave recusada pelo provedor"
         elif status == 404:
             detail = f"modelo não encontrado neste provedor ({model})"

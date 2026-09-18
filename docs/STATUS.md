@@ -61,11 +61,11 @@ Suggested next (not implemented):
 
 - **Fase 0** done (2026-09-18): `database is locked` is retried at the Store, the memory store and
   the LangGraph checkpointer; a runner crash outside the nodes goes through the Ops triage
-  (backoff, then a plain pt-BR inbox note) and a story is never dispatched twice. `pytest --live
-  -m live` runs one real cycle on `gemini-2.5-flash-lite` (key from `~/.loompa/secrets.env`);
-  CI stays scripted. ADR-0006 written. **Pending on the Founder's machine:** the first live run
-  (`loompa providers set-key gemini`, then `uv run pytest --live -m live`), no key was available
-  during the build session.
+  (backoff, then a plain pt-BR inbox note) and a story is never dispatched twice. `uv run pytest --live
+  -m live` runs one real cycle: the terminal asks provider, model and key (hidden input, nothing
+  written anywhere; the key lives only in the test process and a throw-away factory under tmp).
+  CI stays scripted. ADR-0006 written. **Pending on the Founder's machine:** the first live run,
+  no key was available during the build session.
 - **Fase 0b** done (2026-09-18): keys only in `~/.loompa/secrets.env` (hub) or `<repo>/.loompa/.env`
   (factory, gitignored), config.yaml keeps env var names and `save_config` refuses key-shaped
   values; `loompa init` has a "Provedores e modelos" step (presets gratuito/economico/maximo,
@@ -92,7 +92,7 @@ Suggested next (not implemented):
 
 ## Known gaps / next steps
 
-- First real end-to-end run against Gemini (`--live`) still to be executed by the Founder.
+- First real end-to-end run (`uv run pytest --live -m live -q`, interactive prompts) still to be executed by the Founder.
 - CodeRabbit webhook mode; PR review comments feeding back into the Worker.
 - Nightly cycle scheduler (`loompa run --watch` exists; a cron/launchd recipe is not shipped).
 - Dashboard: drag-and-drop priority, story diff viewer, finance charts.

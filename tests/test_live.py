@@ -1,50 +1,41 @@
-"""Live tests: one real cycle against Gemini 2.5 Flash-Lite (free tier).
+"""Live tests: one real cycle against a real provider (default: Gemini 2.5 Flash-Lite, free).
 
-The key is read from the environment or from the REAL hub file (``~/.loompa/secrets.env``),
-never from this repository. Run locally with either::
+    uv run pytest --live -m live -q
 
-    GEMINI_API_KEY=... uv run pytest --live -m live -q          # one-off, nothing written
-    # or, once: printf 'GEMINI_API_KEY=...\n' >> ~/.loompa/secrets.env && chmod 600 ~/.loompa/secrets.env
+The terminal asks for provider, model and API key (hidden input). Nothing is written to disk:
+the key lives in this process's environment only, and the factory under test is a throw-away
+one in pytest's tmp dir. Scripted form for a shell session that already exports the key::
 
-The test builds a throw-away factory under pytest's tmp dir and copies the key into that
-factory's own ``.loompa/.env``; the repository tree is untouched. GitHub CI never passes
-``--live``; everything else in the suite is scripted (MockProvider)."""
+    GEMINI_API_KEY=... uv run pytest --live -m live -q --live-provider gemini --live-model gemini-2.5-flash-lite
+
+GitHub CI never passes ``--live``; everything else in the suite is scripted (MockProvider)."""
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 import pytest
 
-from conftest import git
+from conftest import LiveCredentials, git
 from loompa.agents import MasterAgent
-from loompa.config import Secrets, apply_preset
+from loompa.config import Secrets
 from loompa.config.schema import ModelCandidate
-from loompa.config.secrets import read_dotenv, write_dotenv_value
 from loompa.engine import EngineContext, Scheduler, Stage, load_state
 from loompa.factory import Factory, bootstrap_factory
 from loompa.llm import probe_provider
 
 pytestmark = pytest.mark.live
-LIVE_MODEL = "gemini-2.5-flash-lite"
 PYTEST_CMD = f'"{sys.executable}" -m pytest -q -p no:cacheprovider'
 
 
-def _real_key() -> str:
-    """Environment first, then the founder's real hub file. The `hub` fixture points
-    LOOMPA_HOME at a tmp dir, so the real file is addressed explicitly. Never printed."""
-    return os.environ.get("GEMINI_API_KEY") or read_dotenv(
-        Path.home() / ".loompa" / "secrets.env"
-    ).get("GEMINI_API_KEY", "")
-
-
 @pytest.fixture
-def live_factory(git_repo: Path, hub) -> Factory:
-    key = _real_key()
-    if not key:
-        pytest.skip("GEMINI_API_KEY ausente (env ou ~/.loompa/secrets.env)")
+def live_factory(
+    git_repo: Path, hub, live_credentials: LiveCredentials, monkeypatch: pytest.MonkeyPatch
+) -> Factory:
+    creds = live_credentials
+    if creds.api_key_env:
+        monkeypatch.setenv(creds.api_key_env, creds.api_key)  # process env only, never a file
     (git_repo / "app").mkdir()
     (git_repo / "app" / "__init__.py").write_text("")
     (git_repo / "app" / "calc.py").write_text("def add(a, b):\n    return a + b\n")
@@ -55,9 +46,8 @@ def live_factory(git_repo: Path, hub) -> Factory:
     git("add", ".", cwd=git_repo)
     git("commit", "-qm", "feat: calc", cwd=git_repo)
     f = bootstrap_factory(git_repo, name="Live", store=hub).factory
-    apply_preset(f.config, "gratuito")
-    # Every role on the same free model: one key, one rate limit, cheapest possible cycle.
-    only = [ModelCandidate(provider="gemini", model=LIVE_MODEL)]
+    # Every role on the same cheap model: one key, one rate limit, cheapest possible cycle.
+    only = [ModelCandidate(provider=creds.provider, model=creds.model)]
     f.config.models.tiers = {"tier1": list(only), "tier2": list(only)}
     f.config.quality.test_command = PYTEST_CMD
     f.config.quality.lint_command = ""
@@ -65,19 +55,20 @@ def live_factory(git_repo: Path, hub) -> Factory:
     f.config.schedule.max_parallel = 1
     f.config.schedule.ops_retry_base_s = 5
     f.save()
-    write_dotenv_value(git_repo / ".loompa" / ".env", "GEMINI_API_KEY", key)  # tmp factory only
     return Factory.open(git_repo)
 
 
-async def test_live_probe_gemini(live_factory: Factory):
-    r = await probe_provider(live_factory.config, "gemini", secrets=Secrets.load(live_factory.root))
+async def test_live_probe(live_factory: Factory, live_credentials: LiveCredentials):
+    r = await probe_provider(
+        live_factory.config, live_credentials.provider, secrets=Secrets.load(live_factory.root)
+    )
     assert r.ok, r.detail
-    assert r.model == LIVE_MODEL
+    assert r.model == live_credentials.model
 
 
-async def test_live_first_real_cycle(live_factory: Factory):
-    """Meeting → spec → plan → dev → test → review → delivery message, all on flash-lite."""
-    ctx = EngineContext.build(live_factory)  # real router, key from the secrets file
+async def test_live_first_real_cycle(live_factory: Factory, live_credentials: LiveCredentials):
+    """Meeting → spec → spec review → plan → dev → test → review → delivery message."""
+    ctx = EngineContext.build(live_factory)  # real router; key from the process environment
     try:
         result = await MasterAgent(ctx).meeting(
             "Adicionar a função subtract(a, b) em app/calc.py com teste em tests/test_calc.py"
@@ -91,6 +82,14 @@ async def test_live_first_real_cycle(live_factory: Factory):
         assert msgs and all(m.executive_audit() == [] for m in msgs)
         usage = ctx.store.usage_totals(live_factory.slug)
         assert usage["calls"] >= 3 and usage["input_tokens"] > 0
-        assert all(r["key"] == LIVE_MODEL for r in ctx.store.usage_by("model", live_factory.slug))
+        assert all(
+            r["key"] == live_credentials.model
+            for r in ctx.store.usage_by("model", live_factory.slug)
+        )
+        # the throw-away factory is the only place the key was ever used
+        assert (
+            live_credentials.api_key
+            not in (live_factory.root / ".loompa" / "config.yaml").read_text()
+        )
     finally:
         await ctx.aclose()
