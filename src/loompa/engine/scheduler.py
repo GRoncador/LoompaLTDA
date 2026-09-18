@@ -2,18 +2,26 @@
 
 A paused story (AWAITING_FOUNDER) simply ends its graph run; the scheduler picks the next
 runnable one. Nothing ever blocks the line.
+
+A runner that crashes outside a node (checkpointer, projection, resume) is handed to the Ops
+Loompa like any other incident: transient causes are retried after a backoff, anything else
+blocks the story with a plain-language inbox note. A story is never dispatched twice at once
+and never re-dispatched in a tight loop.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
+from loompa.agents.ops import INCIDENT_KEY, OpsAgent, triage
 from loompa.comms import FounderAnswer
 from loompa.engine.context import EngineContext
-from loompa.engine.graph import apply_founder_answer
+from loompa.engine.graph import BlockedReason, apply_founder_answer, block
 from loompa.engine.langgraph_engine import GraphRuntime
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.finance import BudgetStatus
@@ -79,13 +87,14 @@ class Scheduler:
     max_parallel: int | None = None
     running: dict[str, asyncio.Task] = field(default_factory=dict)
     completed: list[str] = field(default_factory=list)
+    crashes: dict[str, int] = field(default_factory=dict)  # runner crashes per story (session)
+    not_before: dict[str, float] = field(default_factory=dict)  # story -> monotonic retry time
 
     @property
     def slots(self) -> int:
         return self.max_parallel or self.ctx.config.schedule.max_parallel
 
-    def runnable(self) -> list[dict[str, Any]]:
-        """Stories ready to execute. Kaizen-discovered cards wait in BACKLOG for the Founder's go."""
+    def _eligible(self) -> list[dict[str, Any]]:
         return [
             s
             for s in self.ctx.store.list_stories(self.ctx.slug)
@@ -94,6 +103,22 @@ class Scheduler:
             and s["id"] not in self.running
             and not (s["origin"] == "kaizen" and s["stage"] == Stage.BACKLOG)
         ]
+
+    def runnable(self) -> list[dict[str, Any]]:
+        """Stories ready to execute. Kaizen-discovered cards wait in BACKLOG for the Founder's go;
+        a story whose runner just crashed waits out its Ops backoff first."""
+        now = time.monotonic()
+        return [s for s in self._eligible() if self.not_before.get(s["id"], 0.0) <= now]
+
+    def waiting_for(self) -> float | None:
+        """Seconds until the next crashed story may be retried, or None when nothing waits."""
+        now = time.monotonic()
+        waits = [
+            self.not_before[s["id"]] - now
+            for s in self._eligible()
+            if self.not_before.get(s["id"], 0.0) > now
+        ]
+        return max(min(waits), 0.0) if waits else None
 
     def promote(self, story_id: str) -> None:
         """Founder approves a backlog card (e.g. a Kaizen discovery) for execution."""
@@ -138,9 +163,61 @@ class Scheduler:
         for task in done:
             sid = task.get_name().split(":", 1)[1]
             self.running.pop(sid, None)
-            self.completed.append(sid)
-            if task.exception():
-                log.error("runner for %s crashed: %s", sid, task.exception())
+            if task.cancelled():
+                continue
+            exc = task.exception()
+            if exc is None:
+                self.crashes.pop(sid, None)
+                self.not_before.pop(sid, None)
+                if sid not in self.completed:
+                    self.completed.append(sid)
+                continue
+            await self._on_runner_crash(sid, exc)
+
+    async def _on_runner_crash(self, sid: str, exc: BaseException) -> None:
+        """Ops triage for a crash outside the nodes (checkpointer, projection, resume)."""
+        log.error("runner for %s crashed: %s", sid, exc, exc_info=exc)
+        n = self.crashes.get(sid, 0) + 1
+        self.crashes[sid] = n
+        ops = OpsAgent(self.ctx)
+        t = triage(exc)
+        self.ctx.emit("story.error", story_id=sid, node="runner", error=str(exc)[:300])
+        if t.transient and n <= ops.max_recoveries:
+            wait = ops.wait_for(n)
+            self.not_before[sid] = time.monotonic() + wait
+            self.ctx.emit(
+                "story.retry",
+                story_id=sid,
+                node="runner",
+                wait_s=wait,
+                recoveries=n,
+                cause=t.cause,
+            )
+            return
+        technical = (
+            f"{type(exc).__name__}: {exc}\n" + "".join(traceback.format_exception(exc))[-3000:]
+        )
+        try:
+            state = load_state(self.ctx, sid)
+            state.extra[INCIDENT_KEY] = {
+                "node": "runner",
+                "cause": t.cause,
+                "recoveries": n,
+                "transient": t.transient,
+            }
+            state = await block(
+                self.ctx,
+                state,
+                BlockedReason.PERSISTENT_FAILURE,
+                technical,
+                resume=state.stage,
+                executive=ops.executive_reason(state),
+            )
+            state.extra.pop(INCIDENT_KEY, None)
+            save_state(self.ctx, state, "runner_crash")
+        except Exception:  # noqa: BLE001 - never let the escalation itself kill the line
+            log.exception("could not escalate runner crash for %s; parking it", sid)
+            self.not_before[sid] = time.monotonic() + ops.wait_for(n)
 
     async def run(
         self, *, until_idle: bool = True, poll_interval: float = 1.0, max_cycles: int | None = None
@@ -151,9 +228,13 @@ class Scheduler:
             while True:
                 self._dispatch()
                 if not self.running:
-                    if until_idle or (max_cycles and cycles >= max_cycles):
+                    wait = self.waiting_for()
+                    if wait is not None and until_idle:
+                        await asyncio.sleep(min(wait, poll_interval) if wait else 0)
+                    elif until_idle or (max_cycles and cycles >= max_cycles):
                         break
-                    await asyncio.sleep(poll_interval)
+                    else:
+                        await asyncio.sleep(poll_interval)
                 else:
                     await self._reap(poll_interval)
                 cycles += 1

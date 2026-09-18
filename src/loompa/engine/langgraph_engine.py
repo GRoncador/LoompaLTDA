@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 import traceback
 from typing import Any
 
@@ -41,6 +42,7 @@ from loompa.engine.graph import (
     node_test,
 )
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
+from loompa.store import LOCK_BACKOFF_S, LOCK_RETRIES, is_lock_error
 
 log = logging.getLogger("loompa.langgraph")
 
@@ -188,7 +190,22 @@ class GraphRuntime:
             self._graph = None
 
     async def run_story(self, state: StoryState) -> StoryState:
-        """Start a new story or continue one from its last checkpoint until it pauses or ends."""
+        """Start a new story or continue one from its last checkpoint until it pauses or ends.
+
+        A locked checkpoint database (another process on the same factory, a slow disk) is
+        retried in place: every completed node is already checkpointed, so the resume is exact."""
+        for attempt in range(LOCK_RETRIES + 1):
+            try:
+                return await self._run_story_once(state)
+            except sqlite3.OperationalError as exc:
+                if not is_lock_error(exc) or attempt >= LOCK_RETRIES:
+                    raise
+                wait = LOCK_BACKOFF_S * (2**attempt)
+                log.warning("checkpointer locked for %s, retrying in %.2fs", state.story_id, wait)
+                await asyncio.sleep(wait)
+        raise AssertionError("unreachable")
+
+    async def _run_story_once(self, state: StoryState) -> StoryState:
         graph = await self.graph()
         config = thread_config(state.story_id)
         snapshot = await graph.aget_state(config)

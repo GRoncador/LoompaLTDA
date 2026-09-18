@@ -528,3 +528,59 @@ async def test_red_baseline_is_not_blamed_on_story(factory: Factory):
     assert any("já falha" in row["title"] for row in ctx.store.list_learnings())
     assert any(e["type"] == "inspector.baseline_red" for e in ctx.store.events_since(0))
     ctx.close()
+
+
+# ------------------------------------------------------------------- runner crashes
+
+
+async def test_scheduler_retries_transient_runner_crash_without_double_dispatch(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    """A crash outside the nodes (e.g. a locked checkpoint db) is retried after the Ops
+    backoff; the story is dispatched once at a time and reported once."""
+    import sqlite3
+
+    from loompa.engine.langgraph_engine import GraphRuntime
+
+    ctx = make_ctx(factory, dry_run=True)
+    sid = seed_story(ctx, "Crash transitório")
+    original = GraphRuntime.run_story
+    calls: list[str] = []
+
+    async def flaky(self: GraphRuntime, state: Any) -> Any:
+        calls.append(state.story_id)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return await original(self, state)
+
+    monkeypatch.setattr(GraphRuntime, "run_story", flaky)
+    done = await Scheduler(ctx).run()
+    assert done == [sid] and calls == [sid, sid]
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
+    types = [e["type"] for e in ctx.store.events_since(0)]
+    assert "story.retry" in types and types.count("scheduler.dispatch") == 2
+    await ctx.aclose()
+
+
+async def test_scheduler_escalates_persistent_runner_crash_to_inbox(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    from loompa.engine.langgraph_engine import GraphRuntime
+
+    ctx = make_ctx(factory, dry_run=True)
+    sid = seed_story(ctx, "Crash permanente")
+
+    async def broken(self: GraphRuntime, state: Any) -> Any:
+        raise KeyError("foo")  # not transient: escalate on the first crash
+
+    monkeypatch.setattr(GraphRuntime, "run_story", broken)
+    done = await Scheduler(ctx).run()
+    assert done == []
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER
+    assert state.blocked_reason == "persistent_failure" and state.resume_stage == Stage.BACKLOG
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert msg is not None and msg.executive_audit() == []
+    assert "KeyError" not in msg.context and "foo" not in msg.context
+    await ctx.aclose()

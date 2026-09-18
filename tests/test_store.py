@@ -88,3 +88,38 @@ def test_usage_agents_learnings_kv():
     assert s.list_learnings()[0]["title"] == "x"
     s.set("k", "v")
     assert s.get("k") == "v" and s.get("missing", "d") == "d"
+
+
+def test_store_retries_when_sqlite_reports_lock(monkeypatch):
+    import sqlite3
+
+    from loompa import store as store_mod
+
+    s = Store(":memory:")
+    monkeypatch.setattr(store_mod, "LOCK_BACKOFF_S", 0.001)
+    real = s._conn
+    failures = {"left": 2}
+
+    class Flaky:
+        def execute(self, sql, params=()):
+            if failures["left"] and sql.startswith("INSERT"):
+                failures["left"] -= 1
+                raise sqlite3.OperationalError("database is locked")
+            return real.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+    s._conn = Flaky()
+    s.set("k", "v")
+    assert s.get("k") == "v" and failures["left"] == 0
+
+
+def test_store_gives_up_on_non_lock_errors():
+    import sqlite3
+
+    import pytest
+
+    s = Store(":memory:")
+    with pytest.raises(sqlite3.OperationalError):
+        s._q("SELECT * FROM nope")

@@ -8,9 +8,11 @@ directly without a thread pool.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -107,6 +109,36 @@ CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 
+log = logging.getLogger("loompa.store")
+
+# SQLite returns SQLITE_BUSY without honouring `busy_timeout` in two cases: a deferred
+# transaction trying to upgrade to a write lock, and a WAL snapshot that another connection
+# has moved on from. Both are transient; retrying the statement is the documented remedy.
+LOCK_RETRIES = 6
+LOCK_BACKOFF_S = 0.05
+
+
+def is_lock_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text)
+
+
+def retry_locked(fn: Callable[[], Any], *, what: str = "sqlite") -> Any:
+    """Run `fn`, retrying with exponential backoff while SQLite reports a lock."""
+    for attempt in range(LOCK_RETRIES + 1):
+        try:
+            return fn()
+        except sqlite3.OperationalError as exc:
+            if not is_lock_error(exc) or attempt >= LOCK_RETRIES:
+                raise
+            wait = LOCK_BACKOFF_S * (2**attempt)
+            log.warning(
+                "%s locked, retrying in %.2fs (%d/%d)", what, wait, attempt + 1, LOCK_RETRIES
+            )
+            time.sleep(wait)
+    raise AssertionError("unreachable")
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds")
 
@@ -123,11 +155,11 @@ class Store:
         self._conn = sqlite3.connect(
             str(path), check_same_thread=False, isolation_level=None, timeout=30.0
         )
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._lock = threading.RLock()
+        retry_locked(lambda: self._conn.execute("PRAGMA journal_mode=WAL"), what="state.db")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA busy_timeout=10000")
-        self._conn.executescript(SCHEMA)
-        self._lock = threading.RLock()
+        retry_locked(lambda: self._conn.executescript(SCHEMA), what="state.db schema")
 
     def close(self) -> None:
         self._conn.close()
@@ -135,7 +167,9 @@ class Store:
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
-            self._conn.execute("BEGIN")
+            # IMMEDIATE takes the write lock up front (and waits for it), so the transaction
+            # can never hit the un-retryable "deferred upgrade" SQLITE_BUSY.
+            retry_locked(lambda: self._conn.execute("BEGIN IMMEDIATE"), what="state.db tx")
             try:
                 yield self._conn
                 self._conn.execute("COMMIT")
@@ -144,14 +178,20 @@ class Store:
                 raise
 
     def _q(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
-        with self._lock:
+        def run() -> list[dict[str, Any]]:
             cur = self._conn.execute(sql, params)
             return [_row(cur, r) for r in cur.fetchall()]
 
-    def _x(self, sql: str, params: tuple = ()) -> int:
         with self._lock:
+            return retry_locked(run, what="state.db")
+
+    def _x(self, sql: str, params: tuple = ()) -> int:
+        def run() -> int:
             cur = self._conn.execute(sql, params)
             return cur.lastrowid or cur.rowcount
+
+        with self._lock:
+            return retry_locked(run, what="state.db")
 
     # ------------------------------------------------------------------ stories
     def upsert_story(self, story: dict[str, Any]) -> None:

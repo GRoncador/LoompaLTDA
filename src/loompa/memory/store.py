@@ -86,7 +86,10 @@ class MemoryStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.embedder = embedder or HashEmbedder()
         self.chunk_size = chunk_size
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30.0)
+        if str(path) != ":memory:":
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=10000")
         self._conn.executescript(SCHEMA)
         self._lock = threading.RLock()
         self._cache: tuple[np.ndarray, list[int]] | None = None
