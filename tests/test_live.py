@@ -1,14 +1,18 @@
 """Live tests: one real cycle against Gemini 2.5 Flash-Lite (free tier).
 
-Run locally with::
+The key is read from the environment or from the REAL hub file (``~/.loompa/secrets.env``),
+never from this repository. Run locally with either::
 
-    loompa providers set-key gemini          # once; writes ~/.loompa/secrets.env
-    uv run pytest --live -m live -q
+    GEMINI_API_KEY=... uv run pytest --live -m live -q          # one-off, nothing written
+    # or, once: printf 'GEMINI_API_KEY=...\n' >> ~/.loompa/secrets.env && chmod 600 ~/.loompa/secrets.env
 
-GitHub CI never passes ``--live``; everything else in the suite is scripted (MockProvider)."""
+The test builds a throw-away factory under pytest's tmp dir and copies the key into that
+factory's own ``.loompa/.env``; the repository tree is untouched. GitHub CI never passes
+``--live``; everything else in the suite is scripted (MockProvider)."""
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +22,7 @@ from conftest import git
 from loompa.agents import MasterAgent
 from loompa.config import Secrets, apply_preset
 from loompa.config.schema import ModelCandidate
+from loompa.config.secrets import read_dotenv, write_dotenv_value
 from loompa.engine import EngineContext, Scheduler, Stage, load_state
 from loompa.factory import Factory, bootstrap_factory
 from loompa.llm import probe_provider
@@ -27,15 +32,19 @@ LIVE_MODEL = "gemini-2.5-flash-lite"
 PYTEST_CMD = f'"{sys.executable}" -m pytest -q -p no:cacheprovider'
 
 
-def _key_available() -> bool:
-    # The real hub file (~/.loompa/secrets.env) or the environment; never a value in test output.
-    return bool(Secrets.load(None).get("GEMINI_API_KEY"))
+def _real_key() -> str:
+    """Environment first, then the founder's real hub file. The `hub` fixture points
+    LOOMPA_HOME at a tmp dir, so the real file is addressed explicitly. Never printed."""
+    return os.environ.get("GEMINI_API_KEY") or read_dotenv(
+        Path.home() / ".loompa" / "secrets.env"
+    ).get("GEMINI_API_KEY", "")
 
 
 @pytest.fixture
 def live_factory(git_repo: Path, hub) -> Factory:
-    if not _key_available():
-        pytest.skip("GEMINI_API_KEY não configurada (loompa providers set-key gemini)")
+    key = _real_key()
+    if not key:
+        pytest.skip("GEMINI_API_KEY ausente (env ou ~/.loompa/secrets.env)")
     (git_repo / "app").mkdir()
     (git_repo / "app" / "__init__.py").write_text("")
     (git_repo / "app" / "calc.py").write_text("def add(a, b):\n    return a + b\n")
@@ -56,6 +65,7 @@ def live_factory(git_repo: Path, hub) -> Factory:
     f.config.schedule.max_parallel = 1
     f.config.schedule.ops_retry_base_s = 5
     f.save()
+    write_dotenv_value(git_repo / ".loompa" / ".env", "GEMINI_API_KEY", key)  # tmp factory only
     return Factory.open(git_repo)
 
 
