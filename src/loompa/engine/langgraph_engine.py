@@ -1,13 +1,14 @@
-"""LangGraph orchestration for one factory (ADR-0005).
+"""LangGraph orchestration for one factory (ADR-0005, routes as data per ADR-0006).
 
-The story pipeline is a `StateGraph` over `StoryState`:
+The story pipeline is a `StateGraph` over `StoryState` whose nodes come from the phase registry
+(`engine/phases.py`). The default feature route is:
 
-    START → intake → spec → plan → dev → test → review → await_founder → END
-                        ↑_________________________________|   (founder answer re-routes by stage)
+    START → intake → spec → spec_review → plan → dev → test → review → await_founder → END
+                       ↑________________________________________|   (founder answer re-routes)
 
 * Every node is one of the pure `(ctx, state) -> state` functions in `engine/graph.py`.
-* After each node a conditional edge routes by `state.stage`, which is how the escalation ladder
-  (test → dev again) and founder answers (await_founder → spec/dev/review/END) are expressed.
+* After each node a conditional edge routes by `state.phase` (the next phase in the story's
+  route); the escalation ladder (test → dev again) and founder answers are `goto()` calls.
 * Persistence is LangGraph's SQLite checkpointer (`.loompa/langgraph.db`, one thread per story).
   Ctrl-C or a crash resumes from the last completed node with `ainvoke(None, config)`.
 * The Founder inbox is the human-in-the-loop channel: a reply calls `aupdate_state(...,
@@ -31,53 +32,31 @@ from langgraph.graph.state import CompiledStateGraph
 
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent
 from loompa.engine.context import EngineContext
-from loompa.engine.graph import (
-    BlockedReason,
-    block,
-    node_dev,
-    node_intake,
-    node_plan,
-    node_review,
-    node_spec,
-    node_test,
-)
+from loompa.engine.graph import BlockedReason, block
+from loompa.engine.phases import PHASES, ensure_route
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.store import LOCK_BACKOFF_S, LOCK_RETRIES, is_lock_error
 
 log = logging.getLogger("loompa.langgraph")
 
-STAGE_TO_NODE: dict[Stage, str] = {
-    Stage.BACKLOG: "intake",
-    Stage.SPEC: "spec",
-    Stage.PLAN: "plan",
-    Stage.DEV: "dev",
-    Stage.TEST: "test",
-    Stage.REVIEW: "review",
-    Stage.AWAITING_FOUNDER: "await_founder",
-}
-NODE_FUNCS = {
-    "intake": node_intake,
-    "spec": node_spec,
-    "plan": node_plan,
-    "dev": node_dev,
-    "test": node_test,
-    "review": node_review,
-}
-
 
 def route(state: StoryState) -> str:
-    """Conditional edge after a work node: where the story goes next, decided by its stage."""
+    """Conditional edge after a work node: the next phase of the story's route."""
     if state.stage in TERMINAL:
         return END
-    return STAGE_TO_NODE[state.stage]
+    if state.stage in PAUSED:
+        return "await_founder"
+    ensure_route(state)
+    return state.phase
 
 
 def route_after_founder(state: StoryState) -> str:
     """Edge after the pause node: still waiting → END (the run stops, checkpoint kept);
-    otherwise (answer injected via `aupdate_state`) → the stage the answer chose."""
+    otherwise (answer injected via `aupdate_state`) → the phase the answer chose."""
     if state.stage in TERMINAL or state.stage in PAUSED:
         return END
-    return STAGE_TO_NODE[state.stage]
+    ensure_route(state)
+    return state.phase
 
 
 def thread_config(story_id: str) -> dict[str, Any]:
@@ -90,10 +69,11 @@ def build_graph(
     builder = StateGraph(StoryState)
 
     def make(name: str):
-        fn = NODE_FUNCS[name]
+        fn = PHASES[name].node
 
         async def node(state: StoryState) -> dict[str, Any]:
             ops = OpsAgent(ctx)
+            ensure_route(state)
             while True:
                 try:
                     new_state = await fn(ctx, state)
@@ -112,7 +92,7 @@ def build_graph(
                             state,
                             BlockedReason.PERSISTENT_FAILURE,
                             technical,
-                            resume=state.stage,
+                            resume=name,
                             executive=ops.executive_reason(state),
                         )
                         new_state.extra.pop(INCIDENT_KEY, None)
@@ -125,7 +105,7 @@ def build_graph(
         node.__name__ = f"node_{name}"
         return node
 
-    for name in NODE_FUNCS:
+    for name in PHASES:
         builder.add_node(name, make(name))
 
     async def await_founder(state: StoryState) -> dict[str, Any]:
@@ -134,8 +114,8 @@ def build_graph(
 
     builder.add_node("await_founder", await_founder)
     builder.add_edge(START, "intake")
-    targets = {**{n: n for n in STAGE_TO_NODE.values()}, END: END}
-    for name in NODE_FUNCS:
+    targets = {**{n: n for n in PHASES}, "await_founder": "await_founder", END: END}
+    for name in PHASES:
         builder.add_conditional_edges(name, route, targets)
     builder.add_conditional_edges("await_founder", route_after_founder, targets)
     return builder.compile(checkpointer=checkpointer)
@@ -154,7 +134,13 @@ def _project(ctx: EngineContext, state: StoryState, node: str) -> None:
         blocked_message_id=state.blocked_message_id,
     )
     ctx.store.checkpoint(state.story_id, node, state.stage.value, state.model_dump(mode="json"))
-    ctx.emit("story.stage", story_id=state.story_id, stage=state.stage.value, node=node)
+    ctx.emit(
+        "story.stage",
+        story_id=state.story_id,
+        stage=state.stage.value,
+        node=node,
+        phase=state.phase,
+    )
 
 
 class GraphRuntime:
@@ -176,6 +162,9 @@ class GraphRuntime:
                 allowed_msgpack_modules=[
                     ("loompa.engine.state", "Stage"),
                     ("loompa.engine.state", "BlockedReason"),
+                    ("loompa.engine.state", "StoryKind"),
+                    ("loompa.engine.state", "Complexity"),
+                    ("loompa.engine.state", "QAVerdict"),
                 ]
             )
             saver = AsyncSqliteSaver(self._conn, serde=serde)

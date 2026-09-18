@@ -43,6 +43,13 @@ class ProductAgent(LoompaAgent):
                 if state.founder_notes
                 else ""
             )
+            + (
+                "## Review feedback from the Product Owner (fix these before anything else)\n"
+                + state.handoff["spec_review"]
+                + "\n\n"
+                if state.handoff.get("spec_review")
+                else ""
+            )
             + f"## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
         )
         data = await self.ask_json(SYSTEM.format(language=self.language), user, story=state)

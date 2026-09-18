@@ -75,6 +75,7 @@ class LoompaAgent:
                 tier_override=tier_override,
                 json_mode=True,
                 max_tokens=max_tokens,
+                complexity=str(story.complexity) if story else None,
             )
             try:
                 data = extract_json(routed.response.text)

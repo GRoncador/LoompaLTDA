@@ -38,6 +38,10 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
     role = role_of(messages)
     title = _story_title(messages)
     if role == "master":
+        if "Classify the story" in messages[0].content:
+            return json.dumps(
+                {"kind": "feature", "complexity": "STANDARD", "children": [], "reason": "simulação"}
+            )
         if "Metas de hoje" in messages[-1].content:
             goals = (
                 messages[-1]
@@ -132,8 +136,12 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                 )
             ]
         return [ToolCall("c2", "done", {"summary": f"'{title}' registrada (simulação)"})]
+    if role == "product_owner":
+        return json.dumps({"approved": True, "unsupported": [], "missing": [], "notes": "ok"})
     if role == "inspector":
-        return json.dumps({"verdict": "PASS", "criteria": [], "summary": "ok"})
+        return json.dumps({"criteria": [], "findings": [], "summary": "ok"})
+    if role == "dod":
+        return json.dumps({"complete": True, "missing": []})
     if role in ("compliance", "metrics", "storyteller"):
         req = (
             messages[-1]

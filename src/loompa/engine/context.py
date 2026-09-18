@@ -35,6 +35,7 @@ class EngineContext:
     dry_run: bool = False
     listeners: list[Listener] = field(default_factory=list)
     secrets: Secrets = field(default_factory=Secrets)
+    closed: bool = False
 
     @property
     def config(self) -> LoompaConfig:
@@ -191,6 +192,9 @@ class EngineContext:
         return {"chunks": n, **self.memory.stats()}
 
     def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
         rt = getattr(self, "_graph_runtime", None)
         if rt is not None:
             import asyncio
@@ -204,6 +208,9 @@ class EngineContext:
         self.memory.close()
 
     async def aclose(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
         rt = getattr(self, "_graph_runtime", None)
         if rt is not None:
             await rt.close()

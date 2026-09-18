@@ -27,6 +27,30 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(skip)
 
 
+@pytest.fixture(autouse=True)
+def close_leaked_contexts(monkeypatch: pytest.MonkeyPatch):
+    """A test that fails before `await ctx.aclose()` would leave the aiosqlite checkpointer
+    thread alive and pytest would never exit. Track every EngineContext and close it."""
+    from loompa.engine.context import EngineContext
+
+    built: list[EngineContext] = []
+    original = EngineContext.build.__func__  # type: ignore[attr-defined]
+
+    def tracking_build(cls, *args, **kwargs):
+        ctx = original(cls, *args, **kwargs)
+        built.append(ctx)
+        return ctx
+
+    monkeypatch.setattr(EngineContext, "build", classmethod(tracking_build))
+    yield
+    for ctx in built:
+        if not ctx.closed:
+            try:
+                ctx.close()
+            except Exception:  # noqa: BLE001 - best effort at teardown
+                pass
+
+
 @pytest.fixture
 def hub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ConfigStore:
     """Isolated global hub so tests never touch ~/.loompa."""

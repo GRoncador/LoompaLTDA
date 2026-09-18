@@ -44,8 +44,12 @@ function Card({ s, onOpen, onPromote }: { s: StoryCard; onOpen: (id: string) => 
         <div className="mt-0.5 font-medium leading-snug text-slate-100">{s.title}</div>
         <div className="mt-1 flex flex-wrap gap-1">
           {s.epic && <span className="chip bg-slate-800 text-slate-400">{s.epic}</span>}
+          {s.kind && s.kind !== "feature" && <span className="chip bg-fuchsia-900/50 text-fuchsia-200">{s.kind}</span>}
+          {s.complexity && s.complexity !== "STANDARD" && <span className="chip bg-slate-800 text-slate-400">{s.complexity.toLowerCase()}</span>}
+          {s.phase && s.stage !== "AWAITING_FOUNDER" && s.stage !== "DONE" && <span className="chip bg-slate-800 text-slate-400" title={s.route.join(" → ")}>{s.phase.replace("_", " ")}</span>}
           {s.current_tier === "tier1" && <span className="chip bg-blue-900/60 text-blue-200">tier 1</span>}
-          {s.blocked_reason && <span className="chip bg-amber-900/60 text-amber-200">{s.blocked_reason === "delivery" ? "revisar" : s.blocked_reason === "question" ? "dúvida" : "bloqueada"}</span>}
+          {s.qa_verdict === "CONCERNS" && <span className="chip bg-orange-900/50 text-orange-200">ressalvas</span>}
+          {s.blocked_reason && <span className="chip bg-amber-900/60 text-amber-200">{s.blocked_reason === "delivery" ? "revisar" : s.blocked_reason === "question" ? "dúvida" : s.blocked_reason === "waiver" ? "risco" : "bloqueada"}</span>}
           {s.tasks_total > 0 && <span className="chip bg-slate-800 text-slate-400">{s.tasks_done}/{s.tasks_total}</span>}
         </div>
       </button>

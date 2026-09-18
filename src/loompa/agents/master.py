@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -15,13 +16,14 @@ from loompa.comms import (
     compose_blocked_message,
     sanitize_for_founder,
 )
-from loompa.engine.state import Stage, StoryState
+from loompa.engine.state import Complexity, Stage, StoryKind, StoryState
 
 MEETING_SYSTEM = """<!-- role:master -->
 You are the Master Loompa, COO of an autonomous software factory. The founder just gave you the goals
 for today. Decompose them into independent user stories that can be developed in parallel by separate
 engineers, each small enough to finish in a few hours with tests.
-Rules: 2-8 stories total, no duplicates of the existing backlog listed below, titles are short
+Rules: as many stories as the goals genuinely need (a goal too big for one story becomes an
+`epic` with several stories), no duplicates of the existing backlog listed below, titles are short
 imperative phrases, descriptions carry every business detail the founder mentioned, `priority` is
 1 (urgent) to 5 (nice to have). Group related stories under an `epic` name.
 Respond with JSON only: {{"stories": [{{"title": str, "description": str, "epic": str, "priority": int}}],
@@ -38,9 +40,124 @@ Absolutely no file names, code, error names or stack traces.
 """
 
 
+CLASSIFY_SYSTEM = """<!-- role:master -->
+Classify the story below for the factory pipeline. Respond with JSON only:
+{{"kind": "feature"|"bugfix"|"research", "complexity": "SIMPLE"|"STANDARD"|"COMPLEX",
+  "children": [{{"title": str, "description": str}}], "reason": str}}
+- kind: `bugfix` repairs behaviour that already exists; `research` produces knowledge (a report,
+  a comparison, a recommendation) instead of code; everything else is `feature`.
+- complexity: SIMPLE = one obvious change, one or two files, no design decision; COMPLEX = touches
+  several modules, needs architecture or product judgement, or has security/data-migration risk;
+  otherwise STANDARD.
+- children: ONLY when the request clearly bundles several independent deliverables that should
+  be built and reviewed separately; then list 2-6 child stories, each buildable alone. Otherwise [].
+Write titles and descriptions in {language}; keep `reason` to one sentence.
+"""
+
+
+@dataclass
+class Classification:
+    kind: StoryKind = StoryKind.FEATURE
+    complexity: Complexity = Complexity.STANDARD
+    children: list[dict[str, str]] = field(default_factory=list)
+    reason: str = ""
+
+
 class MasterAgent(LoompaAgent):
     role = "master"
     display = "Master Loompa"
+
+    # ------------------------------------------------------------------- intake
+    async def classify(self, state: StoryState) -> Classification:
+        """Kind, complexity and (rarely) an epic split. Deterministic fallback keeps the line
+        moving when the model is unavailable: STANDARD feature, no split."""
+        self.set_state("WORKING", state, detail="classificando a história")
+        user = (
+            f"# Story {state.story_id}: {state.title}\n\n{state.description or '(sem descrição)'}\n\n"
+            + (
+                "## Founder's notes\n" + "\n".join(f"- {n}" for n in state.founder_notes) + "\n\n"
+                if state.founder_notes
+                else ""
+            )
+            + f"## Constitution (excerpt)\n{self.constitution(1500)}"
+        )
+        out = Classification()
+        try:
+            data = await self.ask_json(
+                CLASSIFY_SYSTEM.format(language=self.language), user, story=state, max_tokens=800
+            )
+        except Exception:  # noqa: BLE001
+            self.set_state("IDLE")
+            return out
+        try:
+            out.kind = StoryKind(str(data.get("kind") or "feature").lower())
+        except ValueError:
+            pass
+        try:
+            out.complexity = Complexity(str(data.get("complexity") or "STANDARD").upper())
+        except ValueError:
+            pass
+        out.children = [
+            {
+                "title": str(c.get("title", "")).strip()[:120],
+                "description": str(c.get("description", "")).strip(),
+            }
+            for c in (data.get("children") or [])
+            if isinstance(c, dict) and str(c.get("title", "")).strip()
+        ][:6]
+        out.reason = str(data.get("reason") or "")[:300]
+        self.set_state("IDLE")
+        return out
+
+    def split_epic(self, parent: StoryState, children: list[dict[str, str]]) -> list[str]:
+        """Create child stories under the parent (now an epic). Children run independently."""
+        ids: list[str] = []
+        epic = parent.epic or parent.title[:60]
+        row = self.ctx.store.get_story(parent.story_id) or {}
+        for child in children:
+            sid = self.ctx.store.next_story_id(self.ctx.slug)
+            state = StoryState(
+                story_id=sid,
+                title=child["title"],
+                description=child.get("description") or "",
+                epic=epic,
+                founder_notes=list(parent.founder_notes),
+            )
+            self.ctx.store.upsert_story(
+                {
+                    "id": sid,
+                    "factory": self.ctx.slug,
+                    "title": state.title,
+                    "description": state.description,
+                    "epic": epic,
+                    "stage": Stage.BACKLOG,
+                    "priority": row.get("priority", 300),
+                    "origin": "epic",
+                    "state": state.model_dump(mode="json"),
+                }
+            )
+            self.ctx.emit(
+                "story.created",
+                story_id=sid,
+                agent=self.name,
+                title=state.title,
+                origin="epic",
+                parent=parent.story_id,
+            )
+            ids.append(sid)
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                story_id=parent.story_id,
+                kind=MessageKind.INFO,
+                sender=self.name,
+                title=f"“{parent.title}” virou um épico com {len(ids)} histórias",
+                context="O pedido era grande demais para uma entrega só. Dividi em partes independentes que a equipe constrói e revisa separadamente.",
+                impact="Cada parte chega para sua aprovação assim que ficar pronta.",
+                allow_free_text=False,
+            )
+        )
+        return ids
 
     # ------------------------------------------------------------------ meeting
     async def meeting(self, goals: str) -> dict[str, Any]:

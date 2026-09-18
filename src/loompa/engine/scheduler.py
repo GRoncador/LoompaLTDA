@@ -124,7 +124,8 @@ class Scheduler:
         """Founder approves a backlog card (e.g. a Kaizen discovery) for execution."""
         state = load_state(self.ctx, story_id)
         if state.stage == Stage.BACKLOG:
-            state.stage = Stage.SPEC
+            state.stage = Stage.SPEC  # kanban leaves the backlog; intake still classifies it
+            state.phase = "intake"
             save_state(self.ctx, state, "promote")
             self.ctx.emit("story.promoted", story_id=story_id)
 

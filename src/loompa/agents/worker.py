@@ -30,6 +30,15 @@ Never rewrite unrelated code, never add dependencies, keep diffs minimal, follow
 """
 
 
+DOD_SYSTEM = """<!-- role:dod -->
+You are the Worker Loompa doing a definition-of-done self-check right after finishing a task.
+Given the task, your own summary and the diff you produced, answer honestly whether the task is
+really complete: code AND tests present, nothing outside the task touched, no TODO left behind.
+Respond with JSON only: {{"complete": bool, "missing": [str]}} — `missing` lists concrete things
+still to do (in {language}); empty when complete.
+"""
+
+
 def prune_tool_history(messages: list[Message], *, keep_last: int = 6, max_chars: int = 300) -> int:
     """Collapse old tool results into one-line stubs so long tasks stop re-paying for every file
     read. The model keeps a trace of what it did; only the last `keep_last` results stay verbatim."""
@@ -77,6 +86,31 @@ class WorkerAgent(LoompaAgent):
                 self.set_state("BLOCKED", state, detail="aguardando decisão")
                 self._flush_learnings(state, aci)
                 return result
+            missing = await self._dod_check(state, wt, task.text, result.summary)
+            if missing:
+                self.ctx.emit(
+                    "worker.dod_incomplete",
+                    story_id=state.story_id,
+                    agent=self.name,
+                    task=task.number,
+                    missing=missing[:5],
+                )
+                followup = await self._run_task(
+                    state,
+                    aci,
+                    task.number,
+                    task.text
+                    + "\n\nSelf-check found these still missing; finish them:\n"
+                    + "\n".join(f"- {m}" for m in missing[:5]),
+                    spec,
+                    plan,
+                    tasks_md,
+                )
+                if followup.blocked_reason:
+                    self.set_state("BLOCKED", state, detail="aguardando decisão")
+                    self._flush_learnings(state, aci)
+                    return followup
+                result.summary = f"{result.summary} / {followup.summary}"
             commit = self.ctx.worktrees.commit_all(
                 wt, f"feat({state.story_id.lower()}): {task.text[:60]}"
             )
@@ -190,6 +224,7 @@ class WorkerAgent(LoompaAgent):
                 story_id=state.story_id,
                 tools=aci.spec(),
                 tier_override=self.tier_override,
+                complexity=str(state.complexity),
             )
             resp = routed.response
             last_text = resp.text or last_text
@@ -233,6 +268,41 @@ class WorkerAgent(LoompaAgent):
                 messages, keep_last=self.ctx.config.schedule.worker_keep_tool_results
             )
         return AgentResult(ok=False, summary="limite de iterações atingido", blocked_reason=None)
+
+    async def _dod_check(
+        self, state: StoryState, wt: Worktree, task: str, summary: str
+    ) -> list[str]:
+        """One small tier2 call; empty list means done (or the check is unavailable)."""
+        if self.ctx.dry_run:
+            return []
+        diff = self.ctx.worktrees.diff_working(wt, max_chars=8000)
+        if not diff.strip():
+            return ["nenhuma alteração de código foi feita para esta tarefa"]
+        messages = [
+            Message("system", DOD_SYSTEM.format(language=self.language)),
+            Message(
+                "user",
+                f"# Task\n{task}\n\n# Worker summary\n{summary}\n\n# Diff\n```diff\n{diff}\n```",
+            ),
+        ]
+        try:
+            routed = await self.ctx.router.complete(
+                self.role,
+                messages,
+                agent=self.name,
+                story_id=state.story_id,
+                json_mode=True,
+                max_tokens=600,
+                complexity=str(state.complexity),
+            )
+            from loompa.llm.providers import extract_json
+
+            data = extract_json(routed.response.text)
+        except Exception:  # noqa: BLE001 - advisory
+            return []
+        if not isinstance(data, dict) or data.get("complete", True):
+            return []
+        return [str(m).strip() for m in data.get("missing") or [] if str(m).strip()]
 
     def _flush_learnings(self, state: StoryState, aci: ACI) -> None:
         for item in aci.learnings:

@@ -152,6 +152,13 @@ class WorktreeManager:
         text = self.git("diff", f"{wt.base}...HEAD", cwd=wt.path, check=False)
         return text if len(text) <= max_chars else text[:max_chars] + "\n… (diff truncado)"
 
+    def diff_working(self, wt: Worktree, *, max_chars: int = 20000) -> str:
+        """Uncommitted changes (modified and new files) against HEAD — what a task produced
+        before its commit. Intent-to-add makes untracked files show up with their content."""
+        self.git("add", "-A", "-N", "--", ".", *self.JUNK, cwd=wt.path, check=False)
+        text = self.git("diff", "HEAD", "--", ".", *self.JUNK, cwd=wt.path, check=False)
+        return text if len(text) <= max_chars else text[:max_chars] + "\n… (diff truncado)"
+
     JUNK = (
         ":!**/__pycache__/**",
         ":!*.pyc",

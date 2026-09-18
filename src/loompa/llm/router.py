@@ -85,10 +85,25 @@ class ModelRouter:
         }
         self._cooldown.clear()
 
+    # Roles whose judgement matters more on a hard story: lifted to tier1 when COMPLEX.
+    LIFT_ON_COMPLEX = ("product", "product_owner", "inspector", "analyst")
+
     def candidates(
-        self, role: str, tier_override: str | None = None
+        self, role: str, tier_override: str | None = None, complexity: str | None = None
     ) -> tuple[str, list[ModelCandidate]]:
+        """Tier for a call: explicit override > story complexity > role default.
+        SIMPLE stories run every role on tier2; COMPLEX ones lift the review roles to tier1."""
         tier = tier_override or self.config.models.tier_for(role)
+        if tier_override is None and complexity:
+            c = str(complexity).upper()
+            if c == "SIMPLE" and "tier2" in self.config.models.tiers:
+                tier = "tier2"
+            elif (
+                c == "COMPLEX"
+                and role in self.LIFT_ON_COMPLEX
+                and "tier1" in self.config.models.tiers
+            ):
+                tier = "tier1"
         return tier, list(self.config.models.tiers.get(tier, []))
 
     async def complete(
@@ -103,8 +118,9 @@ class ModelRouter:
         json_mode: bool = False,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        complexity: str | None = None,
     ) -> RoutedCall:
-        tier, cands = self.candidates(role, tier_override)
+        tier, cands = self.candidates(role, tier_override, complexity)
         if not cands:
             raise LLMError(f"nenhum modelo configurado para o tier {tier}")
         loop = asyncio.get_running_loop()

@@ -6,6 +6,7 @@ from loompa.agents.kaizen import KaizenAgent
 from loompa.agents.master import MasterAgent
 from loompa.agents.ops import OpsAgent
 from loompa.agents.product import ProductAgent
+from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.agents.worker import WorkerAgent
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "MasterAgent",
     "OpsAgent",
     "ProductAgent",
+    "ProductOwnerAgent",
     "WorkerAgent",
 ]

@@ -483,17 +483,19 @@ async def test_resume_from_checkpoint_after_interruption(factory: Factory):
 
     ctx = make_ctx(factory, dry_run=True)
     sid = seed_story(ctx, "Retomável")
-    state = await runtime_for(ctx).run_until(load_state(ctx, sid), stop_after=["spec"])
+    state = await runtime_for(ctx).run_until(load_state(ctx, sid), stop_after=["spec_review"])
     assert state.stage == Stage.PLAN and ctx.store.get_story(sid)["stage"] == "PLAN"
+    assert state.route == ["intake", "spec", "spec_review", "plan", "dev", "test", "review"]
     await ctx.aclose()
     # "restart": a fresh context continues from LangGraph's SQLite checkpoint
     ctx2 = make_ctx(factory, dry_run=True)
     await Scheduler(ctx2).run()
     state = load_state(ctx2, sid)
     assert state.stage == Stage.AWAITING_FOUNDER
-    assert [c["node"] for c in ctx2.store.checkpoints(sid)][:3] == [
+    assert [c["node"] for c in ctx2.store.checkpoints(sid)][:4] == [
         "node_intake",
         "node_spec",
+        "node_spec_review",
         "node_plan",
     ]
     hist = await runtime_for(ctx2).history(sid)

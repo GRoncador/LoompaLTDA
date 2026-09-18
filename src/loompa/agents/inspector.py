@@ -1,7 +1,13 @@
-"""Inspector Loompa: binary PASS/FAIL quality gate.
+"""Inspector Loompa: graded quality gate (ADR-0006).
 
-Tier 3 first (tests, lint, typecheck — $0), then an optional Tier 2 acceptance-criteria judge over
-the diff. Optional CodeRabbit CLI review when enabled in config.
+Layers by cost: deterministic tooling (tests, lint, typecheck — $0) → optional scanner
+(CodeRabbit CLI) → LLM judge over the diff. The judge checks each acceptance criterion and lists
+findings with a prefix (SEC-/PERF-/TEST-/ARCH-) and a severity. Verdicts:
+
+* PASS      — everything green, no findings.
+* CONCERNS  — green, but medium/low findings; the story ships and the findings feed Kaizen.
+* FAIL      — red tooling or an unmet acceptance criterion; climbs the escalation ladder.
+* WAIVED    — green tooling and criteria, but a high-severity finding; the Founder decides.
 """
 
 from __future__ import annotations
@@ -17,9 +23,29 @@ from loompa.worktrees import Worktree
 JUDGE_SYSTEM = """<!-- role:inspector -->
 You are the Inspector Loompa (QA). Given the acceptance criteria and the diff, decide for EACH criterion
 whether the implementation plus its tests demonstrably satisfy it. Be strict and binary.
-Respond with JSON only: {{"verdict": "PASS"|"FAIL", "criteria": [{{"text": str, "pass": bool, "reason": str}}],
+Also review the diff for findings a test suite would not catch, each with a prefix and a severity:
+SEC- (security: injection, secrets, unsafe deserialization, auth bypass), PERF- (obvious N+1, unbounded
+loops, blocking I/O in async code), TEST- (missing or tautological tests), ARCH- (violates the
+constitution or the plan, wrong layer, duplicated logic). Severity: high = must not ship as is;
+medium = should be fixed soon; low = nit.
+Respond with JSON only: {{"criteria": [{{"text": str, "pass": bool, "reason": str}}],
+"findings": [{{"prefix": "SEC"|"PERF"|"TEST"|"ARCH", "severity": "high"|"medium"|"low", "text": str}}],
 "summary": str}}. Write reasons in {language}, one sentence each, no stack traces.
 """
+
+SEVERITIES = ("low", "medium", "high")
+PREFIXES = ("SEC", "PERF", "TEST", "ARCH")
+
+
+def grade(criteria_ok: bool, findings: list[dict[str, str]], tooling_ok: bool) -> str:
+    """The verdict rule, kept deterministic and testable (see module docstring)."""
+    if not tooling_ok or not criteria_ok:
+        return "FAIL"
+    if any(f.get("severity") == "high" for f in findings):
+        return "WAIVED"
+    if findings:
+        return "CONCERNS"
+    return "PASS"
 
 
 class InspectorAgent(LoompaAgent):
@@ -116,13 +142,17 @@ class InspectorAgent(LoompaAgent):
                 "[coderabbit] " + ("sem apontamentos críticos" if res.ok else res.output[-1500:])
             )
             ok = ok and res.ok
+        tooling_ok = ok
+        criteria_ok = True
+        findings: list[dict[str, str]] = []
         if ok and state.acceptance and not self.ctx.dry_run:
             judge = await self._judge(state, wt)
             if judge is not None:
-                ok = ok and judge["verdict"] == "PASS"
                 failed = [c for c in judge.get("criteria", []) if not c.get("pass")]
+                criteria_ok = not failed
+                findings = judge.get("findings", [])
                 parts.append(
-                    f"[acceptance] {judge['verdict']}"
+                    f"[acceptance] {'PASS' if criteria_ok else 'FAIL'}"
                     + (
                         "\n"
                         + "\n".join(
@@ -133,6 +163,15 @@ class InspectorAgent(LoompaAgent):
                         else ""
                     )
                 )
+                if findings:
+                    parts.append(
+                        "[findings]\n"
+                        + "\n".join(
+                            f"- {f['id']} ({f['severity']}): {f['text'][:200]}" for f in findings
+                        )
+                    )
+        verdict = grade(criteria_ok, findings, tooling_ok)
+        ok = verdict in ("PASS", "CONCERNS")
         report = "\n".join(parts)
         state.last_test_summary = report
         self.set_state("IDLE")
@@ -140,9 +179,10 @@ class InspectorAgent(LoompaAgent):
             "inspector.verdict",
             story_id=state.story_id,
             agent=self.name,
-            verdict="PASS" if ok else "FAIL",
+            verdict=verdict,
+            findings=len(findings),
         )
-        return AgentResult(ok=ok, summary=report)
+        return AgentResult(ok=ok, summary=report, data={"verdict": verdict, "findings": findings})
 
     async def _judge(self, state: StoryState, wt: Worktree) -> dict | None:
         diff = self.ctx.worktrees.diff(wt, max_chars=16000)
@@ -164,10 +204,30 @@ class InspectorAgent(LoompaAgent):
         )
         try:
             data = await self.ask_json(
-                JUDGE_SYSTEM.format(language=self.language), user, story=state, max_tokens=2000
+                JUDGE_SYSTEM.format(language=self.language), user, story=state, max_tokens=2500
             )
         except Exception:  # noqa: BLE001 - judge is advisory when the LLM is unavailable
             return None
-        verdict = str(data.get("verdict", "FAIL")).upper()
-        data["verdict"] = "PASS" if verdict == "PASS" else "FAIL"
-        return data
+        criteria = [c for c in data.get("criteria") or [] if isinstance(c, dict)]
+        if not criteria and str(data.get("verdict", "")).upper() == "FAIL":
+            criteria = [
+                {"text": c, "pass": False, "reason": "não demonstrado"} for c in state.acceptance
+            ]
+        findings: list[dict[str, str]] = []
+        counters: dict[str, int] = {}
+        for f in data.get("findings") or []:
+            if not isinstance(f, dict) or not str(f.get("text", "")).strip():
+                continue
+            prefix = str(f.get("prefix", "ARCH")).upper().rstrip("-")
+            prefix = prefix if prefix in PREFIXES else "ARCH"
+            severity = str(f.get("severity", "low")).lower()
+            severity = severity if severity in SEVERITIES else "low"
+            counters[prefix] = counters.get(prefix, 0) + 1
+            findings.append(
+                {
+                    "id": f"{prefix}-{counters[prefix]}",
+                    "severity": severity,
+                    "text": str(f["text"]).strip(),
+                }
+            )
+        return {"criteria": criteria, "findings": findings, "summary": str(data.get("summary", ""))}

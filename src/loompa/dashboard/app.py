@@ -35,6 +35,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 OFFICE_ROOMS = {
     "master": "meeting",
     "product": "meeting",
+    "product_owner": "meeting",
+    "analyst": "meeting",
     "architect": "meeting",
     "worker": "dev",
     "inspector": "qa",
@@ -49,6 +51,7 @@ OFFICE_ROOMS = {
 DEFAULT_AGENTS = [
     ("Master Loompa", "master"),
     ("Product Loompa", "product"),
+    ("Product Owner Loompa", "product_owner"),
     ("Architect Loompa", "architect"),
     ("Worker Loompa", "worker"),
     ("Inspector Loompa", "inspector"),
@@ -624,6 +627,11 @@ def _story_card(s: dict[str, Any]) -> dict[str, Any]:
         "blocked_reason": st.get("blocked_reason"),
         "blocked_message_id": st.get("blocked_message_id"),
         "current_tier": st.get("current_tier", "tier2"),
+        "kind": st.get("kind", "feature"),
+        "complexity": st.get("complexity", "STANDARD"),
+        "phase": st.get("phase", ""),
+        "route": st.get("route") or [],
+        "qa_verdict": st.get("qa_verdict"),
         "attempts": {"tier2": s.get("attempts_tier2", 0), "tier1": s.get("attempts_tier1", 0)},
         "tasks_done": len(st.get("tasks_done") or []),
         "tasks_total": st.get("tasks_total", 0),

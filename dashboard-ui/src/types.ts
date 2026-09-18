@@ -24,6 +24,11 @@ export interface StoryCard {
   blocked_reason: string | null;
   blocked_message_id: string | null;
   current_tier: string;
+  kind: string;
+  complexity: string;
+  phase: string;
+  route: string[];
+  qa_verdict: string | null;
   attempts: { tier2: number; tier1: number };
   tasks_done: number;
   tasks_total: number;

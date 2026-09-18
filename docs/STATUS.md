@@ -25,6 +25,7 @@ Status as of 2026-09-18 on branch `dev_fable`. ✅ built & tested · 🟡 partia
 | §9 PR creation | 🟡 `gh pr create` when a remote + `gh` exist; otherwise local branch + merge on approval | `agents/deployer.py` |
 | Plano set/2026 · Fase 0 (estabilização) | ✅ locked-db retry, Ops-triaged runner crashes, `live` marker, ADR-0006 | `store.py`, `engine/scheduler.py`, `tests/test_live.py`, `docs/adr/0006-*` |
 | Plano set/2026 · Fase 0b (provedores, modelos e chaves por fábrica) | ✅ secrets files, presets, `loompa providers`, settings screen + API, tier per agent, secret guard | `config/secrets.py`, `config/presets.py`, `config/settings.py`, `cli/providers.py`, `dashboard/app.py`, `SettingsModal.tsx` |
+| Plano set/2026 · Fase 1 (pipeline como dado e revisões) | ✅ route/kind/complexity/handoff, phase registry, spec_review (PO, No Invention), graded QA gate, DoD, complexity→tier, epic split | `engine/phases.py`, `engine/graph.py`, `agents/product_owner.py`, `agents/inspector.py`, `agents/worker.py`, `llm/router.py` |
 
 ## Deliberate divergences from the brief
 
@@ -73,7 +74,21 @@ Suggested next (not implemented):
   `GET/PUT /api/factories/{slug}/settings` and `POST .../settings/providers/{name}/test`, the
   new-factory modal gained the same step, and the agent drawer shows/edits the role's tier.
   Defaults: `gemini-2.5-flash-lite` heads tier2; Groq provider added; roles are an open set.
-- Next: Fase 1 (pipeline as data, spec/qa reviews, DoD, complexity→tier) per ADR-0006.
+- **Fase 1** done (2026-09-18): `StoryState` carries `kind`, `complexity`, `route`, `phase` and
+  `handoff`; `engine/phases.py` is the phase registry (name, node, owner, reviewer, kanban stage)
+  and `build_route()` decides which phases a story visits (SIMPLE stories and ordinary bugfixes
+  skip `spec_review`). `node_intake` asks the Master to classify; requests that bundle several
+  deliverables become an epic with child stories (`origin=epic`) and the parent closes with an
+  INFO note. `ProductOwnerAgent.review_spec` runs the "No Invention" gate with one rewrite round
+  (feedback travels in `handoff`). The Inspector returns PASS/CONCERNS/FAIL/WAIVED with
+  SEC-/PERF-/TEST-/ARCH- findings: CONCERNS ship and feed Kaizen cards, WAIVED asks the Founder
+  (`BlockedReason.WAIVER`, options fix/waive/drop). The Worker runs a DoD self-check after each
+  task and finishes what is missing once. `ModelRouter.candidates(..., complexity=)` runs SIMPLE
+  stories on tier2 and lifts product/product_owner/inspector/analyst to tier1 on COMPLEX. Legacy
+  stories without a route resume from their kanban stage. Kanban cards show kind, complexity,
+  current phase and QA verdict.
+- Next: Fase 2 (OpenCode spike) or Fase 3 (Backlog service with PO as single writer, git guard,
+  Sprint, batch approvals), per the Founder's call.
 
 ## Known gaps / next steps
 

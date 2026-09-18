@@ -218,9 +218,9 @@ def test_settings_api_never_returns_keys(client, hub):
     r = c.post("/api/factories/keys/settings/providers/gemini/test")
     assert r.status_code == 200 and r.json()["ok"] is False and "chave" in r.json()["detail"]
     agent = c.get("/api/factories/keys/agents/Product Owner Loompa").json()
-    assert (
-        agent["tier"] == "tier2" and agent["candidates"]
-    )  # unknown agent names still map to tier2
+    assert agent["tier"] == "tier1" and agent["candidates"]  # role set to tier1 above
+    agent = c.get("/api/factories/keys/agents/Novo Loompa").json()
+    assert agent["tier"] == "tier2"  # unknown agent names still map to tier2
     agent = c.get("/api/factories/keys/agents/Master Loompa").json()
     assert agent["tier"] == "tier1" and agent["candidates"][0]["model"] == "deepseek-reasoner"
 
