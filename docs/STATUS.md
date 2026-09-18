@@ -1,6 +1,6 @@
 # Brief → implementation map
 
-Status as of 2026-09-17 on branch `dev_fable`. ✅ built & tested · 🟡 partial · ⚪ not started
+Status as of 2026-09-18 on branch `dev_fable`. ✅ built & tested · 🟡 partial · ⚪ not started
 
 | Brief section | Status | Where |
 | --- | --- | --- |
@@ -23,6 +23,8 @@ Status as of 2026-09-17 on branch `dev_fable`. ✅ built & tested · 🟡 partia
 | §8F ACI (paginated reads, patches, compacted logs) | ✅ | `aci/` |
 | §9 Dashboard: Phaser office, inbox, kanban, multi-factory, WebSockets, agent drawer | ✅ | `dashboard/`, `dashboard-ui/` |
 | §9 PR creation | 🟡 `gh pr create` when a remote + `gh` exist; otherwise local branch + merge on approval | `agents/deployer.py` |
+| Plano set/2026 · Fase 0 (estabilização) | ✅ locked-db retry, Ops-triaged runner crashes, `live` marker, ADR-0006 | `store.py`, `engine/scheduler.py`, `tests/test_live.py`, `docs/adr/0006-*` |
+| Plano set/2026 · Fase 0b (provedores, modelos e chaves por fábrica) | ✅ secrets files, presets, `loompa providers`, settings screen + API, tier per agent, secret guard | `config/secrets.py`, `config/presets.py`, `config/settings.py`, `cli/providers.py`, `dashboard/app.py`, `SettingsModal.tsx` |
 
 ## Deliberate divergences from the brief
 
@@ -54,9 +56,28 @@ Suggested next (not implemented):
 2. Per-role output caps: Product/Architect/Inspector judge rarely need more than ~1,500 tokens.
 3. Finance Loompa: record input tokens per tool step to point at agents that read too much.
 
+## Plano set/2026 — progress
+
+- **Fase 0** done (2026-09-18): `database is locked` is retried at the Store, the memory store and
+  the LangGraph checkpointer; a runner crash outside the nodes goes through the Ops triage
+  (backoff, then a plain pt-BR inbox note) and a story is never dispatched twice. `pytest --live
+  -m live` runs one real cycle on `gemini-2.5-flash-lite` (key from `~/.loompa/secrets.env`);
+  CI stays scripted. ADR-0006 written. **Pending on the Founder's machine:** the first live run
+  (`loompa providers set-key gemini`, then `uv run pytest --live -m live`), no key was available
+  during the build session.
+- **Fase 0b** done (2026-09-18): keys only in `~/.loompa/secrets.env` (hub) or `<repo>/.loompa/.env`
+  (factory, gitignored), config.yaml keeps env var names and `save_config` refuses key-shaped
+  values; `loompa init` has a "Provedores e modelos" step (presets gratuito/economico/maximo,
+  hidden prompts, connection test) and `loompa providers list|set-key|test|preset`; dashboard
+  has ⚙ Configurações (providers, keys, tiers, roles, budget, Tavily) via
+  `GET/PUT /api/factories/{slug}/settings` and `POST .../settings/providers/{name}/test`, the
+  new-factory modal gained the same step, and the agent drawer shows/edits the role's tier.
+  Defaults: `gemini-2.5-flash-lite` heads tier2; Groq provider added; roles are an open set.
+- Next: Fase 1 (pipeline as data, spec/qa reviews, DoD, complexity→tier) per ADR-0006.
+
 ## Known gaps / next steps
 
-- Real-LLM end-to-end run against DeepSeek/Gemini (all tests use scripted providers).
+- First real end-to-end run against Gemini (`--live`) still to be executed by the Founder.
 - CodeRabbit webhook mode; PR review comments feeding back into the Worker.
 - Nightly cycle scheduler (`loompa run --watch` exists; a cron/launchd recipe is not shipped).
 - Dashboard: drag-and-drop priority, story diff viewer, finance charts.

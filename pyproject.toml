@@ -58,6 +58,9 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-q"
+markers = [
+    "live: calls a real model provider (Gemini flash-lite); local only, needs --live and a key",
+]
 
 [tool.ruff]
 line-length = 100

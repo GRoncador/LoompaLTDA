@@ -8,6 +8,25 @@ import pytest
 from loompa.config import ConfigStore
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--live",
+        action="store_true",
+        default=False,
+        help="run tests marked `live` against a real provider (needs GEMINI_API_KEY in the "
+        "environment or in ~/.loompa/secrets.env). Never used in CI.",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if config.getoption("--live"):
+        return
+    skip = pytest.mark.skip(reason="live provider test: pass --live (and configure a key)")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture
 def hub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ConfigStore:
     """Isolated global hub so tests never touch ~/.loompa."""
