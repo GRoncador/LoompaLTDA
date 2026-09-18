@@ -1,3 +1,4 @@
+from loompa.llm.probe import ProbeResult, probe_provider, probe_tavily
 from loompa.llm.providers import (
     AnthropicProvider,
     LLMError,
@@ -20,6 +21,9 @@ __all__ = [
     "Message",
     "MockProvider",
     "ModelRouter",
+    "ProbeResult",
+    "probe_provider",
+    "probe_tavily",
     "OpenAICompatibleProvider",
     "QuotaExhausted",
     "RoutedCall",

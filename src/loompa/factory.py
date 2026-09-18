@@ -124,6 +124,33 @@ class BootstrapResult:
     report: str
 
 
+GITIGNORE_LINES = (
+    ".loompa/worktrees/",
+    ".loompa/*.db",
+    ".loompa/*.db-*",
+    ".loompa/logs/",
+    ".loompa/.env",  # per-factory API keys: never committed
+)
+
+
+def _ensure_gitignore(root: Path) -> None:
+    gi = root / ".gitignore"
+    existing = gi.read_text(encoding="utf-8") if gi.is_file() else ""
+    missing = [ln for ln in GITIGNORE_LINES if ln not in existing.splitlines()]
+    if not missing:
+        return
+    block = "\n".join(missing) + "\n"
+    if not existing:
+        gi.write_text(block, encoding="utf-8")
+    else:
+        with gi.open("a", encoding="utf-8") as fh:
+            fh.write(
+                ("" if existing.endswith("\n") else "\n")
+                + "\n# Loompa LTDA runtime state\n"
+                + block
+            )
+
+
 def bootstrap_factory(
     root: Path,
     *,
@@ -180,15 +207,7 @@ def bootstrap_factory(
     if not paths.learnings.is_file():
         paths.learnings.write_text(LEARNINGS_HEADER, encoding="utf-8")
     paths.onboarding_report.write_text(report, encoding="utf-8")
-    gi = root / ".gitignore"
-    marker = ".loompa/worktrees/"
-    if not gi.is_file():
-        gi.write_text(f"{marker}\n.loompa/*.db\n.loompa/*.db-*\n.loompa/logs/\n", encoding="utf-8")
-    elif marker not in gi.read_text(encoding="utf-8"):
-        with gi.open("a", encoding="utf-8") as fh:
-            fh.write(
-                f"\n# Loompa LTDA runtime state\n{marker}\n.loompa/*.db\n.loompa/*.db-*\n.loompa/logs/\n"
-            )
+    _ensure_gitignore(root)
 
     save_config(root, config)
     factory = Factory(root=root, config=config)

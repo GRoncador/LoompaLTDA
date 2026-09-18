@@ -162,7 +162,8 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     # tier2 twice (initial + one retry), then tier1 fixes it
     tiers = [r["key"] for r in ctx.store.usage_by("tier", factory.slug)]
     assert set(tiers) == {"tier1", "tier2"}
-    assert seen_models.count("deepseek-chat") == 4 and seen_models.count("deepseek-reasoner") == 2
+    tier2_model = factory.config.models.tiers["tier2"][0].model
+    assert seen_models.count(tier2_model) == 4 and seen_models.count("deepseek-reasoner") == 2
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
     assert types.count("story.retry") == 1 and types.count("story.escalated") == 1
     assert len(state.failure_history) == 2 and "assert 1 == 2" in state.failure_history[0]

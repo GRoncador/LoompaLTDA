@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,9 +48,11 @@ class ModelRouter:
         on_call: Callable[[str, str, RoutedCall], None] | None = None,
         max_retries: int = 2,
         max_cooldown_wait: float = 90.0,
+        secrets: Mapping[str, str] | None = None,
     ):
         self.config = config
         self.tracker = tracker
+        self.secrets = secrets
         self.on_call = on_call
         self.max_retries = max_retries
         # When every candidate of a tier is merely cooling down (typical with a single-model
@@ -68,8 +70,20 @@ class ModelRouter:
             cfg = self.config.providers.get(name)
             if cfg is None:
                 raise LLMError(f"provedor não configurado: {name}")
-            self._providers[name] = build_provider(name, cfg, client=self._client)
+            self._providers[name] = build_provider(
+                name, cfg, client=self._client, secrets=self.secrets
+            )
         return self._providers[name]
+
+    def reset_providers(self, secrets: Mapping[str, str] | None = None) -> None:
+        """Forget built adapters so new keys/base URLs apply on the next call (no restart).
+        Injected providers (tests, dry-run) are kept."""
+        if secrets is not None:
+            self.secrets = secrets
+        self._providers = {
+            n: p for n, p in self._providers.items() if getattr(p, "cfg", None) is None
+        }
+        self._cooldown.clear()
 
     def candidates(
         self, role: str, tier_override: str | None = None

@@ -10,7 +10,8 @@ from typing import Any
 
 from loompa.aci import ACI
 from loompa.comms import FounderMessage
-from loompa.config import LoompaConfig
+from loompa.config import LoompaConfig, Secrets
+from loompa.config.secrets import install_log_redaction
 from loompa.factory import Factory
 from loompa.finance import CostTracker
 from loompa.llm import ModelRouter
@@ -33,6 +34,7 @@ class EngineContext:
     worktrees: WorktreeManager
     dry_run: bool = False
     listeners: list[Listener] = field(default_factory=list)
+    secrets: Secrets = field(default_factory=Secrets)
 
     @property
     def config(self) -> LoompaConfig:
@@ -59,6 +61,8 @@ class EngineContext:
     ) -> EngineContext:
         store = store or Store(factory.paths.state_db)
         tracker = CostTracker(store, factory.config, factory.slug)
+        secrets = Secrets.load(factory.root)
+        install_log_redaction(secrets.values_for_redaction())
         if memory is None:
             embedder = get_embedder(
                 factory.config.memory.embedding_model, prefer_local_hash=dry_run
@@ -70,16 +74,24 @@ class EngineContext:
             factory=factory,
             store=store,
             memory=memory,
-            router=router or ModelRouter(factory.config, tracker=tracker),
+            router=router or ModelRouter(factory.config, tracker=tracker, secrets=secrets),
             tracker=tracker,
             worktrees=WorktreeManager(factory.root, factory.paths.worktrees),
             dry_run=dry_run,
+            secrets=secrets,
         )
         if router is not None and router.tracker is None:
             router.tracker = tracker
         if ctx.router.on_call is None:
             ctx.router.on_call = ctx._on_llm_call
         return ctx
+
+    def reload_secrets(self) -> Secrets:
+        """Re-read the secrets files and rebuild provider adapters (settings changed)."""
+        self.secrets = Secrets.load(self.factory.root)
+        install_log_redaction(self.secrets.values_for_redaction())
+        self.router.reset_providers(self.secrets)
+        return self.secrets
 
     def _on_llm_call(self, role: str, agent: str, routed: Any) -> None:
         self.emit(

@@ -2,7 +2,7 @@ import type { FactoryRef, Overview } from "../types";
 
 export default function Header(props: {
   factories: FactoryRef[]; slug: string | null; overview: Overview | null; connected: boolean; pending: number;
-  onSwitch: (slug: string) => void; onNewFactory: () => void; onMeeting: () => void; onToggleEngine: () => void;
+  onSwitch: (slug: string) => void; onNewFactory: () => void; onMeeting: () => void; onToggleEngine: () => void; onSettings: () => void;
 }) {
   const { factories, slug, overview, connected, pending } = props;
   const fin = overview?.finance;
@@ -35,6 +35,7 @@ export default function Header(props: {
             {overview.factory.engine ? "⏸ Pausar esteira" : "▶ Ligar esteira"}
           </button>
           <button className="btn-primary" onClick={props.onMeeting}>☀️ Reunião matinal</button>
+          <button className="btn-ghost" title="Provedores, modelos, chaves e orçamento" onClick={props.onSettings}>⚙ Configurações</button>
         </>
       )}
       <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-400" : "bg-red-500"}`} title={connected ? "tempo real conectado" : "reconectando…"} />

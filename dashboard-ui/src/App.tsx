@@ -11,6 +11,7 @@ import AgentDrawer from "./components/AgentDrawer";
 import StoryDrawer from "./components/StoryDrawer";
 import NewFactoryModal from "./components/NewFactoryModal";
 import EventTicker from "./components/EventTicker";
+import SettingsModal from "./components/SettingsModal";
 
 export default function App() {
   const [factories, setFactories] = useState<FactoryRef[]>([]);
@@ -19,6 +20,7 @@ export default function App() {
   const [events, setEvents] = useState<LoompaEvent[]>([]);
   const [meetingOpen, setMeetingOpen] = useState(false);
   const [newFactoryOpen, setNewFactoryOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentName, setAgentName] = useState<string | null>(null);
   const [storyId, setStoryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export default function App() {
 
   const onEvent = useCallback((e: LoompaEvent) => {
     setEvents((prev) => [...prev.slice(-199), e]);
-    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused"].includes(e.type)) {
+    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
@@ -66,7 +68,7 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
-        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onMeeting={() => setMeetingOpen(true)} onToggleEngine={toggleEngine}
+        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onMeeting={() => setMeetingOpen(true)} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)}
       />
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
       <main className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
@@ -86,6 +88,7 @@ export default function App() {
       </main>
       <EventTicker events={events} />
       {meetingOpen && slug && <MeetingModal slug={slug} onClose={() => { setMeetingOpen(false); refresh(); }} />}
+      {settingsOpen && slug && <SettingsModal slug={slug} onClose={() => { setSettingsOpen(false); refresh(); }} />}
       {newFactoryOpen && <NewFactoryModal onClose={async (created) => { setNewFactoryOpen(false); await loadFactories(); if (created) setSlug(created); }} />}
       {agentName && slug && <AgentDrawer slug={slug} name={agentName} onClose={() => setAgentName(null)} onOpenStory={setStoryId} />}
       {storyId && slug && <StoryDrawer slug={slug} id={storyId} onClose={() => setStoryId(null)} />}

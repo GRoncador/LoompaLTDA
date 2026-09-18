@@ -36,3 +36,30 @@ def test_init_greenfield_with_stack(tmp_path: Path, hub):
     assert result.exit_code == 0, result.stdout
     assert (root / ".loompa" / "constitution.md").is_file()
     assert (root / "src" / "fresh" / "main.py").is_file()
+
+
+def test_init_preset_and_providers_commands(git_repo, hub, monkeypatch):
+    from typer.testing import CliRunner
+
+    from loompa.cli.main import app
+
+    runner = CliRunner()
+    monkeypatch.chdir(git_repo)
+    r = runner.invoke(app, ["init", ".", "--yes", "--name", "Chaves", "--preset", "gratuito"])
+    assert r.exit_code == 0, r.stdout
+    assert "preset gratuito aplicado" in r.stdout
+    r = runner.invoke(app, ["providers", "list"])
+    assert r.exit_code == 0 and "Google Gemini" in r.stdout and "não configurada" in r.stdout
+    # hidden prompt writes to the hub secrets file, never to config.yaml or stdout
+    key = "AIzaSyFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE9999"
+    r = runner.invoke(app, ["providers", "set-key", "gemini", "--no-test"], input=key + "\n")
+    assert r.exit_code == 0, r.stdout
+    assert key not in r.stdout and "guardada" in r.stdout
+    assert key in (hub.home / "secrets.env").read_text()
+    assert key not in (git_repo / ".loompa" / "config.yaml").read_text()
+    r = runner.invoke(app, ["providers", "list"])
+    assert "configurada (…9999)" in r.stdout and key not in r.stdout
+    r = runner.invoke(app, ["providers", "set-key", "gemini", "--clear"])
+    assert r.exit_code == 0 and key not in (hub.home / "secrets.env").read_text()
+    r = runner.invoke(app, ["init", ".", "--yes", "--preset", "nope"])
+    assert r.exit_code == 1

@@ -1,4 +1,4 @@
-import type { FactoryRef, Message, Overview } from "./types";
+import type { FactoryRef, Message, Overview, ProbeResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
@@ -9,8 +9,13 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   factories: () => req<{ active: string | null; factories: FactoryRef[]; dry_run: boolean }>("/api/factories"),
   activate: (slug: string) => req(`/api/factories/${slug}/activate`, { method: "POST" }),
-  addFactory: (body: { path: string; name?: string; stack?: string; mission?: string }) =>
+  addFactory: (body: { path: string; name?: string; stack?: string; mission?: string; preset?: string; keys?: Record<string, string>; secrets_scope?: "hub" | "factory" }) =>
     req<{ slug: string; mode: string; report: string }>("/api/factories", { method: "POST", body: JSON.stringify(body) }),
+  settings: (slug: string) => req<Settings>(`/api/factories/${slug}/settings`),
+  updateSettings: (slug: string, patch: SettingsPatch) =>
+    req<{ changes: string[]; settings: Settings }>(`/api/factories/${slug}/settings`, { method: "PUT", body: JSON.stringify(patch) }),
+  testProvider: (slug: string, name: string, model?: string) =>
+    req<ProbeResult>(`/api/factories/${slug}/settings/providers/${encodeURIComponent(name)}/test`, { method: "POST", body: JSON.stringify({ model: model ?? null }) }),
   overview: (slug: string) => req<Overview>(`/api/factories/${slug}/overview`),
   engine: (slug: string, action: "start" | "stop") => req<{ engine: boolean }>(`/api/factories/${slug}/engine/${action}`, { method: "POST" }),
   inbox: (slug: string, status = "pending") => req<Message[]>(`/api/factories/${slug}/inbox?status=${status}`),

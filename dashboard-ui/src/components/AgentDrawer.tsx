@@ -3,6 +3,7 @@ import { api } from "../api";
 
 export default function AgentDrawer({ slug, name, onClose, onOpenStory }: { slug: string; name: string; onClose: () => void; onOpenStory: (id: string) => void }) {
   const [data, setData] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
   useEffect(() => { api.agent(slug, name).then(setData).catch(() => setData(null)); const t = setInterval(() => api.agent(slug, name).then(setData).catch(() => {}), 5000); return () => clearInterval(t); }, [slug, name]);
   return (
     <Drawer title={name} onClose={onClose}>
@@ -11,6 +12,12 @@ export default function AgentDrawer({ slug, name, onClose, onOpenStory }: { slug
           <Row k="Papel" v={data.role} />
           <Row k="Estado" v={<span className={`chip ${data.state === "BLOCKED" ? "bg-red-900/60 text-red-200" : data.state === "WORKING" ? "bg-emerald-900/60 text-emerald-200" : data.state === "TESTING" ? "bg-sky-900/60 text-sky-200" : "bg-slate-800 text-slate-300"}`}>{data.state}</span>} />
           <Row k="Modelo ativo" v={data.model || "—"} />
+          <Row k="Tier" v={
+            <select className="rounded-md border border-line bg-ink px-2 py-0.5 text-sm" value={data.tier || "tier2"} disabled={!data.role || saving}
+              onChange={async (e) => { setSaving(true); try { await api.updateSettings(slug, { roles: { [data.role]: e.target.value } }); setData(await api.agent(slug, name)); } finally { setSaving(false); } }}>
+              {(data.tiers ?? ["tier1", "tier2"]).map((t: string) => <option key={t} value={t}>{t}</option>)}
+            </select>} />
+          <Row k="Modelos" v={(data.candidates ?? []).length ? <ol className="list-decimal pl-4 text-xs text-slate-300">{data.candidates.map((c: any) => <li key={`${c.provider}/${c.model}`}>{c.provider} / {c.model}</li>)}</ol> : <span className="text-slate-500">nenhum modelo neste tier</span>} />
           <Row k="Atividade" v={data.detail || "—"} />
           {data.story && <Row k="História" v={<button className="text-brand hover:underline" onClick={() => onOpenStory(data.story.id)}>{data.story.id} · {data.story.title}</button>} />}
           {data.worktree && <Row k="Worktree" v={<code className="text-xs text-slate-400">{data.worktree}</code>} />}

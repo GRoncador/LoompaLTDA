@@ -8,29 +8,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Mode = Literal["greenfield", "brownfield"]
-Role = Literal[
+# Roles are an open set: any agent role maps to a tier through `models.roles`, defaulting to
+# tier2. `ROLES` lists the ones shipped today (used for defaults and the dashboard office).
+Role = str
+ROLES: tuple[str, ...] = (
     "master",
     "product",
+    "product_owner",
     "architect",
+    "analyst",
     "worker",
     "inspector",
     "deployer",
-    "finance",
-    "compliance",
-    "metrics",
-    "storyteller",
-    "kaizen",
-]
-ROLES: tuple[Role, ...] = (
-    "master",
-    "product",
-    "architect",
-    "worker",
-    "inspector",
-    "deployer",
+    "ops",
     "finance",
     "compliance",
     "metrics",
@@ -87,19 +80,52 @@ class ModelsConfig(BaseModel):
     roles: dict[str, str] = Field(default_factory=dict)
     temperature: float = 0.2
     max_output_tokens: int = 4096
+    preset: str = ""  # last preset applied (informational; tiers are the source of truth)
 
     def tier_for(self, role: str) -> str:
-        return self.roles.get(role, "tier2")
+        return self.roles.get(role) or "tier2"
 
     def candidates_for(self, role: str) -> list[ModelCandidate]:
         return self.tiers.get(self.tier_for(role), [])
 
 
 class ProviderConfig(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     kind: Literal["openai_compatible", "anthropic", "mock"] = "openai_compatible"
     base_url: str = ""
-    api_key_env: str = ""
+    api_key_env: str = ""  # NAME of the variable; the value lives in the secrets files
     extra_headers: dict[str, str] = Field(default_factory=dict)
+    label: str = ""
+    console_url: str = ""  # where the founder creates the key
+
+    @field_validator("api_key_env")
+    @classmethod
+    def _env_name_only(cls, v: str) -> str:
+        from loompa.config.secrets import looks_like_secret
+
+        if looks_like_secret(v):
+            raise ValueError("api_key_env deve ser o NOME da variável, nunca a chave")
+        return v
+
+
+class ToolProviderConfig(BaseModel):
+    """An external tool (web search, ...) that needs its own key."""
+
+    enabled: bool = True
+    api_key_env: str = ""
+    base_url: str = ""
+    console_url: str = ""
+
+
+class ToolsConfig(BaseModel):
+    tavily: ToolProviderConfig = Field(
+        default_factory=lambda: ToolProviderConfig(
+            api_key_env="TAVILY_API_KEY",
+            base_url="https://api.tavily.com",
+            console_url="https://app.tavily.com",
+        )
+    )
 
 
 class Price(BaseModel):
@@ -150,6 +176,7 @@ class LoompaConfig(BaseModel):
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
     pricing: dict[str, Price] = Field(default_factory=dict)
     quality: QualityConfig = Field(default_factory=QualityConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)

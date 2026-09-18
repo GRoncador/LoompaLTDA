@@ -1,3 +1,4 @@
+from loompa.config.presets import MODEL_PRESETS, ModelPreset, apply_preset, preset_summaries
 from loompa.config.schema import (
     BudgetConfig,
     FactoryConfig,
@@ -9,9 +10,11 @@ from loompa.config.schema import (
     ScheduleConfig,
     StackProfile,
 )
+from loompa.config.secrets import Secrets, looks_like_secret, mask
 from loompa.config.store import (
     LOOMPA_DIR,
     ConfigStore,
+    SecretInConfigError,
     default_config,
     find_factory_root,
     load_config,
@@ -20,6 +23,14 @@ from loompa.config.store import (
 
 __all__ = [
     "LOOMPA_DIR",
+    "MODEL_PRESETS",
+    "ModelPreset",
+    "Secrets",
+    "SecretInConfigError",
+    "apply_preset",
+    "looks_like_secret",
+    "mask",
+    "preset_summaries",
     "BudgetConfig",
     "ConfigStore",
     "FactoryConfig",

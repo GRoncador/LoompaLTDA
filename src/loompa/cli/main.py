@@ -65,6 +65,12 @@ def init(
         None, "--mode", help="Força greenfield|brownfield (padrão: detecta)."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Não perguntar nada (usa padrões)."),
+    preset: str | None = typer.Option(
+        None, "--preset", "-p", help="Preset de modelos: gratuito | economico | maximo."
+    ),
+    secrets_scope: str = typer.Option(
+        "hub", "--secrets-scope", help="Onde guardar chaves: hub (todas as fábricas) | factory."
+    ),
     overwrite_constitution: bool = typer.Option(
         False, "--overwrite-constitution", help="Regrava constitution.md."
     ),
@@ -125,6 +131,22 @@ def init(
         console.print(table)
         for w in a.warnings:
             console.print(f"[yellow]![/yellow] {w}")
+    # Step "Provedores e modelos": presets + keys (hidden prompt) + connection test.
+    from loompa.cli.providers import setup_providers_interactive
+    from loompa.config import MODEL_PRESETS, apply_preset
+
+    if yes:
+        if preset:
+            if preset not in MODEL_PRESETS:
+                console.print(f"[red]Preset desconhecido:[/red] {preset}")
+                raise typer.Exit(code=1)
+            apply_preset(f.config, preset)
+            f.save()
+            console.print(
+                f"[green]✔[/green] preset {preset} aplicado (chaves via loompa providers set-key)"
+            )
+    else:
+        setup_providers_interactive(f, preset=preset, scope=secrets_scope, out=console)
     console.print(f"Relatório executivo: {f.paths.onboarding_report}")
     console.print('Próximo passo: [bold]loompa meeting "metas de hoje"[/bold]')
 
@@ -221,5 +243,6 @@ def main() -> None:  # pragma: no cover - console entry
 
 try:  # extended commands (meeting/run/inbox/dashboard) registered when the engine is present
     from loompa.cli import ops as _ops  # noqa: F401
+    from loompa.cli import providers as _providers  # noqa: F401
 except ImportError:  # pragma: no cover
     pass

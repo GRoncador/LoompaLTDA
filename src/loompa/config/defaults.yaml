@@ -34,19 +34,24 @@ models:
       - provider: anthropic
         model: claude-sonnet-5
     tier2:                   # high-throughput executors: Worker, Inspector, Product, Finance, Copy
+      - provider: gemini
+        model: gemini-2.5-flash-lite   # first free candidate (Google AI Studio free tier)
       - provider: deepseek
         model: deepseek-chat
       - provider: gemini
         model: gemini-2.5-flash
       - provider: anthropic
-        model: claude-haiku-4-5-20251001
-  roles:
+        model: claude-haiku-4-5
+  roles:                     # any role not listed here uses tier2
     master: tier1
     architect: tier1
     product: tier2
+    product_owner: tier2
+    analyst: tier2
     worker: tier2
     inspector: tier2
     deployer: tier2
+    ops: tier2
     finance: tier2
     compliance: tier2
     metrics: tier2
@@ -54,37 +59,69 @@ models:
     kaizen: tier2
   temperature: 0.2
   max_output_tokens: 4096
+  preset: ""                 # gratuito | economico | maximo (see loompa/config/presets.py)
 
+# Providers. `api_key_env` is the NAME of a variable; its value lives in ~/.loompa/secrets.env
+# (all factories) or <repo>/.loompa/.env (this factory) - never here, never in git.
 providers:
   deepseek:
     kind: openai_compatible
+    label: DeepSeek
     base_url: https://api.deepseek.com/v1
     api_key_env: DEEPSEEK_API_KEY
+    console_url: https://platform.deepseek.com/api_keys
   gemini:
     kind: openai_compatible
+    label: Google Gemini
     base_url: https://generativelanguage.googleapis.com/v1beta/openai
     api_key_env: GEMINI_API_KEY
+    console_url: https://aistudio.google.com/apikey
   anthropic:
     kind: anthropic
+    label: Anthropic Claude
     base_url: https://api.anthropic.com
     api_key_env: ANTHROPIC_API_KEY
+    console_url: https://console.anthropic.com/settings/keys
+  groq:
+    kind: openai_compatible
+    label: Groq
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    console_url: https://console.groq.com/keys
   openrouter:
     kind: openai_compatible
+    label: OpenRouter
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
+    console_url: https://openrouter.ai/keys
   ollama:
     kind: openai_compatible
+    label: Ollama (local)
     base_url: http://localhost:11434/v1
     api_key_env: ""          # no key needed
+
+# External tools the agents may use (Analyst web search). Same rule: only the variable name.
+tools:
+  tavily:
+    enabled: true
+    api_key_env: TAVILY_API_KEY
+    base_url: https://api.tavily.com
+    console_url: https://app.tavily.com
 
 # USD per 1M tokens. Verify against each provider's pricing page; these are editable.
 pricing:
   deepseek-chat:            { input: 0.27, output: 1.10, cached_input: 0.07 }
   deepseek-reasoner:        { input: 0.55, output: 2.19, cached_input: 0.14 }
+  gemini-2.5-flash-lite:    { input: 0.10, output: 0.40, cached_input: 0.025 }
   gemini-2.5-flash:         { input: 0.30, output: 2.50, cached_input: 0.075 }
   gemini-2.5-pro:           { input: 1.25, output: 10.0, cached_input: 0.31 }
-  claude-sonnet-5:          { input: 3.00, output: 15.0, cached_input: 0.30 }
-  claude-haiku-4-5-20251001: { input: 1.00, output: 5.00, cached_input: 0.10 }
+  claude-opus-5:            { input: 5.00, output: 25.0, cached_input: 0.50 }
+  claude-sonnet-5:          { input: 2.00, output: 10.0, cached_input: 0.20 }
+  claude-haiku-4-5:         { input: 1.00, output: 5.00, cached_input: 0.10 }
+  llama-3.3-70b-versatile:  { input: 0.59, output: 0.79, cached_input: 0.59 }
+  llama-3.1-8b-instant:     { input: 0.05, output: 0.08, cached_input: 0.05 }
+  deepseek/deepseek-r1:free: { input: 0.0, output: 0.0, cached_input: 0.0 }
+  deepseek/deepseek-chat-v3-0324:free: { input: 0.0, output: 0.0, cached_input: 0.0 }
   default:                  { input: 1.00, output: 3.00, cached_input: 0.25 }
 
 quality:

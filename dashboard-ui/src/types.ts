@@ -72,3 +72,39 @@ export interface LoompaEvent {
   agent?: string;
   payload?: Record<string, unknown>;
 }
+
+export interface KeyStatus { env: string; configured: boolean; label: string; source: string | null }
+
+export interface ProviderInfo {
+  name: string; label: string; kind: string; base_url: string; api_key_env: string; console_url: string;
+  needs_key: boolean; key: KeyStatus; used_by: string[];
+}
+
+export interface Candidate { provider: string; model: string; temperature?: number | null; max_output_tokens?: number | null }
+
+export interface PresetInfo { key: string; label: string; description: string; providers: string[]; optional_providers: string[]; tiers: Record<string, Candidate[]> }
+
+export interface Settings {
+  preset: string;
+  presets: PresetInfo[];
+  providers: ProviderInfo[];
+  tiers: Record<string, Candidate[]>;
+  roles: Record<string, string>;
+  budget: { monthly_cap_usd: number; warn_at_fraction: number; hard_stop: boolean };
+  schedule: { max_parallel: number };
+  tools: { tavily: { enabled: boolean; api_key_env: string; console_url: string; key: KeyStatus } };
+  secrets_files: { hub: string; factory: string };
+}
+
+export interface SettingsPatch {
+  preset?: string;
+  providers?: Record<string, { kind?: string; base_url?: string; api_key_env?: string; label?: string; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
+  remove_providers?: string[];
+  tiers?: Record<string, Candidate[]>;
+  roles?: Record<string, string>;
+  budget?: { monthly_cap_usd?: number; warn_at_fraction?: number; hard_stop?: boolean };
+  max_parallel?: number;
+  tools?: Record<string, { enabled?: boolean; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
+}
+
+export interface ProbeResult { name: string; ok: boolean; detail: string; model: string; latency_ms: number }

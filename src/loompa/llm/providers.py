@@ -7,13 +7,24 @@ import json
 import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 from loompa.config.schema import ProviderConfig
+
+
+def resolve_key(env_name: str, secrets: Mapping[str, str] | None = None) -> str:
+    """Key value for `env_name`: secrets files first, process environment as fallback."""
+    if not env_name:
+        return ""
+    if secrets is not None:
+        val = secrets.get(env_name)
+        if val:
+            return val
+    return os.environ.get(env_name, "")
 
 
 class LLMError(RuntimeError):
@@ -177,11 +188,12 @@ class OpenAICompatibleProvider(LLMProvider):
         *,
         client: httpx.AsyncClient | None = None,
         timeout: float = 180.0,
+        secrets: Mapping[str, str] | None = None,
     ):
         self.name = name
         self.cfg = cfg
         self.base_url = cfg.base_url.rstrip("/")
-        self.api_key = os.environ.get(cfg.api_key_env, "") if cfg.api_key_env else ""
+        self.api_key = resolve_key(cfg.api_key_env, secrets)
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._owned = client is None
 
@@ -274,11 +286,12 @@ class AnthropicProvider(LLMProvider):
         *,
         client: httpx.AsyncClient | None = None,
         timeout: float = 180.0,
+        secrets: Mapping[str, str] | None = None,
     ):
         self.name = name
         self.cfg = cfg
         self.base_url = (cfg.base_url or "https://api.anthropic.com").rstrip("/")
-        self.api_key = os.environ.get(cfg.api_key_env or "ANTHROPIC_API_KEY", "")
+        self.api_key = resolve_key(cfg.api_key_env or "ANTHROPIC_API_KEY", secrets)
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._owned = client is None
 
@@ -441,13 +454,17 @@ class MockProvider(LLMProvider):
 
 
 def build_provider(
-    name: str, cfg: ProviderConfig, *, client: httpx.AsyncClient | None = None
+    name: str,
+    cfg: ProviderConfig,
+    *,
+    client: httpx.AsyncClient | None = None,
+    secrets: Mapping[str, str] | None = None,
 ) -> LLMProvider:
     if cfg.kind == "anthropic":
-        return AnthropicProvider(name, cfg, client=client)
+        return AnthropicProvider(name, cfg, client=client, secrets=secrets)
     if cfg.kind == "mock":
         return MockProvider(name)
-    return OpenAICompatibleProvider(name, cfg, client=client)
+    return OpenAICompatibleProvider(name, cfg, client=client, secrets=secrets)
 
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.S)

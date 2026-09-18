@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from loompa.config.schema import FactoryRef, HubRegistry, LoompaConfig
+from loompa.config.secrets import find_secrets
 
 LOOMPA_DIR = ".loompa"
 CONFIG_FILE = "config.yaml"
@@ -40,10 +41,20 @@ def load_config(root: Path) -> LoompaConfig:
     return LoompaConfig.model_validate(merged)
 
 
+class SecretInConfigError(ValueError):
+    """Raised when a value shaped like an API key is about to be written to config.yaml."""
+
+
 def save_config(root: Path, config: LoompaConfig) -> Path:
     path = root / LOOMPA_DIR / CONFIG_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     data = config.model_dump(mode="json")
+    leaks = find_secrets(data)
+    if leaks:
+        raise SecretInConfigError(
+            "config.yaml nunca guarda chaves; use o arquivo de segredos. Campos: "
+            + ", ".join(leaks)
+        )
     path.write_text(
         "# Loompa LTDA factory configuration (see loompa/config/defaults.yaml for docs)\n"
         + yaml.safe_dump(data, sort_keys=False, allow_unicode=True),

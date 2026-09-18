@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from loompa import __version__
 from loompa.comms import FounderAnswer
 from loompa.config import ConfigStore
+from loompa.config.settings import SettingsPatch
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, kanban_column, load_state
 from loompa.factory import Factory
 from loompa.finance import month_start_iso, today_start_iso
@@ -38,6 +39,7 @@ OFFICE_ROOMS = {
     "worker": "dev",
     "inspector": "qa",
     "deployer": "dev",
+    "ops": "qa",
     "finance": "qa",
     "compliance": "lounge",
     "metrics": "lounge",
@@ -51,6 +53,7 @@ DEFAULT_AGENTS = [
     ("Worker Loompa", "worker"),
     ("Inspector Loompa", "inspector"),
     ("Deployer Loompa", "deployer"),
+    ("Ops Loompa", "ops"),
     ("Finance Loompa", "finance"),
     ("Kaizen Loompa", "kaizen"),
     ("Storyteller Loompa", "storyteller"),
@@ -61,6 +64,10 @@ DEFAULT_AGENTS = [
 class ReplyBody(BaseModel):
     option_key: str | None = None
     text: str | None = None
+
+
+class ProbeBody(BaseModel):
+    model: str | None = None
 
 
 class MeetingBody(BaseModel):
@@ -78,6 +85,9 @@ class FactoryBody(BaseModel):
     path: str
     name: str | None = None
     stack: str = "custom"
+    preset: str | None = None  # gratuito | economico | maximo
+    keys: dict[str, str] = {}  # ENV_NAME -> value, written to the secrets file only
+    secrets_scope: str = "hub"
     mission: str = ""
 
 
@@ -227,7 +237,20 @@ def create_app(
             mission=body.mission,
             store=hub.store,
         )
-        return {"slug": result.factory.slug, "mode": result.mode, "report": result.report}
+        f = result.factory
+        if body.preset or body.keys:
+            from loompa.config import MODEL_PRESETS, apply_preset
+            from loompa.config.settings import store_key
+
+            if body.preset:
+                if body.preset not in MODEL_PRESETS:
+                    raise HTTPException(400, f"preset desconhecido: {body.preset}")
+                apply_preset(f.config, body.preset)
+                f.save()
+            for env_name, value in body.keys.items():
+                if value.strip():
+                    store_key(f.root, env_name, value.strip(), scope=body.secrets_scope)
+        return {"slug": f.slug, "mode": result.mode, "report": result.report}
 
     @app.post("/api/factories/{slug}/engine/{action}")
     async def engine(slug: str, action: str) -> dict[str, Any]:
@@ -415,6 +438,44 @@ def create_app(
         msg = MasterAgent(hub.get(slug).ctx).end_of_day_report()
         return msg.model_dump(mode="json")
 
+    # --------------------------------------------------------------- settings
+    @app.get("/api/factories/{slug}/settings")
+    def settings(slug: str) -> dict[str, Any]:
+        from loompa.config.settings import describe_settings
+
+        ctx = hub.get(slug).ctx
+        return describe_settings(ctx.config, ctx.secrets)
+
+    @app.put("/api/factories/{slug}/settings")
+    def update_settings(slug: str, patch: SettingsPatch) -> dict[str, Any]:
+        from loompa.config import SecretInConfigError
+        from loompa.config.settings import apply_settings, describe_settings
+
+        rt = hub.get(slug)
+        ctx = rt.ctx
+        try:
+            notes = apply_settings(ctx.root, ctx.config, patch)
+            rt.factory.save()
+        except (ValueError, SecretInConfigError) as exc:
+            raise HTTPException(400, str(exc)) from None
+        ctx.reload_secrets()  # new keys/base URLs apply on the next LLM call, no restart
+        ctx.emit("settings.updated", changes=notes)
+        return {"changes": notes, "settings": describe_settings(ctx.config, ctx.secrets)}
+
+    @app.post("/api/factories/{slug}/settings/providers/{name}/test")
+    async def test_provider(slug: str, name: str, body: ProbeBody | None = None) -> dict[str, Any]:
+        from loompa.llm import probe_provider, probe_tavily
+
+        ctx = hub.get(slug).ctx
+        ctx.reload_secrets()
+        if name == "tavily":
+            r = await probe_tavily(ctx.config.tools.tavily, secrets=ctx.secrets)
+        else:
+            r = await probe_provider(
+                ctx.config, name, secrets=ctx.secrets, model=body.model if body else None
+            )
+        return r.as_dict()
+
     # ---------------------------------------------------------------- finance
     @app.get("/api/factories/{slug}/finance")
     def finance(slug: str) -> dict[str, Any]:
@@ -447,8 +508,14 @@ def create_app(
             r for r in ctx.store.usage_by("agent", slug, month_start_iso()) if r["key"] == name
         ]
         story = ctx.store.get_story(row["story_id"]) if row.get("story_id") else None
+        role = row.get("role") or next((r for n, r in DEFAULT_AGENTS if n == name), "")
+        tier = ctx.config.models.tier_for(role)  # unknown roles map to tier2 like any new role
         return {
             **row,
+            "role": role,
+            "tier": tier,
+            "tiers": list(ctx.config.models.tiers),
+            "candidates": [c.model_dump() for c in ctx.config.models.tiers.get(tier, [])],
             "today": usage_rows[0] if usage_rows else None,
             "month": month_rows[0] if month_rows else None,
             "story": _story_card(story) if story else None,

@@ -131,39 +131,41 @@ async def test_router_falls_through_and_meters_cost():
     store = Store(":memory:")
     tracker = CostTracker(store, cfg, "f")
     calls: list[str] = []
-    bad = MockProvider("deepseek", script=lambda m, msgs, t: QuotaExhausted("quota"))
-    good = MockProvider("gemini", script=scripted)
+    bad = MockProvider("gemini", script=lambda m, msgs, t: QuotaExhausted("quota"))
+    good = MockProvider("deepseek", script=scripted)
     router = ModelRouter(
         cfg,
         tracker=tracker,
-        providers={"deepseek": bad, "gemini": good},
+        providers={"gemini": bad, "deepseek": good},
         on_call=lambda role, agent, rc: calls.append(rc.candidate.model),
     )
     rc = await router.complete(
         "worker", [Message("user", "hello world" * 100)], agent="worker-1", story_id="S-1"
     )
     assert (
-        rc.candidate.provider == "gemini"
+        rc.candidate.provider == "deepseek"
         and rc.tier == "tier2"
-        and rc.response.text == "gemini-2.5-flash says hi"
+        and rc.response.text == "deepseek-chat says hi"
     )
-    assert calls == ["gemini-2.5-flash"] and rc.cost_usd > 0
+    assert calls == ["deepseek-chat"] and rc.cost_usd > 0
     assert (
         store.usage_totals("f")["calls"] == 1
-        and store.usage_by("model", "f")[0]["key"] == "gemini-2.5-flash"
+        and store.usage_by("model", "f")[0]["key"] == "deepseek-chat"
     )
-    # deepseek is now in cooldown: the second call skips it without invoking it again
+    # gemini flash-lite is now in cooldown: the second call skips it without invoking it again
     n = len(bad.calls)
     rc2 = await router.complete("architect", [Message("user", "x")], tier_override="tier2")
-    assert rc2.candidate.provider == "gemini" and len(bad.calls) == n
-    # tier override to tier1 -> deepseek-reasoner is a different key, so it's tried and fails; gemini pro answers
+    assert rc2.candidate.provider == "deepseek" and len(bad.calls) == n
+    # tier override to tier1 -> deepseek-reasoner heads that tier and answers
     rc3 = await router.complete("worker", [Message("user", "x")], tier_override="tier1")
-    assert rc3.candidate.model == "gemini-2.5-pro" and rc3.tier == "tier1"
+    assert rc3.candidate.model == "deepseek-reasoner" and rc3.tier == "tier1"
 
 
 async def test_router_all_fail_raises():
     cfg = default_config()
-    cfg.models.tiers["tier2"] = cfg.models.tiers["tier2"][:1]
+    cfg.models.tiers["tier2"] = [c for c in cfg.models.tiers["tier2"] if c.provider == "deepseek"][
+        :1
+    ]
     router = ModelRouter(
         cfg,
         providers={"deepseek": MockProvider("deepseek", script=lambda *a: LLMError("boom"))},
@@ -175,7 +177,9 @@ async def test_router_all_fail_raises():
 
 async def test_router_waits_for_single_candidate_cooldown():
     cfg = default_config()
-    cfg.models.tiers["tier2"] = cfg.models.tiers["tier2"][:1]
+    cfg.models.tiers["tier2"] = [c for c in cfg.models.tiers["tier2"] if c.provider == "deepseek"][
+        :1
+    ]
     calls = {"n": 0}
 
     def flaky(model, messages, tools):
