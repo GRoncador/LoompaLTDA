@@ -28,3 +28,6 @@ dashboard-ui/dist/
 .vscode/
 *.log
 .env
+
+# Reference material only (not part of the product)
+REFERENCIA-AIOX-CORE/
