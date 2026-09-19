@@ -76,6 +76,7 @@ ignore = ["E501", "B008", "SIM102", "SIM105"]
 "tests/test_backlog.py" = ["F811"]
 "tests/test_worktrees.py" = ["F811"]
 "tests/test_sprint.py" = ["F811"]
+"tests/test_decisions.py" = ["F811"]
 
 [tool.mypy]
 python_version = "3.11"

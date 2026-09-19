@@ -13,6 +13,7 @@ from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.backlog import DEFAULT_PRIORITY, Admission, Backlog
 from loompa.engine.state import Stage, StoryState
 from loompa.speckit import story_dir
+from loompa.sprints import SprintBoard, SprintError
 
 REVIEW_SYSTEM = """<!-- role:product_owner -->
 You are the Product Owner Loompa. Review the specification written for the story below before
@@ -65,6 +66,25 @@ class ProductOwnerAgent(LoompaAgent):
 
     def admit(self, story_id: str) -> bool:
         return self.backlog.admit(story_id)
+
+    def resolve_finding(self, story_id: str, choice: str) -> bool:
+        """Apply the founder's decision on a suggested card: `sprint` puts it in the sprint
+        being planned, `backlog` leaves it where it is, `drop` cancels it. Returns False when the
+        card is no longer waiting in the backlog (someone already decided)."""
+        row = self.ctx.store.get_story(story_id)
+        if row is None or row["stage"] != Stage.BACKLOG:
+            return False
+        if choice == "sprint":
+            try:
+                SprintBoard(self.ctx.store, self.ctx.slug).add(story_id)
+            except SprintError:  # already in a sprint: nothing to plan
+                return False
+        elif choice == "drop":
+            self.set_status(story_id, Stage.CANCELLED)
+        elif choice != "backlog":
+            raise ValueError(f"decisão desconhecida: {choice}")
+        self.ctx.emit("finding.decided", story_id=story_id, agent=self.name, choice=choice)
+        return True
 
     # ------------------------------------------------------------------- spec
     async def review_spec(self, state: StoryState) -> AgentResult:

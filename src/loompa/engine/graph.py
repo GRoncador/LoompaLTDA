@@ -308,6 +308,7 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
 
 async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     wt = _ensure_worktree(ctx, state)
+    KaizenAgent(ctx).capture(state)  # findings never get lost: sweep what no earlier phase filed
     res = await DeployerAgent(ctx).run(state, wt)
     if not res.ok:
         return await block(ctx, state, BlockedReason.CONFLICT, res.summary, resume="review")

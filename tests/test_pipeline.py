@@ -217,6 +217,12 @@ async def test_waived_verdict_asks_the_founder(factory: Factory, answer: str):
         final = load_state(ctx, sid)
         assert final.blocked_reason == "delivery" and final.qa_verdict == "WAIVED"
         assert any(learn["kind"] == "risk" for learn in final.learnings)
+        # the accepted risk is swept into a card at review and offered on the delivery
+        delivery = ctx.store.get_message(final.blocked_message_id)
+        assert [d.title for d in delivery.decisions] == ["Achado: [risk] Risco aceito pelo Founder"]
+        assert delivery.executive_audit() == [] and final.finding_cards == [
+            delivery.decisions[0].id
+        ]
     await ctx.aclose()
 
 

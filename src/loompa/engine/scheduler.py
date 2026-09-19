@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent, triage
-from loompa.comms import FounderAnswer
+from loompa.comms import FounderAnswer, FounderMessage
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, block
 from loompa.engine.langgraph_engine import GraphRuntime
@@ -251,7 +251,31 @@ class Scheduler:
         self.close_sprints()  # an approval or a cancel may have finished the sprint
         return state
 
+    def _decide_cards(self, msg: FounderMessage, answer: FounderAnswer) -> None:
+        """Apply the side decisions of a batch answer, each on its own. Unknown ids, unknown
+        options and cards already decided are ignored; an undecided card simply stays in the
+        backlog, so nothing a story found is ever lost."""
+        from loompa.agents.product_owner import ProductOwnerAgent
+
+        po = ProductOwnerAgent(self.ctx)
+        for decision in msg.decisions:
+            choice = answer.decisions.get(decision.id)
+            if not choice or decision.chosen or choice not in {o.key for o in decision.options}:
+                continue
+            po.resolve_finding(decision.id, choice)
+            decision.chosen = choice
+
     async def _apply_answer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:
+        msg = self.ctx.store.get_message(message_id)
+        if msg is None:
+            raise KeyError(message_id)
+        if answer.decisions:
+            self._decide_cards(msg, answer)
+            self.ctx.store.put_message(msg)
+            if not answer.option_key and not answer.text:
+                # only the side decisions were answered: the message itself still waits
+                self.ctx.emit("inbox.decided", story_id=msg.story_id, message_id=message_id)
+                return load_state(self.ctx, msg.story_id) if msg.story_id else None
         msg = self.ctx.store.answer_message(message_id, answer)
         self.ctx.emit(
             "inbox.answered", story_id=msg.story_id, message_id=message_id, option=answer.option_key

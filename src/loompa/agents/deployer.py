@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.comms import compose_delivery_message, sanitize_for_founder
-from loompa.engine.state import StoryState
+from loompa.engine.state import Stage, StoryState
+from loompa.sprints import SprintBoard
 from loompa.worktrees import Worktree
 
 SUMMARY_SYSTEM = """<!-- role:deployer -->
@@ -42,6 +43,7 @@ class DeployerAgent(LoompaAgent):
             summary=state.delivery_summary,
             pr_url=state.pr_url,
             cost_usd=float(story.get("cost_usd") or 0.0),
+            cards=self._suggested_cards(state),
         )
         self.ctx.inbox(msg)
         state.blocked_message_id = msg.id
@@ -54,6 +56,33 @@ class DeployerAgent(LoompaAgent):
             commits=len(state.commits),
         )
         return AgentResult(ok=True, summary=state.delivery_summary, data={"message_id": msg.id})
+
+    def _suggested_cards(self, state: StoryState) -> list[dict]:
+        """Backlog cards this story raised that the founder has not decided on yet."""
+        decided = {
+            d.id
+            for m in self.ctx.store.list_messages(self.ctx.slug)
+            if m.story_id == state.story_id
+            for d in m.decisions
+            if d.chosen
+        }
+        board = SprintBoard(self.ctx.store, self.ctx.slug)
+        cards = []
+        for sid in state.finding_cards:
+            row = self.ctx.store.get_story(sid)
+            if not row or row["stage"] != Stage.BACKLOG or sid in decided:
+                continue
+            if board.sprint_of(sid) is not None:  # already planned into a sprint
+                continue
+            cards.append(
+                {
+                    "id": sid,
+                    "title": row["title"],
+                    "detail": (row["description"] or "").split("\n\n")[0],
+                    "priority": row["priority"],
+                }
+            )
+        return cards
 
     def merge(self, state: StoryState, wt: Worktree) -> str:
         sha = self.git.merge_into_base(wt, message=f"feat({state.story_id.lower()}): {state.title}")

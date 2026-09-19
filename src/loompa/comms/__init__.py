@@ -1,4 +1,6 @@
 from loompa.comms.executive import (
+    CARD_OPTIONS,
+    Decision,
     ExecutiveViolation,
     FounderAnswer,
     FounderMessage,
@@ -13,6 +15,8 @@ from loompa.comms.executive import (
 )
 
 __all__ = [
+    "CARD_OPTIONS",
+    "Decision",
     "ExecutiveViolation",
     "FounderAnswer",
     "FounderMessage",

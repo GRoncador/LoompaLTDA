@@ -289,6 +289,13 @@ def inbox_list(
             body += "\n\n" + "\n".join(
                 f"  [{o.key}] {o.label}{' ★' if o.recommended else ''}" for o in m.options
             )
+        for d in m.decisions:
+            body += f"\n\n[bold]{d.id}[/bold] {d.title}" + (f"\n{d.context}" if d.context else "")
+            body += "\n" + "\n".join(
+                f"  {d.id}={o.key}  {o.label}{' ★' if o.recommended else ''}" for o in d.options
+            )
+            if d.chosen:
+                body += f"\n  [green]decidido:[/green] {d.chosen}"
         if m.answer:
             body += (
                 f"\n\n[green]Respondido:[/green] {m.answer.option_key or ''} {m.answer.text or ''}"
@@ -311,13 +318,28 @@ def inbox_reply(
         None, "--option", "-o", help="Chave da opção (ex.: approve, retry, skip)."
     ),
     text: str | None = typer.Option(None, "--text", "-t", help="Resposta livre / orientação."),
+    decision: list[str] = typer.Option(
+        None,
+        "--decision",
+        "-d",
+        help="Decisão sobre um card sugerido, no formato S-007=sprint|backlog|drop (repetível).",
+    ),
     factory: str | None = typer.Option(None, "--factory", "-f"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Responde uma mensagem; a história correspondente é destravada automaticamente."""
+    decisions: dict[str, str] = {}
+    for item in decision or []:
+        card, sep, choice = item.partition("=")
+        if not sep or not card.strip() or not choice.strip():
+            console.print(f"[red]Decisão inválida: {item!r}. Use S-007=sprint|backlog|drop.[/red]")
+            raise typer.Exit(code=1)
+        decisions[card.strip()] = choice.strip()
     f = resolve_factory(factory)
     ctx = build_context(f, dry_run=dry_run)
-    state = Scheduler(ctx).answer(message_id, FounderAnswer(option_key=option, text=text))
+    state = Scheduler(ctx).answer(
+        message_id, FounderAnswer(option_key=option, text=text, decisions=decisions)
+    )
     if state is None:
         console.print("[green]✔[/green] resposta registrada")
     else:
@@ -357,13 +379,23 @@ def inbox_batch(
         choice = typer.prompt("Opção (ou 'pular')", default=default)
         if choice == "pular":
             continue
+        decisions: dict[str, str] = {}
+        for d in m.decisions:
+            console.print(f"  [bold]{d.id}[/bold] {d.title}")
+            for o in d.options:
+                console.print(f"    [{o.key}] {o.label}{' ★' if o.recommended else ''}")
+            d_default = next((o.key for o in d.options if o.recommended), "backlog")
+            decisions[d.id] = typer.prompt(f"  {d.id}", default=d_default)
         text = (
             typer.prompt("Orientação adicional", default="", show_default=False)
             if m.allow_free_text
             else None
         )
         state = sched.answer(
-            m.id, FounderAnswer(option_key=choice if choice else None, text=text or None)
+            m.id,
+            FounderAnswer(
+                option_key=choice if choice else None, text=text or None, decisions=decisions
+            ),
         )
         console.print(f"  [green]✔[/green] {state.stage if state else 'ok'}")
     ctx.close()

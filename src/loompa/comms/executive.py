@@ -43,9 +43,21 @@ class Option(BaseModel):
     recommended: bool = False
 
 
+class Decision(BaseModel):
+    """One independent question inside a message (e.g. what to do with a suggested card).
+    The founder answers each on its own; the message's own `options` stay the main decision."""
+
+    id: str  # the backlog card it is about
+    title: str
+    context: str = ""
+    options: list[Option] = Field(default_factory=list)
+    chosen: str | None = None  # option key, once decided
+
+
 class FounderAnswer(BaseModel):
     option_key: str | None = None
     text: str | None = None
+    decisions: dict[str, str] = Field(default_factory=dict)  # decision id -> option key
     answered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -60,6 +72,7 @@ class FounderMessage(BaseModel):
     context: str  # simple context
     impact: str = ""  # business impact
     options: list[Option] = Field(default_factory=list)
+    decisions: list[Decision] = Field(default_factory=list)  # independent side decisions
     allow_free_text: bool = True
     technical_ref: str | None = None  # pointer to the filtered technical log, never shown inline
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -73,7 +86,14 @@ class FounderMessage(BaseModel):
 
     def executive_audit(self) -> list[ExecutiveViolation]:
         text = "\n".join(
-            [self.title, self.context, self.impact, *(o.description for o in self.options)]
+            [
+                self.title,
+                self.context,
+                self.impact,
+                *(o.description for o in self.options),
+                *(f"{d.title}\n{d.context}" for d in self.decisions),
+                *(o.description for d in self.decisions for o in d.options),
+            ]
         )
         return audit_executive_text(text)
 
@@ -214,6 +234,24 @@ def compose_decision_message(
     )
 
 
+CARD_OPTIONS = ("sprint", "backlog", "drop")
+
+
+def card_decision(card: dict) -> Decision:
+    """The founder's choice about one suggested card (a finding raised while delivering)."""
+    urgent = int(card.get("priority") or 500) <= 250  # bugs come in at 250
+    return Decision(
+        id=str(card["id"]),
+        title=sanitize_for_founder(f"Achado: {card.get('title', '')}", max_chars=160),
+        context=sanitize_for_founder(str(card.get("detail") or ""), max_chars=300),
+        options=[
+            Option(key="sprint", label="Incluir no próximo sprint", recommended=urgent),
+            Option(key="backlog", label="Manter no backlog", recommended=not urgent),
+            Option(key="drop", label="Descartar"),
+        ],
+    )
+
+
 def compose_delivery_message(
     *,
     factory: str,
@@ -222,7 +260,9 @@ def compose_delivery_message(
     summary: str,
     pr_url: str | None = None,
     cost_usd: float = 0.0,
+    cards: list[dict] | None = None,
 ) -> FounderMessage:
+    """The delivery plus, as independent decisions, every card the work suggested."""
     where = (
         f"Pull request: {pr_url}"
         if pr_url
@@ -239,4 +279,5 @@ def compose_delivery_message(
             Option(key="approve", label="Aprovar e liberar", recommended=True),
             Option(key="changes", label="Pedir ajustes"),
         ],
+        decisions=[card_decision(c) for c in cards or []],
     )

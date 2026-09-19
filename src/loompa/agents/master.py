@@ -385,6 +385,12 @@ class MasterAgent(LoompaAgent):
                 )
                 + "."
             )
+        findings = [r for r in stories if r["origin"] == "kaizen" and r["stage"] == Stage.BACKLOG]
+        if findings:
+            lines.append(
+                f"Achados aguardando um sprint no backlog: {len(findings)}. "
+                "Decida na próxima entrega ou ao montar o próximo sprint."
+            )
         for tip in self.ctx.tracker.suggestions()[:2]:
             lines.append(f"Dica de custo: {sanitize_for_founder(tip, max_chars=200)}")
         msg = FounderMessage(

@@ -154,6 +154,9 @@ class EngineContext:
             msg.context = sanitize_for_founder(msg.context)
             msg.impact = sanitize_for_founder(msg.impact)
             msg.title = sanitize_for_founder(msg.title, max_chars=160)
+            for d in msg.decisions:
+                d.title = sanitize_for_founder(d.title, max_chars=160)
+                d.context = sanitize_for_founder(d.context)
         msg.factory = self.slug
         self.store.put_message(msg)
         self.emit(

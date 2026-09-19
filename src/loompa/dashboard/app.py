@@ -68,6 +68,7 @@ DEFAULT_AGENTS = [
 class ReplyBody(BaseModel):
     option_key: str | None = None
     text: str | None = None
+    decisions: dict[str, str] = {}
 
 
 class ProbeBody(BaseModel):
@@ -395,7 +396,8 @@ def create_app(
         ctx = hub.get(slug).ctx
         try:
             state = await Scheduler(ctx).aanswer(
-                message_id, FounderAnswer(option_key=body.option_key, text=body.text)
+                message_id,
+                FounderAnswer(option_key=body.option_key, text=body.text, decisions=body.decisions),
             )
         except KeyError:
             raise HTTPException(404, message_id) from None
