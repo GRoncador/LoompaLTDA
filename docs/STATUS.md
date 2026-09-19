@@ -28,6 +28,7 @@ Status as of 2026-09-19 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 1 (pipeline como dado e revisões) | ✅ route/kind/complexity/handoff, phase registry, spec_review (PO, No Invention), graded QA gate, DoD, complexity→tier, epic split | `engine/phases.py`, `engine/graph.py`, `agents/product_owner.py`, `agents/inspector.py`, `agents/worker.py`, `llm/router.py` |
 | Plano set/2026 · Fase 2 (spike OpenCode) | ✅ `worker.backend` (aci\|opencode), `OpenCodeWorker` roda `opencode run` no worktree com agente `.opencode/agents/loompa-worker.md` restrito a `allowed_paths`, Ops trata falhas do subprocesso como qualquer crash, custo aproximado (tier `opencode`), `loompa worker backend` + settings API; comparação ACI×OpenCode é o Founder rodando a mesma story com cada backend e olhando kanban/finance (sem harness de report novo). ADR-0007 | `config/schema.py::WorkerConfig`, `agents/opencode_worker.py`, `engine/graph.py::node_dev`, `cli/worker.py`, `docs/adr/0007-*` |
 | Plano set/2026 · Fase 4 (ferramentas para todos os papéis, MCP, Analyst) | ✅ perfis de permissão por papel (`Toolbox`), loop de ferramentas genérico em `LoompaAgent`, arquivos protegidos, cliente MCP (`loompa/mcp/`, SDK oficial) com Tavily, `AnalystAgent` e rota `research` (fontes conferidas em código, limitação declarada em código, revisão do PO, entrega ao Founder). ADR-0009 | `agents/toolbox.py`, `agents/base.py`, `mcp/client.py`, `agents/analyst.py`, `engine/graph.py`, `engine/phases.py`, `config/schema.py`, `docs/adr/0009-*` |
+| Plano set/2026 · Fase 5 (conversas) | ✅ sessões de chat persistidas com rascunho de backlog e de sprint (só a Master/Analyst propõem operações, o código valida), Sprint Meeting (Master), Brainstorm (Analyst → Product Owner admite), `loompa meeting` como sessão de um turno, `loompa chat`, API e modal no dashboard. ADR-0010 | `conversations.py`, `agents/conversation.py`, `agents/master.py`, `agents/analyst.py`, `agents/product_owner.py`, `cli/chat.py`, `dashboard/app.py`, `ChatModal.tsx`, `docs/adr/0010-*` |
 
 ## Deliberate divergences from the brief
 
@@ -142,8 +143,25 @@ Suggested next (not implemented):
   query`, `auth_name: tavilyApiKey`); the transports themselves are covered by tests against a
   local server subprocess. The dashboard research tab was type-checked and built, not viewed in a
   browser.
-- Next: Fase 5 (conversations: chat session with backlog/sprint drafts, Sprint Meeting and
-  Brainstorming in the dashboard and CLI).
+- **Fase 5** done (2026-09-19, ADR-0010): a conversation is a row in a new `conversations` table
+  (turns, a `Draft` of cards + sprint goal, limits the agent declared); until the founder commits, the
+  stories and sprints tables are untouched. The model answers `{reply, ops, questions}` and
+  `apply_ops` validates every edit (unknown refs skipped, repeated titles refine the card, titles that
+  match an open card become references to it, existing cards can only change priority and sprint
+  membership, at most 40 cards); the founder's checkboxes send the same ops. **Sprint Meeting**:
+  `MasterAgent.converse`; commit sends the cards to the backlog through `ProductOwnerAgent.add_item`
+  and, with "Começar Sprint", starts the sprint for the marked ones. **Brainstorm**:
+  `AnalystAgent.converse` with repository + web tools, unverified URLs stripped from replies, a missing
+  web search declared in `conv.limits`; `ProductOwnerAgent.admit_ideas` decides which ideas enter the
+  backlog (held ones stay in the draft with the reason). `loompa meeting` is now a session of one turn
+  (same output, the session stays in the history). `loompa chat meeting|brainstorm|resume|list` with
+  slash commands, `GET/POST /conversations…`, and a two-pane `ChatModal` (☀️ Reunião, 💡 Brainstorm, 💬
+  to resume). Seen in headless Chrome against the dry-run provider (brainstorm → backlog, meeting →
+  uncheck a card → goal → Começar Sprint). **Not verified against a real model:** the prompts and
+  the JSON contract only ran with scripted/dry-run providers; `test_live_sprint_meeting_conversation`
+  and `test_live_brainstorm_conversation` check them with Gemini (need a key on the founder's machine).
+- Next: Fase 6 (technical backlog: CodeRabbit webhook, cron/launchd recipe, dashboard priority drag,
+  story diff, cost charts, token suggestions 1-3, PyPI).
 
 ## Known gaps / next steps
 

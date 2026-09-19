@@ -21,7 +21,8 @@ Factory A         Factory B          each: .loompa/{config.yaml, constitution.md
 uv tool install loompa-core            # or: pip install loompa-core
 cd my-project
 loompa init                            # greenfield vs brownfield detection + calibration
-loompa meeting "Recuperação de senha; refatorar webhook de cobrança"
+loompa meeting "Recuperação de senha; refatorar webhook de cobrança"   # goals → backlog
+loompa sprint start                    # the Product Owner admits the cards; the sprint begins
 loompa run                             # batch execution in isolated worktrees (Ctrl-C safe, resumable)
 loompa inbox list                      # evening review: decisions & deliveries in plain language
 loompa inbox reply <id> --option approve
@@ -31,7 +32,7 @@ loompa dashboard                       # http://127.0.0.1:8765 — pixel-art off
 Everything also works with **zero API keys** via `--dry-run` (scripted models, real git/tests):
 
 ```bash
-loompa meeting "Tela de login; Exportar CSV" --dry-run && loompa run --dry-run
+loompa meeting "Tela de login; Exportar CSV" --dry-run && loompa sprint start --dry-run && loompa run --dry-run
 ```
 
 ## Models & cost
@@ -80,7 +81,9 @@ BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → T
 | Command | Purpose |
 | --- | --- |
 | `loompa init [path] [--stack python-fastapi\|python-cli\|node-react\|custom]` | Onboard a repo (Brownfield scanner / Greenfield initializer) |
-| `loompa meeting "goals" [--run] [--file transcript.txt]` | Morning meeting → stories |
+| `loompa meeting "goals" [--run] [--file transcript.txt]` | Morning meeting (one chat turn) → backlog cards |
+| `loompa chat meeting\|brainstorm [text]`, `chat resume ID`, `chat list` | Conversations: Sprint Meeting with the Master, brainstorm with the Analyst; a draft of the backlog and sprint until `/sprint` or `/backlog` |
+| `loompa sprint start\|add\|status` | Sprints: the Product Owner admits the cards, the factory runs them |
 | `loompa run [--watch] [--parallel N] [--dry-run]` | Continuous batch execution |
 | `loompa inbox list\|reply\|batch` | Founder inbox (batch decisions) |
 | `loompa status`, `loompa report`, `loompa kaizen` | Kanban, end-of-day executive report, learnings |
