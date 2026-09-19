@@ -36,7 +36,9 @@ def is_protected(rel: str | Path) -> bool:
     name = parts[-1]
     if ".git" in parts:
         return True
-    if name == ".env" or (name.startswith(".env.") and name not in _SAFE_ENV_FILES):
+    if name == ".env" or name.endswith(".env"):  # .env, prod.env, secrets.env
+        return True
+    if name.startswith(".env.") and name not in _SAFE_ENV_FILES:
         return True
     if name in _KEY_FILE_NAMES or name.endswith(_KEY_FILE_SUFFIXES):
         return True
@@ -262,7 +264,7 @@ class ACI:
         return "\n".join(f"{e.name}/" if e.is_dir() else e.name for e in entries[:300]) or "(vazio)"
 
     def tool_search(self, pattern: str, glob: str | None = None) -> str:
-        hits = self._search.grep(pattern, glob=glob)
+        hits = [h for h in self._search.grep(pattern, glob=glob) if not is_protected(h.path)]
         if not hits:
             return "nenhuma ocorrência"
         return "\n".join(f"{h.path}:{h.line}: {h.text}" for h in hits[:60])

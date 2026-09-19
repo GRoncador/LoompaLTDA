@@ -106,6 +106,7 @@ def test_is_protected():
         ".git/config",
         "certs/server.pem",
         "secrets.env",
+        "config/prod.env",
         "id_rsa",
     ):
         assert is_protected(rel), rel
@@ -259,4 +260,15 @@ async def test_ask_json_with_tools_retries_invalid_json_once(factory: Factory):
     ctx = make_ctx(factory, script)
     agent = Prober(ctx)
     assert await agent.ask_json_with_tools("s", "u", agent.explore_tools()) == {"ok": 1}
+    await ctx.aclose()
+
+
+async def test_search_never_shows_lines_from_protected_files(factory: Factory):
+    (factory.root / "prod.env").write_text("PAYMENT_TOKEN=do-not-leak-from-search\n")
+    (factory.root / "app" / "settings.py").write_text("PAYMENT_TOKEN_NAME = 'PAYMENT_TOKEN'\n")
+    ctx = make_ctx(factory)
+    box = Toolbox.for_role(ctx, "analyst")
+    res = await box.call("search", {"pattern": "PAYMENT_TOKEN"})
+    assert res.ok and "settings.py" in res.output
+    assert "do-not-leak-from-search" not in res.output and "prod.env" not in res.output
     await ctx.aclose()
