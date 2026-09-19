@@ -174,3 +174,22 @@ async def test_opencode_worker_missing_binary_raises(
     with pytest.raises(RuntimeError, match="não foi encontrado no PATH"):
         await OpenCodeWorker(ctx).run(state, wt)
     await ctx.aclose()
+
+
+async def test_opencode_agent_cannot_change_shared_history(factory: Factory):
+    """The generated agent file denies the git commands only the Deployer may run."""
+    import yaml
+
+    ctx = make_ctx(factory)
+    state = seed_story_with_tasks(ctx)
+    wt = ctx.worktrees.create(state.story_id, title=state.title)
+    OpenCodeWorker(ctx)._write_agent_config(wt, state)
+    text = (wt.path / ".opencode" / "agents" / "loompa-worker.md").read_text()
+    front = yaml.safe_load(text.split("---\n")[1])
+    bash = front["permission"]["bash"]
+    keys = list(bash)
+    assert keys[0] == "*" and bash["*"] == "allow"  # wildcard first: the denials that follow win
+    for denied in ("git push*", "git * merge*", "git rebase*", "git checkout*", "gh *"):
+        assert bash[denied] == "deny" and keys.index(denied) > 0
+    assert front["permission"]["edit"]["*"] == "deny"
+    await ctx.aclose()

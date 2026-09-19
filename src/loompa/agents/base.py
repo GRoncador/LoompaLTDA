@@ -10,6 +10,7 @@ from loompa.engine.context import EngineContext
 from loompa.engine.state import StoryState
 from loompa.llm import LLMError, Message
 from loompa.llm.providers import extract_json
+from loompa.worktrees import WorktreeManager
 
 
 @dataclass
@@ -32,6 +33,11 @@ class LoompaAgent:
     @property
     def language(self) -> str:
         return self.ctx.config.factory.language
+
+    @property
+    def git(self) -> WorktreeManager:
+        """Git access as this agent's role: merge, push and PRs work only for the Deployer."""
+        return self.ctx.worktrees.as_role(self.role)
 
     def constitution(self, max_chars: int = 6000) -> str:
         text = self.ctx.factory.constitution_text()

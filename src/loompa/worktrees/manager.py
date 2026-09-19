@@ -6,7 +6,9 @@ Tier 3 (deterministic, $0). Output is trimmed so nothing noisy leaks into agent 
 
 from __future__ import annotations
 
+import copy
 import re
+import shutil
 import subprocess
 import unicodedata
 from dataclasses import dataclass
@@ -15,6 +17,37 @@ from pathlib import Path
 
 class GitError(RuntimeError):
     pass
+
+
+class GitAuthorityError(GitError):
+    """A role other than the Deployer tried an operation that changes shared history."""
+
+
+# Only the Deployer may change what the base branch holds or talk to the remote (ADR-0006 §5).
+DEPLOYER_ROLE = "deployer"
+DEPLOYER_ONLY = frozenset(
+    {"merge", "rebase", "push", "pull", "checkout", "switch", "reset", "cherry-pick", "tag"}
+)
+_BRANCH_DELETE_FLAGS = frozenset({"-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force"})
+_GLOBAL_OPTS_WITH_VALUE = frozenset({"-c", "-C", "--git-dir", "--work-tree", "--namespace"})
+
+
+def git_subcommand(args: tuple[str, ...]) -> str:
+    """The git subcommand in `args`, skipping global options such as `-c user.name=x`."""
+    it = iter(args)
+    for arg in it:
+        if arg in _GLOBAL_OPTS_WITH_VALUE:
+            next(it, None)
+        elif not arg.startswith("-"):
+            return arg
+    return ""
+
+
+def is_deployer_only(args: tuple[str, ...]) -> bool:
+    sub = git_subcommand(args)
+    if sub in DEPLOYER_ONLY:
+        return True
+    return sub == "branch" and any(a in _BRANCH_DELETE_FLAGS for a in args)
 
 
 @dataclass
@@ -33,16 +66,35 @@ class CommitResult:
 
 class WorktreeManager:
     def __init__(
-        self, repo_root: Path, worktrees_dir: Path | None = None, *, branch_prefix: str = "loompa/"
+        self,
+        repo_root: Path,
+        worktrees_dir: Path | None = None,
+        *,
+        branch_prefix: str = "loompa/",
+        actor: str | None = None,
     ):
         self.repo_root = Path(repo_root).resolve()
         self.dir = (worktrees_dir or self.repo_root / ".loompa" / "worktrees").resolve()
         self.branch_prefix = branch_prefix
+        self.actor = actor
+
+    def as_role(self, role: str) -> WorktreeManager:
+        """A view of this manager acting as `role`. Only `deployer` may merge, push or open PRs."""
+        view = copy.copy(self)
+        view.actor = role
+        return view
+
+    def _require_deployer(self, what: str) -> None:
+        if self.actor != DEPLOYER_ROLE:
+            who = self.actor or "engine"
+            raise GitAuthorityError(f"{what}: só o Deployer pode fazer isso (chamado por {who})")
 
     # ------------------------------------------------------------------ plumbing
     def git(
         self, *args: str, cwd: Path | None = None, check: bool = True, timeout: int = 120
     ) -> str:
+        if is_deployer_only(args):
+            self._require_deployer(f"git {git_subcommand(args)}")
         try:
             proc = subprocess.run(
                 ["git", *args],
@@ -127,6 +179,8 @@ class WorktreeManager:
         return out
 
     def remove(self, story_id: str, *, delete_branch: bool = False) -> bool:
+        if delete_branch:  # check first: never remove the worktree and then refuse the branch
+            self._require_deployer("git branch -D")
         path = self.path_for(story_id)
         wt = self.get(story_id)
         if wt is None:
@@ -202,6 +256,7 @@ class WorktreeManager:
 
     def rebase_on_base(self, wt: Worktree) -> bool:
         """Try to rebase the story branch on its base; abort cleanly on conflict."""
+        self._require_deployer("git rebase")
         out = subprocess.run(
             ["git", "rebase", wt.base], cwd=wt.path, capture_output=True, text=True
         )
@@ -212,6 +267,7 @@ class WorktreeManager:
 
     def merge_into_base(self, wt: Worktree, *, message: str | None = None) -> str:
         """Fast-forward or merge the story branch into base in the main checkout."""
+        self._require_deployer("git merge")
         current = self.git("rev-parse", "--abbrev-ref", "HEAD")
         if current != wt.base:
             self.git("checkout", "-q", wt.base)
@@ -229,6 +285,27 @@ class WorktreeManager:
             wt.branch,
         )
         return self.git("rev-parse", "--short", "HEAD")
+
+    def open_pull_request(
+        self, wt: Worktree, *, title: str, body: str, timeout: int = 120
+    ) -> str | None:
+        """Push the story branch and open a PR with `gh`; None when there is no remote or no `gh`."""
+        self._require_deployer("abrir pull request")
+        if not shutil.which("gh") or not self.git("remote", "get-url", "origin", check=False):
+            return None
+        try:
+            self.git("push", "-u", "origin", wt.branch, cwd=wt.path, timeout=timeout)
+            out = subprocess.run(
+                ["gh", "pr", "create", "--base", wt.base, "--head", wt.branch]
+                + ["--title", title, "--body", body],
+                cwd=wt.path,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except (GitError, subprocess.SubprocessError):
+            return None
+        return out.stdout.strip().splitlines()[-1] if out.returncode == 0 else None
 
     def has_conflicts_with_base(self, wt: Worktree) -> bool:
         merge_base = self.git("merge-base", wt.base, "HEAD", cwd=wt.path)

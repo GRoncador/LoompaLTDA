@@ -20,7 +20,7 @@ from loompa.engine.state import StoryState
 from loompa.finance import UsageRecord
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.speckit.artifacts import mark_task_done
-from loompa.worktrees import Worktree
+from loompa.worktrees import DEPLOYER_ONLY, Worktree
 
 AGENT_SYSTEM = """You are the Worker Loompa, a senior full-stack engineer executing ONE task from a
 checklist inside an isolated git worktree that IS your entire workspace. Work surgically:
@@ -127,13 +127,22 @@ class OpenCodeWorker(LoompaAgent):
         agents_dir = wt.path / ".opencode" / "agents"
         agents_dir.mkdir(parents=True, exist_ok=True)
         edit_globs = "\n".join(f'    "{p}": allow' for p in allowed) + '\n    "*": deny'
+        # Same rule as the Loompa-side guard: only the Deployer changes shared history. OpenCode
+        # applies the last matching pattern, so the denials come after the wildcard.
+        bash_rules = '    "*": allow\n' + "\n".join(
+            f'    "{pattern}": deny'
+            for sub in sorted(DEPLOYER_ONLY)
+            for pattern in (f"git {sub}*", f"git * {sub}*")
+        )
+        bash_rules += '\n    "git branch -D*": deny\n    "git branch -d*": deny\n    "gh *": deny'
         body = (
             "---\n"
             "description: Loompa Worker — one task at a time, minimal diff, tests green.\n"
             "mode: subagent\n"
             "permission:\n"
             "  read: allow\n"
-            "  bash: allow\n"
+            "  bash:\n"
+            f"{bash_rules}\n"
             "  edit:\n"
             f"{edit_globs}\n"
             "---\n\n"
@@ -179,7 +188,9 @@ class OpenCodeWorker(LoompaAgent):
         if res.timed_out:
             raise TimeoutError(f"opencode excedeu {cfg.opencode_timeout_s}s na tarefa T{number}")
         if not res.ok:
-            raise RuntimeError(f"opencode terminou com erro na tarefa T{number}: {res.output[-800:]}")
+            raise RuntimeError(
+                f"opencode terminou com erro na tarefa T{number}: {res.output[-800:]}"
+            )
         summary, blocked = self._parse_output(res.stdout)
         if blocked:
             return AgentResult(ok=False, blocked_reason=blocked)
