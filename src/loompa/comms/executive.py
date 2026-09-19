@@ -310,6 +310,7 @@ def compose_research_message(
         factory=factory,
         story_id=story_id,
         kind=MessageKind.DELIVERY,
+        sender="Analyst Loompa",
         title=f"Pesquisa pronta: “{story_title}”",
         context="\n\n".join(p for p in parts if p),
         impact=(
