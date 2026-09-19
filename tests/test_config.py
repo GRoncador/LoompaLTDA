@@ -10,7 +10,7 @@ def test_defaults_load_and_validate():
     assert cfg.budget.monthly_cap_usd == 30.0
     assert cfg.models.tier_for("master") == "tier1"
     assert cfg.models.tier_for("worker") == "tier2"
-    assert cfg.models.candidates_for("worker")[0].model == "gemini-2.5-flash-lite"
+    assert cfg.models.candidates_for("worker")[0].model == "gemini-3.5-flash-lite"
     assert cfg.models.tier_for("analyst") == "tier2" and cfg.models.tier_for("novo") == "tier2"
     assert cfg.providers["deepseek"].kind == "openai_compatible"
     assert cfg.price_for("deepseek-chat").output == 1.10

@@ -109,7 +109,7 @@ def test_presets_and_settings_patch(tmp_path: Path, hub):
     (root / ".loompa").mkdir(parents=True)
     cfg = default_config()
     preset = apply_preset(cfg, "gratuito")
-    assert cfg.models.tiers["tier2"][0].model == "gemini-2.5-flash-lite" and preset.providers == (
+    assert cfg.models.tiers["tier2"][0].model == "gemini-3.5-flash-lite" and preset.providers == (
         "gemini",
     )
     notes = apply_settings(
@@ -165,7 +165,7 @@ async def test_probe_provider_reads_key_from_secrets(tmp_path: Path, hub):
         },
     )
     r = await probe_provider(cfg, "gemini", secrets=secrets)
-    assert r.ok and r.model == "gemini-2.5-flash-lite" and "ok" in r.detail
+    assert r.ok and r.model == "gemini-3.5-flash-lite" and "ok" in r.detail
     assert route.calls[0].request.headers["authorization"] == f"Bearer {FAKE_GEMINI}"
     assert FAKE_GEMINI not in repr(r.as_dict())
     r2 = await probe_provider(cfg, "gemini", secrets=Secrets())

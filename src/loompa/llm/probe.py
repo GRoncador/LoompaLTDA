@@ -5,6 +5,7 @@ returns or logs the key; error text is trimmed and never includes the request.""
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -74,7 +75,10 @@ async def probe_provider(
         if status in (401, 403) or (status == 400 and "api key" in text or "api_key" in text):
             detail = "chave recusada pelo provedor"
         elif status == 404:
-            detail = f"modelo não encontrado neste provedor ({model})"
+            hint = re.search(r"use models/([\w.\-]+)", str(exc))
+            detail = f"modelo não encontrado neste provedor ({model})" + (
+                f"; o provedor sugere {hint.group(1)}" if hint else ""
+            )
         elif status and status >= 500:
             detail = "provedor indisponível no momento"
         elif "rede" in str(exc):

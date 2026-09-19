@@ -6,7 +6,7 @@ The terminal asks for provider, model and API key (hidden input). Nothing is wri
 the key lives in this process's environment only, and the factory under test is a throw-away
 one in pytest's tmp dir. Scripted form for a shell session that already exports the key::
 
-    GEMINI_API_KEY=... uv run pytest --live -m live -q --live-provider gemini --live-model gemini-2.5-flash-lite
+    GEMINI_API_KEY=... uv run pytest --live -m live -q --live-provider gemini --live-model gemini-3.5-flash-lite
 
 GitHub CI never passes ``--live``; everything else in the suite is scripted (MockProvider)."""
 

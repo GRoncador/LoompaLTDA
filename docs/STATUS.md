@@ -73,7 +73,7 @@ Suggested next (not implemented):
   has ⚙ Configurações (providers, keys, tiers, roles, budget, Tavily) via
   `GET/PUT /api/factories/{slug}/settings` and `POST .../settings/providers/{name}/test`, the
   new-factory modal gained the same step, and the agent drawer shows/edits the role's tier.
-  Defaults: `gemini-2.5-flash-lite` heads tier2; Groq provider added; roles are an open set.
+  Defaults: `gemini-3.5-flash-lite` heads tier2; Groq provider added; roles are an open set.
 - **Fase 1** done (2026-09-18): `StoryState` carries `kind`, `complexity`, `route`, `phase` and
   `handoff`; `engine/phases.py` is the phase registry (name, node, owner, reviewer, kanban stage)
   and `build_route()` decides which phases a story visits (SIMPLE stories and ordinary bugfixes

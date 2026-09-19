@@ -3,7 +3,7 @@ from __future__ import annotations
 import getpass
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -12,7 +12,7 @@ from loompa.config import ConfigStore, default_config
 
 # Cheapest sensible model per provider for the live smoke test.
 LIVE_DEFAULT_MODEL = {
-    "gemini": "gemini-2.5-flash-lite",
+    "gemini": "gemini-3.5-flash-lite",
     "deepseek": "deepseek-chat",
     "groq": "llama-3.1-8b-instant",
     "openrouter": "deepseek/deepseek-chat-v3-0324:free",
@@ -47,7 +47,7 @@ class LiveCredentials:
     provider: str
     model: str
     api_key_env: str
-    api_key: str  # lives only in this process; never logged, never written
+    api_key: str = field(repr=False)  # never in reprs, assertion headers, logs or files
 
 
 def _ask_tty(prompt: str, *, hidden: bool = False) -> str:

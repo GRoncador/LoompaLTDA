@@ -37,7 +37,7 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
                 _c("openrouter", "deepseek/deepseek-r1:free"),
             ],
             "tier2": [
-                _c("gemini", "gemini-2.5-flash-lite"),
+                _c("gemini", "gemini-3.5-flash-lite"),
                 _c("groq", "llama-3.1-8b-instant"),
                 _c("openrouter", "deepseek/deepseek-chat-v3-0324:free"),
             ],
@@ -51,7 +51,7 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         description="DeepSeek para raciocínio e execução, Gemini Flash-Lite como reserva. Centavos por história.",
         tiers={
             "tier1": [_c("deepseek", "deepseek-reasoner"), _c("gemini", "gemini-2.5-pro")],
-            "tier2": [_c("deepseek", "deepseek-chat"), _c("gemini", "gemini-2.5-flash-lite")],
+            "tier2": [_c("deepseek", "deepseek-chat"), _c("gemini", "gemini-3.5-flash-lite")],
         },
         providers=("deepseek",),
         optional_providers=("gemini",),
