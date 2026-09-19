@@ -103,5 +103,10 @@ keeps working with no keys. `--run` and the dashboard's `meeting` endpoint are u
   conversations: Gemini 3 requires the thought signature of each function call to come back with it,
   and the provider adapter dropped it (ADR-0002 addendum). The fix is covered by mocked tests only; the
   brainstorm live test has to be run again.
+* A small model may answer well and still not draft: live, it replied that it had prepared the story
+  and sent only the sprint goal. In a chat that self-corrects (the founder says so, and `Turn.ignored`
+  now records every refused edit), but `loompa meeting` has nobody at the keyboard, so it salvages the
+  goals with the deterministic split when the model drafts nothing *and* asks nothing. A meeting that
+  asks a question instead of drafting is doing its job and is never salvaged.
 * Not done: turning a brainstorm's admitted ideas straight into a Sprint Meeting (open one and pick
   the cards), streaming, and pruning old sessions.

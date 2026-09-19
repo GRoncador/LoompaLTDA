@@ -165,7 +165,14 @@ Suggested next (not implemented):
   provider's `extra_content`, replayed to Google endpoints only; a history that another model made gets
   one retry with the documented `skip_thought_signature_validator` bypass). **Re-run the brainstorm live
   test to confirm the fix against the real API** (it was only checked against a mocked Gemini-shaped
-  endpoint); the bypass retry has no live coverage at all.
+  endpoint); the bypass retry has no live coverage at all. **Second live run:** the brainstorm passed,
+  and `test_live_first_real_cycle` then failed for a different reason — the model replied "I prepared
+  the story" and sent only a `goal` op, so the one-turn `loompa meeting` returned zero stories. Two
+  fixes: the turn contract now states that every story described in `reply` needs its own `add` op,
+  and `meeting()` falls back to the deterministic split of the goals when the model drafts nothing and
+  asks nothing (the guarantee the pre-Fase-5 `meeting` had on its error path; a `meeting.recovered`
+  event and a warning in the live test keep the salvage visible). A refused edit is now saved on the
+  turn (`Turn.ignored`), because the first diagnosis was blind: only `changes` was persisted.
 - Next: Fase 6 (technical backlog: CodeRabbit webhook, cron/launchd recipe, dashboard priority drag,
   story diff, cost charts, token suggestions 1-3, PyPI).
 
