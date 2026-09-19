@@ -19,9 +19,11 @@ from pathlib import Path
 import pytest
 
 from conftest import LiveCredentials, git
-from loompa.agents import MasterAgent
+from loompa.agents import Conversations, MasterAgent
+from loompa.comms import audit_executive_text
 from loompa.config import default_config
 from loompa.config.schema import ModelCandidate
+from loompa.conversations import ConversationKind
 from loompa.engine import EngineContext, Scheduler, Stage, load_state
 from loompa.factory import Factory, bootstrap_factory
 from loompa.llm import ProbeResult, probe_provider
@@ -111,5 +113,55 @@ async def test_live_first_real_cycle(
             live_credentials.api_key
             not in (live_factory.root / ".loompa" / "config.yaml").read_text()
         )
+    finally:
+        await ctx.aclose()
+
+
+async def test_live_sprint_meeting_conversation(live_reachable: ProbeResult, live_factory: Factory):
+    """Two chat turns build a draft without touching the backlog; committing fills it."""
+    if not live_reachable.ok:
+        pytest.skip(f"provedor indisponível: {live_reachable.detail}")
+    ctx = EngineContext.build(live_factory)
+    try:
+        chats = Conversations(ctx)
+        conv = chats.open(ConversationKind.MEETING)
+        turn = await chats.say(
+            conv.id,
+            "Quero duas coisas em app/calc.py: a função subtract(a, b) e a função multiply(a, b).",
+        )
+        assert not turn.failed and turn.reply, turn
+        assert audit_executive_text(turn.reply) == []
+        assert chats.board.require(conv.id).draft.items, turn
+        assert ctx.store.list_stories(live_factory.slug) == []  # a draft is not the backlog
+        turn = await chats.say(
+            conv.id, "Marque a primeira para o sprint e defina a meta como 'Calculadora completa'."
+        )
+        assert not turn.failed and turn.reply, turn
+        result = await chats.commit(conv.id)
+        assert result.created, result
+        assert ctx.store.list_stories(live_factory.slug)
+    finally:
+        await ctx.aclose()
+
+
+async def test_live_brainstorm_conversation(live_reachable: ProbeResult, live_factory: Factory):
+    """The Analyst answers without web tools (no Tavily key here) and says so; the Product Owner
+    decides on the ideas it proposes."""
+    if not live_reachable.ok:
+        pytest.skip(f"provedor indisponível: {live_reachable.detail}")
+    ctx = EngineContext.build(live_factory)
+    try:
+        chats = Conversations(ctx)
+        conv = chats.open(ConversationKind.BRAINSTORM)
+        turn = await chats.say(
+            conv.id, "Que operações matemáticas simples valeria acrescentar à calculadora?"
+        )
+        assert not turn.failed and turn.reply, turn
+        assert audit_executive_text(turn.reply) == []
+        conv = chats.board.require(conv.id)
+        assert conv.limits  # the missing web search is declared by code
+        if conv.draft.items:
+            result = await chats.commit(conv.id)
+            assert result.created or result.held, result
     finally:
         await ctx.aclose()

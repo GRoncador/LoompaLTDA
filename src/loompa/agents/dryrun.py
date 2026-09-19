@@ -34,6 +34,11 @@ def _story_title(messages: list[Message]) -> str:
     return "história"
 
 
+def _founder_message(messages: list[Message]) -> str:
+    """The founder's latest chat message, as `run_turn` lays it out in the prompt."""
+    return messages[-1].content.split("## Founder's message\n", 1)[-1].strip()
+
+
 def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, Any]] | None) -> Any:
     role = role_of(messages)
     title = _story_title(messages)
@@ -50,20 +55,24 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                     "reason": "simulação",
                 }
             )
-        if "Metas de hoje" in messages[-1].content:
-            goals = (
-                messages[-1]
-                .content.split("# Metas de hoje (Founder)\n", 1)[-1]
-                .split("\n\n## Backlog", 1)[0]
-            )
-            parts = [p.strip(" -•*") for p in re.split(r"[;\n]+", goals) if p.strip(" -•*")]
+        if "Sprint Meeting" in messages[0].content:
+            said = _founder_message(messages)
+            parts = [p.strip(" -•*") for p in re.split(r"[;\n]+", said) if p.strip(" -•*")]
             return json.dumps(
                 {
-                    "stories": [
-                        {"title": p[:80], "description": p, "epic": "dia", "priority": 3}
+                    "reply": f"Simulação: anotei {len(parts)} história(s) no rascunho do sprint.",
+                    "ops": [
+                        {
+                            "op": "add",
+                            "title": p[:80],
+                            "description": p,
+                            "epic": "dia",
+                            "priority": 3,
+                            "in_sprint": True,
+                        }
                         for p in parts
                     ],
-                    "clarifications": [],
+                    "questions": [],
                 }
             )
         user = messages[-1].content
@@ -144,6 +153,23 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                 )
             ]
         return [ToolCall("c2", "done", {"summary": f"'{title}' registrada (simulação)"})]
+    if role == "analyst" and "Brainstorming session" in messages[0].content:
+        said = _founder_message(messages)
+        return json.dumps(
+            {
+                "reply": "Simulação: registrei uma ideia a partir do que você disse. "
+                "Sem busca na web nem análise real.",
+                "ops": [
+                    {
+                        "op": "add",
+                        "title": f"Ideia: {said[:70]}",
+                        "description": said,
+                        "priority": 3,
+                    }
+                ],
+                "questions": [],
+            }
+        )
     if role == "analyst":
         return json.dumps(
             {
@@ -155,6 +181,11 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                 "follow_ups": [],
                 "needs_decision": False,
             }
+        )
+    if role == "product_owner" and "## Ideas to review" in messages[-1].content:
+        keys = re.findall(r"^- (D\d+) ", messages[-1].content, re.M)
+        return json.dumps(
+            {"verdicts": [{"key": k, "admit": True, "reason": "", "priority": 3} for k in keys]}
         )
     if role == "product_owner":
         return json.dumps({"approved": True, "unsupported": [], "missing": [], "notes": "ok"})

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from loompa.agents.base import LoompaAgent
+from loompa.agents.conversation import Conversations, TurnResult, run_turn
 from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.comms import (
     FounderMessage,
@@ -17,20 +18,36 @@ from loompa.comms import (
     compose_blocked_message,
     sanitize_for_founder,
 )
+from loompa.conversations import (
+    CommitResult,
+    Conversation,
+    ConversationBoard,
+    ConversationError,
+    ConversationKind,
+    from_scale,
+    to_scale,
+)
 from loompa.engine.state import TERMINAL, Complexity, Stage, StoryKind, StoryState
 from loompa.sprints import Sprint, SprintBoard, SprintError, SprintStatus
 
 MEETING_SYSTEM = """<!-- role:master -->
-You are the Master Loompa, COO of an autonomous software factory. The founder just gave you the goals
-for today. Decompose them into independent user stories that can be developed in parallel by separate
-engineers, each small enough to finish in a few hours with tests.
-Rules: as many stories as the goals genuinely need (a goal too big for one story becomes an
-`epic` with several stories), no duplicates of the existing backlog listed below, titles are short
-imperative phrases, descriptions carry every business detail the founder mentioned, `priority` is
-1 (urgent) to 5 (nice to have). Group related stories under an `epic` name.
-Respond with JSON only: {{"stories": [{{"title": str, "description": str, "epic": str, "priority": int}}],
-"clarifications": [str]}}. `clarifications` are questions ONLY if a goal is impossible to start without
-an answer; keep them in plain {language}. Write everything in {language}.
+You are the Master Loompa, COO of an autonomous software factory, running a Sprint Meeting with the
+founder in a chat. Over several messages you turn what the founder says into a draft backlog and a
+draft sprint, and you keep both drafts tidy as the conversation changes them.
+Rules:
+- Decompose goals into independent stories that separate engineers can build in parallel, each
+  small enough to finish in a few hours with tests. As many as the goals genuinely need; a goal too
+  big for one story becomes several stories sharing an `epic` name. Titles are short imperative
+  phrases; descriptions carry every business detail the founder mentioned and nothing they did not
+  say (no invented requirements).
+- Goals the founder wants worked on in this sprint get `in_sprint: true`; ideas for later stay
+  false. When the founder asks for an existing backlog card, reference it by its id with an
+  `update` (`in_sprint: true`) instead of adding it again. Never duplicate a card that is already
+  in the backlog or in progress.
+- Follow the founder's corrections literally (drop, reorder, rename, move in or out of the sprint).
+- Ask a question only when you cannot draft even one story without the answer; otherwise draft and
+  state your assumption in the reply. When the draft looks complete, say the founder can start
+  the sprint or save it to the backlog.
 """
 
 EXEC_SYSTEM = """<!-- role:master -->
@@ -225,49 +242,92 @@ class MasterAgent(LoompaAgent):
         return closed
 
     # ------------------------------------------------------------------ meeting
-    async def meeting(self, goals: str) -> dict[str, Any]:
-        self.set_state("WORKING", detail="reunião matinal")
-        existing = [
-            s["title"]
-            for s in self.ctx.store.list_stories(self.ctx.slug)
-            if s["stage"] not in (Stage.DONE, Stage.CANCELLED)
-        ]
-        precedents = self.precedents(goals, kinds=("constitution", "adr", "learning", "doc"))
-        user = (
-            f"# Metas de hoje (Founder)\n{goals}\n\n## Backlog existente\n"
-            + ("\n".join(f"- {t}" for t in existing) or "(vazio)")
-            + f"\n\n## Constitution (excerpt)\n{self.constitution(2500)}\n\n{precedents}"
-        )
+    async def converse(self, conv: Conversation, text: str) -> TurnResult:
+        """One turn of a Sprint Meeting: the founder speaks, the draft changes, the Master answers."""
+        self.set_state("WORKING", detail="reunião com o Founder")
         try:
-            data = await self.ask_json(MEETING_SYSTEM.format(language=self.language), user)
-            stories = [s for s in data.get("stories", []) if isinstance(s, dict) and s.get("title")]
-            clarifications = self._list(data, "clarifications")
-        except Exception:  # noqa: BLE001 - fall back to a deterministic split so the day still starts
-            stories = self._split_goals(goals)
-            clarifications = []
-        created = []
-        po = ProductOwnerAgent(self.ctx)
-        for s in stories:
-            priority = int(s.get("priority") or 3)
-            added = po.add_item(
-                str(s["title"]),
-                str(s.get("description") or ""),
-                epic=str(s.get("epic") or ""),
-                priority=max(1, min(5, priority)) * 100,
-                origin="founder",
+            context = f"## Constitution (excerpt)\n{self.constitution(2500)}\n\n" + self.precedents(
+                text, kinds=("constitution", "adr", "learning", "doc")
             )
-            if not added.created:
-                continue
-            row = self.ctx.store.get_story(added.story_id) or {}
-            created.append(
-                {
-                    "id": added.story_id,
-                    "title": row.get("title", ""),
-                    "epic": row.get("epic", ""),
-                    "priority": priority,
-                }
+            return await run_turn(
+                self,
+                ConversationBoard(self.ctx.store, self.ctx.slug),
+                conv,
+                text,
+                system=MEETING_SYSTEM,
+                context=context,
+                toolbox=self.explore_tools(),
+                fallback_ops=lambda goals: [{"op": "add", **g} for g in self._split_goals(goals)],
             )
-        for q in clarifications[:3]:
+        finally:
+            self.set_state("IDLE")
+
+    def commit_meeting(
+        self, conv: Conversation, *, start_sprint: bool, goal: str = ""
+    ) -> CommitResult:
+        """End a Sprint Meeting: every card in the draft goes to the backlog through the Product
+        Owner and, with `start_sprint`, the cards marked for the sprint start it. Nothing is
+        written until every pick has been checked, so a stale draft fails before it changes anything."""
+        store, po = self.ctx.store, ProductOwnerAgent(self.ctx)
+        draft = conv.draft
+        if not draft.items:
+            raise ConversationError("o rascunho está vazio")
+        if start_sprint and not draft.in_sprint():
+            raise ConversationError("marque ao menos uma história para o sprint")
+        if start_sprint:
+            for item in draft.in_sprint():
+                row = store.get_story(item.story_id) if item.story_id else None
+                if item.story_id and (row is None or row["stage"] != Stage.BACKLOG):
+                    raise ConversationError(f"{item.story_id} não está mais esperando no backlog")
+        result = CommitResult()
+        picks: list[str] = []
+        for item in draft.items:
+            if item.story_id:  # already a card: at most its priority changes
+                row = store.get_story(item.story_id)
+                if row is not None and to_scale(row["priority"]) != item.priority:
+                    po.set_priority(item.story_id, from_scale(item.priority))
+                result.existing.append(item.story_id)
+            else:
+                added = po.add_item(
+                    item.title,
+                    item.description,
+                    epic=item.epic,
+                    priority=from_scale(item.priority),
+                    origin=item.origin,
+                )
+                item.story_id = added.story_id
+                (result.created if added.created else result.existing).append(added.story_id)
+            if item.in_sprint:
+                row = store.get_story(item.story_id) or {}
+                if row.get("stage") == Stage.BACKLOG:
+                    picks.append(item.story_id)
+                else:  # a repeated title matched work that already started
+                    result.skipped.append(item.story_id)
+        if start_sprint:
+            if not picks:  # `start_sprint([])` would mean "everything in the backlog"
+                raise ConversationError(
+                    "nenhuma das histórias do sprint está esperando no backlog; "
+                    "os cards já foram salvos"
+                )
+            sprint = self.start_sprint(picks, goal=goal or draft.goal)
+            result.sprint_id = sprint.id
+        return result
+
+    async def meeting(self, goals: str) -> dict[str, Any]:
+        """The morning meeting: a Sprint Meeting of a single turn, saved to the backlog. The
+        session stays in the history like any other. Questions the Master could not do without
+        go to the inbox, because nobody is at the keyboard to answer them."""
+        convs = Conversations(self.ctx)
+        conv = convs.open(ConversationKind.MEETING)
+        turn = await self.converse(conv, goals)
+        if convs.board.require(conv.id).draft.items:
+            result = await convs.commit(conv.id)
+        else:
+            convs.discard(conv.id)
+            result = CommitResult()
+        store = self.ctx.store
+        created = [row for sid in result.created if (row := store.get_story(sid)) is not None]
+        for q in turn.questions[:3]:
             self.ctx.inbox(
                 FounderMessage(
                     factory=self.ctx.slug,
@@ -278,14 +338,24 @@ class MasterAgent(LoompaAgent):
                     options=[Option(key="answer", label="Responder abaixo", recommended=True)],
                 )
             )
-        self.set_state("IDLE")
         self.ctx.emit(
             "meeting.done",
             agent=self.name,
             created=len(created),
-            clarifications=len(clarifications),
+            clarifications=len(turn.questions),
         )
-        return {"stories": created, "clarifications": clarifications}
+        return {
+            "stories": [
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "epic": r["epic"],
+                    "priority": to_scale(r["priority"]),
+                }
+                for r in created
+            ],
+            "clarifications": turn.questions,
+        }
 
     @staticmethod
     def _split_goals(goals: str) -> list[dict[str, Any]]:

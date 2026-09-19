@@ -1,6 +1,7 @@
 from loompa.agents.analyst import AnalystAgent
 from loompa.agents.architect import ArchitectAgent
 from loompa.agents.base import AgentResult, LoompaAgent
+from loompa.agents.conversation import Conversations
 from loompa.agents.deployer import DeployerAgent
 from loompa.agents.inspector import InspectorAgent
 from loompa.agents.kaizen import KaizenAgent
@@ -15,6 +16,7 @@ __all__ = [
     "AgentResult",
     "AnalystAgent",
     "ArchitectAgent",
+    "Conversations",
     "DeployerAgent",
     "InspectorAgent",
     "KaizenAgent",

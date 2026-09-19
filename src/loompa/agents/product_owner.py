@@ -9,8 +9,19 @@ come through them.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.backlog import DEFAULT_PRIORITY, Admission, Backlog
+from loompa.comms import sanitize_for_founder
+from loompa.conversations import (
+    CommitResult,
+    Conversation,
+    ConversationError,
+    DraftItem,
+    from_scale,
+    render_backlog,
+)
 from loompa.engine.state import Stage, StoryState
 from loompa.speckit import story_dir
 from loompa.sprints import SprintBoard, SprintError
@@ -44,6 +55,26 @@ Respond with JSON only:
 founder would still need to decide. Approve when nothing is unsupported and nothing critical is
 missing. Write in {language}.
 """
+
+
+IDEAS_SYSTEM = """<!-- role:product_owner -->
+You are the Product Owner Loompa. After a brainstorm the founder picked the ideas below for the
+backlog, and you have the final word on what enters it. For each idea decide:
+- admit: a concrete deliverable one engineer can build in a few hours, that fits the constitution
+  and the product's mission, and that no card in the backlog or in progress already covers.
+- hold: too vague to build from, several deliverables in one, already covered, or against the
+  constitution. Give a one-sentence reason in plain {language}, written for the founder.
+You may change an idea's priority (1 urgent ... 5 nice to have). Do not rewrite titles or
+descriptions and do not add scope of your own.
+Respond with JSON only: {{"verdicts": [{{"key": str, "admit": bool, "reason": str, "priority": int}}]}}
+"""
+
+
+@dataclass
+class IdeaVerdict:
+    admit: bool = True
+    reason: str = ""
+    priority: int | None = None
 
 
 class ProductOwnerAgent(LoompaAgent):
@@ -101,6 +132,82 @@ class ProductOwnerAgent(LoompaAgent):
             raise ValueError(f"decisão desconhecida: {choice}")
         self.ctx.emit("finding.decided", story_id=story_id, agent=self.name, choice=choice)
         return True
+
+    # ----------------------------------------------------------------- brainstorm
+    async def admit_ideas(self, conv: Conversation) -> CommitResult:
+        """Final admission of a brainstorm (Analyst proposes, the Product Owner decides). Admitted
+        ideas become backlog cards and leave the draft; held ones stay in it with the reason, so
+        the founder can refine them with the Analyst and try again."""
+        ideas = [i for i in conv.draft.items if not i.story_id]
+        result = CommitResult(existing=[i.story_id for i in conv.draft.items if i.story_id])
+        if not conv.draft.items:
+            raise ConversationError("o rascunho está vazio")
+        self.set_state("WORKING", detail="admitindo as ideias do brainstorm")
+        try:
+            verdicts = await self._review_ideas(ideas) if ideas else {}
+            held: list[DraftItem] = []
+            for idea in ideas:
+                verdict = verdicts.get(idea.key, IdeaVerdict())
+                if not verdict.admit:
+                    idea.note = verdict.reason
+                    held.append(idea)
+                    result.held.append(
+                        {"key": idea.key, "title": idea.title, "reason": verdict.reason}
+                    )
+                    continue
+                added = self.add_item(
+                    idea.title,
+                    idea.description,
+                    epic=idea.epic,
+                    priority=from_scale(verdict.priority or idea.priority),
+                    origin=idea.origin,
+                )
+                (result.created if added.created else result.existing).append(added.story_id)
+            conv.draft.items = held
+        finally:
+            self.set_state("IDLE")
+        self.ctx.emit(
+            "ideas.admitted",
+            agent=self.name,
+            conversation_id=conv.id,
+            admitted=len(result.created),
+            held=len(result.held),
+        )
+        return result
+
+    async def _review_ideas(self, ideas: list[DraftItem]) -> dict[str, IdeaVerdict]:
+        """The Product Owner's call on each idea. Advisory when the model is unavailable: a
+        provider outage admits what the founder picked instead of losing the session."""
+        cards = {c.id: c for c in _open_cards(self)}
+        user = (
+            f"## Constitution (excerpt)\n{self.constitution(3000)}\n\n## Backlog\n"
+            f"{render_backlog(cards)}\n\n## Ideas to review\n"
+            + "\n".join(
+                f'- {i.key} · P{i.priority} · "{i.title}": {i.description[:500]}' for i in ideas
+            )
+        )
+        try:
+            data = await self.ask_json(
+                IDEAS_SYSTEM.format(language=self.language), user, max_tokens=1500
+            )
+        except Exception:  # noqa: BLE001
+            return {}
+        verdicts: dict[str, IdeaVerdict] = {}
+        for raw in data.get("verdicts") or []:
+            if not isinstance(raw, dict) or not raw.get("key"):
+                continue
+            try:
+                priority = max(1, min(5, int(raw["priority"]))) if raw.get("priority") else None
+            except (TypeError, ValueError):
+                priority = None
+            admit = raw.get("admit") is not False
+            reason = sanitize_for_founder(str(raw.get("reason") or ""), max_chars=240)
+            verdicts[str(raw["key"])] = IdeaVerdict(
+                admit=admit or not reason,  # a hold without a reason is not a hold
+                reason=reason,
+                priority=priority,
+            )
+        return verdicts
 
     # ------------------------------------------------------------------- spec
     async def review_spec(self, state: StoryState) -> AgentResult:
@@ -214,3 +321,9 @@ class ProductOwnerAgent(LoompaAgent):
             summary=" ".join(summary_parts) or "aprovado",
             data={"unsupported": unsupported, "missing": missing, "notes": notes},
         )
+
+
+def _open_cards(agent: LoompaAgent):
+    from loompa.conversations import ConversationBoard
+
+    return ConversationBoard(agent.ctx.store, agent.ctx.slug).cards().values()

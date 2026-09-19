@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS sprints (
     started_at TEXT,
     closed_at TEXT
 );
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    factory TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    data_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
@@ -544,6 +554,55 @@ class Store:
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         return [self._sprint(r) for r in self._q(sql + " ORDER BY created_at, id", tuple(params))]
+
+    # ------------------------------------------------------------ conversations
+    def next_conversation_id(self, factory: str) -> str:
+        rows = self._q("SELECT COUNT(*) AS n FROM conversations WHERE factory = ?", (factory,))
+        return f"C-{rows[0]['n'] + 1:03d}"
+
+    def put_conversation(self, conv: dict[str, Any]) -> None:
+        """Insert or replace a chat session. `turns`, `draft`, `result`... travel as one JSON
+        document; the columns are only what the listings filter and sort on."""
+        row = dict(conv)
+        created = row.get("created_at") or now_iso()
+        self._x(
+            "INSERT OR REPLACE INTO conversations (id, factory, kind, status, title, data_json, "
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                row["id"],
+                row["factory"],
+                row["kind"],
+                row["status"],
+                row.get("title", ""),
+                json.dumps(row, ensure_ascii=False, default=str),
+                created,
+                now_iso(),
+            ),
+        )
+
+    @staticmethod
+    def _conversation(row: dict[str, Any]) -> dict[str, Any]:
+        data = json.loads(row["data_json"] or "{}")
+        return {**data, "updated_at": row["updated_at"]}
+
+    def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
+        return self._conversation(rows[0]) if rows else None
+
+    def list_conversations(
+        self, factory: str | None = None, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        sql, params, clauses = "SELECT * FROM conversations", [], []
+        if factory:
+            clauses.append("factory = ?")
+            params.append(factory)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        rows = self._q(sql + " ORDER BY updated_at DESC, id DESC", tuple(params))
+        return [self._conversation(r) for r in rows]
 
     # ----------------------------------------------------------------------- kv
     def get(self, key: str, default: str | None = None) -> str | None:
