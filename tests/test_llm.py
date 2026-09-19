@@ -6,6 +6,7 @@ import pytest
 import respx
 
 from loompa.config import default_config
+from loompa.config.schema import ModelCandidate
 from loompa.finance import CostTracker
 from loompa.llm import (
     LLMError,
@@ -414,3 +415,34 @@ def test_extract_json():
     assert extract_json("[1, 2]") == [1, 2]
     with pytest.raises(ValueError):
         extract_json("nothing here")
+
+
+@respx.mock
+async def test_reasoning_effort_reaches_the_payload(monkeypatch):
+    """A reasoning model spends its output budget on thinking *and* answering. Sending the
+    effort is how a short task keeps room for the answer."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    p = OpenAICompatibleProvider("openrouter", default_config().providers["openrouter"])
+    route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}}
+        )
+    )
+    await p.complete("z-ai/glm-5.3", [Message("user", "u")], reasoning_effort="low")
+    assert json.loads(route.calls[0].request.content)["reasoning_effort"] == "low"
+    await p.complete("z-ai/glm-5.3", [Message("user", "u")])
+    assert "reasoning_effort" not in json.loads(route.calls[1].request.content)
+    await p.aclose()
+
+
+async def test_the_candidate_sets_the_default_effort_and_the_call_overrides_it():
+    cfg = default_config()
+    cfg.models.tiers = {
+        "tier2": [ModelCandidate(provider="mock", model="m", reasoning_effort="high")]
+    }
+    mock = MockProvider("mock", script=lambda m, msgs, t: "hi")
+    router = ModelRouter(cfg, providers={"mock": mock})
+    await router.complete("worker", [Message("user", "u")])
+    assert mock.calls[-1]["reasoning_effort"] == "high"  # from the candidate
+    await router.complete("worker", [Message("user", "u")], reasoning_effort="low")
+    assert mock.calls[-1]["reasoning_effort"] == "low"  # the call wins, like max_tokens

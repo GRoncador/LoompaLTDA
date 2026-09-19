@@ -78,11 +78,25 @@ class BudgetConfig(BaseModel):
     hard_stop: bool = True
 
 
+REASONING_EFFORTS = ("minimal", "low", "medium", "high", "max")
+
+
 class ModelCandidate(BaseModel):
     provider: str
     model: str
     temperature: float | None = None
     max_output_tokens: int | None = None
+    # How much a reasoning model may think before answering. On such a model the output budget
+    # pays for the thinking *and* the answer, so a short task with a small `max_output_tokens`
+    # can spend all of it reasoning and return nothing. Empty keeps the provider's default.
+    reasoning_effort: str = ""
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def _known_effort(cls, v: str) -> str:
+        if v and v not in REASONING_EFFORTS:
+            raise ValueError(f"reasoning_effort deve ser um de {', '.join(REASONING_EFFORTS)}")
+        return v
 
 
 class ModelsConfig(BaseModel):

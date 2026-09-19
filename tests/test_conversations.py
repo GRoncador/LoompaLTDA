@@ -26,7 +26,7 @@ from loompa.conversations import (
 )
 from loompa.engine import EngineContext, Scheduler, Stage
 from loompa.factory import Factory
-from loompa.llm import Message, ModelRouter, OpenAICompatibleProvider
+from loompa.llm import Message, MockProvider, ModelRouter, OpenAICompatibleProvider
 from loompa.sprints import SprintBoard, SprintStatus
 from test_engine import factory, make_ctx  # noqa: F401
 
@@ -651,3 +651,18 @@ async def test_a_gemini_turn_that_uses_a_tool_sends_the_signature_back(
     finally:
         await ctx.aclose()
         await gemini.aclose()
+
+
+async def test_a_chat_turn_asks_for_low_reasoning_effort(factory: Factory):
+    """A reasoning model's output budget pays for the thinking and the answer both, and a chat
+    turn keeps a small one. Without this, GLM 5.3 spent all 1800 tokens thinking and returned
+    an empty reply (live, 2026-09-19)."""
+    provider = MockProvider("mock", script=dry_run_script)
+    router = ModelRouter(factory.config, providers=dict.fromkeys(factory.config.providers, provider))
+    ctx = EngineContext.build(factory, router=router, dry_run=True)
+    try:
+        conv = Conversations(ctx).open(ConversationKind.MEETING)
+        await Conversations(ctx).say(conv.id, "Página de login")
+    finally:
+        ctx.close()
+    assert provider.calls and all(c["reasoning_effort"] == "low" for c in provider.calls)

@@ -131,6 +131,7 @@ class LLMProvider:
         temperature: float = 0.2,
         max_tokens: int = 4096,
         json_mode: bool = False,
+        reasoning_effort: str = "",
     ) -> LLMResponse:
         raise NotImplementedError
 
@@ -275,11 +276,26 @@ class OpenAICompatibleProvider(LLMProvider):
         return bool(self.api_key) or not self.cfg.api_key_env
 
     async def complete(
-        self, model, messages, *, tools=None, temperature=0.2, max_tokens=4096, json_mode=False
+        self,
+        model,
+        messages,
+        *,
+        tools=None,
+        temperature=0.2,
+        max_tokens=4096,
+        json_mode=False,
+        reasoning_effort="",
     ) -> LLMResponse:
         try:
             return await self._complete(
-                model, messages, tools, temperature, max_tokens, json_mode, dummy_signature=False
+                model,
+                messages,
+                tools,
+                temperature,
+                max_tokens,
+                json_mode,
+                reasoning_effort,
+                dummy_signature=False,
             )
         except LLMError as exc:
             # Gemini 3 refuses a function call in the history that it did not sign. That happens
@@ -293,7 +309,14 @@ class OpenAICompatibleProvider(LLMProvider):
             ):
                 raise
             return await self._complete(
-                model, messages, tools, temperature, max_tokens, json_mode, dummy_signature=True
+                model,
+                messages,
+                tools,
+                temperature,
+                max_tokens,
+                json_mode,
+                reasoning_effort,
+                dummy_signature=True,
             )
 
     async def _complete(
@@ -304,6 +327,7 @@ class OpenAICompatibleProvider(LLMProvider):
         temperature,
         max_tokens,
         json_mode,
+        reasoning_effort,
         *,
         dummy_signature: bool,
     ) -> LLMResponse:
@@ -321,6 +345,8 @@ class OpenAICompatibleProvider(LLMProvider):
             payload["tools"] = _openai_tools(tools)
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
         headers = {"Content-Type": "application/json", **self.cfg.extra_headers}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -388,7 +414,15 @@ class AnthropicProvider(LLMProvider):
         return bool(self.api_key)
 
     async def complete(
-        self, model, messages, *, tools=None, temperature=0.2, max_tokens=4096, json_mode=False
+        self,
+        model,
+        messages,
+        *,
+        tools=None,
+        temperature=0.2,
+        max_tokens=4096,
+        json_mode=False,
+        reasoning_effort="",  # Anthropic expresses thinking as a budget, not an effort label
     ) -> LLMResponse:
         if not self.available():
             raise LLMError("chave de API ausente: defina ANTHROPIC_API_KEY", retryable=True)
@@ -510,10 +544,24 @@ class MockProvider(LLMProvider):
         self.calls: list[dict[str, Any]] = []
 
     async def complete(
-        self, model, messages, *, tools=None, temperature=0.2, max_tokens=4096, json_mode=False
+        self,
+        model,
+        messages,
+        *,
+        tools=None,
+        temperature=0.2,
+        max_tokens=4096,
+        json_mode=False,
+        reasoning_effort="",
     ) -> LLMResponse:
         self.calls.append(
-            {"model": model, "messages": messages, "tools": tools, "json_mode": json_mode}
+            {
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+                "json_mode": json_mode,
+                "reasoning_effort": reasoning_effort,
+            }
         )
         result = self.script(model, messages, tools) if self.script else "ok"
         if isinstance(result, LLMResponse):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,12 +12,14 @@ from typing import TYPE_CHECKING, Any
 from loompa.agents.toolbox import READ_TOOLS, Toolbox, prune_tool_history
 from loompa.engine.context import EngineContext
 from loompa.engine.state import StoryState
-from loompa.llm import LLMError, Message
+from loompa.llm import LLMError, LLMResponse, Message
 from loompa.llm.providers import extract_json
 from loompa.worktrees import WorktreeManager
 
 if TYPE_CHECKING:
     from loompa.mcp import McpSession
+
+log = logging.getLogger(__name__)
 
 MAX_TOOL_RESULT_CHARS = 12000
 JSON_ONLY = "Responda APENAS com um objeto JSON válido, sem texto ao redor."
@@ -129,6 +132,7 @@ class LoompaAgent:
         final_prompt: str | None = None,
         keep_tool_results: int = 6,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> LoopResult:
         """Call the model, run the tools it asks for, feed the results back, until it stops.
 
@@ -149,6 +153,7 @@ class LoompaAgent:
                 tier_override=tier_override,
                 max_tokens=max_tokens,
                 complexity=complexity,
+                reasoning_effort=reasoning_effort,
             )
             resp = routed.response
             last_text = resp.text or last_text
@@ -190,6 +195,7 @@ class LoompaAgent:
                 tier_override=tier_override,
                 max_tokens=max_tokens,
                 complexity=complexity,
+                reasoning_effort=reasoning_effort,
             )
             return LoopResult("text", routed.response.text or last_text, tool_calls=calls)
         return LoopResult("limit", last_text, tool_calls=calls)
@@ -203,6 +209,7 @@ class LoompaAgent:
         story: StoryState | None = None,
         max_iterations: int | None = None,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         """Like `ask_json`, but the model may use `toolbox` first. Falls back to the one-shot
         call when there is nothing to offer or `schedule.agent_tool_iterations` is 0."""
@@ -212,7 +219,9 @@ class LoompaAgent:
             else self.ctx.config.schedule.agent_tool_iterations
         )
         if rounds <= 0 or not toolbox.spec():
-            return await self.ask_json(system, user, story=story, max_tokens=max_tokens)
+            return await self.ask_json(
+                system, user, story=story, max_tokens=max_tokens, reasoning_effort=reasoning_effort
+            )
         messages = [Message("system", system), Message("user", user)]
         loop = await self.tool_loop(
             messages,
@@ -222,6 +231,7 @@ class LoompaAgent:
             final_prompt=FINAL_JSON,
             keep_tool_results=self.ctx.config.schedule.worker_keep_tool_results,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
         )
         try:
             return _as_dict(extract_json(loop.text))
@@ -236,11 +246,12 @@ class LoompaAgent:
                 json_mode=True,
                 max_tokens=max_tokens,
                 complexity=str(story.complexity) if story else None,
+                reasoning_effort=reasoning_effort,
             )
             try:
                 return _as_dict(extract_json(routed.response.text))
             except ValueError:
-                raise LLMError("modelo não devolveu JSON válido") from None
+                raise _no_json(routed.response) from None
 
     async def ask_json(
         self,
@@ -250,6 +261,7 @@ class LoompaAgent:
         story: StoryState | None = None,
         tier_override: str | None = None,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         """One-shot structured call; retries once asking for valid JSON."""
         messages = [Message("system", system), Message("user", user)]
@@ -263,12 +275,13 @@ class LoompaAgent:
                 json_mode=True,
                 max_tokens=max_tokens,
                 complexity=str(story.complexity) if story else None,
+                reasoning_effort=reasoning_effort,
             )
             try:
                 return _as_dict(extract_json(routed.response.text))
             except ValueError:
                 if attempt == 1:
-                    raise LLMError("modelo não devolveu JSON válido") from None
+                    raise _no_json(routed.response) from None
                 messages += [Message("assistant", routed.response.text), Message("user", JSON_ONLY)]
         raise LLMError("modelo não devolveu JSON válido")
 
@@ -286,3 +299,18 @@ class LoompaAgent:
 
 def _as_dict(data: Any) -> dict[str, Any]:
     return data if isinstance(data, dict) else {"items": data}
+
+
+def _no_json(resp: LLMResponse) -> LLMError:
+    """The model answered, but not with JSON. The reply itself is the only way to tell an empty
+    answer from prose from a truncation, so it goes to the log: the message stays clean because
+    it reaches `conversation.error`, which the dashboard reads."""
+    log.warning(
+        "%s/%s não devolveu JSON: finish_reason=%r saída=%d tokens, resposta=%r",
+        resp.provider,
+        resp.model,
+        resp.finish_reason,
+        resp.output_tokens,
+        resp.text[:600],
+    )
+    return LLMError("modelo não devolveu JSON válido")

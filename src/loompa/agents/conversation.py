@@ -40,6 +40,11 @@ log = logging.getLogger(__name__)
 
 MAX_REPLY_CHARS = 2400
 CHAT_TOOL_ROUNDS = 4  # a chat turn should answer quickly; research is what takes many rounds
+# On a reasoning model the output budget pays for the thinking and the answer both, and a chat
+# turn keeps a small one. Left alone, a model that reasons at full effort (GLM 5.3, Qwen Max and
+# most of the frontier make it mandatory) spends the whole budget thinking and returns nothing.
+# Drafting a card from what the founder just said is not the work that needs deep thought.
+CHAT_REASONING_EFFORT = "low"
 FAILURE_REPLY = (
     "Não consegui responder agora. Sua mensagem ficou registrada; tente de novo em instantes."
 )
@@ -135,6 +140,7 @@ async def run_turn(
             toolbox,
             max_iterations=rounds,
             max_tokens=max_tokens,
+            reasoning_effort=CHAT_REASONING_EFFORT,
         )
     except Exception as exc:  # noqa: BLE001 - the founder gets a plain note, Ops gets the detail
         # The traceback goes to the log, never to the event: `/api/factories/{slug}/events` is

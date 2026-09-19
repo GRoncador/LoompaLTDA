@@ -119,6 +119,7 @@ class ModelRouter:
         max_tokens: int | None = None,
         temperature: float | None = None,
         complexity: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> RoutedCall:
         tier, cands = self.candidates(role, tier_override, complexity)
         if not cands:
@@ -139,6 +140,7 @@ class ModelRouter:
                 json_mode,
                 max_tokens,
                 temperature,
+                reasoning_effort,
                 errors,
                 attempts,
             )
@@ -177,6 +179,7 @@ class ModelRouter:
         json_mode: bool,
         max_tokens: int | None,
         temperature: float | None,
+        reasoning_effort: str | None,
         errors: list[str],
         attempts: int,
     ) -> RoutedCall | int:
@@ -210,6 +213,11 @@ class ModelRouter:
                         or cand.max_output_tokens
                         or self.config.models.max_output_tokens,
                         json_mode=json_mode,
+                        reasoning_effort=(
+                            reasoning_effort
+                            if reasoning_effort is not None
+                            else cand.reasoning_effort
+                        ),
                     )
                 except QuotaExhausted as exc:
                     errors.append(str(exc))
