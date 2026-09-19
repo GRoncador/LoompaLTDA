@@ -98,9 +98,10 @@ keeps working with no keys. `--run` and the dashboard's `meeting` endpoint are u
   do at worst is add a card to a draft the founder reviews, and the Product Owner still decides on
   admission.
 * `LoompaAgent`s stay stateless: the session is loaded, edited and saved around each turn.
-* Not verified against a real model: the prompts and the `{reply, ops, questions}` contract were
-  exercised with scripted providers and the dry-run provider only. Two `live` tests
-  (`test_live_sprint_meeting_conversation`, `test_live_brainstorm_conversation`) check the contract
-  with Gemini; they need a key on the founder's machine.
+* Checked against a real model only in part. The Sprint Meeting contract (`{reply, ops, questions}`)
+  passed live with Gemini 3.5 Flash-Lite. The first live brainstorm failed for a reason unrelated to
+  conversations: Gemini 3 requires the thought signature of each function call to come back with it,
+  and the provider adapter dropped it (ADR-0002 addendum). The fix is covered by mocked tests only; the
+  brainstorm live test has to be run again.
 * Not done: turning a brainstorm's admitted ideas straight into a Sprint Meeting (open one and pick
   the cards), streaming, and pruning old sessions.

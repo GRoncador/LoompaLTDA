@@ -28,3 +28,21 @@ months; the code must not hard-code them.
 - No SDK lock-in, tiny dependency surface, deterministic tests with `respx`.
 - Swapping DeepSeek for a local Ollama model is a YAML edit.
 - Tier 3 (deterministic scripts: ruff, pytest, git) never touches this module — cost is $0.
+
+## Addendum (2026-09-19): provider metadata that must come back with a tool call
+
+Gemini 3 models attach a *thought signature* to every function call they make (OpenAI-compatible
+endpoint: `tool_calls[].extra_content.google.thought_signature`) and answer `400 Function call is
+missing a thought_signature` when the next request carries the call without it. The first live
+brainstorm hit this on its second request, right after a `list_dir`. The Worker's live cycle had
+passed with the same model; the likely reason is that Gemini did not sign those simpler calls, but that
+was not confirmed.
+
+- `ToolCall.extra` keeps whatever the provider attached (`extra_content`), out of `repr` and of
+  equality, and `OpenAICompatibleProvider` puts it back when the call is replayed. It is sent to Google
+  endpoints only: other OpenAI-compatible servers may reject unknown message fields.
+- A history the model did not write (the router fell through from another provider halfway through a
+  loop) has calls without a signature. On exactly that 400, and only for those calls, the adapter
+  retries once with Google's documented bypass value. The shared history is never rewritten.
+- A failed chat turn tells the founder only "try again"; the technical reason is the
+  `conversation.error` event, and the `live` tests print it when they fail.

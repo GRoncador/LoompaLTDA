@@ -157,9 +157,15 @@ Suggested next (not implemented):
   (same output, the session stays in the history). `loompa chat meeting|brainstorm|resume|list` with
   slash commands, `GET/POST /conversations…`, and a two-pane `ChatModal` (☀️ Reunião, 💡 Brainstorm, 💬
   to resume). Seen in headless Chrome against the dry-run provider (brainstorm → backlog, meeting →
-  uncheck a card → goal → Começar Sprint). **Not verified against a real model:** the prompts and
-  the JSON contract only ran with scripted/dry-run providers; `test_live_sprint_meeting_conversation`
-  and `test_live_brainstorm_conversation` check them with Gemini (need a key on the founder's machine).
+  uncheck a card → goal → Começar Sprint). **Live against Gemini (Founder's machine, 2026-09-19):**
+  `test_live_sprint_meeting_conversation` passed; `test_live_brainstorm_conversation` failed with a 400
+  ("Function call is missing a thought_signature") — Gemini 3 signs every function call and wants the
+  signature back on the next request, and the adapter dropped it. Any role that uses tools with
+  Gemini 3 can hit this (Architect/Product/Analyst/Worker), not only chats. Fixed in the OpenAI-compatible adapter (`ToolCall.extra` keeps the
+  provider's `extra_content`, replayed to Google endpoints only; a history that another model made gets
+  one retry with the documented `skip_thought_signature_validator` bypass). **Re-run the brainstorm live
+  test to confirm the fix against the real API** (it was only checked against a mocked Gemini-shaped
+  endpoint); the bypass retry has no live coverage at all.
 - Next: Fase 6 (technical backlog: CodeRabbit webhook, cron/launchd recipe, dashboard priority drag,
   story diff, cost charts, token suggestions 1-3, PyPI).
 
