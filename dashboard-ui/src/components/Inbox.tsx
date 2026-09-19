@@ -12,7 +12,7 @@ const KIND: Record<Message["kind"], { label: string; cls: string }> = {
 
 export default function Inbox(props: {
   messages: Message[]; finance: Overview["finance"] | null; kaizen: number;
-  onReply: (m: Message, option: string | null, text: string | null) => Promise<void>;
+  onReply: (m: Message, option: string | null, text: string | null, decisions?: Record<string, string>) => Promise<void>;
   onArchive: (m: Message) => Promise<void>;
   onOpenStory: (id: string) => void;
 }) {
@@ -44,10 +44,14 @@ function MessageCard({ m, onReply, onArchive, onOpenStory }: { m: Message } & Pi
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(m.kind !== "info");
+  // side decisions (suggested cards): the recommended option unless the founder picks another
+  const open_decisions = m.decisions.filter((d) => !d.chosen);
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  const choice = (d: Message["decisions"][number]) => picked[d.id] ?? d.options.find((o) => o.recommended)?.key ?? d.options[0]?.key ?? "backlog";
   const k = KIND[m.kind];
   const send = async (opt: string | null) => {
     setBusy(true);
-    try { await onReply(m, opt, text || null); } finally { setBusy(false); }
+    try { await onReply(m, opt, text || null, Object.fromEntries(open_decisions.map((d) => [d.id, choice(d)]))); } finally { setBusy(false); }
   };
   return (
     <article className="rounded-md border border-line bg-ink/70 p-3">
@@ -60,6 +64,28 @@ function MessageCard({ m, onReply, onArchive, onOpenStory }: { m: Message } & Pi
         <>
           <p className="mt-2 whitespace-pre-line text-sm text-slate-300">{m.context}</p>
           {m.impact && <p className="mt-1 text-xs italic text-slate-400">{m.impact}</p>}
+          {m.decisions.length > 0 && (
+            <div className="mt-3 space-y-2 rounded-md border border-line bg-panel/60 p-2">
+              <p className="text-xs font-semibold text-slate-300">💡 Achados sugeridos — decida cada um</p>
+              {m.decisions.map((d) => (
+                <div key={d.id} className="text-xs">
+                  <div className="text-slate-200">{d.title}</div>
+                  {d.context && <div className="text-slate-400">{d.context}</div>}
+                  {d.chosen ? (
+                    <div className="mt-1 text-lime-300">decidido: {d.options.find((o) => o.key === d.chosen)?.label ?? d.chosen}</div>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {d.options.map((o) => (
+                        <button key={o.key} type="button" onClick={() => setPicked((p) => ({ ...p, [d.id]: o.key }))} className={`rounded border px-2 py-0.5 ${choice(d) === o.key ? "border-brand bg-brand/20 text-slate-50" : "border-line text-slate-400 hover:text-slate-200"}`}>
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {m.options.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {m.options.map((o) => (

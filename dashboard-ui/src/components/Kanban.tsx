@@ -1,16 +1,32 @@
 import { useState } from "react";
-import type { Column, StoryCard } from "../types";
+import type { Column, SprintSummary, StoryCard } from "../types";
 
 const TONE: Record<string, string> = {
   BACKLOG: "border-slate-600", SPEC: "border-violet-500", DEV: "border-emerald-500", TEST: "border-sky-500", AWAITING_FOUNDER: "border-amber-500", DONE: "border-slate-500",
 };
 
-export default function Kanban({ columns, onOpen, onPromote, onCreate }: { columns: Column[]; onOpen: (id: string) => void; onPromote: (id: string) => void; onCreate: (title: string) => Promise<void> }) {
+export default function Kanban({ columns, sprint, onStartSprint, onOpen, onPromote, onCreate }: { columns: Column[]; sprint: SprintSummary | null; onStartSprint: () => Promise<void>; onOpen: (id: string) => void; onPromote: (id: string) => void; onCreate: (title: string) => Promise<void> }) {
   const [title, setTitle] = useState("");
+  const [starting, setStarting] = useState(false);
+  // the founder's own cards wait for a sprint; Kaizen findings wait for an explicit yes
+  const waiting = (columns.find((c) => c.key === "BACKLOG")?.stories ?? []).filter((s) => s.origin !== "kaizen").length;
   return (
     <>
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
-        <h2 className="text-sm font-semibold">📋 Kanban de Fluxo de Valor</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold">📋 Kanban de Fluxo de Valor</h2>
+          {sprint && (
+            <span className="chip bg-sky-900/50 text-sky-200" title={sprint.goal || undefined}>
+              {sprint.id} · {sprint.status === "open" ? "em planejamento" : "rodando"} · {sprint.progress.done}/{sprint.progress.total}
+              {sprint.progress.waiting > 0 ? ` · ${sprint.progress.waiting} aguardando você` : ""}
+            </span>
+          )}
+          {waiting > 0 && (
+            <button className="btn-primary text-xs" disabled={starting} onClick={async () => { setStarting(true); try { await onStartSprint(); } finally { setStarting(false); } }}>
+              ▶ Iniciar sprint ({waiting})
+            </button>
+          )}
+        </div>
         <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); if (title.trim()) { await onCreate(title.trim()); setTitle(""); } }}>
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Nova história rápida…" className="w-64 rounded-md border border-line bg-ink px-2 py-1 text-xs" />
           <button className="btn-ghost text-xs" type="submit">+ Backlog</button>
@@ -53,7 +69,7 @@ function Card({ s, onOpen, onPromote }: { s: StoryCard; onOpen: (id: string) => 
           {s.tasks_total > 0 && <span className="chip bg-slate-800 text-slate-400">{s.tasks_done}/{s.tasks_total}</span>}
         </div>
       </button>
-      {kaizen && <button className="mt-1 w-full rounded bg-lime-900/50 py-0.5 text-[10px] text-lime-200 hover:bg-lime-800/60" onClick={() => onPromote(s.id)}>💡 aprovar para execução</button>}
+      {kaizen && <button className="mt-1 w-full rounded bg-lime-900/50 py-0.5 text-[10px] text-lime-200 hover:bg-lime-800/60" onClick={() => onPromote(s.id)}>💡 executar agora (fora do sprint)</button>}
     </div>
   );
 }

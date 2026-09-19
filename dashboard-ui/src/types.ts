@@ -41,6 +41,16 @@ export interface Column { key: string; label: string; stories: StoryCard[] }
 
 export interface Option { key: string; label: string; description: string; recommended: boolean }
 
+export interface Decision { id: string; title: string; context: string; options: Option[]; chosen: string | null }
+
+export interface SprintSummary {
+  id: string;
+  status: "open" | "running" | "closed";
+  goal: string;
+  story_ids: string[];
+  progress: { total: number; done: number; cancelled: number; waiting: number };
+}
+
 export interface Message {
   id: string;
   factory: string;
@@ -52,6 +62,7 @@ export interface Message {
   context: string;
   impact: string;
   options: Option[];
+  decisions: Decision[];
   allow_free_text: boolean;
   created_at: string;
   answer?: { option_key: string | null; text: string | null; answered_at: string } | null;
@@ -64,6 +75,7 @@ export interface Overview {
   inbox: Message[];
   finance: { today_usd: number; month_usd: number; cap_usd: number; fraction: number; warn: boolean; exhausted: boolean };
   kaizen_today: number;
+  sprint: SprintSummary | null;
   last_event_id: number;
 }
 

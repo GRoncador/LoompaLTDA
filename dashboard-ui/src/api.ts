@@ -19,11 +19,13 @@ export const api = {
   overview: (slug: string) => req<Overview>(`/api/factories/${slug}/overview`),
   engine: (slug: string, action: "start" | "stop") => req<{ engine: boolean }>(`/api/factories/${slug}/engine/${action}`, { method: "POST" }),
   inbox: (slug: string, status = "pending") => req<Message[]>(`/api/factories/${slug}/inbox?status=${status}`),
-  reply: (slug: string, id: string, body: { option_key?: string | null; text?: string | null }) =>
+  reply: (slug: string, id: string, body: { option_key?: string | null; text?: string | null; decisions?: Record<string, string> }) =>
     req<{ stage: string | null }>(`/api/factories/${slug}/inbox/${id}/reply`, { method: "POST", body: JSON.stringify(body) }),
   archive: (slug: string, id: string) => req(`/api/factories/${slug}/inbox/${id}/archive`, { method: "POST" }),
   meeting: (slug: string, goals: string, run: boolean) =>
     req<{ stories: { id: string; title: string }[]; clarifications: string[] }>(`/api/factories/${slug}/meeting`, { method: "POST", body: JSON.stringify({ goals, run }) }),
+  startSprint: (slug: string, story_ids: string[] = [], goal = "") =>
+    req<{ id: string; story_ids: string[] }>(`/api/factories/${slug}/sprints/start`, { method: "POST", body: JSON.stringify({ story_ids, goal, run: true }) }),
   story: (slug: string, id: string) => req<any>(`/api/factories/${slug}/stories/${id}`),
   createStory: (slug: string, title: string, description: string) =>
     req<{ id: string }>(`/api/factories/${slug}/stories`, { method: "POST", body: JSON.stringify({ title, description }) }),

@@ -44,7 +44,7 @@ export default function App() {
 
   const onEvent = useCallback((e: LoompaEvent) => {
     setEvents((prev) => [...prev.slice(-199), e]);
-    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated"].includes(e.type)) {
+    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "backlog.status", "backlog.priority"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
@@ -56,9 +56,14 @@ export default function App() {
     await api.engine(slug, overview.factory.engine ? "stop" : "start");
     refresh();
   };
-  const reply = async (m: Message, option_key: string | null, text: string | null) => {
+  const reply = async (m: Message, option_key: string | null, text: string | null, decisions: Record<string, string> = {}) => {
     if (!slug) return;
-    await api.reply(slug, m.id, { option_key, text });
+    await api.reply(slug, m.id, { option_key, text, decisions });
+    refresh();
+  };
+  const startSprint = async () => {
+    if (!slug) return;
+    try { await api.startSprint(slug); setError(null); } catch (e) { setError(String(e)); }
     refresh();
   };
 
@@ -83,7 +88,7 @@ export default function App() {
           <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} />
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
-          <Kanban columns={overview?.columns ?? []} onOpen={setStoryId} onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }} onCreate={async (title) => { if (slug) { await api.createStory(slug, title, ""); refresh(); } }} />
+          <Kanban columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} onStartSprint={startSprint} onOpen={setStoryId} onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }} onCreate={async (title) => { if (slug) { await api.createStory(slug, title, ""); refresh(); } }} />
         </section>
       </main>
       <EventTicker events={events} />

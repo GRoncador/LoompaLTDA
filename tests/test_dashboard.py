@@ -132,3 +132,33 @@ def test_index_without_bundle(client: TestClient):
     r = client.get("/")
     assert r.status_code == 200 and ("Loompa LTDA HQ" in r.text or '<div id="root"' in r.text)
     assert client.get("/api/nope").status_code == 404
+
+
+def test_reply_carries_decisions_and_sprints_are_listed(client: TestClient):
+    from loompa.agents import ProductOwnerAgent
+    from loompa.comms import FounderMessage, MessageKind, card_decision
+
+    ctx = client.app.state.hub.get("demo-hq").ctx
+    card = ProductOwnerAgent(ctx).add_item("[Débito técnico] limpar", origin="kaizen").story_id
+    msg = ctx.inbox(
+        FounderMessage(
+            kind=MessageKind.DELIVERY,
+            title="Entrega",
+            context="ok",
+            decisions=[card_decision({"id": card, "title": "limpar", "priority": 500})],
+        )
+    )
+    pending = client.get("/api/factories/demo-hq/inbox").json()
+    assert [d["id"] for d in pending[0]["decisions"]] == [card]
+    # only the card is decided: the message stays pending, the card lands in the sprint draft
+    r = client.post(
+        f"/api/factories/demo-hq/inbox/{msg.id}/reply", json={"decisions": {card: "sprint"}}
+    )
+    assert r.status_code == 200 and r.json()["story_id"] is None
+    assert (
+        client.get("/api/factories/demo-hq/inbox").json()[0]["decisions"][0]["chosen"] == "sprint"
+    )
+    sprints = client.get("/api/factories/demo-hq/sprints").json()
+    assert sprints[0]["status"] == "open" and sprints[0]["story_ids"] == [card]
+    ov = client.get("/api/factories/demo-hq/overview").json()
+    assert ov["sprint"]["id"] == "SP-001" and ov["sprint"]["progress"]["total"] == 1
