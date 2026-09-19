@@ -1,6 +1,6 @@
 # Brief → implementation map
 
-Status as of 2026-09-18 on branch `dev_fable`. ✅ built & tested · 🟡 partial · ⚪ not started
+Status as of 2026-09-19 on branch `dev`. ✅ built & tested · 🟡 partial · ⚪ not started
 
 | Brief section | Status | Where |
 | --- | --- | --- |
@@ -26,6 +26,7 @@ Status as of 2026-09-18 on branch `dev_fable`. ✅ built & tested · 🟡 partia
 | Plano set/2026 · Fase 0 (estabilização) | ✅ locked-db retry, Ops-triaged runner crashes, `live` marker, ADR-0006 | `store.py`, `engine/scheduler.py`, `tests/test_live.py`, `docs/adr/0006-*` |
 | Plano set/2026 · Fase 0b (provedores, modelos e chaves por fábrica) | ✅ secrets files, presets, `loompa providers`, settings screen + API, tier per agent, secret guard | `config/secrets.py`, `config/presets.py`, `config/settings.py`, `cli/providers.py`, `dashboard/app.py`, `SettingsModal.tsx` |
 | Plano set/2026 · Fase 1 (pipeline como dado e revisões) | ✅ route/kind/complexity/handoff, phase registry, spec_review (PO, No Invention), graded QA gate, DoD, complexity→tier, epic split | `engine/phases.py`, `engine/graph.py`, `agents/product_owner.py`, `agents/inspector.py`, `agents/worker.py`, `llm/router.py` |
+| Plano set/2026 · Fase 2 (spike OpenCode) | ✅ `worker.backend` (aci\|opencode), `OpenCodeWorker` roda `opencode run` no worktree com agente `.opencode/agents/loompa-worker.md` restrito a `allowed_paths`, Ops trata falhas do subprocesso como qualquer crash, custo aproximado (tier `opencode`), `loompa worker backend` + settings API; comparação ACI×OpenCode é o Founder rodando a mesma story com cada backend e olhando kanban/finance (sem harness de report novo). ADR-0007 | `config/schema.py::WorkerConfig`, `agents/opencode_worker.py`, `engine/graph.py::node_dev`, `cli/worker.py`, `docs/adr/0007-*` |
 
 ## Deliberate divergences from the brief
 
@@ -88,11 +89,27 @@ Suggested next (not implemented):
   stories on tier2 and lifts product/product_owner/inspector/analyst to tier1 on COMPLEX. Legacy
   stories without a route resume from their kanban stage. Kanban cards show kind, complexity,
   current phase and QA verdict.
-- Next: Fase 2 (OpenCode spike) or Fase 3 (Backlog service with PO as single writer, git guard,
-  Sprint, batch approvals), per the Founder's call.
+- **Fase 2** done (2026-09-19): `worker.backend` (`aci` default, `opencode`) picks the Worker
+  class in `node_dev`. `OpenCodeWorker` keeps Loompa's per-task/per-commit loop but runs
+  `opencode run --format json --agent loompa-worker --model <router's pick>` inside the
+  story's worktree; before the first task it writes `.opencode/agents/loompa-worker.md`
+  scoped to `state.allowed_paths` (deny by default elsewhere), mirroring the ACI tool's own
+  guard. The model's own `DONE:`/`BLOCKED:` line closes each task. Ops still owns
+  retries/cooldowns: a missing binary or a non-zero exit is a plain `RuntimeError`, a timeout a
+  `TimeoutError`, both triaged like any other node crash. Cost has no real token counts from
+  the subprocess, so it's approximated (chars/4) through the same pricing table, tagged tier
+  `opencode` so Finance can tell it apart. `loompa worker backend [aci|opencode]` and
+  `PUT .../settings` (`worker_backend`) switch it without a restart. ADR-0007. The
+  ACI-vs-OpenCode comparison itself is the Founder running the same story once per backend and
+  reading the existing kanban/finance views — no new report generator was built for a decision
+  meant to close, not to maintain.
+- Next: Fase 3 (Backlog service with PO as single writer, git guard, Sprint, batch approvals).
 
 ## Known gaps / next steps
 
+- OpenCode backend has no DoD self-check yet (ACI path has one); add it if OpenCode becomes
+  the standard. Its `.opencode/agents/*.md` permission schema hasn't been run against a real
+  `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
 - CodeRabbit webhook mode; PR review comments feeding back into the Worker.
 - Nightly cycle scheduler (`loompa run --watch` exists; a cron/launchd recipe is not shipped).
 - Dashboard: drag-and-drop priority, story diff viewer, finance charts.

@@ -62,6 +62,13 @@ class ScheduleConfig(BaseModel):
     ops_retry_base_s: float = Field(60.0, ge=0)  # first wait; doubles each retry, capped at 10 min
 
 
+class WorkerConfig(BaseModel):
+    backend: Literal["aci", "opencode"] = "aci"
+    opencode_bin: str = "opencode"
+    opencode_agent: str = "loompa-worker"
+    opencode_timeout_s: int = Field(900, ge=1)
+
+
 class BudgetConfig(BaseModel):
     monthly_cap_usd: float = Field(30.0, ge=0)
     warn_at_fraction: float = Field(0.8, ge=0, le=1)
@@ -173,6 +180,7 @@ class StackProfile(BaseModel):
 class LoompaConfig(BaseModel):
     factory: FactoryConfig = Field(default_factory=FactoryConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)

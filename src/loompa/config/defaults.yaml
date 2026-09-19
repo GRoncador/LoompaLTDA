@@ -17,6 +17,12 @@ schedule:
   ops_max_recoveries: 3     # transient crashes (rate limit, network) the Ops Loompa retries by itself
   ops_retry_base_s: 60      # wait before the first retry; doubles each time (max 10 min)
 
+worker:
+  backend: aci               # aci (Loompa's own tool loop) | opencode (spike, see ADR-0007)
+  opencode_bin: opencode      # binary looked up on PATH
+  opencode_agent: loompa-worker  # subagent name written to .opencode/agents/<name>.md per story
+  opencode_timeout_s: 900     # per-task subprocess timeout
+
 budget:
   monthly_cap_usd: 30.0
   warn_at_fraction: 0.8     # Finance Loompa alerts the inbox at 80% of the cap

@@ -20,6 +20,7 @@ from loompa.agents import (
     InspectorAgent,
     KaizenAgent,
     MasterAgent,
+    OpenCodeWorker,
     ProductAgent,
     ProductOwnerAgent,
     WorkerAgent,
@@ -198,9 +199,12 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     if "baseline" not in state.extra:
         state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
     tier = "tier1" if state.current_tier == "tier1" else None
-    worker = WorkerAgent(
-        ctx, name=f"Worker Loompa {'Sr' if tier else ''}".strip(), tier_override=tier
+    opencode = ctx.config.worker.backend == "opencode"
+    worker_cls = OpenCodeWorker if opencode else WorkerAgent
+    label = " ".join(
+        p for p in ("Worker Loompa", "Sr" if tier else "", "(OpenCode)" if opencode else "") if p
     )
+    worker = worker_cls(ctx, name=label, tier_override=tier)
     res = await worker.run(state, wt)
     KaizenAgent(ctx).capture(state)
     if res.blocked_reason:

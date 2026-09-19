@@ -80,6 +80,7 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
         },
         "budget": config.budget.model_dump(),
         "schedule": {"max_parallel": config.schedule.max_parallel},
+        "worker": {"backend": config.worker.backend},
         "tools": {
             "tavily": {
                 "enabled": t.enabled,
@@ -126,6 +127,7 @@ class SettingsPatch(BaseModel):
     roles: dict[str, str] | None = None
     budget: BudgetPatch | None = None
     max_parallel: int | None = None
+    worker_backend: str | None = None  # "aci" | "opencode" (Fase 2 spike, ADR-0007)
     tools: dict[str, ToolPatch] = Field(default_factory=dict)
 
 
@@ -183,6 +185,11 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
         notes.append("orçamento atualizado")
     if patch.max_parallel is not None:
         config.schedule.max_parallel = patch.max_parallel
+    if patch.worker_backend is not None:
+        if patch.worker_backend not in ("aci", "opencode"):
+            raise ValueError("worker_backend deve ser 'aci' ou 'opencode'")
+        config.worker.backend = patch.worker_backend  # type: ignore[assignment]
+        notes.append(f"backend do Worker: {patch.worker_backend}")
     for name, tp in patch.tools.items():
         if name != "tavily":
             raise ValueError(f"ferramenta desconhecida: {name}")
