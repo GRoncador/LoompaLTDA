@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
 import pytest
+import respx
 
 from loompa.agents import AnalystAgent, Conversations, MasterAgent, ProductOwnerAgent
 from loompa.agents.conversation import parse_turn
 from loompa.agents.dryrun import dry_run_script, role_of
 from loompa.comms import MessageKind
+from loompa.config.schema import ModelCandidate
 from loompa.conversations import (
     MAX_ITEMS,
     ConversationBoard,
@@ -21,9 +24,9 @@ from loompa.conversations import (
     OpenCard,
     apply_ops,
 )
-from loompa.engine import Scheduler, Stage
+from loompa.engine import EngineContext, Scheduler, Stage
 from loompa.factory import Factory
-from loompa.llm import Message
+from loompa.llm import Message, ModelRouter, OpenAICompatibleProvider
 from loompa.sprints import SprintBoard, SprintStatus
 from test_engine import factory, make_ctx  # noqa: F401
 
@@ -537,3 +540,61 @@ async def test_a_repeated_idea_points_at_the_existing_card(factory: Factory):
     assert result.created == [] and result.existing == ["S-001"]
     assert len(ctx.store.list_stories(factory.slug)) == 1
     await ctx.aclose()
+
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+SIGNATURE = {"google": {"thought_signature": "c2lnbmF0dXJl"}}
+
+
+def gemini_answer(message: dict) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "model": "gemini-3.5-flash-lite",
+            "choices": [{"finish_reason": "stop", "message": message}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 20},
+        },
+    )
+
+
+@respx.mock
+async def test_a_gemini_turn_that_uses_a_tool_sends_the_signature_back(
+    factory: Factory, monkeypatch
+):
+    """The brainstorm that failed against the real Gemini: it made a tool call, and the next
+    request lacked the thought signature. Runs the whole stack (agent, tool loop, router,
+    adapter) against an endpoint shaped like Gemini's."""
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    factory.config.tools.tavily.enabled = False  # repository tools only, no network
+    only = [ModelCandidate(provider="gemini", model="gemini-3.5-flash-lite")]
+    factory.config.models.tiers = {"tier1": list(only), "tier2": list(only)}
+    gemini = OpenAICompatibleProvider("gemini", factory.config.providers["gemini"])
+    ctx = EngineContext.build(
+        factory, router=ModelRouter(factory.config, providers={"gemini": gemini})
+    )
+    listing = {
+        "tool_calls": [
+            {
+                "id": "function-call-1",
+                "type": "function",
+                "extra_content": SIGNATURE,
+                "function": {"name": "list_dir", "arguments": '{"path": "."}'},
+            }
+        ]
+    }
+    idea = {"op": "add", "title": "Convite por e-mail", "description": "d", "priority": 2}
+    final = {"content": json.dumps({"reply": "Vi o projeto.", "ops": [idea], "questions": []})}
+    route = respx.post(GEMINI_URL).mock(side_effect=[gemini_answer(listing), gemini_answer(final)])
+    try:
+        chats = Conversations(ctx)
+        conv = chats.open(ConversationKind.BRAINSTORM)
+        turn = await chats.say(conv.id, "Como melhorar o onboarding?")
+        assert not turn.failed, events(ctx, "conversation.error")
+        assert route.call_count == 2
+        sent = json.loads(route.calls[1].request.content)["messages"]
+        (call,) = [tc for m in sent for tc in m.get("tool_calls") or []]
+        assert call["extra_content"] == SIGNATURE
+        assert [i.title for i in chats.board.require(conv.id).draft.items] == ["Convite por e-mail"]
+    finally:
+        await ctx.aclose()
+        await gemini.aclose()

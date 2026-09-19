@@ -29,6 +29,16 @@ from loompa.factory import Factory, bootstrap_factory
 from loompa.llm import ProbeResult, probe_provider
 
 pytestmark = pytest.mark.live
+
+
+def why(ctx: EngineContext, turn) -> str:
+    """A failed chat turn tells the founder only "try again"; the reason is in the event log."""
+    errors = [e for e in ctx.store.events_since(0, limit=5000) if e["type"] == "conversation.error"]
+    return (
+        f"{turn}\n{errors[-1]['payload']['error'] if errors else '(no conversation.error event)'}"
+    )
+
+
 PYTEST_CMD = f'"{sys.executable}" -m pytest -q -p no:cacheprovider'
 
 
@@ -129,14 +139,14 @@ async def test_live_sprint_meeting_conversation(live_reachable: ProbeResult, liv
             conv.id,
             "Quero duas coisas em app/calc.py: a função subtract(a, b) e a função multiply(a, b).",
         )
-        assert not turn.failed and turn.reply, turn
+        assert not turn.failed and turn.reply, why(ctx, turn)
         assert audit_executive_text(turn.reply) == []
         assert chats.board.require(conv.id).draft.items, turn
         assert ctx.store.list_stories(live_factory.slug) == []  # a draft is not the backlog
         turn = await chats.say(
             conv.id, "Marque a primeira para o sprint e defina a meta como 'Calculadora completa'."
         )
-        assert not turn.failed and turn.reply, turn
+        assert not turn.failed and turn.reply, why(ctx, turn)
         result = await chats.commit(conv.id)
         assert result.created, result
         assert ctx.store.list_stories(live_factory.slug)
@@ -156,7 +166,7 @@ async def test_live_brainstorm_conversation(live_reachable: ProbeResult, live_fa
         turn = await chats.say(
             conv.id, "Que operações matemáticas simples valeria acrescentar à calculadora?"
         )
-        assert not turn.failed and turn.reply, turn
+        assert not turn.failed and turn.reply, why(ctx, turn)
         assert audit_executive_text(turn.reply) == []
         conv = chats.board.require(conv.id)
         assert conv.limits  # the missing web search is declared by code

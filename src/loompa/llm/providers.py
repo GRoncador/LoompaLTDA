@@ -77,6 +77,10 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+    # Provider metadata that must come back with the call. Gemini 3 attaches a thought signature
+    # (`extra_content`) to every function call it makes and answers 400 if the next request does
+    # not return it. Opaque to everyone but the adapter that produced it.
+    extra: dict[str, Any] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -142,7 +146,33 @@ def _openai_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | 
     ]
 
 
-def _openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
+# Documented bypass for function calls Gemini did not make itself (a history that came from
+# another model, or from a scripted provider).
+SKIP_SIGNATURE_VALIDATION = "skip_thought_signature_validator"
+
+
+def is_google_endpoint(base_url: str) -> bool:
+    return "googleapis.com" in base_url
+
+
+def _openai_tool_call(tc: ToolCall, *, google: bool, dummy_signature: bool) -> dict[str, Any]:
+    call: dict[str, Any] = {
+        "id": tc.id,
+        "type": "function",
+        "function": {"name": tc.name, "arguments": json.dumps(tc.arguments, ensure_ascii=False)},
+    }
+    # Other OpenAI-compatible servers may reject unknown message fields, so only Google gets it.
+    extra = tc.extra
+    if google and extra is None and dummy_signature:
+        extra = {"google": {"thought_signature": SKIP_SIGNATURE_VALIDATION}}
+    if google and extra:
+        call["extra_content"] = extra
+    return call
+
+
+def _openai_messages(
+    messages: list[Message], *, google: bool = False, dummy_signature: bool = False
+) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for m in messages:
         if m.role == "tool":
@@ -153,14 +183,7 @@ def _openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
                     "role": "assistant",
                     "content": m.content or None,
                     "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                            },
-                        }
+                        _openai_tool_call(tc, google=google, dummy_signature=dummy_signature)
                         for tc in m.tool_calls
                     ],
                 }
@@ -193,6 +216,7 @@ class OpenAICompatibleProvider(LLMProvider):
         self.name = name
         self.cfg = cfg
         self.base_url = cfg.base_url.rstrip("/")
+        self.google = is_google_endpoint(self.base_url)
         self.api_key = resolve_key(cfg.api_key_env, secrets)
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._owned = client is None
@@ -203,11 +227,43 @@ class OpenAICompatibleProvider(LLMProvider):
     async def complete(
         self, model, messages, *, tools=None, temperature=0.2, max_tokens=4096, json_mode=False
     ) -> LLMResponse:
+        try:
+            return await self._complete(
+                model, messages, tools, temperature, max_tokens, json_mode, dummy_signature=False
+            )
+        except LLMError as exc:
+            # Gemini 3 refuses a function call in the history that it did not sign. That happens
+            # when the loop switched providers halfway (the router fell through). Say once that
+            # the signature check may be skipped for those calls; nothing changes otherwise.
+            if not (
+                self.google
+                and exc.status == 400
+                and "thought_signature" in str(exc)
+                and any(tc.extra is None for m in messages for tc in m.tool_calls)
+            ):
+                raise
+            return await self._complete(
+                model, messages, tools, temperature, max_tokens, json_mode, dummy_signature=True
+            )
+
+    async def _complete(
+        self,
+        model,
+        messages,
+        tools,
+        temperature,
+        max_tokens,
+        json_mode,
+        *,
+        dummy_signature: bool,
+    ) -> LLMResponse:
         if not self.available():
             raise LLMError(f"chave de API ausente: defina {self.cfg.api_key_env}", retryable=True)
         payload: dict[str, Any] = {
             "model": model,
-            "messages": _openai_messages(messages),
+            "messages": _openai_messages(
+                messages, google=self.google, dummy_signature=dummy_signature
+            ),
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
@@ -256,6 +312,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 tc.get("id") or f"call_{i}",
                 tc["function"]["name"],
                 _parse_args(tc["function"].get("arguments")),
+                extra=tc["extra_content"] if isinstance(tc.get("extra_content"), dict) else None,
             )
             for i, tc in enumerate(msg.get("tool_calls") or [])
             if tc.get("function")

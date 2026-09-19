@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -61,6 +63,128 @@ async def test_openai_compatible_provider_parses_tool_calls(monkeypatch):
     assert body.headers["Authorization"] == "Bearer k"
     assert b'"tools"' in body.content and b'"messages"' in body.content
     await p.aclose()
+
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+SIGNED = {"google": {"thought_signature": "c2lnbmF0dXJl"}}
+GEMINI_TOOL_CALL = {
+    "id": "function-call-1",
+    "type": "function",
+    "extra_content": SIGNED,
+    "function": {"name": "list_dir", "arguments": '{"path": "."}'},
+}
+
+
+def gemini_reply(tool_calls: list[dict] | None = None, text: str = "") -> httpx.Response:
+    message: dict = {"content": text}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+    return httpx.Response(
+        200,
+        json={
+            "model": "gemini-3.5-flash-lite",
+            "choices": [{"finish_reason": "stop", "message": message}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+        },
+    )
+
+
+def sent_tool_calls(route: respx.Route, call: int = -1) -> list[dict]:
+    body = json.loads(route.calls[call].request.content)
+    return [tc for m in body["messages"] for tc in m.get("tool_calls") or []]
+
+
+@respx.mock
+async def test_gemini_thought_signatures_go_back_with_the_function_call(monkeypatch):
+    """Gemini 3 answers 400 ("missing a thought_signature") when a function call in the history
+    does not carry the signature it came with. The adapter keeps it and returns it."""
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    p = OpenAICompatibleProvider("gemini", default_config().providers["gemini"])
+    route = respx.post(GEMINI_URL).mock(
+        side_effect=[gemini_reply([GEMINI_TOOL_CALL]), gemini_reply(text="pronto")]
+    )
+    tools = [{"name": "list_dir", "parameters": {"type": "object"}}]
+    history = [Message("user", "olhe o projeto")]
+    first = await p.complete("gemini-3.5-flash-lite", history, tools=tools)
+    assert first.tool_calls == [ToolCall("function-call-1", "list_dir", {"path": "."})]
+    assert first.tool_calls[0].extra == SIGNED
+    assert "c2lnbmF0dXJl" not in repr(first.tool_calls[0])  # signatures stay out of logs
+    history += [
+        Message("assistant", "", tool_calls=first.tool_calls),
+        Message("tool", "app/", tool_call_id="function-call-1"),
+    ]
+    await p.complete("gemini-3.5-flash-lite", history, tools=tools)
+    (echoed,) = sent_tool_calls(route)
+    assert echoed["extra_content"] == SIGNED and echoed["id"] == "function-call-1"
+    assert route.call_count == 2  # no retry was needed
+
+
+@respx.mock
+async def test_signatures_are_never_sent_to_other_providers(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+    p = OpenAICompatibleProvider("deepseek", default_config().providers["deepseek"])
+    route = respx.post("https://api.deepseek.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}}
+        )
+    )
+    signed = ToolCall("c1", "list_dir", {}, extra=SIGNED)  # made by Gemini, replayed elsewhere
+    await p.complete(
+        "deepseek-chat",
+        [Message("user", "u"), Message("assistant", "", tool_calls=[signed])],
+    )
+    (sent,) = sent_tool_calls(route)
+    assert (
+        "extra_content" not in sent and b"thought_signature" not in route.calls[0].request.content
+    )
+
+
+@respx.mock
+async def test_gemini_history_from_another_model_is_retried_once_with_the_documented_bypass(
+    monkeypatch,
+):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    p = OpenAICompatibleProvider("gemini", default_config().providers["gemini"])
+    refusal = httpx.Response(
+        400,
+        text='{"error": {"code": 400, "message": "Function call is missing a thought_signature '
+        'in functionCall parts."}}',
+    )
+    route = respx.post(GEMINI_URL).mock(side_effect=[refusal, gemini_reply(text="ok")])
+    foreign = ToolCall("c1", "list_dir", {})  # a call another provider made earlier in the loop
+    resp = await p.complete(
+        "gemini-3.5-flash-lite",
+        [
+            Message("user", "u"),
+            Message("assistant", "", tool_calls=[foreign]),
+            Message("tool", "app/", tool_call_id="c1"),
+        ],
+    )
+    assert resp.text == "ok" and route.call_count == 2
+    assert "extra_content" not in sent_tool_calls(route, 0)[0]
+    assert sent_tool_calls(route, 1)[0]["extra_content"] == {
+        "google": {"thought_signature": "skip_thought_signature_validator"}
+    }
+    assert foreign.extra is None  # the shared history is not rewritten
+
+
+@respx.mock
+async def test_only_that_exact_refusal_is_retried(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    p = OpenAICompatibleProvider("gemini", default_config().providers["gemini"])
+    unsigned = [Message("assistant", "", tool_calls=[ToolCall("c1", "list_dir", {})])]
+    route = respx.post(GEMINI_URL).mock(return_value=httpx.Response(400, text="bad request"))
+    with pytest.raises(LLMError, match="bad request"):
+        await p.complete("gemini-3.5-flash-lite", [Message("user", "u"), *unsigned])
+    assert route.call_count == 1  # some other 400: not our business
+    respx.reset()
+    route = respx.post(GEMINI_URL).mock(
+        return_value=httpx.Response(400, text="Function call is missing a thought_signature")
+    )
+    signed = [Message("assistant", "", tool_calls=[ToolCall("c1", "list_dir", {}, extra=SIGNED)])]
+    with pytest.raises(LLMError, match="thought_signature"):
+        await p.complete("gemini-3.5-flash-lite", [Message("user", "u"), *signed])
+    assert route.call_count == 1  # everything was signed already: a retry cannot help
 
 
 @respx.mock
