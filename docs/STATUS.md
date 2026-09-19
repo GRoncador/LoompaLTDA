@@ -38,8 +38,9 @@ Status as of 2026-09-19 on branch `dev`. ✅ built & tested · 🟡 partial · �
    offline (ADR-0003).
 4. **No Next.js / shadcn** — Vite SPA embedded in the wheel so `pip install` ships the dashboard
    (ADR-0004).
-5. **Kaizen cards do not auto-run** — they wait in the backlog for the Founder's approval
-   (dashboard button or `promote`), as the brief frames them as catalogued for evaluation.
+5. **Backlog cards do not auto-run** — they wait for a sprint (`loompa sprint start`, the kanban
+   button or `meeting --run`); Kaizen findings additionally need an explicit yes (a delivery
+   decision, `sprint add` or `promote`), as the brief frames them as catalogued for evaluation.
 6. **Baseline-aware Inspector** — brownfield suites that are already red on `main` are recorded as
    tech-debt cards instead of blocking every story (found during the CLI smoke test).
 
@@ -103,7 +104,24 @@ Suggested next (not implemented):
   ACI-vs-OpenCode comparison itself is the Founder running the same story once per backend and
   reading the existing kanban/finance views — no new report generator was built for a decision
   meant to close, not to maintain.
-- Next: Fase 3 (Backlog service with PO as single writer, git guard, Sprint, batch approvals).
+- **Fase 3** done (2026-09-19, ADR-0008): `loompa/backlog.py` is the only write path for cards and
+  only the Product Owner can build it (`add_item`, `set_priority`, `set_status`, `admit`); Master,
+  Kaizen, the dashboard, `promote` and the founder's skip/drop go through it and a test walks the
+  source AST to prove nothing else creates or ranks cards. Repeated titles no longer duplicate an
+  open card. `WorktreeManager.as_role()` + `LoompaAgent.git`: merge, rebase, push, pull, checkout,
+  reset, branch deletion and PR creation raise `GitAuthorityError` for every role but the
+  Deployer (raw `git()` included); the OpenCode agent file denies the same commands. `Sprint`
+  (`SP-001`, open/running/closed) with `loompa sprint start|add|status`: the Master runs the
+  Sprint Meeting, the Product Owner admits the cards, and the Scheduler no longer dispatches
+  anything still in BACKLOG (in-flight stories, epic children and `promote` still run). The sprint
+  closes and emits `sprint.done` when all its stories are terminal; a story blocked on the founder
+  waits alone. `FounderMessage.decisions[]` / `FounderAnswer.decisions`: a delivery offers each
+  suggested card (sprint / backlog / drop) as its own decision (`loompa inbox reply -d S-007=sprint`,
+  dashboard buttons, `POST /inbox/{id}/reply` with `decisions`); cards decided once are not asked
+  again and undecided ones stay in the backlog. Dashboard: sprint chip + "Iniciar sprint" button,
+  decisions in the inbox, `GET /sprints`, `POST /sprints/start`. Not done here: dashboard UI was
+  type-checked and built but not looked at in a browser.
+- Next: Fase 4 (tools for every role, MCP client, Analyst and the research route).
 
 ## Known gaps / next steps
 
