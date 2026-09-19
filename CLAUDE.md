@@ -23,4 +23,5 @@
   `loompa.comms.audit_executive_text` — no stack traces, paths or error names. Agent prompts are English.
 - Everything must work with zero API keys via the dry-run provider (`--dry-run`); tests use
   `MockProvider` scripts, never the network.
-- Commit style: semantic (`feat:`, `fix:`, `docs:`, `chore:`, `test:`), work on `dev_fable`.
+- Commit style: semantic (`feat:`, `fix:`, `docs:`, `chore:`, `test:`), work on `dev` (`dev_fable` is the
+  older branch this one grew out of; it is behind and nothing new goes there).
