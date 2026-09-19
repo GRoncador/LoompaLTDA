@@ -5,6 +5,9 @@
 - Frontend: `dashboard-ui/` (Vite + React + Tailwind + Phaser). `npm run build` writes the bundle
   into `src/loompa/dashboard/static/` — commit the bundle when the UI changes.
 - Orchestration is LangGraph (`engine/langgraph_engine.py`, ADR-0005); node logic stays in `engine/graph.py`.
+- Authority is enforced in code (ADR-0008): stories are created/ranked/admitted only through `ProductOwnerAgent`
+  (`loompa/backlog.py`), git merge/push/PR only through the Deployer's `agent.git`, and BACKLOG cards run only
+  after a sprint start (`loompa sprint start`, `meeting --run`) — don't call `store.upsert_story` or the raw `git()`.
 - Architecture decisions live in `docs/adr/`. Read them before changing the engine, LLM layer,
   memory or dashboard stack. The product brief is `PROJECT_BRIEF_OOMPA_LOOMPA_LTDA.md`.
 - Founder-facing text (inbox, reports) is Portuguese (pt-BR) and must pass
