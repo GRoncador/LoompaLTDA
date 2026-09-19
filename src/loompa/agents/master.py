@@ -320,6 +320,17 @@ class MasterAgent(LoompaAgent):
         convs = Conversations(self.ctx)
         conv = convs.open(ConversationKind.MEETING)
         turn = await self.converse(conv, goals)
+        if not convs.board.require(conv.id).draft.items and not turn.questions:
+            # The model answered but drafted nothing (seen live: it replied "I prepared the story"
+            # and sent only the sprint goal). In a chat the founder would say so; here nobody is at
+            # the keyboard, so the goals are split deterministically, as when the model is down.
+            report = convs.edit(conv.id, [{"op": "add", **g} for g in self._split_goals(goals)])
+            self.ctx.emit(
+                "meeting.recovered",
+                agent=self.name,
+                cards=len(report.changes),
+                ignored=len(turn.ignored),
+            )
         if convs.board.require(conv.id).draft.items:
             result = await convs.commit(conv.id)
         else:

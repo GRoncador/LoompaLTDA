@@ -409,6 +409,59 @@ async def test_the_morning_meeting_is_a_one_turn_session(factory: Factory):
     await ctx.aclose()
 
 
+async def test_the_one_turn_meeting_recovers_when_the_model_drafts_nothing(factory: Factory):
+    """Seen live with Gemini flash-lite: the reply said the story was prepared and the only op was
+    the sprint goal. `loompa meeting` is a batch command with nobody at the keyboard, so the
+    founder's goals must never evaporate."""
+    script = turn_script(
+        {
+            "reply": "Preparei a história para adicionar a subtração, já com testes.",
+            "ops": [{"op": "goal", "text": "Calculadora completa"}],
+            "questions": [],
+        }
+    )
+    ctx = make_ctx(factory, script)
+    result = await MasterAgent(ctx).meeting("Página de login; Exportar CSV")
+    assert [s["title"] for s in result["stories"]] == ["Página de login", "Exportar CSV"]
+    assert {s["id"] for s in result["stories"]} == {"S-001", "S-002"}
+    recovered = events(ctx, "meeting.recovered")
+    assert len(recovered) == 1 and recovered[0]["payload"]["cards"] == 2
+    await ctx.aclose()
+
+
+async def test_a_question_is_not_a_dropped_ball(factory: Factory):
+    """A meeting that asks instead of drafting is doing its job: no deterministic salvage."""
+    script = turn_script(
+        {"reply": "Para quem é o relatório?", "ops": [], "questions": ["Para quem é o relatório?"]}
+    )
+    ctx = make_ctx(factory, script)
+    result = await MasterAgent(ctx).meeting("Um relatório")
+    assert result["stories"] == [] and result["clarifications"] == ["Para quem é o relatório?"]
+    assert events(ctx, "meeting.recovered") == []
+    assert ctx.store.list_stories(factory.slug) == []
+    await ctx.aclose()
+
+
+async def test_a_chat_turn_records_what_it_refused(factory: Factory):
+    """The reason an edit was dropped survives in the session, not only in the reply of the
+    moment: a silent drop is what made the live failure hard to diagnose."""
+    script = turn_script(
+        {
+            "reply": "Anotei.",
+            "ops": [add("Login"), {"op": "add", "description": "sem título"}, {"op": "explodir"}],
+        }
+    )
+    ctx = make_ctx(factory, script)
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    turn = await chats.say(conv.id, "quero um login")
+    assert len(turn.ignored) == 2
+    saved = chats.board.require(conv.id).turns[-1]
+    assert saved.ignored == turn.ignored and saved.changes == turn.changes
+    assert events(ctx, "conversation.turn")[0]["payload"]["ignored"] == 2
+    await ctx.aclose()
+
+
 async def test_a_meeting_that_drafts_nothing_leaves_no_open_session(factory: Factory):
     script = turn_script(
         {"reply": "Preciso de mais detalhes.", "ops": [], "questions": ["Sobre o quê?"]}

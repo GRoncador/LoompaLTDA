@@ -55,6 +55,7 @@ class Turn(BaseModel):
     name: str = ""  # who spoke, for agent turns
     text: str
     changes: list[str] = Field(default_factory=list)  # what the turn did to the draft
+    ignored: list[str] = Field(default_factory=list)  # edits that were refused, and why
     at: str = Field(default_factory=now_iso)
 
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,12 @@ async def test_live_first_real_cycle(
             "Adicionar a função subtract(a, b) em app/calc.py com teste em tests/test_calc.py"
         )
         assert result["stories"], result
+        if [e for e in ctx.store.events_since(0, limit=5000) if e["type"] == "meeting.recovered"]:
+            warnings.warn(  # the command worked, but the model did not draft the cards itself
+                "o modelo respondeu sem propor nenhuma história; a reunião caiu na divisão "
+                "determinística das metas (veja meeting.recovered)",
+                stacklevel=1,
+            )
         master.start_sprint()
         done = await Scheduler(ctx).run()
         assert done

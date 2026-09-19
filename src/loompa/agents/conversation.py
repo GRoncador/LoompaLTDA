@@ -56,6 +56,9 @@ Never say a card was created or a sprint started. Operations:
 - {{"op": "goal", "text": str}}  (the sprint goal, one sentence)
 `priority` is 1 (urgent) to 5 (nice to have). `questions` repeats any question you asked in the
 reply (at most two), or is empty. Return "ops": [] when the message needs no change to the draft.
+The reply and the ops must say the same thing: every story you describe in `reply` needs its own
+`add` op in the same answer. A `goal` op sets the sprint goal and never creates a story, so a reply
+that says you prepared the work, with no `add` next to it, is wrong.
 """
 
 
@@ -145,7 +148,15 @@ async def run_turn(
     reply = founder_text(polish(reply) if polish else reply) or (
         "Atualizei o rascunho." if report.changes else "Certo. O que mais você quer ajustar?"
     )
-    conv.turns.append(Turn(who="agent", name=agent.name, text=reply, changes=report.changes))
+    conv.turns.append(
+        Turn(
+            who="agent",
+            name=agent.name,
+            text=reply,
+            changes=report.changes,
+            ignored=report.ignored,
+        )
+    )
     board.save(conv)
     agent.ctx.emit(
         "conversation.turn",
@@ -154,6 +165,7 @@ async def run_turn(
         kind=conv.kind.value,
         cards=len(conv.draft.items),
         in_sprint=len(conv.draft.in_sprint()),
+        ignored=len(report.ignored),
     )
     return TurnResult(reply, report.changes, report.ignored, questions, failed)
 
