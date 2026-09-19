@@ -8,14 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from loompa.config import ConfigStore, default_config
+from loompa.config import MODEL_PRESETS, ConfigStore, default_config
 
-# Cheapest sensible model per provider for the live smoke test.
+# Cheapest sensible model per provider for the live smoke test. OpenRouter follows the tier2 lead
+# of its preset, so a preset change cannot leave this testing a model that is no longer the default.
 LIVE_DEFAULT_MODEL = {
     "gemini": "gemini-3.5-flash-lite",
     "deepseek": "deepseek-chat",
     "groq": "llama-3.1-8b-instant",
-    "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+    "openrouter": MODEL_PRESETS["openrouter"].tiers["tier2"][0].model,
     "anthropic": "claude-haiku-4-5",
 }
 

@@ -91,7 +91,7 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
 
 def apply_preset(config: LoompaConfig, key: str) -> ModelPreset:
     preset = MODEL_PRESETS[key]
-    config.models.tiers = {t: list(c) for t, c in preset.tiers.items()}
+    config.models.tiers = {t: [c.model_copy() for c in cs] for t, cs in preset.tiers.items()}
     config.models.preset = key
     return preset
 
