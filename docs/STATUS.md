@@ -173,6 +173,35 @@ Suggested next (not implemented):
   asks nothing (the guarantee the pre-Fase-5 `meeting` had on its error path; a `meeting.recovered`
   event and a warning in the live test keep the salvage visible). A refused edit is now saved on the
   turn (`Turn.ignored`), because the first diagnosis was blind: only `changes` was persisted.
+- **Third and fourth live runs (2026-09-19): two bugs of ours, neither in the providers.** Both
+  conversation tests failed with a bare `'list' object has no attribute 'get'`. Cause: Google's
+  OpenAI-compatible endpoint answers a 429 with a *list* body, `[{"error": {...}}]`, and
+  `_retry_after_seconds` read it as an object. It is evaluated inside the
+  `raise QuotaExhausted(..., retry_after=...)` expression, so the crash replaced the quota error
+  before it existed and escaped the router's fall-through: a routine free-tier rate limit killed the
+  whole turn. Fixed, plus a guard that turns any unparseable 200 into a retryable `LLMError` carrying
+  the body, so a future provider quirk falls through to the next candidate instead of escaping raw.
+  Two live runs were wasted first on guessed payload shapes; what found it was one line of
+  `log.exception` in `run_turn` (the traceback goes to the log, never to the event —
+  `/api/factories/{slug}/events` feeds the dashboard). Live after the fix: **Gemini 4/4**.
+- **Models: OpenRouter is now the recommended preset**, first in `MODEL_PRESETS` and so the onboarding
+  default — one key for every tier, spending cap in OpenRouter's own dashboard. Candidates were read
+  from the live `/api/v1/models` catalogue, filtered to those supporting `tools` and excluding `:batch`
+  (queued, wrong latency for a tool loop): `z-ai/glm-5.3` on tier1, `z-ai/glm-5.3-flash` and
+  `deepseek/deepseek-v4-flash-0731` on tier2, free DeepSeek as fallback. Cheap *paid* models lead on
+  purpose: OpenRouter's `:free` pool is throttled and rotates. Their real prices are in `pricing`,
+  because `price_for` otherwise falls back to a generic $1.00/$3.00 and would bill a $0.09 model
+  twelve times over.
+- **`reasoning_effort` (new).** On a reasoning model the output budget pays for the thinking *and* the
+  answer. The chat turn caps it at 1800 tokens, so `z-ai/glm-5.3` spent all 1800 reasoning and returned
+  an empty string (`finish_reason='length'`). Mandatory reasoning is the norm at the tier1 frontier
+  (GLM 5.3, Qwen Max and Grok 4.6 all force it; of the shortlist only `kimi-k3` does not), so changing
+  model would only postpone it. `reasoning_effort` follows the path `max_tokens` already takes: a
+  default per `ModelCandidate`, a per-call override that wins; `run_turn` asks for `"low"`, the
+  Architect on a complex story still thinks at full effort. Anthropic accepts and ignores it (thinking
+  there is a token budget, not an effort label). `ask_json`/`ask_json_with_tools` now log the reply,
+  `finish_reason` and output tokens when the answer is not JSON — that log is what identified this.
+  Live: **OpenRouter 4/4 on both tiers**, full suite green.
 - Next: Fase 6 (technical backlog: CodeRabbit webhook, cron/launchd recipe, dashboard priority drag,
   story diff, cost charts, token suggestions 1-3, PyPI).
 
@@ -189,3 +218,15 @@ Suggested next (not implemented):
 - Nightly cycle scheduler (`loompa run --watch` exists; a cron/launchd recipe is not shipped).
 - Dashboard: drag-and-drop priority, story diff viewer, finance charts.
 - Packaging: publish to PyPI; `uvx loompa` verified locally via `uv run loompa` only.
+- `loompa models sync` (proposed, not built): rank the OpenRouter catalogue by cost/benefit from
+  `pricing` + `benchmarks.artificial_analysis` and refresh the model matrix. The catalogue does carry
+  those indices (447 models, 251 with benchmarks, 378 with `tools`), so the idea is sound. Open
+  decisions before building it: what to do with the ~44% of models that have no benchmark (a naive
+  `coding or 0` filter drops them silently); whether tier1 should rank by ratio or by "floor, then
+  best", since a ratio always picks the cheapest acceptable model; and it must now also read
+  `reasoning.mandatory`/`default_effort`, which is exactly what broke tier1. Governance the Founder
+  asked for: propose through the inbox and never swap models mid-sprint, because the prompts are tuned.
+- `LIVE_DEFAULT_MODEL["openrouter"]` in `tests/conftest.py` still names the old preset's free DeepSeek;
+  omitting `--live-model` therefore tests a model no longer in the default preset.
+- The full test suite intermittently hangs after reaching 100% on some machines (a thread-join flake at
+  teardown, pre-existing). It runs to completion on the Founder's machine.
