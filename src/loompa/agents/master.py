@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from loompa.agents.base import LoompaAgent
+from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.comms import (
     FounderMessage,
     MessageKind,
@@ -114,37 +115,17 @@ class MasterAgent(LoompaAgent):
         ids: list[str] = []
         epic = parent.epic or parent.title[:60]
         row = self.ctx.store.get_story(parent.story_id) or {}
+        po = ProductOwnerAgent(self.ctx)
         for child in children:
-            sid = self.ctx.store.next_story_id(self.ctx.slug)
-            state = StoryState(
-                story_id=sid,
-                title=child["title"],
-                description=child.get("description") or "",
+            added = po.add_item(
+                child["title"],
+                child.get("description") or "",
                 epic=epic,
+                priority=row.get("priority", 300),
+                origin="epic",
                 founder_notes=list(parent.founder_notes),
             )
-            self.ctx.store.upsert_story(
-                {
-                    "id": sid,
-                    "factory": self.ctx.slug,
-                    "title": state.title,
-                    "description": state.description,
-                    "epic": epic,
-                    "stage": Stage.BACKLOG,
-                    "priority": row.get("priority", 300),
-                    "origin": "epic",
-                    "state": state.model_dump(mode="json"),
-                }
-            )
-            self.ctx.emit(
-                "story.created",
-                story_id=sid,
-                agent=self.name,
-                title=state.title,
-                origin="epic",
-                parent=parent.story_id,
-            )
-            ids.append(sid)
+            ids.append(added.story_id)
         self.ctx.inbox(
             FounderMessage(
                 factory=self.ctx.slug,
@@ -181,38 +162,27 @@ class MasterAgent(LoompaAgent):
             stories = self._split_goals(goals)
             clarifications = []
         created = []
+        po = ProductOwnerAgent(self.ctx)
         for s in stories:
-            title = str(s["title"]).strip()[:120]
-            if title.lower() in {t.lower() for t in existing}:
-                continue
-            story_id = self.ctx.store.next_story_id(self.ctx.slug)
-            state = StoryState(
-                story_id=story_id,
-                title=title,
-                description=str(s.get("description") or "").strip(),
-                epic=str(s.get("epic") or "").strip(),
-            )
             priority = int(s.get("priority") or 3)
-            self.ctx.store.upsert_story(
+            added = po.add_item(
+                str(s["title"]),
+                str(s.get("description") or ""),
+                epic=str(s.get("epic") or ""),
+                priority=max(1, min(5, priority)) * 100,
+                origin="founder",
+            )
+            if not added.created:
+                continue
+            row = self.ctx.store.get_story(added.story_id) or {}
+            created.append(
                 {
-                    "id": story_id,
-                    "factory": self.ctx.slug,
-                    "title": title,
-                    "description": state.description,
-                    "epic": state.epic,
-                    "stage": Stage.BACKLOG,
-                    "priority": max(1, min(5, priority)) * 100,
-                    "origin": "founder",
-                    "state": state.model_dump(mode="json"),
+                    "id": added.story_id,
+                    "title": row.get("title", ""),
+                    "epic": row.get("epic", ""),
+                    "priority": priority,
                 }
             )
-            self.ctx.emit(
-                "story.created", story_id=story_id, agent=self.name, title=title, origin="founder"
-            )
-            created.append(
-                {"id": story_id, "title": title, "epic": state.epic, "priority": priority}
-            )
-            existing.append(title)
         for q in clarifications[:3]:
             self.ctx.inbox(
                 FounderMessage(

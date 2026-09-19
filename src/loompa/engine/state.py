@@ -108,7 +108,23 @@ class StoryState(BaseModel):
     delivery_summary: str = ""
 
     learnings: list[dict[str, str]] = Field(default_factory=list)
+    finding_cards: list[str] = Field(default_factory=list)  # backlog cards this story raised
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> StoryState:
+        """Rebuild the state from a `stories` row; the row's columns win over the JSON blob."""
+        data = dict(row.get("state") or {})
+        data.update(
+            {
+                "story_id": row["id"],
+                "title": row["title"],
+                "description": row.get("description", ""),
+                "epic": row.get("epic", ""),
+                "stage": row["stage"],
+            }
+        )
+        return cls.model_validate(data)
 
     @property
     def is_terminal(self) -> bool:

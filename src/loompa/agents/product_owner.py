@@ -2,13 +2,16 @@
 
 Fase 1 (ADR-0006): reviews the spec with the "No Invention" gate — every acceptance criterion
 must trace back to something the founder said, the constitution or an existing spec. Fase 3
-makes this agent the only writer of the backlog.
+makes this agent the only writer of the backlog: the methods below are the only door to
+`loompa.backlog.Backlog`, and Master, Kaizen, the dashboard and the founder's answers all
+come through them.
 """
 
 from __future__ import annotations
 
 from loompa.agents.base import AgentResult, LoompaAgent
-from loompa.engine.state import StoryState
+from loompa.backlog import DEFAULT_PRIORITY, Admission, Backlog
+from loompa.engine.state import Stage, StoryState
 from loompa.speckit import story_dir
 
 REVIEW_SYSTEM = """<!-- role:product_owner -->
@@ -30,6 +33,40 @@ class ProductOwnerAgent(LoompaAgent):
     role = "product_owner"
     display = "Product Owner Loompa"
 
+    # ---------------------------------------------------------------- backlog
+    @property
+    def backlog(self) -> Backlog:
+        return Backlog(self.ctx, owner=self)
+
+    def add_item(
+        self,
+        title: str,
+        description: str = "",
+        *,
+        epic: str = "",
+        priority: int = DEFAULT_PRIORITY,
+        origin: str = "founder",
+        founder_notes: list[str] | None = None,
+    ) -> Admission:
+        return self.backlog.add_item(
+            title,
+            description,
+            epic=epic,
+            priority=priority,
+            origin=origin,
+            founder_notes=founder_notes,
+        )
+
+    def set_priority(self, story_id: str, priority: int) -> None:
+        self.backlog.set_priority(story_id, priority)
+
+    def set_status(self, story_id: str, status: Stage) -> None:
+        self.backlog.set_status(story_id, status)
+
+    def admit(self, story_id: str) -> bool:
+        return self.backlog.admit(story_id)
+
+    # ------------------------------------------------------------------- spec
     async def review_spec(self, state: StoryState) -> AgentResult:
         self.set_state("WORKING", state, detail="revisando a spec (No Invention)")
         paths = story_dir(self.ctx.root, state.story_id)

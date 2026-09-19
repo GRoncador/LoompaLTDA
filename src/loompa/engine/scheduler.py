@@ -33,17 +33,7 @@ def load_state(ctx: EngineContext, story_id: str) -> StoryState:
     row = ctx.store.get_story(story_id)
     if row is None:
         raise KeyError(story_id)
-    data = dict(row["state"] or {})
-    data.update(
-        {
-            "story_id": story_id,
-            "title": row["title"],
-            "description": row.get("description", ""),
-            "epic": row.get("epic", ""),
-            "stage": row["stage"],
-        }
-    )
-    return StoryState.model_validate(data)
+    return StoryState.from_row(row)
 
 
 def save_state(ctx: EngineContext, state: StoryState, node: str) -> None:
@@ -122,12 +112,9 @@ class Scheduler:
 
     def promote(self, story_id: str) -> None:
         """Founder approves a backlog card (e.g. a Kaizen discovery) for execution."""
-        state = load_state(self.ctx, story_id)
-        if state.stage == Stage.BACKLOG:
-            state.stage = Stage.SPEC  # kanban leaves the backlog; intake still classifies it
-            state.phase = "intake"
-            save_state(self.ctx, state, "promote")
-            self.ctx.emit("story.promoted", story_id=story_id)
+        from loompa.agents.product_owner import ProductOwnerAgent
+
+        ProductOwnerAgent(self.ctx).admit(story_id)
 
     def budget_ok(self) -> BudgetStatus:
         st = self.ctx.tracker.status()

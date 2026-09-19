@@ -1,11 +1,17 @@
-"""Kaizen loop: every discovery becomes a learning entry, a backlog card and searchable memory."""
+"""Kaizen loop: every discovery becomes a learning entry, a backlog card and searchable memory.
+
+The card is proposed to the Product Owner, the only writer of the backlog: it lands as a new card
+or, when an open card already says the same, points at that one. Either way the story that raised
+it remembers the card (`finding_cards`), so the delivery can ask the founder what to do with it.
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 from loompa.agents.base import LoompaAgent
-from loompa.engine.state import Stage, StoryState
+from loompa.agents.product_owner import ProductOwnerAgent
+from loompa.engine.state import StoryState
 
 KIND_LABEL = {
     "bug": "Bug colateral",
@@ -34,25 +40,14 @@ class KaizenAgent(LoompaAgent):
             detail = str(item.get("detail") or "").strip()
             if not title:
                 continue
-            new_id = self.ctx.store.next_story_id(self.ctx.slug)
-            child = StoryState(
-                story_id=new_id,
-                title=f"[{KIND_LABEL.get(kind, kind)}] {title}",
-                description=f"{detail}\n\nDescoberto durante {state.story_id} ({state.title}).",
+            added = ProductOwnerAgent(self.ctx).add_item(
+                f"[{KIND_LABEL.get(kind, kind)}] {title}",
+                f"{detail}\n\nDescoberto durante {state.story_id} ({state.title}).",
+                epic="kaizen",
+                priority=500 if kind != "bug" else 250,
+                origin="kaizen",
             )
-            self.ctx.store.upsert_story(
-                {
-                    "id": new_id,
-                    "factory": self.ctx.slug,
-                    "title": child.title,
-                    "description": child.description,
-                    "epic": "kaizen",
-                    "stage": Stage.BACKLOG,
-                    "priority": 500 if kind != "bug" else 250,
-                    "origin": "kaizen",
-                    "state": child.model_dump(mode="json"),
-                }
-            )
+            new_id = added.story_id
             self.ctx.store.add_learning(
                 story_id=state.story_id,
                 kind=kind,
@@ -74,6 +69,8 @@ class KaizenAgent(LoompaAgent):
                 created_story_id=new_id,
             )
             item["_captured"] = "1"
+            if new_id not in state.finding_cards:
+                state.finding_cards.append(new_id)
             created.append(new_id)
         if lines:
             with path.open("a", encoding="utf-8") as fh:

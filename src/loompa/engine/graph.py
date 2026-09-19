@@ -33,6 +33,8 @@ from loompa.worktrees import GitError, Worktree
 
 Node = Callable[[EngineContext, StoryState], Awaitable[StoryState]]
 
+SKIPPED_PRIORITY = 900  # "deixar para depois": back of the queue
+
 
 def _write_tech_log(ctx: EngineContext, state: StoryState, text: str) -> str:
     logs = ctx.factory.paths.logs
@@ -364,13 +366,16 @@ def apply_founder_answer(
         else None
     )
     if key == "drop":
+        ProductOwnerAgent(ctx).set_status(state.story_id, Stage.CANCELLED)
         state.stage = Stage.CANCELLED
         state.phase = ""
         ctx.worktrees.remove(state.story_id)
     elif key == "skip":
+        po = ProductOwnerAgent(ctx)
+        po.set_status(state.story_id, Stage.BACKLOG)
+        po.set_priority(state.story_id, SKIPPED_PRIORITY)
         goto(state, "intake" if not state.route else state.route[0])
         state.stage = Stage.BACKLOG
-        ctx.store.update_story(state.story_id, priority=900)
     elif reason == BlockedReason.DELIVERY:
         if key in ("approve", "approved", "ok", "yes", "sim"):
             wt = ctx.worktrees.get(state.story_id)

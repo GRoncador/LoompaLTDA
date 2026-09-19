@@ -346,23 +346,15 @@ def create_app(
     @app.post("/api/factories/{slug}/stories")
     def create_story(slug: str, body: StoryBody) -> dict[str, Any]:
         ctx = hub.get(slug).ctx
-        from loompa.engine import Stage, StoryState
+        from loompa.agents import ProductOwnerAgent
 
-        sid = ctx.store.next_story_id(slug)
-        state = StoryState(story_id=sid, title=body.title[:120], description=body.description)
-        ctx.store.upsert_story(
-            {
-                "id": sid,
-                "factory": slug,
-                "title": state.title,
-                "description": body.description,
-                "stage": Stage.BACKLOG,
-                "priority": max(1, min(5, body.priority)) * 100,
-                "origin": "founder",
-                "state": state.model_dump(mode="json"),
-            }
+        added = ProductOwnerAgent(ctx).add_item(
+            body.title,
+            body.description,
+            priority=max(1, min(5, body.priority)) * 100,
+            origin="founder",
         )
-        ctx.emit("story.created", story_id=sid, title=state.title, origin="founder")
+        sid = added.story_id
         return {"id": sid}
 
     @app.post("/api/factories/{slug}/stories/{story_id}/promote")
