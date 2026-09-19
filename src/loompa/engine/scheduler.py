@@ -25,6 +25,7 @@ from loompa.engine.graph import BlockedReason, apply_founder_answer, block
 from loompa.engine.langgraph_engine import GraphRuntime
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.finance import BudgetStatus
+from loompa.models_sync import ModelSync
 
 log = logging.getLogger("loompa.scheduler")
 
@@ -122,6 +123,7 @@ class Scheduler:
         from loompa.agents.master import MasterAgent
 
         MasterAgent(self.ctx).close_finished_sprints()
+        ModelSync(self.ctx).apply_deferred()  # an approved model swap waits for the work to end
 
     def budget_ok(self) -> BudgetStatus:
         st = self.ctx.tracker.status()
@@ -283,6 +285,7 @@ class Scheduler:
         if msg.kind.value == "finance" and answer.option_key in ("raise_10", "raise_30"):
             self.ctx.config.budget.monthly_cap_usd += 10 if answer.option_key == "raise_10" else 30
             self.ctx.factory.save()
+        ModelSync(self.ctx).on_answer(msg, answer)
         if not msg.story_id:
             return None
         state = load_state(self.ctx, msg.story_id)

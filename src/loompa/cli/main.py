@@ -243,6 +243,7 @@ def main() -> None:  # pragma: no cover - console entry
 
 try:  # extended commands (meeting/run/inbox/dashboard) registered when the engine is present
     from loompa.cli import chat as _chat  # noqa: F401
+    from loompa.cli import models as _models  # noqa: F401
     from loompa.cli import ops as _ops  # noqa: F401
     from loompa.cli import providers as _providers  # noqa: F401
     from loompa.cli import worker as _worker  # noqa: F401

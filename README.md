@@ -86,6 +86,7 @@ BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → T
 | `loompa sprint start\|add\|status` | Sprints: the Product Owner admits the cards, the factory runs them |
 | `loompa run [--watch] [--parallel N] [--dry-run]` | Continuous batch execution |
 | `loompa inbox list\|reply\|batch` | Founder inbox (batch decisions) |
+| `loompa models sync [--preview]` | Rank the OpenRouter catalogue by cost/benefit and propose a new model list in the inbox (applied on approval, never mid-sprint) |
 | `loompa status`, `loompa report`, `loompa kaizen` | Kanban, end-of-day executive report, learnings |
 | `loompa ask compliance\|metrics\|storyteller "…"` | On-demand support Loompas |
 | `loompa memory index\|search` | Organizational memory |

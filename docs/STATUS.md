@@ -29,6 +29,7 @@ Status as of 2026-09-19 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 2 (spike OpenCode) | ✅ `worker.backend` (aci\|opencode), `OpenCodeWorker` roda `opencode run` no worktree com agente `.opencode/agents/loompa-worker.md` restrito a `allowed_paths`, Ops trata falhas do subprocesso como qualquer crash, custo aproximado (tier `opencode`), `loompa worker backend` + settings API; comparação ACI×OpenCode é o Founder rodando a mesma story com cada backend e olhando kanban/finance (sem harness de report novo). ADR-0007 | `config/schema.py::WorkerConfig`, `agents/opencode_worker.py`, `engine/graph.py::node_dev`, `cli/worker.py`, `docs/adr/0007-*` |
 | Plano set/2026 · Fase 4 (ferramentas para todos os papéis, MCP, Analyst) | ✅ perfis de permissão por papel (`Toolbox`), loop de ferramentas genérico em `LoompaAgent`, arquivos protegidos, cliente MCP (`loompa/mcp/`, SDK oficial) com Tavily, `AnalystAgent` e rota `research` (fontes conferidas em código, limitação declarada em código, revisão do PO, entrega ao Founder). ADR-0009 | `agents/toolbox.py`, `agents/base.py`, `mcp/client.py`, `agents/analyst.py`, `engine/graph.py`, `engine/phases.py`, `config/schema.py`, `docs/adr/0009-*` |
 | Plano set/2026 · Fase 5 (conversas) | ✅ sessões de chat persistidas com rascunho de backlog e de sprint (só a Master/Analyst propõem operações, o código valida), Sprint Meeting (Master), Brainstorm (Analyst → Product Owner admite), `loompa meeting` como sessão de um turno, `loompa chat`, API e modal no dashboard. ADR-0010 | `conversations.py`, `agents/conversation.py`, `agents/master.py`, `agents/analyst.py`, `agents/product_owner.py`, `cli/chat.py`, `dashboard/app.py`, `ChatModal.tsx`, `docs/adr/0010-*` |
+| Plano set/2026 · Fase 6 (parcial: `models sync`) | ✅ catálogo da OpenRouter ranqueado por custo-benefício (tier1: melhor nota sob teto de preço; tier2: mais barato acima de um piso), proposta na Caixa de Entrada, aplicada só com aprovação e fora de sprint. ADR-0011 | `llm/catalog.py`, `models_sync.py`, `cli/models.py`, `engine/scheduler.py`, `tests/test_models_sync.py`, `docs/adr/0011-*` |
 
 ## Deliberate divergences from the brief
 
@@ -204,6 +205,18 @@ Suggested next (not implemented):
   Live: **OpenRouter 4/4 on both tiers**, full suite green.
 - Next: Fase 6 (technical backlog: CodeRabbit webhook, cron/launchd recipe, dashboard priority drag,
   story diff, cost charts, token suggestions 1-3, PyPI).
+- **`loompa models sync` built (2026-09-20, ADR-0011), the first item of Fase 6.** Ranking rules were
+  decided against the real catalogue (447 models, 85 pass the filters), not in the abstract: no
+  benchmark means *out and counted*, never scored 0; a model that forces reasoning without a way to
+  lower the effort is out (that is what broke tier1); tier1 is best-under-a-ceiling and tier2 is
+  cheapest-above-a-floor, because a ratio always picks the cheapest. Governance as the Founder asked:
+  an inbox decision, applied only when nothing is in flight (otherwise on the next `close_sprints`)
+  and never over a configuration edited since. On the live catalogue tier1 comes out as Qwen3.8 Max,
+  Grok 4.6, GLM 5.3 and tier2 as GLM 5.3 Flash, GPT-5.6 Luna, Qwen3.8 27B — Luna, Qwen 27B and Grok are
+  **not validated live**. Also fixed: `LIVE_DEFAULT_MODEL["openrouter"]` now reads the preset's tier2
+  lead; `apply_preset` copies its candidates instead of sharing them across factories.
+  Found while doing it: the `gratuito` preset names `deepseek/deepseek-r1:free` and
+  `deepseek/deepseek-chat-v3-0324:free`, which are gone from the OpenRouter catalogue (not changed).
 
 ## Known gaps / next steps
 
@@ -218,15 +231,5 @@ Suggested next (not implemented):
 - Nightly cycle scheduler (`loompa run --watch` exists; a cron/launchd recipe is not shipped).
 - Dashboard: drag-and-drop priority, story diff viewer, finance charts.
 - Packaging: publish to PyPI; `uvx loompa` verified locally via `uv run loompa` only.
-- `loompa models sync` (proposed, not built): rank the OpenRouter catalogue by cost/benefit from
-  `pricing` + `benchmarks.artificial_analysis` and refresh the model matrix. The catalogue does carry
-  those indices (447 models, 251 with benchmarks, 378 with `tools`), so the idea is sound. Open
-  decisions before building it: what to do with the ~44% of models that have no benchmark (a naive
-  `coding or 0` filter drops them silently); whether tier1 should rank by ratio or by "floor, then
-  best", since a ratio always picks the cheapest acceptable model; and it must now also read
-  `reasoning.mandatory`/`default_effort`, which is exactly what broke tier1. Governance the Founder
-  asked for: propose through the inbox and never swap models mid-sprint, because the prompts are tuned.
-- `LIVE_DEFAULT_MODEL["openrouter"]` in `tests/conftest.py` still names the old preset's free DeepSeek;
-  omitting `--live-model` therefore tests a model no longer in the default preset.
 - The full test suite intermittently hangs after reaching 100% on some machines (a thread-join flake at
   teardown, pre-existing). It runs to completion on the Founder's machine.
