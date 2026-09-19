@@ -11,7 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,13 @@ from loompa import __version__
 from loompa.comms import FounderAnswer
 from loompa.config import ConfigStore
 from loompa.config.settings import SettingsPatch
+from loompa.conversations import (
+    Conversation,
+    ConversationError,
+    ConversationKind,
+    ConversationNotFound,
+    ConversationStatus,
+)
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, kanban_column, load_state
 from loompa.factory import Factory
 from loompa.finance import month_start_iso, today_start_iso
@@ -87,6 +94,25 @@ class SprintBody(BaseModel):
     run: bool = True
 
 
+class ChatOpenBody(BaseModel):
+    kind: ConversationKind = ConversationKind.MEETING
+    text: str = ""
+
+
+class ChatSayBody(BaseModel):
+    text: str
+
+
+class DraftBody(BaseModel):
+    ops: list[dict[str, Any]]
+
+
+class CommitBody(BaseModel):
+    start_sprint: bool = False
+    goal: str = ""
+    run: bool = True
+
+
 class StoryBody(BaseModel):
     title: str
     description: str = ""
@@ -109,6 +135,11 @@ class FactoryRuntime:
     ctx: EngineContext
     engine_task: asyncio.Task | None = None
     listeners: set[asyncio.Queue] = field(default_factory=set)
+    chat_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+
+    def chat_lock(self, conversation_id: str) -> asyncio.Lock:
+        """One turn or commit at a time per conversation (two tabs, or a double click)."""
+        return self.chat_locks.setdefault(conversation_id, asyncio.Lock())
 
     def broadcast(self, event: dict[str, Any]) -> None:
         for q in list(self.listeners):
@@ -203,6 +234,25 @@ def _sprint_summary(ctx: EngineContext) -> dict[str, Any] | None:
         return None
     sprint = next((sp for sp in active if sp.status == SprintStatus.RUNNING), active[-1])
     return {**sprint.model_dump(), "progress": board.progress(sprint)}
+
+
+def _board(ctx: EngineContext):
+    from loompa.conversations import ConversationBoard
+
+    return ConversationBoard(ctx.store, ctx.slug)
+
+
+def _conversation_summary(conv: Conversation) -> dict[str, Any]:
+    return {
+        "id": conv.id,
+        "kind": conv.kind.value,
+        "status": conv.status.value,
+        "title": conv.title,
+        "turns": len(conv.turns),
+        "cards": len(conv.draft.items),
+        "in_sprint": len(conv.draft.in_sprint()),
+        "updated_at": conv.updated_at,
+    }
 
 
 def create_app(
@@ -336,6 +386,9 @@ def create_app(
             },
             "kaizen_today": len(ctx.store.list_learnings(since_iso=today_start_iso())),
             "sprint": _sprint_summary(ctx),
+            "conversations": [
+                _conversation_summary(c) for c in _board(ctx).list(ConversationStatus.OPEN)[:10]
+            ],
             "last_event_id": _last_event_id(ctx),
         }
 
@@ -449,6 +502,88 @@ def create_app(
             await hub.start_engine(slug)
         board = SprintBoard(rt.ctx.store, slug)
         return {**sprint.model_dump(), "progress": board.progress(sprint)}
+
+    # ---------------------------------------------------------- conversations
+    def _chat(slug: str) -> tuple[FactoryRuntime, Any]:
+        from loompa.agents import Conversations
+
+        rt = hub.get(slug)
+        return rt, Conversations(rt.ctx)
+
+    def _payload(conv: Conversation, **extra: Any) -> dict[str, Any]:
+        return {"conversation": conv.model_dump(mode="json"), **extra}
+
+    @contextlib.contextmanager
+    def _chat_errors():
+        try:
+            yield
+        except ConversationNotFound as exc:
+            raise HTTPException(404, str(exc)) from None
+        except (ConversationError, SprintError) as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.get("/api/factories/{slug}/conversations")
+    def list_conversations(slug: str, status: str | None = None) -> list[dict[str, Any]]:
+        board = _board(hub.get(slug).ctx)
+        wanted = ConversationStatus(status) if status else None
+        return [_conversation_summary(c) for c in board.list(wanted)]
+
+    @app.post("/api/factories/{slug}/conversations")
+    async def open_conversation(slug: str, body: ChatOpenBody) -> dict[str, Any]:
+        rt, chats = _chat(slug)
+        rt.ctx.index_memory()
+        conv = chats.open(body.kind)
+        turn = None
+        if body.text.strip():
+            async with rt.chat_lock(conv.id):
+                with _chat_errors():
+                    turn = await chats.say(conv.id, body.text)
+        conv = chats.board.require(conv.id)
+        return _payload(conv, turn=turn and asdict(turn))
+
+    @app.get("/api/factories/{slug}/conversations/{conversation_id}")
+    def get_conversation(slug: str, conversation_id: str) -> dict[str, Any]:
+        _, chats = _chat(slug)
+        with _chat_errors():
+            return _payload(chats.board.require(conversation_id, open_only=False))
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/messages")
+    async def say(slug: str, conversation_id: str, body: ChatSayBody) -> dict[str, Any]:
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                turn = await chats.say(conversation_id, body.text)
+                return _payload(chats.board.require(conversation_id), turn=asdict(turn))
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/draft")
+    async def edit_draft(slug: str, conversation_id: str, body: DraftBody) -> dict[str, Any]:
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                report = chats.edit(conversation_id, body.ops)
+                return _payload(chats.board.require(conversation_id), report=asdict(report))
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/commit")
+    async def commit_conversation(
+        slug: str, conversation_id: str, body: CommitBody
+    ) -> dict[str, Any]:
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                result = await chats.commit(
+                    conversation_id, start_sprint=body.start_sprint, goal=body.goal
+                )
+                conv = chats.board.require(conversation_id, open_only=False)
+        if body.start_sprint and body.run:
+            await hub.start_engine(slug)
+        return _payload(conv, result=result.as_dict())
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/discard")
+    async def discard_conversation(slug: str, conversation_id: str) -> dict[str, Any]:
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                return _payload(chats.discard(conversation_id))
 
     @app.post("/api/factories/{slug}/transcribe")
     async def transcribe(slug: str, audio: UploadFile = File(...)) -> dict[str, Any]:
