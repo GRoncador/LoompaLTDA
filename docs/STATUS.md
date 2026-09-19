@@ -27,6 +27,7 @@ Status as of 2026-09-19 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 0b (provedores, modelos e chaves por fábrica) | ✅ secrets files, presets, `loompa providers`, settings screen + API, tier per agent, secret guard | `config/secrets.py`, `config/presets.py`, `config/settings.py`, `cli/providers.py`, `dashboard/app.py`, `SettingsModal.tsx` |
 | Plano set/2026 · Fase 1 (pipeline como dado e revisões) | ✅ route/kind/complexity/handoff, phase registry, spec_review (PO, No Invention), graded QA gate, DoD, complexity→tier, epic split | `engine/phases.py`, `engine/graph.py`, `agents/product_owner.py`, `agents/inspector.py`, `agents/worker.py`, `llm/router.py` |
 | Plano set/2026 · Fase 2 (spike OpenCode) | ✅ `worker.backend` (aci\|opencode), `OpenCodeWorker` roda `opencode run` no worktree com agente `.opencode/agents/loompa-worker.md` restrito a `allowed_paths`, Ops trata falhas do subprocesso como qualquer crash, custo aproximado (tier `opencode`), `loompa worker backend` + settings API; comparação ACI×OpenCode é o Founder rodando a mesma story com cada backend e olhando kanban/finance (sem harness de report novo). ADR-0007 | `config/schema.py::WorkerConfig`, `agents/opencode_worker.py`, `engine/graph.py::node_dev`, `cli/worker.py`, `docs/adr/0007-*` |
+| Plano set/2026 · Fase 4 (ferramentas para todos os papéis, MCP, Analyst) | ✅ perfis de permissão por papel (`Toolbox`), loop de ferramentas genérico em `LoompaAgent`, arquivos protegidos, cliente MCP (`loompa/mcp/`, SDK oficial) com Tavily, `AnalystAgent` e rota `research` (fontes conferidas em código, limitação declarada em código, revisão do PO, entrega ao Founder). ADR-0009 | `agents/toolbox.py`, `agents/base.py`, `mcp/client.py`, `agents/analyst.py`, `engine/graph.py`, `engine/phases.py`, `config/schema.py`, `docs/adr/0009-*` |
 
 ## Deliberate divergences from the brief
 
@@ -121,10 +122,35 @@ Suggested next (not implemented):
   again and undecided ones stay in the backlog. Dashboard: sprint chip + "Iniciar sprint" button,
   decisions in the inbox, `GET /sprints`, `POST /sprints/start`. Not done here: dashboard UI was
   type-checked and built but not looked at in a browser.
-- Next: Fase 4 (tools for every role, MCP client, Analyst and the research route).
+- **Fase 4** done (2026-09-19, ADR-0009): `agents/toolbox.py` gives every role a permission profile
+  (worker: repo + its plan's paths + tests; inspector: repo + tests; architect/product/PO/analyst/
+  master: repo read, `.loompa/specs/` write, `docs/` only inside a worktree) enforced when a tool
+  is *called*; `LoompaAgent.tool_loop` is the Worker's old loop made generic and
+  `ask_json_with_tools` lets the Architect and Product Loompas read the repository before they
+  answer (`schedule.agent_tool_iterations`, 0 = one-shot). Credentials, `.git` and factory state
+  are unreadable by any tool. `loompa/mcp/` is the MCP client on the official SDK: streamable
+  HTTP or stdio, key in a header / URL parameter / child env (never in config.yaml), tools filtered
+  by role and `allow` globs, an unreachable server becomes a declared limitation. `tools.tavily`
+  is now an `McpServerConfig` (old configs still load); `loompa providers test tavily` and the
+  settings screen test the same MCP path. `AnalystAgent` + route `intake → research →
+  research_review → founder → done` for `kind=research` (no worktree, no merge): cited URLs must
+  have been returned by a web tool in that run, the "no web search" limitation is added by code,
+  the Product Owner reviews (two objective checks no reviewer can waive), follow-ups become cards
+  offered on the delivery, the report is `research.md` (story drawer tab) and is indexed as a
+  precedent. `--dry-run` never opens MCP. **Not verified:** the real Tavily server (no key in the
+  build session): `Bearer` in the Authorization header is assumed (fallback: `tools.tavily.auth:
+  query`, `auth_name: tavilyApiKey`); the transports themselves are covered by tests against a
+  local server subprocess. The dashboard research tab was type-checked and built, not viewed in a
+  browser.
+- Next: Fase 5 (conversations: chat session with backlog/sprint drafts, Sprint Meeting and
+  Brainstorming in the dashboard and CLI).
 
 ## Known gaps / next steps
 
+- First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
+  describe a story as a research request ("Pesquisar alternativas de gateway de pagamento para o
+  Brasil") so the Master classifies it as `research`. There is no explicit "kind" switch on card
+  creation yet; intake decides.
 - OpenCode backend has no DoD self-check yet (ACI path has one); add it if OpenCode becomes
   the standard. Its `.opencode/agents/*.md` permission schema hasn't been run against a real
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.

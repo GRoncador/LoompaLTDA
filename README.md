@@ -63,6 +63,13 @@ BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → T
   One task = one semantic commit; the Worker is physically fenced to the plan's paths.
 * **ACI**: agents get paginated reads, exact edits, unified-diff patches and compacted test/lint
   output only — never a raw shell.
+* **Tools per role**: each role has a permission profile (the Worker writes inside its plan, the
+  Architect/Product/Analyst only read the repo and write story artifacts); credentials and
+  factory state are unreadable by any tool.
+* **Research**: a story that asks for knowledge instead of code (`kind=research`) goes
+  `intake → research → research_review → you`: the Analyst reads the repo and, with a Tavily key
+  (`loompa providers set-key tavily`, used through MCP), the web; every cited source is checked, a
+  missing key is declared as a limitation, and the report comes back with follow-up cards.
 * **Kaizen**: out-of-scope findings become `learnings.md` entries + backlog cards; lessons from
   escalated fixes are appended to the constitution and indexed in local memory.
 * **Hybrid memory**: AST/ripgrep for code; local SQLite vector RAG (FastEmbed optional, $0) for
