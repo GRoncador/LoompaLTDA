@@ -10,6 +10,7 @@ import json
 
 from loompa.aci import ACI
 from loompa.agents.base import AgentResult, LoompaAgent
+from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
 from loompa.engine.state import StoryState
 from loompa.llm import Message
 from loompa.speckit import story_dir, tasks_from_markdown
@@ -37,21 +38,6 @@ really complete: code AND tests present, nothing outside the task touched, no TO
 Respond with JSON only: {{"complete": bool, "missing": [str]}} — `missing` lists concrete things
 still to do (in {language}); empty when complete.
 """
-
-
-def prune_tool_history(messages: list[Message], *, keep_last: int = 6, max_chars: int = 300) -> int:
-    """Collapse old tool results into one-line stubs so long tasks stop re-paying for every file
-    read. The model keeps a trace of what it did; only the last `keep_last` results stay verbatim."""
-    tool_idx = [i for i, m in enumerate(messages) if m.role == "tool"]
-    pruned = 0
-    for i in tool_idx[:-keep_last] if keep_last else tool_idx:
-        m = messages[i]
-        if len(m.content) <= max_chars or m.content.startswith("[resumido]"):
-            continue
-        first = m.content.strip().splitlines()[0][:120]
-        m.content = f"[resumido] resultado anterior de {m.name or 'ferramenta'} ({len(m.content)} chars): {first} …"
-        pruned += 1
-    return pruned
 
 
 class WorkerAgent(LoompaAgent):
@@ -214,59 +200,28 @@ class WorkerAgent(LoompaAgent):
             f"# Task T{number}\n\n**{text}**\n{retry_ctx}{notes}\n## Checklist\n{tasks_md[:2000]}\n"
         )
         messages = [Message("system", stable, cache=True), Message("user", user)]
-        max_iter = self.ctx.config.schedule.worker_max_iterations
-        last_text = ""
-        for i in range(max_iter):
-            routed = await self.ctx.router.complete(
-                self.role,
-                messages,
-                agent=self.name,
-                story_id=state.story_id,
-                tools=aci.spec(),
-                tier_override=self.tier_override,
-                complexity=str(state.complexity),
+        sched = self.ctx.config.schedule
+        loop = await self.tool_loop(
+            messages,
+            Toolbox(aci, PROFILES["worker"]),
+            story=state,
+            max_iterations=sched.worker_max_iterations,
+            tier_override=self.tier_override,
+            terminal=("done", "blocked"),
+            nudge="Continue com as ferramentas, ou chame `done` se a tarefa está completa e verde.",
+            keep_tool_results=sched.worker_keep_tool_results,
+        )
+        if loop.ended_by == "done":
+            return AgentResult(ok=True, summary=str(loop.args.get("summary", ""))[:300])
+        if loop.ended_by == "blocked":
+            opts = loop.args.get("options") or []
+            return AgentResult(
+                ok=False,
+                blocked_reason=str(loop.args.get("reason", "")),
+                blocked_options=[str(o) for o in opts][:3] or None,
             )
-            resp = routed.response
-            last_text = resp.text or last_text
-            if not resp.tool_calls:
-                # model stopped without calling done: nudge once, then accept
-                if i < max_iter - 1 and "done" not in (resp.text or "").lower():
-                    messages += [
-                        Message("assistant", resp.text),
-                        Message(
-                            "user",
-                            "Continue com as ferramentas, ou chame `done` se a tarefa está completa e verde.",
-                        ),
-                    ]
-                    continue
-                return AgentResult(ok=True, summary=last_text[:200] or "tarefa encerrada")
-            messages.append(Message("assistant", resp.text, tool_calls=resp.tool_calls))
-            for call in resp.tool_calls:
-                if call.name == "done":
-                    return AgentResult(
-                        ok=True, summary=str(call.arguments.get("summary", ""))[:300]
-                    )
-                if call.name == "blocked":
-                    opts = call.arguments.get("options") or []
-                    return AgentResult(
-                        ok=False,
-                        blocked_reason=str(call.arguments.get("reason", "")),
-                        blocked_options=[str(o) for o in opts][:3] or None,
-                    )
-                result = await aci.call(call.name, call.arguments)
-                self.ctx.emit(
-                    "tool.call",
-                    story_id=state.story_id,
-                    agent=self.name,
-                    tool=call.name,
-                    ok=result.ok,
-                )
-                messages.append(
-                    Message("tool", result.output[:12000], tool_call_id=call.id, name=call.name)
-                )
-            prune_tool_history(
-                messages, keep_last=self.ctx.config.schedule.worker_keep_tool_results
-            )
+        if loop.ended_by == "text":  # the model stopped without `done`: accept what it said
+            return AgentResult(ok=True, summary=loop.text[:200] or "tarefa encerrada")
         return AgentResult(ok=False, summary="limite de iterações atingido", blocked_reason=None)
 
     async def _dod_check(

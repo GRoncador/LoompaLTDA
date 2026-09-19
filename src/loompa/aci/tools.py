@@ -22,6 +22,29 @@ class ToolError(Exception):
     pass
 
 
+_SAFE_ENV_FILES = {".env.example", ".env.sample", ".env.template"}
+_KEY_FILE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
+_KEY_FILE_NAMES = {"secrets.env", "id_rsa", "id_ed25519", "id_ecdsa"}
+
+
+def is_protected(rel: str | Path) -> bool:
+    """Files no agent tool may read or write: credentials, git internals and the factory's own
+    state. A model that browses the web must not be able to be talked into reading a key."""
+    parts = Path(rel).parts
+    if not parts:
+        return False
+    name = parts[-1]
+    if ".git" in parts:
+        return True
+    if name == ".env" or (name.startswith(".env.") and name not in _SAFE_ENV_FILES):
+        return True
+    if name in _KEY_FILE_NAMES or name.endswith(_KEY_FILE_SUFFIXES):
+        return True
+    return parts[0] == ".loompa" and (
+        name.endswith((".db", ".db-wal", ".db-shm")) or "logs" in parts or "worktrees" in parts
+    )
+
+
 @dataclass
 class ToolResult:
     ok: bool
@@ -187,6 +210,8 @@ class ACI:
         p = (self.root / path).resolve()
         if self.root not in (p, *p.parents):
             raise ToolError(f"caminho fora do repositório: {path}")
+        if is_protected(p.relative_to(self.root)):
+            raise ToolError(f"arquivo protegido (credenciais ou estado interno): {path}")
         if for_write and self.allowed_paths is not None:
             rel = str(p.relative_to(self.root))
             if not any(
