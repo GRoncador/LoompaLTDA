@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { useSocket } from "./useSocket";
-import type { FactoryRef, LoompaEvent, Message, Overview } from "./types";
+import type { ConversationKind, FactoryRef, LoompaEvent, Message, Overview } from "./types";
 import Header from "./components/Header";
 import Office from "./components/Office";
 import Inbox from "./components/Inbox";
 import Kanban from "./components/Kanban";
-import MeetingModal from "./components/MeetingModal";
+import ChatModal from "./components/ChatModal";
 import AgentDrawer from "./components/AgentDrawer";
 import StoryDrawer from "./components/StoryDrawer";
 import NewFactoryModal from "./components/NewFactoryModal";
@@ -18,7 +18,7 @@ export default function App() {
   const [slug, setSlug] = useState<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [events, setEvents] = useState<LoompaEvent[]>([]);
-  const [meetingOpen, setMeetingOpen] = useState(false);
+  const [chat, setChat] = useState<{ kind: ConversationKind; resumeId?: string } | null>(null);
   const [newFactoryOpen, setNewFactoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentName, setAgentName] = useState<string | null>(null);
@@ -44,7 +44,7 @@ export default function App() {
 
   const onEvent = useCallback((e: LoompaEvent) => {
     setEvents((prev) => [...prev.slice(-199), e]);
-    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "backlog.status", "backlog.priority"].includes(e.type)) {
+    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
@@ -73,7 +73,7 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
-        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onMeeting={() => setMeetingOpen(true)} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)}
+        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onChat={(kind, resumeId) => setChat({ kind, resumeId })} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)}
       />
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
       <main className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
@@ -92,7 +92,7 @@ export default function App() {
         </section>
       </main>
       <EventTicker events={events} />
-      {meetingOpen && slug && <MeetingModal slug={slug} onClose={() => { setMeetingOpen(false); refresh(); }} />}
+      {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} onClose={() => { setChat(null); refresh(); }} />}
       {settingsOpen && slug && <SettingsModal slug={slug} onClose={() => { setSettingsOpen(false); refresh(); }} />}
       {newFactoryOpen && <NewFactoryModal onClose={async (created) => { setNewFactoryOpen(false); await loadFactories(); if (created) setSlug(created); }} />}
       {agentName && slug && <AgentDrawer slug={slug} name={agentName} onClose={() => setAgentName(null)} onOpenStory={setStoryId} />}

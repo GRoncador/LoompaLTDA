@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { Settings, SettingsPatch } from "../types";
-import { Modal } from "./MeetingModal";
+import { Modal } from "./Modal";
 import { ProvidersPanel } from "./SettingsModal";
 
 export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: string) => void }) {

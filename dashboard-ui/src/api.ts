@@ -1,4 +1,4 @@
-import type { FactoryRef, Message, Overview, ProbeResult, Settings, SettingsPatch } from "./types";
+import type { ChatReply, ConversationKind, FactoryRef, Message, Overview, ProbeResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
@@ -24,6 +24,16 @@ export const api = {
   archive: (slug: string, id: string) => req(`/api/factories/${slug}/inbox/${id}/archive`, { method: "POST" }),
   meeting: (slug: string, goals: string, run: boolean) =>
     req<{ stories: { id: string; title: string }[]; clarifications: string[] }>(`/api/factories/${slug}/meeting`, { method: "POST", body: JSON.stringify({ goals, run }) }),
+  conversation: (slug: string, id: string) => req<{ conversation: ChatReply["conversation"] }>(`/api/factories/${slug}/conversations/${id}`),
+  openConversation: (slug: string, kind: ConversationKind, text: string) =>
+    req<ChatReply>(`/api/factories/${slug}/conversations`, { method: "POST", body: JSON.stringify({ kind, text }) }),
+  say: (slug: string, id: string, text: string) =>
+    req<ChatReply>(`/api/factories/${slug}/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ text }) }),
+  editDraft: (slug: string, id: string, ops: Record<string, unknown>[]) =>
+    req<ChatReply>(`/api/factories/${slug}/conversations/${id}/draft`, { method: "POST", body: JSON.stringify({ ops }) }),
+  commit: (slug: string, id: string, body: { start_sprint?: boolean; goal?: string; run?: boolean }) =>
+    req<ChatReply>(`/api/factories/${slug}/conversations/${id}/commit`, { method: "POST", body: JSON.stringify(body) }),
+  discard: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/discard`, { method: "POST" }),
   startSprint: (slug: string, story_ids: string[] = [], goal = "") =>
     req<{ id: string; story_ids: string[] }>(`/api/factories/${slug}/sprints/start`, { method: "POST", body: JSON.stringify({ story_ids, goal, run: true }) }),
   story: (slug: string, id: string) => req<any>(`/api/factories/${slug}/stories/${id}`),

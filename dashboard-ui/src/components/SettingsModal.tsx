@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { Candidate, ProbeResult, Settings, SettingsPatch } from "../types";
-import { Modal } from "./MeetingModal";
+import { Modal } from "./Modal";
 
 const input = "w-full rounded-md border border-line bg-ink px-2 py-1 text-sm";
 const select = "rounded-md border border-line bg-ink px-2 py-1 text-sm";

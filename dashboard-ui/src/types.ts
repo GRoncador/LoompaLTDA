@@ -68,6 +68,37 @@ export interface Message {
   answer?: { option_key: string | null; text: string | null; answered_at: string } | null;
 }
 
+export type ConversationKind = "meeting" | "brainstorm";
+
+export interface DraftItem {
+  key: string; title: string; description: string; epic: string; priority: number;
+  in_sprint: boolean; story_id: string | null; origin: string; note: string;
+}
+
+export interface Turn { who: "founder" | "agent"; name: string; text: string; changes: string[]; at: string }
+
+export interface CommitResult { created: string[]; existing: string[]; held: { key: string; title: string; reason: string }[]; skipped: string[]; sprint_id: string | null }
+
+export interface Conversation {
+  id: string;
+  kind: ConversationKind;
+  status: "open" | "committed" | "discarded";
+  title: string;
+  turns: Turn[];
+  draft: { goal: string; items: DraftItem[] };
+  limits: string[];
+  result: Partial<CommitResult>;
+}
+
+export interface ConversationSummary { id: string; kind: ConversationKind; status: string; title: string; turns: number; cards: number; in_sprint: number; updated_at: string }
+
+export interface ChatReply {
+  conversation: Conversation;
+  turn?: { reply: string; changes: string[]; ignored: string[]; questions: string[]; failed: boolean } | null;
+  report?: { changes: string[]; ignored: string[] };
+  result?: CommitResult;
+}
+
 export interface Overview {
   factory: { slug: string; name: string; mode: string; language: string; engine: boolean; dry_run: boolean };
   columns: Column[];
@@ -76,6 +107,7 @@ export interface Overview {
   finance: { today_usd: number; month_usd: number; cap_usd: number; fraction: number; warn: boolean; exhausted: boolean };
   kaizen_today: number;
   sprint: SprintSummary | null;
+  conversations: ConversationSummary[];
   last_event_id: number;
 }
 
