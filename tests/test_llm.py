@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -15,7 +16,7 @@ from loompa.llm import (
     QuotaExhausted,
     ToolCall,
 )
-from loompa.llm.providers import AnthropicProvider, extract_json
+from loompa.llm.providers import AnthropicProvider, _retry_after_seconds, extract_json
 from loompa.store import Store
 
 OPENAI_OK = {
@@ -185,6 +186,72 @@ async def test_only_that_exact_refusal_is_retried(monkeypatch):
     with pytest.raises(LLMError, match="thought_signature"):
         await p.complete("gemini-3.5-flash-lite", [Message("user", "u"), *signed])
     assert route.call_count == 1  # everything was signed already: a retry cannot help
+
+
+@respx.mock
+async def test_an_unreadable_200_falls_through_instead_of_crashing_the_call(monkeypatch):
+    """A 200 whose shape we cannot parse is provider trouble: it must reach the router as an
+    LLMError (which falls through to the next candidate), never as a raw AttributeError."""
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    p = OpenAICompatibleProvider("gemini", default_config().providers["gemini"])
+    respx.post(GEMINI_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={  # tool_calls nested one level too deep: `tc` is a list, so `tc.get` blows up
+                "choices": [{"message": {"content": "", "tool_calls": [[{"function": {}}]]}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+    )
+    with pytest.raises(LLMError, match="formato inesperado") as err:
+        await p.complete("gemini-3.5-flash-lite", [Message("user", "u")])
+    assert err.value.retryable and "tool_calls" in str(err.value)  # the body aids the diagnosis
+    await p.aclose()
+
+
+@respx.mock
+async def test_a_gemini_rate_limit_becomes_quota_exhausted_not_a_crash(monkeypatch):
+    """Google's OpenAI-compatible endpoint returns a 429 whose body is a *list*
+    (`[{"error": {...}}]`), not the object every other server sends. Reading the retry delay
+    happens while `QuotaExhausted` is being built, so a crash there replaced the quota error
+    and escaped the router's fall-through — a rate limit killed the whole turn."""
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    p = OpenAICompatibleProvider("gemini", default_config().providers["gemini"])
+    respx.post(GEMINI_URL).mock(
+        return_value=httpx.Response(
+            429,
+            json=[
+                {
+                    "error": {
+                        "code": 429,
+                        "status": "RESOURCE_EXHAUSTED",
+                        "message": "Quota exceeded for quota metric 'Generate requests'.",
+                        "details": [
+                            {"@type": "type.googleapis.com/google.rpc.RetryInfo",
+                             "retryDelay": "23s"},
+                        ],
+                    }
+                }
+            ],
+        )
+    )
+    with pytest.raises(QuotaExhausted) as err:
+        await p.complete("gemini-3.5-flash-lite", [Message("user", "u")])
+    assert err.value.status == 429 and err.value.retry_after == 23.0
+    await p.aclose()
+
+
+def test_retry_delay_survives_any_error_body():
+    """`_retry_after_seconds` runs inside a `raise` expression: it must never raise itself."""
+    def resp(body: Any) -> httpx.Response:
+        return httpx.Response(429, json=body)
+
+    assert _retry_after_seconds(resp([{"error": {"details": [{"retryDelay": "5s"}]}}])) == 5.0
+    assert _retry_after_seconds(resp({"error": {"message": "try again in 300ms"}})) == 0.3
+    for hostile in ([], ["nonsense"], [[{"error": {}}]], {"error": []}, "text", 7, None):
+        assert _retry_after_seconds(resp(hostile)) is None
+    assert _retry_after_seconds(httpx.Response(429, text="<html>502</html>")) is None
+    assert _retry_after_seconds(httpx.Response(429, headers={"retry-after": "12"}, json=[])) == 12.0
 
 
 @respx.mock

@@ -10,6 +10,7 @@ Product Owner, so a conversation never writes a card by itself.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
     from loompa.agents.toolbox import Toolbox
     from loompa.conversations import CommitResult
     from loompa.engine.context import EngineContext
+
+log = logging.getLogger(__name__)
 
 MAX_REPLY_CHARS = 2400
 CHAT_TOOL_ROUNDS = 4  # a chat turn should answer quickly; research is what takes many rounds
@@ -134,8 +137,15 @@ async def run_turn(
             max_tokens=max_tokens,
         )
     except Exception as exc:  # noqa: BLE001 - the founder gets a plain note, Ops gets the detail
+        # The traceback goes to the log, never to the event: `/api/factories/{slug}/events` is
+        # read by the dashboard, and a bare message ("'list' object has no attribute 'get'")
+        # is unreadable without it.
+        log.exception("conversation %s failed in a turn", conv.id)
         agent.ctx.emit(
-            "conversation.error", agent=agent.name, conversation_id=conv.id, error=str(exc)[:300]
+            "conversation.error",
+            agent=agent.name,
+            conversation_id=conv.id,
+            error=f"{type(exc).__name__}: {exc}"[:300],
         )
         reply, questions, failed = FAILURE_REPLY, [], True
         if fallback_ops is not None and not conv.draft.items:

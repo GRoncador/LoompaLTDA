@@ -33,7 +33,9 @@ pytestmark = pytest.mark.live
 
 
 def why(ctx: EngineContext, turn) -> str:
-    """A failed chat turn tells the founder only "try again"; the reason is in the event log."""
+    """A failed chat turn tells the founder only "try again"; the reason is in the event log.
+    The traceback is not in the event (the dashboard reads those) — it is logged, so pytest
+    prints it under "Captured log call" when this assertion fails."""
     errors = [e for e in ctx.store.events_since(0, limit=5000) if e["type"] == "conversation.error"]
     return (
         f"{turn}\n{errors[-1]['payload']['error'] if errors else '(no conversation.error event)'}"

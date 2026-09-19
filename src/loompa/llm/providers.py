@@ -46,7 +46,11 @@ class QuotaExhausted(LLMError):
 
 def _retry_after_seconds(resp: httpx.Response) -> float | None:
     """Best-effort: `Retry-After` header, Gemini's `retryDelay: "23s"` detail, or an
-    OpenAI-style "try again in 12.3s" message. None when the provider gave no hint."""
+    OpenAI-style "try again in 12.3s" message. None when the provider gave no hint.
+
+    Never raises. It is evaluated while a `QuotaExhausted` is being built, so an exception
+    here replaces the quota error with itself and escapes the router's fall-through: a rate
+    limit then kills the call instead of pausing the model."""
     header = resp.headers.get("retry-after")
     if header:
         try:
@@ -54,9 +58,13 @@ def _retry_after_seconds(resp: httpx.Response) -> float | None:
         except ValueError:
             pass
     try:
-        err = resp.json().get("error") or {}
+        body = resp.json()
     except ValueError:
         return None
+    # Google's OpenAI-compatible endpoint wraps the error in a list: `[{"error": {...}}]`.
+    if isinstance(body, list):
+        body = next((item for item in body if isinstance(item, dict)), {})
+    err = (body.get("error") or {}) if isinstance(body, dict) else {}
     if isinstance(err, dict):
         for detail in err.get("details") or []:
             delay = detail.get("retryDelay") if isinstance(detail, dict) else None
@@ -203,6 +211,48 @@ def _parse_args(raw: Any) -> dict[str, Any]:
         return {"_raw": raw}
 
 
+def _cached_tokens(usage: Mapping[str, Any]) -> int:
+    """Cached prompt tokens. `prompt_tokens_details` is `{"cached_tokens": N}` on OpenAI-shaped
+    servers and `prompt_cache_hit_tokens` on DeepSeek; anything else counts as zero."""
+    details = usage.get("prompt_tokens_details")
+    cached = (
+        (details.get("cached_tokens") if isinstance(details, dict) else None)
+        or usage.get("prompt_cache_hit_tokens")
+        or 0
+    )
+    return int(cached or 0)
+
+
+def _parse_openai_response(
+    data: Any, model: str, provider: str, duration_ms: int
+) -> LLMResponse:
+    choice = (data.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    usage = data.get("usage") or {}
+    tool_calls = [
+        ToolCall(
+            tc.get("id") or f"call_{i}",
+            tc["function"]["name"],
+            _parse_args(tc["function"].get("arguments")),
+            extra=tc["extra_content"] if isinstance(tc.get("extra_content"), dict) else None,
+        )
+        for i, tc in enumerate(msg.get("tool_calls") or [])
+        if tc.get("function")
+    ]
+    return LLMResponse(
+        content=msg.get("content") or "",
+        tool_calls=tool_calls,
+        model=data.get("model") or model,
+        provider=provider,
+        input_tokens=int(usage.get("prompt_tokens") or 0),
+        output_tokens=int(usage.get("completion_tokens") or 0),
+        cached_tokens=_cached_tokens(usage),
+        finish_reason=choice.get("finish_reason") or "",
+        duration_ms=duration_ms,
+        raw=data,
+    )
+
+
 class OpenAICompatibleProvider(LLMProvider):
     def __init__(
         self,
@@ -299,36 +349,18 @@ class OpenAICompatibleProvider(LLMProvider):
         if resp.status_code >= 400:
             raise LLMError(f"{self.name}/{model}: {resp.text[:300]}", status=resp.status_code)
         data = resp.json()
-        choice = (data.get("choices") or [{}])[0]
-        msg = choice.get("message") or {}
-        usage = data.get("usage") or {}
-        cached = (
-            ((usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
-            or usage.get("prompt_cache_hit_tokens")
-            or 0
-        )
-        tool_calls = [
-            ToolCall(
-                tc.get("id") or f"call_{i}",
-                tc["function"]["name"],
-                _parse_args(tc["function"].get("arguments")),
-                extra=tc["extra_content"] if isinstance(tc.get("extra_content"), dict) else None,
-            )
-            for i, tc in enumerate(msg.get("tool_calls") or [])
-            if tc.get("function")
-        ]
-        return LLMResponse(
-            content=msg.get("content") or "",
-            tool_calls=tool_calls,
-            model=data.get("model") or model,
-            provider=self.name,
-            input_tokens=int(usage.get("prompt_tokens") or 0),
-            output_tokens=int(usage.get("completion_tokens") or 0),
-            cached_tokens=int(cached or 0),
-            finish_reason=choice.get("finish_reason") or "",
-            duration_ms=duration,
-            raw=data,
-        )
+        try:
+            return _parse_openai_response(data, model, self.name, duration)
+        except (AttributeError, TypeError, KeyError, IndexError) as exc:
+            # A 200 whose shape we cannot read is provider trouble like any other: make it an
+            # LLMError so the router falls through to the next candidate instead of letting a
+            # raw AttributeError kill the call. The payload goes in the message: these are
+            # provider quirks, and the body is the only way to see what changed.
+            raise LLMError(
+                f"{self.name}/{model}: resposta em formato inesperado "
+                f"({type(exc).__name__}: {exc}); corpo: {json.dumps(data, ensure_ascii=False)[:400]}",
+                retryable=True,
+            ) from exc
 
     async def aclose(self) -> None:
         if self._owned:

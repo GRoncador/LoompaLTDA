@@ -20,6 +20,16 @@ LIVE_DEFAULT_MODEL = {
 }
 
 
+def _key_env_names() -> tuple[str, ...]:
+    cfg = default_config()
+    named = [p.api_key_env for p in cfg.providers.values()]
+    named += [s.api_key_env for s in cfg.tools.servers().values()]
+    return tuple(sorted({n for n in named if n}))
+
+
+_KEY_ENV_NAMES = _key_env_names()
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--live",
@@ -92,6 +102,19 @@ def live_credentials(request: pytest.FixtureRequest) -> LiveCredentials:
     if env_name and not key:
         pytest.skip("sem chave: teste live pulado")
     return LiveCredentials(provider, model, env_name, key)
+
+
+@pytest.fixture(autouse=True)
+def no_ambient_keys(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """Hide real API keys from every test but the live ones.
+
+    `resolve_key` falls back to the process environment, so a developer who exports
+    GEMINI_API_KEY to run the live tests would fail the suite: the tests that assert "no key
+    configured" would find the real one. The live tests are the exception and keep it."""
+    if "live" in request.keywords:
+        return
+    for env_name in _KEY_ENV_NAMES:
+        monkeypatch.delenv(env_name, raising=False)
 
 
 @pytest.fixture(autouse=True)
