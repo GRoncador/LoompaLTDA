@@ -2,12 +2,20 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Drawer, Row } from "./AgentDrawer";
 
+type Tab = "spec" | "plan" | "tasks" | "research" | "log";
+
 export default function StoryDrawer({ slug, id, onClose }: { slug: string; id: string; onClose: () => void }) {
   const [data, setData] = useState<any>(null);
-  const [tab, setTab] = useState<"spec" | "plan" | "tasks" | "log">("tasks");
-  useEffect(() => { api.story(slug, id).then(setData).catch(() => setData(null)); }, [slug, id]);
+  const [tab, setTab] = useState<Tab>("tasks");
+  useEffect(() => {
+    api.story(slug, id)
+      .then((d) => { setData(d); if (d?.state?.kind === "research") setTab("research"); })
+      .catch(() => setData(null));
+  }, [slug, id]);
   if (!data) return <Drawer title={id} onClose={onClose}><p className="text-sm text-slate-400">carregando…</p></Drawer>;
   const s = data.story, st = data.state;
+  // a research story ends in a report, not in code: no spec/plan/tasks to browse
+  const tabs: Tab[] = st.kind === "research" ? ["research", "log"] : ["tasks", "spec", "plan", "log"];
   return (
     <Drawer title={`${s.id} · ${s.title}`} onClose={onClose}>
       <div className="space-y-2 text-sm">
@@ -20,7 +28,7 @@ export default function StoryDrawer({ slug, id, onClose }: { slug: string; id: s
         {st.delivery_summary && <Row k="Entrega" v={st.delivery_summary} />}
       </div>
       <div className="mt-4 flex gap-1 border-b border-line text-xs">
-        {(["tasks", "spec", "plan", "log"] as const).map((t) => (
+        {tabs.map((t) => (
           <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 ${tab === t ? "border-b-2 border-brand text-brand" : "text-slate-400"}`}>{t === "log" ? "histórico" : t + ".md"}</button>
         ))}
       </div>

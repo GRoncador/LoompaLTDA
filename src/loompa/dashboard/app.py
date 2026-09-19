@@ -349,7 +349,7 @@ def create_app(
         specs = ctx.factory.paths.specs / story_id
         docs = {
             name: (specs / f"{name}.md").read_text(encoding="utf-8")
-            for name in ("spec", "plan", "tasks")
+            for name in ("spec", "plan", "tasks", "research")
             if (specs / f"{name}.md").is_file()
         }
         return {
