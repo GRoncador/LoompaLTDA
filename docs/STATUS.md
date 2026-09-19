@@ -64,8 +64,9 @@ Suggested next (not implemented):
   (backoff, then a plain pt-BR inbox note) and a story is never dispatched twice. `uv run pytest --live
   -m live` runs one real cycle: the terminal asks provider, model and key (hidden input, nothing
   written anywhere; the key lives only in the test process and a throw-away factory under tmp).
-  CI stays scripted. ADR-0006 written. **Pending on the Founder's machine:** the first live run,
-  no key was available during the build session.
+  CI stays scripted. ADR-0006 written. **Confirmed on the Founder's machine (2026-09-19):**
+  `uv run pytest --live -m live -q --live-provider gemini --live-model gemini-3.5-flash-lite`
+  passes both live tests against the real Gemini free tier.
 - **Fase 0b** done (2026-09-18): keys only in `~/.loompa/secrets.env` (hub) or `<repo>/.loompa/.env`
   (factory, gitignored), config.yaml keeps env var names and `save_config` refuses key-shaped
   values; `loompa init` has a "Provedores e modelos" step (presets gratuito/economico/maximo,
@@ -92,7 +93,6 @@ Suggested next (not implemented):
 
 ## Known gaps / next steps
 
-- First real end-to-end run (`uv run pytest --live -m live -q`, interactive prompts) still to be executed by the Founder.
 - CodeRabbit webhook mode; PR review comments feeding back into the Worker.
 - Nightly cycle scheduler (`loompa run --watch` exists; a cron/launchd recipe is not shipped).
 - Dashboard: drag-and-drop priority, story diff viewer, finance charts.
