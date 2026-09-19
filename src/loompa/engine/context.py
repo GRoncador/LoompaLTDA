@@ -15,6 +15,7 @@ from loompa.config.secrets import install_log_redaction
 from loompa.factory import Factory
 from loompa.finance import CostTracker
 from loompa.llm import ModelRouter
+from loompa.mcp import McpHub
 from loompa.memory import MemoryStore, get_embedder
 from loompa.store import Store
 from loompa.worktrees import WorktreeManager
@@ -36,6 +37,18 @@ class EngineContext:
     listeners: list[Listener] = field(default_factory=list)
     secrets: Secrets = field(default_factory=Secrets)
     closed: bool = False
+    _mcp: McpHub | None = field(default=None, repr=False)
+
+    @property
+    def mcp(self) -> McpHub:
+        """The factory's MCP servers (web search for the Analyst); built on first use."""
+        if self._mcp is None:
+            self._mcp = McpHub(self.config, self.secrets)
+        return self._mcp
+
+    @mcp.setter
+    def mcp(self, hub: McpHub) -> None:
+        self._mcp = hub
 
     @property
     def config(self) -> LoompaConfig:
@@ -92,6 +105,8 @@ class EngineContext:
         self.secrets = Secrets.load(self.factory.root)
         install_log_redaction(self.secrets.values_for_redaction())
         self.router.reset_providers(self.secrets)
+        if self._mcp is not None:
+            self._mcp.secrets = self.secrets
         return self.secrets
 
     def _on_llm_call(self, role: str, agent: str, routed: Any) -> None:

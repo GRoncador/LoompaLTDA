@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 
 import httpx
 
-from loompa.config.schema import LoompaConfig, ToolProviderConfig
+from loompa.config.schema import LoompaConfig, McpServerConfig
 from loompa.llm.providers import LLMError, Message, QuotaExhausted, build_provider, resolve_key
 
 
@@ -98,14 +98,42 @@ async def probe_provider(
 
 
 async def probe_tavily(
-    cfg: ToolProviderConfig,
+    cfg: McpServerConfig,
     *,
     secrets: Mapping[str, str] | None = None,
     client: httpx.AsyncClient | None = None,
+    hub: object | None = None,
 ) -> ProbeResult:
+    """Tavily as the Analyst uses it: through its MCP server. When that fails, the REST search
+    endpoint says whether the key itself is the problem or only the MCP connection."""
+    from loompa.mcp import McpHub, probe_server
+
     key = resolve_key(cfg.api_key_env, secrets)
     if not key:
         return ProbeResult("tavily", False, "chave não configurada")
+    config = LoompaConfig()
+    config.tools.tavily = cfg
+    mcp_hub = hub if isinstance(hub, McpHub) else McpHub(config, secrets)
+    result = await probe_server(mcp_hub, "tavily")
+    if result.ok:
+        return ProbeResult(
+            "tavily", True, "busca web ok (servidor MCP)", latency_ms=result.latency_ms
+        )
+    rest = await _probe_tavily_rest(cfg, key, client)
+    if rest.ok:
+        return ProbeResult(
+            "tavily",
+            False,
+            "a chave é válida, mas não consegui abrir o servidor MCP de busca; "
+            "veja `tools.tavily.auth` na configuração",
+            latency_ms=rest.latency_ms,
+        )
+    return rest
+
+
+async def _probe_tavily_rest(
+    cfg: McpServerConfig, key: str, client: httpx.AsyncClient | None
+) -> ProbeResult:
     own = client is None
     client = client or httpx.AsyncClient(timeout=30.0)
     start = time.monotonic()

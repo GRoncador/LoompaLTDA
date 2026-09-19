@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Mode = Literal["greenfield", "brownfield"]
 # Roles are an open set: any agent role maps to a tier through `models.roles`, defaulting to
@@ -57,6 +57,9 @@ class ScheduleConfig(BaseModel):
     tier1_max_attempts: int = Field(1, ge=1)
     worker_max_iterations: int = Field(40, ge=1)
     worker_keep_tool_results: int = Field(6, ge=1)
+    agent_tool_iterations: int = Field(
+        8, ge=0
+    )  # tool rounds for Architect/Product/Analyst; 0 = one-shot
     work_hours: str = "09:00-17:30"
     ops_max_recoveries: int = Field(3, ge=0)  # transient crashes the Ops Loompa retries per story
     ops_retry_base_s: float = Field(60.0, ge=0)  # first wait; doubles each retry, capped at 10 min
@@ -125,14 +128,58 @@ class ToolProviderConfig(BaseModel):
     console_url: str = ""
 
 
-class ToolsConfig(BaseModel):
-    tavily: ToolProviderConfig = Field(
-        default_factory=lambda: ToolProviderConfig(
-            api_key_env="TAVILY_API_KEY",
-            base_url="https://api.tavily.com",
-            console_url="https://app.tavily.com",
-        )
+class McpServerConfig(ToolProviderConfig):
+    """An MCP server whose tools some roles may call (ADR-0009). Like every other key, the
+    secret is only named here (`api_key_env`); the value comes from the secrets files."""
+
+    transport: Literal["http", "stdio"] = "http"
+    url: str = ""  # streamable-HTTP endpoint
+    command: str = ""  # stdio: executable that speaks MCP on stdin/stdout
+    args: list[str] = Field(default_factory=list)
+    # How the key reaches the server: `bearer` = Authorization header, `query` = URL parameter
+    # named `auth_name`, `env` = environment variable `auth_name` (stdio), `none` = no key.
+    auth: Literal["bearer", "query", "env", "none"] = "bearer"
+    auth_name: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)  # static and never secret
+    roles: list[str] = Field(default_factory=lambda: ["analyst"])  # who may call its tools
+    allow: list[str] = Field(default_factory=list)  # tool-name globs; empty = every tool
+    timeout_s: float = Field(60.0, gt=0)
+
+
+TAVILY_MCP_URL = "https://mcp.tavily.com/mcp/"
+# Search and extract answer a research question; crawl/map/research burn credits on their own.
+TAVILY_MCP_ALLOW = ["*search*", "*extract*"]
+TAVILY_DEFAULT_PARAMETERS = (
+    '{"include_images": false, "include_raw_content": false, "max_results": 5}'
+)
+
+
+def _tavily_default() -> McpServerConfig:
+    return McpServerConfig(
+        api_key_env="TAVILY_API_KEY",
+        base_url="https://api.tavily.com",
+        console_url="https://app.tavily.com",
+        url=TAVILY_MCP_URL,
+        allow=list(TAVILY_MCP_ALLOW),
+        headers={"DEFAULT_PARAMETERS": TAVILY_DEFAULT_PARAMETERS},
     )
+
+
+class ToolsConfig(BaseModel):
+    tavily: McpServerConfig = Field(default_factory=_tavily_default)
+    mcp: dict[str, McpServerConfig] = Field(default_factory=dict)  # any other MCP server
+
+    @model_validator(mode="after")
+    def _builtin_defaults(self) -> ToolsConfig:
+        # config.yaml files written before MCP existed only carry Tavily's key fields
+        if self.tavily.transport == "http" and not self.tavily.url:
+            self.tavily.url = TAVILY_MCP_URL
+        if not self.tavily.allow:
+            self.tavily.allow = list(TAVILY_MCP_ALLOW)
+        return self
+
+    def servers(self) -> dict[str, McpServerConfig]:
+        return {"tavily": self.tavily, **self.mcp}
 
 
 class Price(BaseModel):

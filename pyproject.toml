@@ -19,6 +19,7 @@ dependencies = [
     "numpy>=1.26",
     "langgraph>=0.4",
     "langgraph-checkpoint-sqlite>=2.0",
+    "mcp>=1.12",
 ]
 
 [project.optional-dependencies]
@@ -77,6 +78,8 @@ ignore = ["E501", "B008", "SIM102", "SIM105"]
 "tests/test_worktrees.py" = ["F811"]
 "tests/test_sprint.py" = ["F811"]
 "tests/test_decisions.py" = ["F811"]
+"tests/test_tools.py" = ["F811"]
+"tests/test_research.py" = ["F811"]
 
 [tool.mypy]
 python_version = "3.11"
