@@ -1,4 +1,4 @@
-"""Live tests: one real cycle against a real provider (default: Gemini 2.5 Flash-Lite, free).
+"""Live tests: one real cycle against a real provider (default: Gemini 3.5 Flash-Lite, free).
 
     uv run pytest --live -m live -q
 
@@ -12,6 +12,7 @@ GitHub CI never passes ``--live``; everything else in the suite is scripted (Moc
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -19,14 +20,30 @@ import pytest
 
 from conftest import LiveCredentials, git
 from loompa.agents import MasterAgent
-from loompa.config import Secrets
+from loompa.config import default_config
 from loompa.config.schema import ModelCandidate
 from loompa.engine import EngineContext, Scheduler, Stage, load_state
 from loompa.factory import Factory, bootstrap_factory
-from loompa.llm import probe_provider
+from loompa.llm import ProbeResult, probe_provider
 
 pytestmark = pytest.mark.live
 PYTEST_CMD = f'"{sys.executable}" -m pytest -q -p no:cacheprovider'
+
+
+@pytest.fixture(scope="session")
+def live_reachable(live_credentials: LiveCredentials) -> ProbeResult:
+    """One tiny call, once per session: does the chosen model still answer? A model that was
+    retired (Google closed gemini-2.5-flash-lite to new accounts on 2026-09-19) otherwise shows
+    up as every story failing in `spec` after the full retry loop, with no usable message."""
+    creds = live_credentials
+    return asyncio.run(
+        probe_provider(
+            default_config(),
+            creds.provider,
+            model=creds.model,
+            secrets={creds.api_key_env: creds.api_key} if creds.api_key_env else None,
+        )
+    )
 
 
 @pytest.fixture
@@ -58,16 +75,17 @@ def live_factory(
     return Factory.open(git_repo)
 
 
-async def test_live_probe(live_factory: Factory, live_credentials: LiveCredentials):
-    r = await probe_provider(
-        live_factory.config, live_credentials.provider, secrets=Secrets.load(live_factory.root)
-    )
-    assert r.ok, r.detail
-    assert r.model == live_credentials.model
+def test_live_probe(live_reachable: ProbeResult, live_credentials: LiveCredentials):
+    assert live_reachable.ok, live_reachable.detail
+    assert live_reachable.model == live_credentials.model
 
 
-async def test_live_first_real_cycle(live_factory: Factory, live_credentials: LiveCredentials):
+async def test_live_first_real_cycle(
+    live_reachable: ProbeResult, live_factory: Factory, live_credentials: LiveCredentials
+):
     """Meeting → spec → spec review → plan → dev → test → review → delivery message."""
+    if not live_reachable.ok:  # the probe already said why; don't burn retries on a dead model
+        pytest.skip(f"provedor indisponível: {live_reachable.detail}")
     ctx = EngineContext.build(live_factory)  # real router; key from the process environment
     try:
         result = await MasterAgent(ctx).meeting(
