@@ -210,7 +210,8 @@ def test_settings_api_never_returns_keys(client, hub):
     assert ".loompa/.env" in (root / ".gitignore").read_text()
     events = c.get("/api/factories/keys/events?after=0").text
     assert "sk-fake" not in events and FAKE_TAVILY not in events
-    assert c.get("/api/factories/keys/settings").json()["presets"][0]["key"] == "gratuito"
+    # the first preset is the one onboarding offers by default
+    assert c.get("/api/factories/keys/settings").json()["presets"][0]["key"] == "openrouter"
     assert (
         c.put("/api/factories/keys/settings", json={"roles": {"worker": "nope"}}).status_code == 400
     )

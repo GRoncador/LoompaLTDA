@@ -26,6 +26,25 @@ def _c(provider: str, model: str) -> ModelCandidate:
 
 
 MODEL_PRESETS: dict[str, ModelPreset] = {
+    # First entry: what onboarding offers by default. One key covers every tier, and the
+    # spending cap lives in the OpenRouter dashboard as well as in `budget`.
+    "openrouter": ModelPreset(
+        key="openrouter",
+        label="OpenRouter (recomendado)",
+        description="Uma única chave para todos os modelos, com teto de gastos no painel da OpenRouter. GLM 5.3 no raciocínio, GLM Flash e DeepSeek Flash na execução — centavos por história, com modelos gratuitos como reserva.",
+        tiers={
+            "tier1": [
+                _c("openrouter", "z-ai/glm-5.3"),
+                _c("openrouter", "qwen/qwen3.8-max-0902"),
+            ],
+            "tier2": [
+                _c("openrouter", "z-ai/glm-5.3-flash"),
+                _c("openrouter", "deepseek/deepseek-v4-flash-0731"),
+                _c("openrouter", "deepseek/deepseek-v4-flash-0731:free"),
+            ],
+        },
+        providers=("openrouter",),
+    ),
     "gratuito": ModelPreset(
         key="gratuito",
         label="Gratuito",

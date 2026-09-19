@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from loompa.config import LoompaConfig, default_config, find_factory_root, load_config, save_config
+from loompa.config import (
+    MODEL_PRESETS,
+    LoompaConfig,
+    default_config,
+    find_factory_root,
+    load_config,
+    save_config,
+)
 from loompa.config.schema import FactoryRef, HubRegistry, slugify
 
 
@@ -70,3 +77,31 @@ def test_registry_model_upsert_replaces():
     reg.upsert(FactoryRef(slug="x", name="X", path=Path("/x")))
     reg.upsert(FactoryRef(slug="x", name="X2", path=Path("/x2")))
     assert len(reg.factories) == 1 and reg.factories[0].name == "X2"
+
+
+def test_every_preset_is_usable_and_priced():
+    """A preset that names a model with no price makes the budget report zero, and one whose
+    provider is missing from `providers` asks for a key the founder is never prompted for."""
+    cfg = default_config()
+    for key, preset in MODEL_PRESETS.items():
+        assert set(preset.tiers) == {"tier1", "tier2"}, key
+        for tier, candidates in preset.tiers.items():
+            assert candidates, f"{key}/{tier} está vazio"
+            for c in candidates:
+                assert c.provider in cfg.providers, f"{key}: provedor {c.provider} não existe"
+                # `price_for` falls back to a generic `default` entry, so asking it proves
+                # nothing: a $0.09 model billed at the $1.00 default is 10x off.
+                assert c.model in cfg.pricing, f"{key}: {c.model} sem preço próprio em pricing"
+        declared = {*preset.providers, *preset.optional_providers}
+        used = {c.provider for cs in preset.tiers.values() for c in cs}
+        assert used <= declared, f"{key}: {used - declared} usado sem estar declarado"
+
+
+def test_the_default_preset_needs_a_single_key():
+    """Onboarding offers the first preset: it should be the one key a founder can get in one go."""
+    key, preset = next(iter(MODEL_PRESETS.items()))
+    assert key == "openrouter" and preset.providers == ("openrouter",)
+    assert not preset.optional_providers
+    assert all(
+        c.provider == "openrouter" for cs in preset.tiers.values() for c in cs
+    ), "o preset padrão não deve exigir uma segunda chave"

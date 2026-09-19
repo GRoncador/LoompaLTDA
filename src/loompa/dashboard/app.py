@@ -123,7 +123,7 @@ class FactoryBody(BaseModel):
     path: str
     name: str | None = None
     stack: str = "custom"
-    preset: str | None = None  # gratuito | economico | maximo
+    preset: str | None = None  # openrouter | gratuito | economico | maximo
     keys: dict[str, str] = {}  # ENV_NAME -> value, written to the secrets file only
     secrets_scope: str = "hub"
     mission: str = ""

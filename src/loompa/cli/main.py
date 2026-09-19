@@ -66,7 +66,7 @@ def init(
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Não perguntar nada (usa padrões)."),
     preset: str | None = typer.Option(
-        None, "--preset", "-p", help="Preset de modelos: gratuito | economico | maximo."
+        None, "--preset", "-p", help="Preset de modelos: openrouter | gratuito | economico | maximo."
     ),
     secrets_scope: str = typer.Option(
         "hub", "--secrets-scope", help="Onde guardar chaves: hub (todas as fábricas) | factory."

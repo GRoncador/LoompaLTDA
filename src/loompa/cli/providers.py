@@ -81,7 +81,7 @@ def setup_providers_interactive(
         for key, p in MODEL_PRESETS.items():
             out.print(f"  [cyan]{key:10}[/cyan] {p.label} — {p.description}")
         out.print("  [cyan]{:10}[/cyan] manter a configuração atual".format("pular"))
-        preset = typer.prompt("Preset", default="gratuito").strip().lower()
+        preset = typer.prompt("Preset", default=next(iter(MODEL_PRESETS))).strip().lower()
     if preset in MODEL_PRESETS:
         chosen = apply_preset(f.config, preset)
         f.save()
@@ -192,7 +192,7 @@ def providers_test(
 
 @providers_app.command("preset")
 def providers_preset(
-    name: str = typer.Argument(..., help="gratuito | economico | maximo"),
+    name: str = typer.Argument(..., help="openrouter | gratuito | economico | maximo"),
     factory: str | None = typer.Option(None, "--factory", "-f"),
     keys: bool = typer.Option(True, "--keys/--no-keys", help="Pergunta as chaves faltantes."),
     scope: str = typer.Option("hub", "--scope"),
