@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from conftest import git
-from loompa.agents import MasterAgent
+from loompa.agents import MasterAgent, ProductOwnerAgent
 from loompa.agents.dryrun import dry_run_script, role_of
 from loompa.comms import FounderAnswer, MessageStatus
 from loompa.engine import EngineContext, Scheduler, Stage, load_state
@@ -65,16 +65,10 @@ def with_worker(worker_fn: Callable[[str, list[Message]], Any]) -> Callable[...,
 
 
 def seed_story(ctx: EngineContext, title: str, description: str = "") -> str:
-    sid = ctx.store.next_story_id(ctx.slug)
-    ctx.store.upsert_story(
-        {
-            "id": sid,
-            "factory": ctx.slug,
-            "title": title,
-            "description": description,
-            "stage": Stage.BACKLOG,
-        }
-    )
+    """A story already cleared to run: the Product Owner adds the card and admits it."""
+    po = ProductOwnerAgent(ctx)
+    sid = po.add_item(title, description).story_id
+    po.admit(sid)
     return sid
 
 
@@ -87,11 +81,14 @@ def tool_results(messages: list[Message]) -> list[str]:
 
 async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
-    result = await MasterAgent(ctx).meeting("Página de login; Exportar relatório em CSV")
+    master = MasterAgent(ctx)
+    result = await master.meeting("Página de login; Exportar relatório em CSV")
     assert [s["title"] for s in result["stories"]] == [
         "Página de login",
         "Exportar relatório em CSV",
     ]
+    assert await Scheduler(ctx).run() == []  # nothing runs until a sprint starts
+    master.start_sprint()
     done = await Scheduler(ctx).run()
     assert sorted(done) == ["S-001", "S-002"]
     for sid in ("S-001", "S-002"):
@@ -468,7 +465,8 @@ async def test_budget_exhaustion_pauses_dispatch(factory: Factory):
     )
     sid = seed_story(ctx, "Nada")
     await Scheduler(ctx).run(until_idle=True, max_cycles=1)
-    assert load_state(ctx, sid).stage == Stage.BACKLOG
+    assert ctx.store.checkpoints(sid)[-1]["node"] == "admit"  # admitted, but nothing dispatched
+    assert load_state(ctx, sid).phase == "intake"
     events = [e["type"] for e in ctx.store.events_since(0)]
     assert "scheduler.paused" in events
     alert = [m for m in ctx.store.list_messages(factory.slug) if m.kind == "finance"]
@@ -492,7 +490,8 @@ async def test_resume_from_checkpoint_after_interruption(factory: Factory):
     await Scheduler(ctx2).run()
     state = load_state(ctx2, sid)
     assert state.stage == Stage.AWAITING_FOUNDER
-    assert [c["node"] for c in ctx2.store.checkpoints(sid)][:4] == [
+    assert [c["node"] for c in ctx2.store.checkpoints(sid)][:5] == [
+        "admit",
         "node_intake",
         "node_spec",
         "node_spec_review",
@@ -505,7 +504,7 @@ async def test_resume_from_checkpoint_after_interruption(factory: Factory):
 
 def test_end_of_day_report_is_executive(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
-    seed_story(ctx, "A")
+    ProductOwnerAgent(ctx).add_item("A")  # still waiting in the backlog
     msg = MasterAgent(ctx).end_of_day_report()
     assert (
         msg.kind == "info"

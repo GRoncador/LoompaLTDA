@@ -13,10 +13,19 @@ def test_meeting_run_inbox_dry_run(git_repo: Path, hub, monkeypatch):
     assert runner.invoke(app, ["init", ".", "--yes", "--name", "Ops"]).exit_code == 0
     r = runner.invoke(app, ["meeting", "Cadastro de clientes; Relatório mensal", "--dry-run"])
     assert r.exit_code == 0, r.stdout
-    assert "S-001" in r.stdout and "S-002" in r.stdout
+    assert "S-001" in r.stdout and "S-002" in r.stdout and "loompa sprint start" in r.stdout
+    r = runner.invoke(app, ["run", "--dry-run"])  # the backlog waits for a sprint
+    assert r.exit_code == 0 and "0 histórias processadas" in r.stdout, r.stdout
+    r = runner.invoke(app, ["sprint", "start", "--dry-run", "--goal", "Primeira entrega"])
+    assert r.exit_code == 0 and "SP-001 iniciado" in r.stdout, r.stdout
+    r = runner.invoke(app, ["sprint", "start", "--dry-run"])  # nothing left to start
+    assert r.exit_code == 1 and "não há histórias" in r.stdout
     r = runner.invoke(app, ["run", "--dry-run"])
     assert r.exit_code == 0, r.stdout
     assert "2 histórias processadas" in r.stdout
+    r = runner.invoke(app, ["sprint", "status"])
+    assert r.exit_code == 0 and "SP-001" in r.stdout and "rodando" in r.stdout
+    assert "aguardando você" in r.stdout and "Primeira entrega" in r.stdout
     r = runner.invoke(app, ["inbox", "list"])
     assert r.exit_code == 0 and "DELIVERY" in r.stdout and "S-001" in r.stdout
     msg_id = r.stdout.split("DELIVERY · ")[1].split(" ")[0]

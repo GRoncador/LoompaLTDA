@@ -91,12 +91,13 @@ class Scheduler:
             if s["stage"] not in TERMINAL
             and s["stage"] not in PAUSED
             and s["id"] not in self.running
-            and not (s["origin"] == "kaizen" and s["stage"] == Stage.BACKLOG)
+            and s["stage"] != Stage.BACKLOG  # cards wait for a sprint (or the founder's promote)
         ]
 
     def runnable(self) -> list[dict[str, Any]]:
-        """Stories ready to execute. Kaizen-discovered cards wait in BACKLOG for the Founder's go;
-        a story whose runner just crashed waits out its Ops backoff first."""
+        """Stories ready to execute: the ones the Product Owner admitted out of the backlog
+        (a sprint start, an epic split, an explicit promote). A story whose runner just crashed
+        waits out its Ops backoff first."""
         now = time.monotonic()
         return [s for s in self._eligible() if self.not_before.get(s["id"], 0.0) <= now]
 
@@ -111,10 +112,16 @@ class Scheduler:
         return max(min(waits), 0.0) if waits else None
 
     def promote(self, story_id: str) -> None:
-        """Founder approves a backlog card (e.g. a Kaizen discovery) for execution."""
+        """Founder sends one backlog card straight to work, outside any sprint (a hotfix lane)."""
         from loompa.agents.product_owner import ProductOwnerAgent
 
         ProductOwnerAgent(self.ctx).admit(story_id)
+
+    def close_sprints(self) -> None:
+        """Close sprints whose stories all finished (the Master tells the founder)."""
+        from loompa.agents.master import MasterAgent
+
+        MasterAgent(self.ctx).close_finished_sprints()
 
     def budget_ok(self) -> BudgetStatus:
         st = self.ctx.tracker.status()
@@ -198,7 +205,7 @@ class Scheduler:
                 state,
                 BlockedReason.PERSISTENT_FAILURE,
                 technical,
-                resume=state.stage,
+                resume=state.phase or state.stage,  # the phase, not its kanban column
                 executive=ops.executive_reason(state),
             )
             state.extra.pop(INCIDENT_KEY, None)
@@ -215,6 +222,7 @@ class Scheduler:
         try:
             while True:
                 self._dispatch()
+                self.close_sprints()
                 if not self.running:
                     wait = self.waiting_for()
                     if wait is not None and until_idle:
@@ -239,6 +247,11 @@ class Scheduler:
     # --------------------------------------------------------------- founder
     async def aanswer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:
         """Apply an inbox reply; returns the updated story state (None for non-story messages)."""
+        state = await self._apply_answer(message_id, answer)
+        self.close_sprints()  # an approval or a cancel may have finished the sprint
+        return state
+
+    async def _apply_answer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:
         msg = self.ctx.store.answer_message(message_id, answer)
         self.ctx.emit(
             "inbox.answered", story_id=msg.story_id, message_id=message_id, option=answer.option_key

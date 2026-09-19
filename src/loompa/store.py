@@ -105,6 +105,16 @@ CREATE TABLE IF NOT EXISTS learnings (
     promoted INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sprints (
+    id TEXT PRIMARY KEY,
+    factory TEXT NOT NULL,
+    goal TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    story_ids_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    closed_at TEXT
+);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
@@ -488,6 +498,52 @@ class Store:
                 "SELECT * FROM learnings WHERE created_at >= ? ORDER BY id DESC", (since_iso,)
             )
         return self._q("SELECT * FROM learnings ORDER BY id DESC")
+
+    # ------------------------------------------------------------------ sprints
+    def next_sprint_id(self, factory: str) -> str:
+        rows = self._q("SELECT COUNT(*) AS n FROM sprints WHERE factory = ?", (factory,))
+        return f"SP-{rows[0]['n'] + 1:03d}"
+
+    def put_sprint(self, sprint: dict[str, Any]) -> None:
+        row = {**sprint, "story_ids_json": json.dumps(sprint["story_ids"])}
+        cols = (
+            "id",
+            "factory",
+            "goal",
+            "status",
+            "story_ids_json",
+            "created_at",
+            "started_at",
+            "closed_at",
+        )
+        self._x(
+            f"INSERT OR REPLACE INTO sprints ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
+            tuple(row.get(c) for c in cols),
+        )
+
+    @staticmethod
+    def _sprint(row: dict[str, Any]) -> dict[str, Any]:
+        row = dict(row)
+        row["story_ids"] = json.loads(row.pop("story_ids_json") or "[]")
+        return row
+
+    def get_sprint(self, sprint_id: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT * FROM sprints WHERE id = ?", (sprint_id,))
+        return self._sprint(rows[0]) if rows else None
+
+    def list_sprints(
+        self, factory: str | None = None, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        sql, params, clauses = "SELECT * FROM sprints", [], []
+        if factory:
+            clauses.append("factory = ?")
+            params.append(factory)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        return [self._sprint(r) for r in self._q(sql + " ORDER BY created_at, id", tuple(params))]
 
     # ----------------------------------------------------------------------- kv
     def get(self, key: str, default: str | None = None) -> str | None:

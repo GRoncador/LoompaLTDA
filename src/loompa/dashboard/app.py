@@ -28,6 +28,7 @@ from loompa.config.settings import SettingsPatch
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, kanban_column, load_state
 from loompa.factory import Factory
 from loompa.finance import month_start_iso, today_start_iso
+from loompa.sprints import SprintBoard, SprintError, SprintStatus
 
 log = logging.getLogger("loompa.dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -76,6 +77,13 @@ class ProbeBody(BaseModel):
 class MeetingBody(BaseModel):
     goals: str
     run: bool = False
+
+
+class SprintBody(BaseModel):
+    story_ids: list[str] = []
+    goal: str = ""
+    limit: int | None = None
+    run: bool = True
 
 
 class StoryBody(BaseModel):
@@ -184,6 +192,16 @@ class Hub:
             await self.stop_engine(slug)
             await self.runtimes[slug].ctx.aclose()
         self.runtimes.clear()
+
+
+def _sprint_summary(ctx: EngineContext) -> dict[str, Any] | None:
+    """The sprint the founder cares about now: the running one, else the one being planned."""
+    board = SprintBoard(ctx.store, ctx.slug)
+    active = [sp for sp in board.sprints() if sp.status != SprintStatus.CLOSED]
+    if not active:
+        return None
+    sprint = next((sp for sp in active if sp.status == SprintStatus.RUNNING), active[-1])
+    return {**sprint.model_dump(), "progress": board.progress(sprint)}
 
 
 def create_app(
@@ -316,6 +334,7 @@ def create_app(
                 "exhausted": budget.exhausted,
             },
             "kaizen_today": len(ctx.store.list_learnings(since_iso=today_start_iso())),
+            "sprint": _sprint_summary(ctx),
             "last_event_id": _last_event_id(ctx),
         }
 
@@ -398,10 +417,36 @@ def create_app(
 
         rt = hub.get(slug)
         rt.ctx.index_memory()
-        result = await MasterAgent(rt.ctx).meeting(body.goals)
+        master = MasterAgent(rt.ctx)
+        result = await master.meeting(body.goals)
         if body.run:
+            if result["stories"]:
+                master.start_sprint([s["id"] for s in result["stories"]])
             await hub.start_engine(slug)
         return result
+
+    # ----------------------------------------------------------------- sprints
+    @app.get("/api/factories/{slug}/sprints")
+    def sprints(slug: str) -> list[dict[str, Any]]:
+        ctx = hub.get(slug).ctx
+        board = SprintBoard(ctx.store, slug)
+        return [{**sp.model_dump(), "progress": board.progress(sp)} for sp in board.sprints()]
+
+    @app.post("/api/factories/{slug}/sprints/start")
+    async def start_sprint(slug: str, body: SprintBody) -> dict[str, Any]:
+        from loompa.agents import MasterAgent
+
+        rt = hub.get(slug)
+        try:
+            sprint = MasterAgent(rt.ctx).start_sprint(
+                body.story_ids or None, goal=body.goal, limit=body.limit
+            )
+        except SprintError as exc:
+            raise HTTPException(409, str(exc)) from None
+        if body.run:
+            await hub.start_engine(slug)
+        board = SprintBoard(rt.ctx.store, slug)
+        return {**sprint.model_dump(), "progress": board.progress(sprint)}
 
     @app.post("/api/factories/{slug}/transcribe")
     async def transcribe(slug: str, audio: UploadFile = File(...)) -> dict[str, Any]:

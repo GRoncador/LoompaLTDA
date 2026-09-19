@@ -88,10 +88,12 @@ async def test_live_first_real_cycle(
         pytest.skip(f"provedor indisponível: {live_reachable.detail}")
     ctx = EngineContext.build(live_factory)  # real router; key from the process environment
     try:
-        result = await MasterAgent(ctx).meeting(
+        master = MasterAgent(ctx)
+        result = await master.meeting(
             "Adicionar a função subtract(a, b) em app/calc.py com teste em tests/test_calc.py"
         )
         assert result["stories"], result
+        master.start_sprint()
         done = await Scheduler(ctx).run()
         assert done
         state = load_state(ctx, done[0])

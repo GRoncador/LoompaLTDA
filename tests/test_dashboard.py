@@ -57,7 +57,16 @@ def test_meeting_run_inbox_flow(client: TestClient):
         "Exportar CSV",
     ]
     ov = client.get("/api/factories/demo-hq/overview").json()
-    assert len(ov["columns"][0]["stories"]) == 2
+    assert len(ov["columns"][0]["stories"]) == 2 and ov["sprint"] is None
+    # the backlog waits for a sprint: nothing runs until the founder starts one
+    sprint = client.post("/api/factories/demo-hq/sprints/start", json={"run": False}).json()
+    assert sprint["id"] == "SP-001" and sprint["status"] == "running"
+    assert sprint["story_ids"] == ["S-001", "S-002"] and sprint["progress"]["total"] == 2
+    assert (
+        client.post("/api/factories/demo-hq/sprints/start", json={"run": False}).status_code == 409
+    )
+    ov = client.get("/api/factories/demo-hq/overview").json()
+    assert ov["sprint"]["id"] == "SP-001" and ov["columns"][0]["stories"] == []
     # run the engine until the stories await the founder
     assert client.post("/api/factories/demo-hq/engine/start").json()["engine"] is True
     import time
@@ -75,7 +84,8 @@ def test_meeting_run_inbox_flow(client: TestClient):
     assert len(waiting) == 2 and all(s["blocked_reason"] == "delivery" for s in waiting)
     story = client.get("/api/factories/demo-hq/stories/S-001").json()
     assert "spec" in story["docs"] and story["state"]["tasks_done"] == [1] and story["commits"]
-    assert story["usage"]["calls"] >= 3 and [c["node"] for c in story["checkpoints"]][:2] == [
+    assert story["usage"]["calls"] >= 3 and [c["node"] for c in story["checkpoints"]][:3] == [
+        "admit",
         "node_intake",
         "node_spec",
     ]

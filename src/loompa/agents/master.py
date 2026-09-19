@@ -17,7 +17,8 @@ from loompa.comms import (
     compose_blocked_message,
     sanitize_for_founder,
 )
-from loompa.engine.state import Complexity, Stage, StoryKind, StoryState
+from loompa.engine.state import TERMINAL, Complexity, Stage, StoryKind, StoryState
+from loompa.sprints import Sprint, SprintBoard, SprintError, SprintStatus
 
 MEETING_SYSTEM = """<!-- role:master -->
 You are the Master Loompa, COO of an autonomous software factory. The founder just gave you the goals
@@ -116,6 +117,8 @@ class MasterAgent(LoompaAgent):
         epic = parent.epic or parent.title[:60]
         row = self.ctx.store.get_story(parent.story_id) or {}
         po = ProductOwnerAgent(self.ctx)
+        board = SprintBoard(self.ctx.store, self.ctx.slug)
+        parent_sprint = board.sprint_of(parent.story_id)
         for child in children:
             added = po.add_item(
                 child["title"],
@@ -125,6 +128,10 @@ class MasterAgent(LoompaAgent):
                 origin="epic",
                 founder_notes=list(parent.founder_notes),
             )
+            if added.created:  # the parent was already cleared to run; so are its parts
+                if parent_sprint is not None:
+                    board.add(added.story_id, parent_sprint.id)
+                po.admit(added.story_id)
             ids.append(added.story_id)
         self.ctx.inbox(
             FounderMessage(
@@ -139,6 +146,83 @@ class MasterAgent(LoompaAgent):
             )
         )
         return ids
+
+    # ------------------------------------------------------------------- sprint
+    def start_sprint(
+        self, story_ids: list[str] | None = None, *, goal: str = "", limit: int | None = None
+    ) -> Sprint:
+        """Sprint Meeting: gather the stories, let the Product Owner admit them, start the batch.
+
+        With explicit ids they join the sprint being planned; with none, the sprint's draft is
+        used or, when it is empty, the founder's cards in priority order (Kaizen findings wait
+        for an explicit yes). Only cards waiting in the backlog can be picked."""
+        self.set_state("WORKING", detail="reunião de sprint")
+        try:
+            store, po = self.ctx.store, ProductOwnerAgent(self.ctx)
+            board = SprintBoard(store, self.ctx.slug)
+            sprint = board.draft()
+            picked = list(story_ids or [])
+            if not picked and not sprint.story_ids:
+                picked = [
+                    s["id"]
+                    for s in store.list_stories(self.ctx.slug, stage=Stage.BACKLOG)
+                    if s["origin"] != "kaizen"
+                ][: limit or None]
+            for sid in picked:
+                board.add(sid, sprint.id)
+            sprint = board.get(sprint.id) or sprint
+            if not sprint.story_ids:
+                raise SprintError("não há histórias no backlog para começar um sprint")
+            for sid in sprint.story_ids:
+                po.admit(sid)
+            sprint = board.start(sprint.id, goal)
+            self.ctx.emit(
+                "sprint.started",
+                agent=self.name,
+                sprint_id=sprint.id,
+                stories=sprint.story_ids,
+                goal=sprint.goal,
+            )
+            return sprint
+        finally:
+            self.set_state("IDLE")
+
+    def close_finished_sprints(self) -> list[Sprint]:
+        """Close every running sprint whose stories all reached a terminal state and tell the
+        founder. A story waiting on the founder keeps its sprint open; nothing else waits."""
+        board = SprintBoard(self.ctx.store, self.ctx.slug)
+        closed: list[Sprint] = []
+        for sprint in board.sprints(SprintStatus.RUNNING):
+            rows = [self.ctx.store.get_story(sid) for sid in sprint.story_ids]
+            if any(r is not None and r["stage"] not in TERMINAL for r in rows):
+                continue
+            counts = board.progress(sprint)
+            sprint = board.close(sprint.id)
+            self.ctx.emit(
+                "sprint.done",
+                agent=self.name,
+                sprint_id=sprint.id,
+                done=counts["done"],
+                cancelled=counts["cancelled"],
+            )
+            self.ctx.inbox(
+                FounderMessage(
+                    factory=self.ctx.slug,
+                    kind=MessageKind.INFO,
+                    sender=self.name,
+                    title=f"Sprint {sprint.id} concluído",
+                    context=(
+                        f"{counts['done']} entregas concluídas"
+                        + (f" e {counts['cancelled']} canceladas" if counts["cancelled"] else "")
+                        + "."
+                        + (f" Meta: {sprint.goal}" if sprint.goal else "")
+                    ),
+                    impact="Escolha as próximas histórias do backlog para o próximo sprint.",
+                    allow_free_text=False,
+                )
+            )
+            closed.append(sprint)
+        return closed
 
     # ------------------------------------------------------------------ meeting
     async def meeting(self, goals: str) -> dict[str, Any]:

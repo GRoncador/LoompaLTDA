@@ -13,9 +13,10 @@ from rich.table import Table
 
 from loompa.cli.main import app, resolve_factory
 from loompa.comms import FounderAnswer
-from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, kanban_column
+from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column
 from loompa.factory import Factory
 from loompa.llm import ModelRouter
+from loompa.sprints import SprintBoard, SprintError, SprintStatus
 from loompa.store import Store
 
 console = Console()
@@ -23,6 +24,8 @@ inbox_app = typer.Typer(help="Caixa de Entrada do Founder (decisões em lote).")
 app.add_typer(inbox_app, name="inbox")
 memory_app = typer.Typer(help="Memória organizacional (RAG local).")
 app.add_typer(memory_app, name="memory")
+sprint_app = typer.Typer(help="Sprints: lotes de histórias que a fábrica executa juntos.")
+app.add_typer(sprint_app, name="sprint")
 
 
 def build_context(f: Factory, *, dry_run: bool = False) -> EngineContext:
@@ -95,7 +98,16 @@ def meeting(
     for q in result["clarifications"]:
         console.print(f"[yellow]?[/yellow] {q}  (enviado à Caixa de Entrada)")
     if run_after:
+        from loompa.agents import MasterAgent as Master
+
+        if result["stories"]:
+            sprint = Master(ctx).start_sprint([s["id"] for s in result["stories"]])
+            console.print(
+                f"[green]✔[/green] {sprint.id} iniciado com {len(sprint.story_ids)} histórias"
+            )
         asyncio.run(_run(ctx, until_idle=True))
+    elif result["stories"]:
+        console.print("Histórias no backlog. Para executar: [bold]loompa sprint start[/bold]")
     ctx.close()
 
 
@@ -156,10 +168,102 @@ def run(
             f"[bold]{f.config.factory.name}[/bold] · execução {'simulada' if dry_run else 'real'} · paralelismo {parallel or f.config.schedule.max_parallel}"
         )
     )
+    waiting = len(ctx.store.list_stories(f.slug, stage=Stage.BACKLOG))
+    if waiting:
+        console.print(
+            f"[dim]{waiting} histórias esperam no backlog; `loompa sprint start` as coloca para rodar.[/dim]"
+        )
     done = asyncio.run(_run(ctx, until_idle=not watch, max_parallel=parallel))
     console.print(f"[green]✔[/green] ciclo encerrado · {len(done)} histórias processadas")
     print_runtime_status(f, console)
     ctx.close()
+
+
+# ----------------------------------------------------------------------------- sprint
+
+
+@sprint_app.command("start")
+def sprint_start(
+    ids: list[str] = typer.Argument(
+        None, help="Histórias do backlog (padrão: o rascunho do sprint ou o backlog do Founder)."
+    ),
+    goal: str = typer.Option("", "--goal", "-g", help="Meta do sprint em uma frase."),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="No máximo N histórias."),
+    factory: str | None = typer.Option(None, "--factory", "-f"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Sem chamadas de IA (simulação)."),
+    run_after: bool = typer.Option(False, "--run", help="Já executa o sprint."),
+) -> None:
+    """Começa um sprint: o Product Owner admite as histórias e a esteira passa a rodá-las."""
+    from loompa.agents import MasterAgent
+
+    f = resolve_factory(factory)
+    ctx = build_context(f, dry_run=dry_run)
+    try:
+        sprint = MasterAgent(ctx).start_sprint(ids or None, goal=goal, limit=limit)
+    except SprintError as exc:
+        console.print(f"[red]{exc}[/red]")
+        ctx.close()
+        raise typer.Exit(code=1) from None
+    console.print(
+        f"[green]✔[/green] {sprint.id} iniciado · {len(sprint.story_ids)} histórias: "
+        + ", ".join(sprint.story_ids)
+    )
+    if run_after:
+        asyncio.run(_run(ctx, until_idle=True))
+    ctx.close()
+
+
+@sprint_app.command("add")
+def sprint_add(
+    ids: list[str] = typer.Argument(..., help="Histórias do backlog para o próximo sprint."),
+    factory: str | None = typer.Option(None, "--factory", "-f"),
+) -> None:
+    """Monta o rascunho do próximo sprint sem começá-lo."""
+    f = resolve_factory(factory)
+    store = Store(f.paths.state_db)
+    board = SprintBoard(store, f.slug)
+    try:
+        for sid in ids:
+            sprint = board.add(sid)
+    except SprintError as exc:
+        console.print(f"[red]{exc}[/red]")
+        store.close()
+        raise typer.Exit(code=1) from None
+    console.print(f"[green]✔[/green] {sprint.id} (aberto): {', '.join(sprint.story_ids)}")
+    store.close()
+
+
+@sprint_app.command("status")
+def sprint_status(factory: str | None = typer.Option(None, "--factory", "-f")) -> None:
+    """Sprints da fábrica e o andamento de cada história."""
+    f = resolve_factory(factory)
+    if not f.paths.state_db.is_file():
+        console.print("Nenhum sprint ainda.")
+        return
+    store = Store(f.paths.state_db)
+    board = SprintBoard(store, f.slug)
+    sprints = board.sprints()
+    if not sprints:
+        console.print("Nenhum sprint ainda. Comece com [bold]loompa sprint start[/bold].")
+    label = {"open": "aberto", "running": "rodando", "closed": "encerrado"}
+    for sp in sprints:
+        counts = board.progress(sp)
+        console.print(
+            f"[bold]{sp.id}[/bold] · {label[sp.status.value]} · {counts['done']}/{counts['total']} concluídas"
+            + (f" · {counts['waiting']} aguardando você" if counts["waiting"] else "")
+            + (f" · meta: {sp.goal}" if sp.goal else "")
+        )
+        if sp.status == SprintStatus.CLOSED:
+            continue
+        table = Table(show_header=True, box=None)
+        for col in ("id", "título", "etapa"):
+            table.add_column(col)
+        for sid in sp.story_ids:
+            row = store.get_story(sid)
+            if row:
+                table.add_row(sid, row["title"][:60], row["stage"])
+        console.print(table)
+    store.close()
 
 
 # ------------------------------------------------------------------------------ inbox
