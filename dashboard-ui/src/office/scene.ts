@@ -2,8 +2,9 @@ import Phaser from "phaser";
 import type { Agent } from "../types";
 
 /**
- * Pixel-art office rendered procedurally (no external sprites): four rooms, desks, a sofa, a
- * lab lamp. Each Loompa is a little 16x24 sprite whose animation reflects its state:
+ * Pixel-art office: four rooms, desks, a sofa, a lab lamp, all rendered procedurally. Each
+ * Loompa uses a 32x32 PNG at public/sprites/loompa-<role>.png when present, falling back to a
+ * procedurally-drawn 16x24 placeholder otherwise. Its animation reflects its state:
  *   IDLE     -> sitting on the lounge sofa / resting at desk, slow breathing
  *   WORKING  -> at its desk, hands "typing" + floating keystrokes
  *   TESTING  -> in the QA lab, blue lamp blinking
@@ -22,7 +23,17 @@ const ROLE_COLORS: Record<string, number> = {
   deployer: 0xf472b6, finance: 0xfbbf24, kaizen: 0x4ade80, storyteller: 0xfb7185, metrics: 0x94a3b8, compliance: 0xc084fc,
 };
 
-interface Sprite { root: Phaser.GameObjects.Container; body: Phaser.GameObjects.Rectangle; badge: Phaser.GameObjects.Text; label: Phaser.GameObjects.Text; state: string; t: number; home: { x: number; y: number }; seat: { x: number; y: number } }
+interface Sprite {
+  root: Phaser.GameObjects.Container;
+  body: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image;
+  badge: Phaser.GameObjects.Text;
+  label: Phaser.GameObjects.Text;
+  badgeBase: number;
+  state: string;
+  t: number;
+  home: { x: number; y: number };
+  seat: { x: number; y: number };
+}
 
 export class OfficeScene extends Phaser.Scene {
   private sprites = new Map<string, Sprite>();
@@ -34,6 +45,14 @@ export class OfficeScene extends Phaser.Scene {
   constructor() { super("office"); }
 
   init(data: { onSelect: (name: string) => void }) { this.onSelect = data.onSelect; }
+
+  preload() {
+    // Drop a 32x32 PNG at dashboard-ui/public/sprites/loompa-<role>.png to replace the
+    // procedural placeholder for that role; missing files just fall back silently in spawn().
+    Object.keys(ROLE_COLORS).forEach((role) => {
+      this.load.image(`loompa-${role}`, `/sprites/loompa-${role}.png`);
+    });
+  }
 
   create() {
     const g = this.add.graphics();
@@ -99,21 +118,34 @@ export class OfficeScene extends Phaser.Scene {
 
   private spawn(a: Agent): Sprite {
     const color = ROLE_COLORS[a.role] ?? 0xe2e8f0;
+    const textureKey = `loompa-${a.role}`;
+    const hasArt = this.textures.exists(textureKey);
     const root = this.add.container(100, 100);
     const shadow = this.add.ellipse(0, 22, 20, 6, 0x000000, 0.35);
-    const body = this.add.rectangle(0, 6, 14, 18, color).setStrokeStyle(1, 0x0b1220);
-    const head = this.add.rectangle(0, -8, 12, 12, 0xfde68a).setStrokeStyle(1, 0x0b1220);
-    const hair = this.add.rectangle(0, -13, 12, 4, 0x22c55e);
-    const eyeL = this.add.rectangle(-3, -8, 2, 2, 0x0b1220);
-    const eyeR = this.add.rectangle(3, -8, 2, 2, 0x0b1220);
-    const badge = this.add.text(0, -30, "", { fontFamily: "monospace", fontSize: "12px", color: "#e2e8f0", fontStyle: "bold" }).setOrigin(0.5);
+    const highlight = this.add.rectangle(0, hasArt ? 4 : 6, hasArt ? 36 : 26, 42).setStrokeStyle(2, 0xffffff, 0);
+    const extras: Phaser.GameObjects.GameObject[] = [];
+    let body: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image;
+    let badgeBase: number;
+    if (hasArt) {
+      body = this.add.image(0, 20, textureKey).setOrigin(0.5, 1);
+      badgeBase = -26;
+    } else {
+      body = this.add.rectangle(0, 6, 14, 18, color).setStrokeStyle(1, 0x0b1220);
+      const head = this.add.rectangle(0, -8, 12, 12, 0xfde68a).setStrokeStyle(1, 0x0b1220);
+      const hair = this.add.rectangle(0, -13, 12, 4, 0x22c55e);
+      const eyeL = this.add.rectangle(-3, -8, 2, 2, 0x0b1220);
+      const eyeR = this.add.rectangle(3, -8, 2, 2, 0x0b1220);
+      extras.push(head, hair, eyeL, eyeR);
+      badgeBase = -30;
+    }
+    const badge = this.add.text(0, badgeBase, "", { fontFamily: "monospace", fontSize: "12px", color: "#e2e8f0", fontStyle: "bold" }).setOrigin(0.5);
     const label = this.add.text(0, 26, "", { fontFamily: "monospace", fontSize: "9px", color: "#cbd5e1" }).setOrigin(0.5, 0);
-    root.add([shadow, body, head, hair, eyeL, eyeR, badge, label]);
-    root.setSize(24, 40).setInteractive({ useHandCursor: true });
+    root.add([shadow, highlight, body, ...extras, badge, label]);
+    root.setSize(hasArt ? 32 : 24, 40).setInteractive({ useHandCursor: true });
     root.on("pointerdown", () => this.onSelect(a.name));
-    root.on("pointerover", () => body.setStrokeStyle(2, 0xffffff));
-    root.on("pointerout", () => body.setStrokeStyle(1, 0x0b1220));
-    const sp: Sprite = { root, body, badge, label, state: a.state, t: Math.random() * 10, home: { x: 100, y: 100 }, seat: { x: 100, y: 100 } };
+    root.on("pointerover", () => highlight.setStrokeStyle(2, 0xffffff, 1));
+    root.on("pointerout", () => highlight.setStrokeStyle(2, 0xffffff, 0));
+    const sp: Sprite = { root, body, badge, label, badgeBase, state: a.state, t: Math.random() * 10, home: { x: 100, y: 100 }, seat: { x: 100, y: 100 } };
     this.sprites.set(a.name, sp);
     return sp;
   }
@@ -125,9 +157,9 @@ export class OfficeScene extends Phaser.Scene {
       sp.t += dt;
       if (sp.state === "WORKING") {
         sp.body.setScale(1, 1 + Math.sin(sp.t * 14) * 0.04);
-        sp.badge.setY(-30 + Math.sin(sp.t * 8) * 2);
+        sp.badge.setY(sp.badgeBase + Math.sin(sp.t * 8) * 2);
       } else if (sp.state === "BLOCKED") {
-        sp.badge.setY(-32 + Math.abs(Math.sin(sp.t * 4)) * -6);
+        sp.badge.setY(sp.badgeBase - 2 + Math.abs(Math.sin(sp.t * 4)) * -6);
         sp.badge.setScale(1 + Math.sin(sp.t * 6) * 0.15);
       } else if (sp.state === "TESTING") {
         testing = true;
