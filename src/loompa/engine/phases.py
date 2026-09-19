@@ -41,13 +41,17 @@ def phase_stage(name: str) -> Stage:
 # ---------------------------------------------------------------------------- routes
 
 BASE_ROUTE = ["intake", "spec", "spec_review", "plan", "dev", "test", "review"]
+# Research produces knowledge, not code: no worktree, no merge. The Product Owner reviews the
+# report, then the founder reads it (`research_review` ends by pausing for the founder).
+RESEARCH_ROUTE = ["intake", "research", "research_review"]
 
 
 def build_route(kind: StoryKind | str, complexity: Complexity | str) -> list[str]:
-    """Ordered phases for a story. Research stories get their own route in Fase 4 (Analyst);
-    until then they follow the feature route so nothing is lost."""
+    """Ordered phases for a story, from its kind and complexity."""
     kind = StoryKind(kind)
     complexity = Complexity(complexity)
+    if kind == StoryKind.RESEARCH:
+        return list(RESEARCH_ROUTE)
     route = list(BASE_ROUTE)
     if (
         complexity == Complexity.SIMPLE

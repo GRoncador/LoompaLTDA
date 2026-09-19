@@ -281,3 +281,44 @@ def compose_delivery_message(
         ],
         decisions=[card_decision(c) for c in cards or []],
     )
+
+
+def compose_research_message(
+    *,
+    factory: str,
+    story_id: str,
+    story_title: str,
+    summary: str,
+    recommendation: str,
+    limitations: list[str],
+    sources: int,
+    cost_usd: float = 0.0,
+    cards: list[dict] | None = None,
+    concerns: str = "",
+) -> FounderMessage:
+    """A finished research: what was found, what we recommend, what we could not check, plus
+    every follow-up the research suggests as its own decision."""
+    parts = [sanitize_for_founder(summary, max_chars=550)]
+    if recommendation.strip():
+        parts.append("Recomendação: " + sanitize_for_founder(recommendation, max_chars=330))
+    if limitations:
+        parts.append("Limitações: " + sanitize_for_founder(" ".join(limitations), max_chars=260))
+    if concerns.strip():
+        parts.append("Ressalvas da revisão: " + sanitize_for_founder(concerns, max_chars=160))
+    cited = f"{sources} fonte(s) verificada(s). " if sources else ""
+    return FounderMessage(
+        factory=factory,
+        story_id=story_id,
+        kind=MessageKind.DELIVERY,
+        title=f"Pesquisa pronta: “{story_title}”",
+        context="\n\n".join(p for p in parts if p),
+        impact=(
+            "Nada foi alterado no produto. O relatório completo, com as fontes, está na história "
+            f"no painel. {cited}Custo desta pesquisa: US$ {cost_usd:.2f}."
+        ),
+        options=[
+            Option(key="approve", label="Aprovar a pesquisa", recommended=True),
+            Option(key="changes", label="Pedir mais aprofundamento"),
+        ],
+        decisions=[card_decision(c) for c in cards or []],
+    )

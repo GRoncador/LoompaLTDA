@@ -11,7 +11,8 @@ from datetime import UTC, datetime
 
 from loompa.agents.base import LoompaAgent
 from loompa.agents.product_owner import ProductOwnerAgent
-from loompa.engine.state import StoryState
+from loompa.engine.state import Stage, StoryState
+from loompa.sprints import SprintBoard
 
 KIND_LABEL = {
     "bug": "Bug colateral",
@@ -77,6 +78,34 @@ class KaizenAgent(LoompaAgent):
                 fh.write("\n".join(lines) + "\n")
             self.ctx.memory.index_file(path, kind="learning", doc_id="learnings.md")
         return created
+
+    def suggested_cards(self, state: StoryState) -> list[dict]:
+        """Backlog cards this story raised that the founder has not decided on yet: what a
+        delivery (code or research) offers as independent decisions."""
+        decided = {
+            d.id
+            for m in self.ctx.store.list_messages(self.ctx.slug)
+            if m.story_id == state.story_id
+            for d in m.decisions
+            if d.chosen
+        }
+        board = SprintBoard(self.ctx.store, self.ctx.slug)
+        cards = []
+        for sid in state.finding_cards:
+            row = self.ctx.store.get_story(sid)
+            if not row or row["stage"] != Stage.BACKLOG or sid in decided:
+                continue
+            if board.sprint_of(sid) is not None:  # already planned into a sprint
+                continue
+            cards.append(
+                {
+                    "id": sid,
+                    "title": row["title"],
+                    "detail": (row["description"] or "").split("\n\n")[0],
+                    "priority": row["priority"],
+                }
+            )
+        return cards
 
     def record_resolution(self, state: StoryState, failure: str, fix: str) -> None:
         """Persist a past bug resolution so future workers can recall it."""

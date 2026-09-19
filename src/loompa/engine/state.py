@@ -101,6 +101,7 @@ class StoryState(BaseModel):
     worker_summary: str = ""
     review_notes: str = ""
     spec_review_rounds: int = 0
+    research_review_rounds: int = 0
     qa_verdict: QAVerdict | None = None
     qa_findings: list[dict[str, str]] = Field(default_factory=list)  # {id, severity, text}
     pr_url: str | None = None

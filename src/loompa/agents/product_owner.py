@@ -30,6 +30,22 @@ Write in {language}.
 """
 
 
+RESEARCH_REVIEW_SYSTEM = """<!-- role:product_owner -->
+You are the Product Owner Loompa. The Analyst wrote the research report below for the founder's
+request. Review it before it reaches the founder:
+- It must answer the question that was asked, not a nearby one.
+- Every finding must be backed by the sources cited next to it; a claim without a source is an
+  opinion and must be flagged. Sources marked as unverified do not count.
+- The limitations must be stated honestly (for example when the web could not be searched).
+- The recommendation must follow from the findings and say what would change it.
+Respond with JSON only:
+{{"approved": bool, "unsupported": [str], "missing": [str], "notes": str}}
+`unsupported` quotes the claims that are not backed by their sources; `missing` lists what the
+founder would still need to decide. Approve when nothing is unsupported and nothing critical is
+missing. Write in {language}.
+"""
+
+
 class ProductOwnerAgent(LoompaAgent):
     role = "product_owner"
     display = "Product Owner Loompa"
@@ -100,26 +116,92 @@ class ProductOwnerAgent(LoompaAgent):
             )
             + f"## Spec under review\n{spec[:6000]}\n\n## Constitution (excerpt)\n{self.constitution(3000)}"
         )
+        return await self._verdict(
+            state,
+            REVIEW_SYSTEM,
+            user,
+            event="spec.reviewed",
+            unavailable="revisão indisponível; spec seguiu",
+        )
+
+    # --------------------------------------------------------------- research
+    async def review_research(self, state: StoryState) -> AgentResult:
+        """Sources and honesty gate on the Analyst's report. Two checks the model cannot talk
+        its way past come first: a report that used the web must have at least one verified
+        source, and a report with no findings says nothing."""
+        self.set_state("WORKING", state, detail="revisando a pesquisa")
+        report = state.extra.get("research") or {}
+        paths = story_dir(self.ctx.root, state.story_id)
+        text = paths.research.read_text(encoding="utf-8") if paths.research.is_file() else ""
+        problems: list[str] = []
+        if not report.get("findings_total"):
+            problems.append("o relatório não traz nenhum achado")
+        elif report.get("web_used") and not report.get("sourced"):
+            problems.append("a pesquisa usou a web, mas nenhum achado tem fonte verificada")
+        if report.get("dropped_sources"):
+            problems.append(
+                f"{len(report['dropped_sources'])} fonte(s) citada(s) não foram encontradas nas consultas"
+            )
+        user = (
+            f"# Story {state.story_id}: {state.title}\n\n## Founder's request\n{state.description or state.title}\n\n"
+            + (
+                "## Founder's notes\n" + "\n".join(f"- {n}" for n in state.founder_notes) + "\n\n"
+                if state.founder_notes
+                else ""
+            )
+            + "## Automatic checks\n"
+            + ("\n".join(f"- {p}" for p in problems) or "- all sources verified")
+            + f"\n\n## Report under review\n{text[:7000]}"
+        )
+        res = await self._verdict(
+            state,
+            RESEARCH_REVIEW_SYSTEM,
+            user,
+            event="research.reviewed",
+            unavailable="revisão indisponível; pesquisa seguiu",
+            unsupported_label="Afirmações sem fonte que as sustente",
+        )
+        hard = [p for p in problems if "nenhum achado" in p]
+        if hard:
+            res.ok = False
+            res.summary = " ".join(
+                ["Problemas objetivos: " + "; ".join(hard) + ".", res.summary]
+            ).strip()
+        return res
+
+    async def _verdict(
+        self,
+        state: StoryState,
+        system: str,
+        user: str,
+        *,
+        event: str,
+        unavailable: str,
+        unsupported_label: str = "Critérios sem origem rastreável",
+    ) -> AgentResult:
+        """One review call: `{approved, unsupported, missing, notes}` folded into an AgentResult.
+        The review is advisory when the model is unavailable, so a provider outage never holds
+        the line."""
         try:
             data = await self.ask_json(
-                REVIEW_SYSTEM.format(language=self.language), user, story=state, max_tokens=1500
+                system.format(language=self.language), user, story=state, max_tokens=1500
             )
-        except Exception:  # noqa: BLE001 - the review is advisory when the model is unavailable
+        except Exception:  # noqa: BLE001
             self.set_state("IDLE")
-            return AgentResult(ok=True, summary="revisão indisponível; spec seguiu")
+            return AgentResult(ok=True, summary=unavailable)
         unsupported = self._list(data, "unsupported")
         missing = self._list(data, "missing")
         approved = bool(data.get("approved")) and not unsupported
         notes = str(data.get("notes") or "").strip()
         summary_parts = []
         if unsupported:
-            summary_parts.append("Critérios sem origem rastreável: " + "; ".join(unsupported[:5]))
+            summary_parts.append(f"{unsupported_label}: " + "; ".join(unsupported[:5]))
         if missing:
             summary_parts.append("Faltando: " + "; ".join(missing[:5]))
         if notes:
             summary_parts.append(notes)
         self.ctx.emit(
-            "spec.reviewed",
+            event,
             story_id=state.story_id,
             agent=self.name,
             approved=approved,
@@ -129,6 +211,6 @@ class ProductOwnerAgent(LoompaAgent):
         self.set_state("IDLE")
         return AgentResult(
             ok=approved,
-            summary=" ".join(summary_parts) or "spec aprovada",
+            summary=" ".join(summary_parts) or "aprovado",
             data={"unsupported": unsupported, "missing": missing, "notes": notes},
         )

@@ -1,3 +1,4 @@
+from loompa.agents.analyst import AnalystAgent
 from loompa.agents.architect import ArchitectAgent
 from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.agents.deployer import DeployerAgent
@@ -12,6 +13,7 @@ from loompa.agents.worker import WorkerAgent
 
 __all__ = [
     "AgentResult",
+    "AnalystAgent",
     "ArchitectAgent",
     "DeployerAgent",
     "InspectorAgent",

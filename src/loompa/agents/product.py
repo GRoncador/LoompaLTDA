@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from loompa.agents.base import AgentResult, LoompaAgent
+from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent
 from loompa.engine.state import StoryState
 from loompa.speckit import SpecArtifacts, story_dir
 
@@ -52,7 +52,12 @@ class ProductAgent(LoompaAgent):
             )
             + f"## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
         )
-        data = await self.ask_json(SYSTEM.format(language=self.language), user, story=state)
+        data = await self.ask_json_with_tools(
+            SYSTEM.format(language=self.language) + EXPLORE_HINT,
+            user,
+            self.explore_tools(),
+            story=state,
+        )
         if data.get("needs_decision") and not state.founder_notes:
             self.set_state("BLOCKED", state, detail="decisão de produto pendente")
             return AgentResult(

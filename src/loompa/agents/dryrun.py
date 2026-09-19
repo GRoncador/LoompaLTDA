@@ -39,8 +39,16 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
     title = _story_title(messages)
     if role == "master":
         if "Classify the story" in messages[0].content:
+            researching = re.search(
+                r"^# Story S-\d+: (pesquis|research)", messages[-1].content, re.I
+            )
             return json.dumps(
-                {"kind": "feature", "complexity": "STANDARD", "children": [], "reason": "simulação"}
+                {
+                    "kind": "research" if researching else "feature",
+                    "complexity": "STANDARD",
+                    "children": [],
+                    "reason": "simulação",
+                }
             )
         if "Metas de hoje" in messages[-1].content:
             goals = (
@@ -136,6 +144,18 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                 )
             ]
         return [ToolCall("c2", "done", {"summary": f"'{title}' registrada (simulação)"})]
+    if role == "analyst":
+        return json.dumps(
+            {
+                "question": title,
+                "summary": f"Resposta simulada do Analyst para: {title}.",
+                "findings": [{"text": "Achado simulado, sem busca real.", "sources": []}],
+                "recommendation": "Repetir com a busca na web configurada para dados reais.",
+                "limitations": [],
+                "follow_ups": [],
+                "needs_decision": False,
+            }
+        )
     if role == "product_owner":
         return json.dumps({"approved": True, "unsupported": [], "missing": [], "notes": "ok"})
     if role == "inspector":

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from loompa.agents.base import AgentResult, LoompaAgent
+from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent
 from loompa.engine.state import StoryState
 from loompa.speckit import render_plan, render_tasks, story_dir
 
@@ -63,7 +63,14 @@ class ArchitectAgent(LoompaAgent):
             )
             + f"## Repository outline\n{outline}\n\n## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
         )
-        data = await self.ask_json(SYSTEM.format(language=self.language), user, story=state)
+        # The plan's `files` are the only paths the Worker may touch: let the Architect check
+        # them in the repository instead of guessing.
+        data = await self.ask_json_with_tools(
+            SYSTEM.format(language=self.language) + EXPLORE_HINT,
+            user,
+            self.explore_tools(),
+            story=state,
+        )
         tasks = self._list(data, "tasks") or [
             f"Implementar '{state.title}' com testes cobrindo os critérios de aceitação"
         ]

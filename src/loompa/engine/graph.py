@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from loompa.agents import (
+    AnalystAgent,
     ArchitectAgent,
     DeployerAgent,
     InspectorAgent,
@@ -25,10 +26,16 @@ from loompa.agents import (
     ProductOwnerAgent,
     WorkerAgent,
 )
-from loompa.comms import FounderAnswer, FounderMessage, MessageKind, Option
+from loompa.comms import (
+    FounderAnswer,
+    FounderMessage,
+    MessageKind,
+    Option,
+    compose_research_message,
+)
 from loompa.engine.context import EngineContext
 from loompa.engine.phases import Phase, advance, build_route, goto, phase_stage, register
-from loompa.engine.state import BlockedReason, QAVerdict, Stage, StoryState
+from loompa.engine.state import BlockedReason, QAVerdict, Stage, StoryKind, StoryState
 from loompa.worktrees import GitError, Worktree
 
 Node = Callable[[EngineContext, StoryState], Awaitable[StoryState]]
@@ -104,6 +111,8 @@ _STAGE_OF_PHASE = {
     "dev": Stage.DEV,
     "test": Stage.TEST,
     "review": Stage.REVIEW,
+    "research": Stage.SPEC,
+    "research_review": Stage.REVIEW,
 }
 
 
@@ -319,6 +328,65 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     return state
 
 
+async def node_research(ctx: EngineContext, state: StoryState) -> StoryState:
+    """The Analyst researches the request (repository, memory and, when configured, the web)."""
+    res = await AnalystAgent(ctx).run(state)
+    if res.blocked_reason:
+        return await block(
+            ctx,
+            state,
+            BlockedReason.QUESTION,
+            res.blocked_reason,
+            options=res.blocked_options,
+            resume="research",
+        )
+    return advance(state)
+
+
+async def node_research_review(ctx: EngineContext, state: StoryState) -> StoryState:
+    """The Product Owner reviews the report (sources, honesty); one rewrite round at most, then
+    the concerns travel with the delivery. The founder reads the result: no code, no merge."""
+    review = await ProductOwnerAgent(ctx).review_research(state)
+    state.research_review_rounds += 1
+    if not review.ok and state.research_review_rounds < 2:
+        state.hand_off(review.summary, phase="research_review")
+        ctx.emit("research.rejected", story_id=state.story_id, issues=review.summary[:500])
+        return goto(state, "research")
+    report = state.extra.setdefault("research", {})
+    if not review.ok:
+        report["review_concerns"] = review.summary
+        state.review_notes = (state.review_notes + "\n" + review.summary).strip()
+    else:
+        report.pop("review_concerns", None)
+    ctx.emit("research.approved", story_id=state.story_id, rounds=state.research_review_rounds)
+    KaizenAgent(ctx).capture(state)  # follow-ups become cards the founder decides on
+    story = ctx.store.get_story(state.story_id) or {}
+    state.delivery_summary = str(report.get("summary") or state.title)
+    msg = ctx.inbox(
+        compose_research_message(
+            factory=ctx.slug,
+            story_id=state.story_id,
+            story_title=state.title,
+            summary=state.delivery_summary,
+            recommendation=str(report.get("recommendation") or ""),
+            limitations=list(report.get("limitations") or []),
+            sources=len(report.get("sources") or []),
+            cost_usd=float(story.get("cost_usd") or 0.0),
+            cards=KaizenAgent(ctx).suggested_cards(state),
+            concerns=str(report.get("review_concerns") or ""),
+        )
+    )
+    ctx.emit(
+        "story.delivered", story_id=state.story_id, agent="Analyst Loompa", pr_url=None, commits=0
+    )
+    state.blocked_message_id = msg.id
+    state.blocked_reason = BlockedReason.DELIVERY
+    state.resume_stage = Stage.REVIEW
+    state.resume_phase = "research_review"
+    state.stage = Stage.AWAITING_FOUNDER
+    return state
+
+
 # --------------------------------------------------------------------- phase registry
 
 register(
@@ -338,6 +406,26 @@ register(Phase("plan", node_plan, Stage.PLAN, owner="architect", reviewer="produ
 register(Phase("dev", node_dev, Stage.DEV, owner="worker", description="DoD checklist per task"))
 register(Phase("test", node_test, Stage.TEST, owner="inspector", description="graded QA gate"))
 register(Phase("review", node_review, Stage.REVIEW, owner="deployer", reviewer="founder"))
+register(
+    Phase(
+        "research",
+        node_research,
+        Stage.SPEC,
+        owner="analyst",
+        reviewer="product_owner",
+        description="repository, memory and web research; sources checked in code",
+    )
+)
+register(
+    Phase(
+        "research_review",
+        node_research_review,
+        Stage.REVIEW,
+        owner="product_owner",
+        reviewer="founder",
+        description="sources and honesty gate, then the report goes to the founder",
+    )
+)
 
 NODES: dict[Stage, Node] = {  # legacy view kept for callers that index by stage
     Stage.BACKLOG: node_intake,
@@ -390,6 +478,10 @@ def apply_founder_answer(
                     return state
             state.stage = Stage.DONE
             state.phase = ""
+        elif state.kind == StoryKind.RESEARCH:
+            state.note(guidance or "Founder pediu mais aprofundamento na pesquisa.")
+            state.research_review_rounds = 0  # the new report gets its own review rounds
+            goto(state, "research")
         else:
             state.note(guidance or "Founder pediu ajustes na entrega.")
             goto(state, "dev")

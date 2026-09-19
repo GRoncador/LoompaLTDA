@@ -107,6 +107,39 @@ def render_tasks(*, story_id: str, title: str, tasks: list[str]) -> str:
     return _template("tasks.md").format(story_id=story_id, title=title, tasks="\n".join(lines))
 
 
+def render_research(
+    *,
+    story_id: str,
+    title: str,
+    question: str,
+    summary: str,
+    findings: list[dict[str, object]],
+    recommendation: str,
+    limitations: list[str],
+    sources: list[str],
+    status: str = "draft",
+) -> str:
+    """The Analyst's report. Each finding lists the sources that back it; findings without one
+    say so, so a reader never mistakes a guess for a cited fact."""
+    lines = []
+    for i, f in enumerate(findings, 1):
+        cited = [str(u) for u in f.get("sources") or []]  # type: ignore[union-attr]
+        backing = ", ".join(cited) if cited else "_sem fonte verificada_"
+        lines.append(f"{i}. {str(f.get('text', '')).strip()}\n   - Fontes: {backing}")
+    return _template("research.md").format(
+        story_id=story_id,
+        title=title,
+        date=date.today().isoformat(),
+        status=status,
+        question=question.strip() or title,
+        summary=summary.strip() or "_(sem resumo)_",
+        findings="\n".join(lines) or "_(nenhum achado)_",
+        recommendation=recommendation.strip() or "_(sem recomendação)_",
+        limitations=_bullets(limitations),
+        sources=_bullets(sources),
+    )
+
+
 class TaskItem(BaseModel):
     number: int
     text: str
@@ -141,6 +174,7 @@ class StorySpecPaths:
     spec: Path
     plan: Path
     tasks: Path
+    research: Path  # research stories (Analyst) end here instead of in code
 
     def all_present(self) -> bool:
         return self.spec.is_file() and self.plan.is_file() and self.tasks.is_file()
@@ -149,7 +183,11 @@ class StorySpecPaths:
 def story_dir(factory_root: Path, story_id: str) -> StorySpecPaths:
     root = factory_root / ".loompa" / "specs" / story_id
     return StorySpecPaths(
-        root=root, spec=root / "spec.md", plan=root / "plan.md", tasks=root / "tasks.md"
+        root=root,
+        spec=root / "spec.md",
+        plan=root / "plan.md",
+        tasks=root / "tasks.md",
+        research=root / "research.md",
     )
 
 
