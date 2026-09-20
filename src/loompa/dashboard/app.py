@@ -653,6 +653,66 @@ def create_app(
             )
         return r.as_dict()
 
+    @app.post("/api/factories/{slug}/models/preview-sync")
+    def preview_models_sync(slug: str) -> dict[str, Any]:
+        from loompa.llm.catalog import CatalogError, Policy
+        from loompa.models_sync import plan, proposal_to_dict
+
+        rt = hub.get(slug)
+        ctx = rt.ctx
+        try:
+            proposal = plan(ctx.config, Policy())
+            return proposal_to_dict(proposal)
+        except CatalogError as exc:
+            raise HTTPException(400, str(exc)) from None
+        except Exception as exc:
+            raise HTTPException(500, f"Erro ao consultar catálogo da OpenRouter: {exc}") from None
+
+    @app.post("/api/factories/{slug}/models/apply-sync")
+    def apply_models_sync(slug: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        from loompa.config.settings import describe_settings
+        from loompa.llm.catalog import CatalogError, Policy, apply_proposal
+        from loompa.models_sync import ModelSync, plan
+
+        rt = hub.get(slug)
+        ctx = rt.ctx
+        sync = ModelSync(ctx)
+        to_inbox = bool(body and body.get("to_inbox"))
+
+        try:
+            proposal = plan(ctx.config, Policy())
+        except CatalogError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+        if to_inbox:
+            msg = sync.propose(proposal)
+            if msg is None:
+                return {"applied": False, "to_inbox": True, "message": "Nenhuma alteração necessária."}
+            return {"applied": False, "to_inbox": True, "message_id": msg.id}
+
+        if sync.busy():
+            raise HTTPException(
+                400,
+                "Há trabalho ou sprint em andamento. As trocas de modelos devem ser propostas via Inbox ou aguardar o fim das histórias.",
+            )
+
+        if not apply_proposal(ctx.config, proposal):
+            raise HTTPException(
+                400,
+                "A configuração dos modelos mudou antes da aplicação. Tente novamente.",
+            )
+
+        rt.factory.save()
+        ctx.emit("models.sync.applied", added=proposal.added)
+        return {
+            "applied": True,
+            "to_inbox": False,
+            "added": proposal.added,
+            "removed": proposal.removed,
+            "pricing": proposal.pricing,
+            "settings": describe_settings(ctx.config, ctx.secrets),
+        }
+
     # ---------------------------------------------------------------- finance
     @app.get("/api/factories/{slug}/finance")
     def finance(slug: str) -> dict[str, Any]:

@@ -162,3 +162,33 @@ def test_reply_carries_decisions_and_sprints_are_listed(client: TestClient):
     assert sprints[0]["status"] == "open" and sprints[0]["story_ids"] == [card]
     ov = client.get("/api/factories/demo-hq/overview").json()
     assert ov["sprint"]["id"] == "SP-001" and ov["sprint"]["progress"]["total"] == 1
+
+
+def test_models_sync_endpoints(client: TestClient, monkeypatch):
+    from loompa.config.schema import ModelCandidate
+    from loompa.llm.catalog import parse_catalog
+    from test_models_sync import CATALOG
+
+    models = parse_catalog({"data": CATALOG})
+    monkeypatch.setattr("loompa.models_sync.fetch_catalog", lambda *args, **kwargs: models)
+
+    ctx = client.app.state.hub.get("demo-hq").ctx
+    ctx.config.models.tiers["tier1"].insert(0, ModelCandidate(provider="openrouter", model="m1"))
+    ctx.config.models.tiers["tier2"].insert(0, ModelCandidate(provider="openrouter", model="m2"))
+
+    r = client.post("/api/factories/demo-hq/models/preview-sync")
+    assert r.status_code == 200
+    data = r.json()
+    assert "clusters" in data
+    assert "strategy" in data["clusters"]
+    assert "engineering" in data["clusters"]
+    assert "routine" in data["clusters"]
+    assert len(data["clusters"]["strategy"]["tier1"]) > 0
+
+    r_inbox = client.post("/api/factories/demo-hq/models/apply-sync", json={"to_inbox": True})
+    assert r_inbox.status_code == 200
+    assert r_inbox.json()["to_inbox"] is True
+
+    r_apply = client.post("/api/factories/demo-hq/models/apply-sync", json={"to_inbox": False})
+    assert r_apply.status_code == 200
+    assert r_apply.json()["applied"] is True

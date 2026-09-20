@@ -35,11 +35,21 @@ SENDER = "Ops Loompa"
 PREFIX = "models_sync:"  # kv: `models_sync:<message id>` holds the proposal that message asks about
 DEFERRED = PREFIX + "deferred"  # kv: id of an approved proposal waiting for the sprint to end
 ALIAS_SEEN = "alias_seen:"  # kv: `alias_seen:<alias>` = the model that last answered for it
-TIER_LABEL = {"tier1": "Raciocínio (Master, Architect)", "tier2": "Execução (Worker e demais)"}
+TIER_LABEL = {
+    "tier1": "Raciocínio (Master, Architect)",
+    "tier2": "Execução (Worker e demais)",
+    "tier3_free": "Gratuito (Tarefas Leves e Contingência)",
+}
 
 
 def _usd(value: float) -> str:
     return f"US$ {value:.2f}".replace(".", ",")
+
+
+def proposal_to_dict(proposal: Proposal) -> dict[str, Any]:
+    d = asdict(proposal)
+    d["changed"] = proposal.changed
+    return d
 
 
 def plan(

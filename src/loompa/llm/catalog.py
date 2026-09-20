@@ -18,6 +18,7 @@ benchmark, 31 force reasoning without any way to limit it):
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -88,6 +89,7 @@ class CatalogModel:
     mandatory_reasoning: bool
     efforts: tuple[str, ...]
     expires: date | None
+    intelligence: float | None = None
 
     @property
     def vendor(self) -> str:
@@ -104,6 +106,33 @@ class CatalogModel:
         if self.coding is None or self.agentic is None:
             return None
         return (self.coding + self.agentic) / 2
+
+    def score_tier1(self) -> float | None:
+        """Strategic (Master/Architect): 50% intelligence + 30% coding + 20% agentic."""
+        if self.coding is None or self.agentic is None:
+            return None
+        intel = self.intelligence if self.intelligence is not None else self.quality
+        if intel is None:
+            return None
+        return round(0.50 * intel + 0.30 * self.coding + 0.20 * self.agentic, 1)
+
+    def score_tier2(self) -> float | None:
+        """Execution (Worker/Inspector): 60% coding + 30% agentic + 10% intelligence."""
+        if self.coding is None or self.agentic is None:
+            return None
+        intel = self.intelligence if self.intelligence is not None else self.quality
+        if intel is None:
+            return None
+        return round(0.60 * self.coding + 0.30 * self.agentic + 0.10 * intel, 1)
+
+    def score_routine(self) -> float | None:
+        """Routine & Research (Analyst/Kaizen/Deployer): 55% agentic + 30% intelligence + 15% coding."""
+        if self.coding is None or self.agentic is None:
+            return None
+        intel = self.intelligence if self.intelligence is not None else self.quality
+        if intel is None:
+            return None
+        return round(0.55 * self.agentic + 0.30 * intel + 0.15 * self.coding, 1)
 
     @property
     def blended(self) -> float | None:
@@ -170,6 +199,7 @@ def parse_model(raw: Any, index: dict[str, dict[str, Any]] | None = None) -> Cat
         mandatory_reasoning=reasoning.get("mandatory") is True,
         efforts=tuple(str(e) for e in _list(reasoning.get("supported_efforts"))),
         expires=expires,
+        intelligence=_number(bench.get("intelligence_index")),
     )
 
 
@@ -325,6 +355,7 @@ class Proposal:
     mode: str = "pinned"  # alias | pinned: which kind of ids the ranking was made from
     repriced: list[str] = field(default_factory=list)  # in use, priced differently in the config
     targets: dict[str, str] = field(default_factory=dict)  # aliases in use -> model behind them now
+    clusters: dict[str, dict[str, list[dict[str, Any]]]] = field(default_factory=dict)
 
     @property
     def changed(self) -> bool:
@@ -341,6 +372,58 @@ def _dump_all(config: LoompaConfig) -> dict[str, list[dict[str, Any]]]:
 
 def is_free(model_id: str) -> bool:
     return model_id.endswith(":free") or model_id == FREE_ROUTER
+
+
+def _model_summary(m: CatalogModel, score: float | None) -> dict[str, Any]:
+    return {
+        "id": m.id,
+        "name": m.label,
+        "vendor": m.vendor,
+        "quality": round(m.quality or 0.0, 1),
+        "price": round(m.blended or 0.0, 2),
+        "coding": round(m.coding, 1) if m.coding is not None else None,
+        "agentic": round(m.agentic, 1) if m.agentic is not None else None,
+        "intelligence": round(m.intelligence, 1) if m.intelligence is not None else None,
+        "score": score,
+    }
+
+
+def rank_cluster(
+    eligible: list[CatalogModel],
+    score_fn: Callable[[CatalogModel], float | None],
+    policy: Policy,
+) -> dict[str, list[dict[str, Any]]]:
+    scored = [(m, score_fn(m) or 0.0) for m in eligible]
+    best_score = max((s for _, s in scored), default=0.0)
+
+    # Tier 1: highest score under ceiling
+    t1_candidates = [m for m, _ in scored if (m.blended or 0.0) <= policy.tier1_ceiling]
+    t1_picks = _one_per_vendor(
+        sorted(t1_candidates, key=lambda m: (-(score_fn(m) or 0.0), m.blended or 0.0, m.id)),
+        policy.picks,
+    )
+
+    # Tier 2: lowest cost above floor
+    t2_candidates = [m for m, s in scored if s >= policy.tier2_floor * best_score]
+    t2_picks = _one_per_vendor(
+        sorted(t2_candidates, key=lambda m: (m.blended or 0.0, -(score_fn(m) or 0.0), m.id)),
+        policy.picks,
+    )
+
+    # Tier 3: highest score among free models
+    t3_candidates = [
+        m for m, _ in scored if is_free(m.id) or (m.blended is not None and m.blended == 0.0)
+    ]
+    t3_picks = _one_per_vendor(
+        sorted(t3_candidates, key=lambda m: (-(score_fn(m) or 0.0), m.id)),
+        policy.picks,
+    )
+
+    return {
+        "tier1": [_model_summary(m, score_fn(m)) for m in t1_picks],
+        "tier2": [_model_summary(m, score_fn(m)) for m in t2_picks],
+        "tier3": [_model_summary(m, score_fn(m)) for m in t3_picks],
+    }
 
 
 def detect_mode(config: LoompaConfig) -> str:
@@ -404,10 +487,32 @@ def build_proposal(
             {
                 "id": m.id,
                 "name": m.label,
+                "vendor": m.vendor,
                 "quality": round(m.quality or 0.0, 1),
                 "price": round(m.blended or 0.0, 2),
+                "coding": round(m.coding, 1) if m.coding is not None else None,
+                "agentic": round(m.agentic, 1) if m.agentic is not None else None,
+                "intelligence": round(m.intelligence, 1) if m.intelligence is not None else None,
+                "score": m.score_tier1() if tier == "tier1" else m.score_tier2(),
             }
             for m in picked[tier]
+        ]
+
+    free_cands = [m for m in ranking.eligible if is_free(m.id) or (m.blended is not None and m.blended == 0.0)]
+    if free_cands:
+        summary["tier3_free"] = [
+            {
+                "id": m.id,
+                "name": m.label,
+                "vendor": m.vendor,
+                "quality": round(m.quality or 0.0, 1),
+                "price": 0.0,
+                "coding": round(m.coding, 1) if m.coding is not None else None,
+                "agentic": round(m.agentic, 1) if m.agentic is not None else None,
+                "intelligence": round(m.intelligence, 1) if m.intelligence is not None else None,
+                "score": m.score_routine(),
+            }
+            for m in sorted(free_cands, key=lambda m: (-(m.quality or 0.0), m.id))[: policy.picks]
         ]
 
     used_after = {c.model for cands in tiers.values() for c in cands if c.provider == PROVIDER}
@@ -421,6 +526,11 @@ def build_proposal(
         for mid, price in pricing.items()
         if not _same_price(config.pricing.get(mid), Price(**price))
     ]
+    clusters = {
+        "strategy": rank_cluster(ranking.eligible, lambda m: m.score_tier1(), policy),
+        "engineering": rank_cluster(ranking.eligible, lambda m: m.score_tier2(), policy),
+        "routine": rank_cluster(ranking.eligible, lambda m: m.score_routine(), policy),
+    }
     return Proposal(
         tiers={t: _dump(c) for t, c in tiers.items()},
         base={t: _dump(c) for t, c in config.models.tiers.items()},
@@ -444,6 +554,7 @@ def build_proposal(
         targets={
             m: by_id[m].target_id for m in sorted(configured) if m in by_id and by_id[m].alias
         },
+        clusters=clusters,
     )
 
 

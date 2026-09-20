@@ -1,4 +1,4 @@
-import type { ChatReply, ConversationKind, FactoryRef, Message, Overview, ProbeResult, Settings, SettingsPatch } from "./types";
+import type { ChatReply, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
@@ -16,6 +16,12 @@ export const api = {
     req<{ changes: string[]; settings: Settings }>(`/api/factories/${slug}/settings`, { method: "PUT", body: JSON.stringify(patch) }),
   testProvider: (slug: string, name: string, model?: string) =>
     req<ProbeResult>(`/api/factories/${slug}/settings/providers/${encodeURIComponent(name)}/test`, { method: "POST", body: JSON.stringify({ model: model ?? null }) }),
+  previewModelSync: (slug: string) => req<ModelProposalDTO>(`/api/factories/${slug}/models/preview-sync`, { method: "POST" }),
+  applyModelSync: (slug: string, toInbox: boolean = false) =>
+    req<{ applied: boolean; to_inbox: boolean; message?: string; message_id?: string; added?: string[]; removed?: string[]; settings?: Settings }>(
+      `/api/factories/${slug}/models/apply-sync`,
+      { method: "POST", body: JSON.stringify({ to_inbox: toInbox }) }
+    ),
   overview: (slug: string) => req<Overview>(`/api/factories/${slug}/overview`),
   engine: (slug: string, action: "start" | "stop") => req<{ engine: boolean }>(`/api/factories/${slug}/engine/${action}`, { method: "POST" }),
   inbox: (slug: string, status = "pending") => req<Message[]>(`/api/factories/${slug}/inbox?status=${status}`),

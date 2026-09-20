@@ -129,7 +129,56 @@ export interface ProviderInfo {
   needs_key: boolean; key: KeyStatus; used_by: string[];
 }
 
-export interface Candidate { provider: string; model: string; temperature?: number | null; max_output_tokens?: number | null }
+export interface Candidate {
+  provider: string;
+  model: string;
+  temperature?: number | null;
+  max_output_tokens?: number | null;
+  score?: number | null;
+  quality?: number | null;
+  price?: number | null;
+  vendor?: string;
+}
+
+export interface ModelPick {
+  id: string;
+  name: string;
+  vendor?: string;
+  quality: number;
+  price: number;
+  coding?: number | null;
+  agentic?: number | null;
+  intelligence?: number | null;
+  score?: number | null;
+}
+
+export interface ClusterTiers {
+  tier1: ModelPick[];
+  tier2: ModelPick[];
+  tier3: ModelPick[];
+}
+
+export interface ModelProposalDTO {
+  tiers: Record<string, Candidate[]>;
+  base: Record<string, Candidate[]>;
+  pricing: Record<string, { input: number; output: number; cached_input: number }>;
+  added: string[];
+  removed: string[];
+  gone: string[];
+  expiring: string[];
+  repriced: string[];
+  summary: Record<string, ModelPick[]>;
+  clusters?: {
+    strategy?: ClusterTiers;
+    engineering?: ClusterTiers;
+    routine?: ClusterTiers;
+  };
+  considered: number;
+  eligible: number;
+  excluded: Record<string, number>;
+  mode: string;
+  changed: boolean;
+}
 
 export interface PresetInfo { key: string; label: string; description: string; providers: string[]; optional_providers: string[]; tiers: Record<string, Candidate[]> }
 
