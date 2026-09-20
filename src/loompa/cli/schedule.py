@@ -30,15 +30,11 @@ def schedule(
         "auto", "--for", help="launchd (macOS) | cron (Linux) | auto: o do seu sistema."
     ),
     run_at: str = typer.Option("02:00", "--run-at", help="Ciclo noturno (`loompa run`), HH:MM."),
-    sync_day: int = typer.Option(
-        1, "--sync-day", help="Dia do mês da atualização dos modelos (1-28)."
-    ),
-    sync_at: str = typer.Option("09:00", "--sync-at", help="Horário da atualização dos modelos."),
     write: Path | None = typer.Option(
         None, "--write", help="launchd: grava os .plist nesta pasta (ex.: ~/Library/LaunchAgents)."
     ),
 ) -> None:
-    """Mostra como rodar o ciclo noturno e a atualização mensal de modelos sozinhos.
+    """Mostra como rodar o ciclo noturno sozinho.
 
     Só imprime (ou grava os arquivos que você pedir); não liga nada. As chaves não entram no
     agendamento: o Loompa as lê dos próprios arquivos de segredos.
@@ -49,7 +45,7 @@ def schedule(
         console.print("[red]✘[/red] --for deve ser launchd, cron ou auto.")
         raise typer.Exit(code=1)
     try:
-        todo = jobs(f.slug, run_at=run_at, sync_day=sync_day, sync_at=sync_at)
+        todo = jobs(f.slug, run_at=run_at)
     except ScheduleError as exc:
         console.print(f"[red]✘[/red] {exc}")
         raise typer.Exit(code=1) from exc

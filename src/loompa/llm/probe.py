@@ -34,15 +34,19 @@ class ProbeResult:
 
 
 def _first_model(config: LoompaConfig, provider: str) -> str:
-    for tier in ("tier2", "tier1"):
+    """Which model to test a key with: one this factory actually uses, else the provider's own
+    cheap default. A provider that is in no tier yet still has a key worth testing."""
+    for tier in ("tier2", "tier1", "tier3"):
         for cand in config.models.tiers.get(tier, []):
             if cand.provider == provider:
                 return cand.model
-    for cands in config.models.tiers.values():
-        for cand in cands:
-            if cand.provider == provider:
-                return cand.model
-    return ""
+    for tier_map in config.models.matrix.values():
+        for cands in tier_map.values():
+            for cand in cands:
+                if cand.provider == provider:
+                    return cand.model
+    cfg = config.providers.get(provider)
+    return cfg.probe_model if cfg else ""
 
 
 async def probe_provider(
@@ -58,7 +62,11 @@ async def probe_provider(
         return ProbeResult(name, False, "provedor não está na configuração desta fábrica")
     model = model or _first_model(config, name)
     if not model:
-        return ProbeResult(name, False, "nenhum modelo deste provedor aparece nos tiers")
+        return ProbeResult(
+            name,
+            False,
+            "escolha um modelo deste provedor na aba Modelos para testar a conexão",
+        )
     if cfg.api_key_env and not resolve_key(cfg.api_key_env, secrets):
         return ProbeResult(name, False, "chave não configurada", model=model)
     prov = build_provider(name, cfg, client=client, secrets=secrets)

@@ -21,8 +21,9 @@ PROVIDER_PURPOSE = {
     "openrouter": "uma chave para todos os modelos de IA, com teto de gastos no painel deles",
     "gemini": "modelos Gemini do Google (tem plano gratuito)",
     "deepseek": "modelos DeepSeek, baratos para o trabalho do dia a dia",
-    "groq": "modelos abertos muito rápidos (tem plano gratuito)",
-    "anthropic": "modelos Claude",
+    "anthropic": "modelos Claude, da Anthropic",
+    "openai": "modelos GPT, da OpenAI (ChatGPT)",
+    "xai": "modelos Grok, da xAI",
     "ollama": "modelos rodando na sua própria máquina",
 }
 

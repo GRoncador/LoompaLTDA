@@ -98,6 +98,8 @@ class EngineContext:
             router.tracker = tracker
         if ctx.router.on_call is None:
             ctx.router.on_call = ctx._on_llm_call
+        if ctx.router.on_model_gone is None:
+            ctx.router.on_model_gone = ctx._on_model_gone
         return ctx
 
     def reload_secrets(self) -> Secrets:
@@ -121,6 +123,14 @@ class EngineContext:
             input_tokens=routed.response.input_tokens,
             output_tokens=routed.response.output_tokens,
         )
+
+    def _on_model_gone(self, candidate: Any, detail: str) -> None:
+        from loompa.models_sync import ModelWatch
+
+        try:
+            ModelWatch(self).model_gone(candidate.provider, candidate.model)
+        except Exception:  # noqa: BLE001 - a notice must never break the call that is failing
+            log.exception("could not report a model the provider does not have")
 
     def _watch_aliases(self, role: str, agent: str, routed: Any) -> None:
         from loompa.models_sync import AliasWatch

@@ -14,7 +14,6 @@ from conftest import git
 from loompa.config import (
     SecretInConfigError,
     Secrets,
-    apply_preset,
     default_config,
     looks_like_secret,
     mask,
@@ -104,14 +103,10 @@ def test_log_redaction_masks_values(caplog):
         install_log_redaction([])
 
 
-def test_presets_and_settings_patch(tmp_path: Path, hub):
+def test_settings_patch_writes_keys_and_config(tmp_path: Path, hub):
     root = tmp_path / "repo"
     (root / ".loompa").mkdir(parents=True)
     cfg = default_config()
-    preset = apply_preset(cfg, "gratuito")
-    assert cfg.models.tiers["tier2"][0].model == "gemini-3.5-flash-lite" and preset.providers == (
-        "gemini",
-    )
     notes = apply_settings(
         root,
         cfg,
@@ -119,7 +114,7 @@ def test_presets_and_settings_patch(tmp_path: Path, hub):
             {
                 "providers": {"gemini": {"api_key": FAKE_GEMINI, "scope": "factory"}},
                 "roles": {"analyst": "tier1"},
-                "budget": {"monthly_cap_usd": 12},
+                "budget": {"cap_usd": 12, "period": "weekly"},
                 "tools": {"tavily": {"api_key": FAKE_TAVILY}},
             }
         ),
@@ -129,7 +124,7 @@ def test_presets_and_settings_patch(tmp_path: Path, hub):
     assert (
         secrets.source("GEMINI_API_KEY") == "factory" and secrets.source("TAVILY_API_KEY") == "hub"
     )
-    assert cfg.models.tier_for("analyst") == "tier1" and cfg.budget.monthly_cap_usd == 12
+    assert cfg.models.tier_for("analyst") == "tier1" and cfg.budget.cap_usd == 12
     view = describe_settings(cfg, secrets)
     text = repr(view)
     assert FAKE_GEMINI not in text and FAKE_TAVILY not in text
@@ -189,7 +184,6 @@ def test_settings_api_never_returns_keys(client, hub):
     r = c.put(
         "/api/factories/keys/settings",
         json={
-            "preset": "economico",
             "providers": {"deepseek": {"api_key": "sk-fakefakefakefakefake0001"}},
             "tools": {"tavily": {"api_key": FAKE_TAVILY, "scope": "factory"}},
             "roles": {"product_owner": "tier1"},
@@ -199,7 +193,7 @@ def test_settings_api_never_returns_keys(client, hub):
     body = r.text
     assert "sk-fake" not in body and FAKE_TAVILY not in body
     st = r.json()["settings"]
-    assert st["preset"] == "economico" and st["roles"]["product_owner"] == "tier1"
+    assert st["roles"]["product_owner"] == "tier1"
     ds = next(p for p in st["providers"] if p["name"] == "deepseek")
     assert ds["key"]["configured"] and ds["key"]["label"].endswith("(…0001)")
     assert st["tools"]["tavily"]["key"]["source"] == "factory"
@@ -210,8 +204,11 @@ def test_settings_api_never_returns_keys(client, hub):
     assert ".loompa/.env" in (root / ".gitignore").read_text()
     events = c.get("/api/factories/keys/events?after=0").text
     assert "sk-fake" not in events and FAKE_TAVILY not in events
-    # the first preset is the one onboarding offers by default
-    assert c.get("/api/factories/keys/settings").json()["presets"][0]["key"] == "openrouter"
+    # OpenRouter leads the list and is the one marked as recommended
+    listed = c.get("/api/factories/keys/settings").json()["providers"]
+    assert listed[0]["name"] == "openrouter" and listed[0]["recommended"]
+    assert [p["name"] for p in listed[1:4]] == ["gemini", "anthropic", "openai"]
+    assert not any(p["recommended"] for p in listed[1:])
     assert (
         c.put("/api/factories/keys/settings", json={"roles": {"worker": "nope"}}).status_code == 400
     )
@@ -223,7 +220,7 @@ def test_settings_api_never_returns_keys(client, hub):
     agent = c.get("/api/factories/keys/agents/Novo Loompa").json()
     assert agent["tier"] == "tier2"  # unknown agent names still map to tier2
     agent = c.get("/api/factories/keys/agents/Master Loompa").json()
-    assert agent["tier"] == "tier1" and agent["candidates"][0]["model"] == "deepseek-reasoner"
+    assert agent["tier"] == "tier1" and agent["candidates"][0]["model"] == "~z-ai/glm-latest"
 
 
 def test_repo_never_ships_secrets():

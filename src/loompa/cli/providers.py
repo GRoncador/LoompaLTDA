@@ -1,4 +1,4 @@
-"""`loompa providers`: keys, presets and connection tests for one factory (pt-BR, no secrets)."""
+"""`loompa providers`: keys and connection tests for one factory (pt-BR, no secrets)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from rich.console import Console
 from rich.table import Table
 
 from loompa.cli.main import app, resolve_factory
-from loompa.config import MODEL_PRESETS, Secrets, apply_preset
+from loompa.config import Secrets
 from loompa.config.services import PROVIDER_PURPOSE
-from loompa.config.settings import describe_settings, store_key
+from loompa.config.settings import PROVIDER_ORDER, describe_settings, store_key
 from loompa.factory import Factory
 from loompa.llm import ProbeResult, probe_provider, probe_tavily
 
@@ -30,19 +30,19 @@ def print_providers(f: Factory, out: Console) -> None:
     table.add_column("provedor", style="cyan")
     table.add_column("chave")
     table.add_column("origem")
-    table.add_column("modelos nos tiers")
+    table.add_column("para que serve")
     for p in info["providers"]:
         table.add_row(
-            p["label"],
+            p["label"] + (" [dim](recomendado)[/dim]" if p["recommended"] else ""),
             p["key"]["label"],
             p["key"]["source"] or "-",
-            ", ".join(p["used_by"]) or "-",
+            PROVIDER_PURPOSE.get(p["name"], "modelos de IA"),
         )
     t = info["tools"]["tavily"]
-    table.add_row("Tavily (busca web)", t["key"]["label"], t["key"]["source"] or "-", "Analyst")
+    table.add_row(
+        "Tavily (busca web)", t["key"]["label"], t["key"]["source"] or "-", "pesquisa, não modelos"
+    )
     out.print(table)
-    if info["preset"]:
-        out.print(f"Preset atual: [bold]{info['preset']}[/bold]")
 
 
 def _prompt_key(label: str, env_name: str) -> str | None:
@@ -143,60 +143,58 @@ def collect_key(
     return False
 
 
-def choose_preset(out: Console) -> str | None:
-    """Numbered menu of the model presets; None keeps the current configuration."""
-    out.print("\n[bold]Modelos de IA[/bold] — escolha um conjunto pronto (dá para mudar depois):")
-    keys = list(MODEL_PRESETS)
-    for i, p in enumerate(MODEL_PRESETS.values(), 1):
-        out.print(f"  [cyan]{i}[/cyan]) {p.label} — {p.description}")
-    out.print("  [cyan]0[/cyan]) manter a configuração atual")
-    while True:
-        raw = typer.prompt("Número ou nome", default="1").strip().lower()
-        if raw in ("0", "pular", "manter"):
-            return None
-        if raw.isdigit() and 1 <= int(raw) <= len(keys):
-            return keys[int(raw) - 1]
-        if raw in MODEL_PRESETS:
-            return raw
-        out.print(f"  [red]Não entendi “{raw}”.[/red] Digite um número de 0 a {len(keys)}.")
+def ordered_providers(f: Factory) -> list[str]:
+    """Providers that need a key, in the order the settings screen lists them."""
+    named = [n for n in PROVIDER_ORDER if n in f.config.providers]
+    named += sorted(set(f.config.providers) - set(named))
+    return [n for n in named if (cfg := f.config.providers.get(n)) and cfg.api_key_env]
 
 
-def setup_providers_interactive(
-    f: Factory, *, preset: str | None, scope: str, out: Console, test: bool = True
-) -> None:
-    """Models and their keys, then the optional web search: `loompa providers preset` and the
-    first two steps of `loompa setup`."""
-    if preset is None:
-        preset = choose_preset(out)
-    wanted: list[str]
-    if preset in MODEL_PRESETS:
-        chosen = apply_preset(f.config, preset)
-        f.save()
-        out.print(f"[green]✔[/green] conjunto [bold]{chosen.label}[/bold] aplicado")
-        wanted = [*chosen.providers, *chosen.optional_providers]
-        required = set(chosen.providers)
-    else:
-        wanted = sorted({c.provider for cs in f.config.models.tiers.values() for c in cs})
-        required = set(wanted)
+def setup_providers_interactive(f: Factory, *, scope: str, out: Console, test: bool = True) -> None:
+    """The keys. Which models a factory uses is the founder's to choose afterwards, so this step
+    only opens doors: OpenRouter first, because one key there reaches every model, and the rest
+    only for a founder who says they want them — asking for six keys in a row helps nobody."""
+    names = ordered_providers(f)
+    if not names:
+        return
     working: list[str] = []
-    for name in wanted:
-        cfg = f.config.providers.get(name)
-        if cfg is None or not cfg.api_key_env:
-            continue
-        ok = collect_key(
-            f,
-            name=name,
-            label=cfg.label or name,
-            purpose=PROVIDER_PURPOSE.get(name, "modelos de IA"),
-            env=cfg.api_key_env,
-            url=cfg.console_url,
-            scope=scope,
-            out=out,
-            optional=name not in required,
-            test=test,
-        )
-        if ok:
-            working.append(name)
+    first = "openrouter" if "openrouter" in names else names[0]
+    out.print(
+        "\n[bold]Modelos de IA[/bold] — uma chave da OpenRouter já alcança todos os modelos. "
+        "Enter pula; dá para adicionar ou trocar depois em Configurações."
+    )
+    cfg = f.config.providers[first]
+    if collect_key(
+        f,
+        name=first,
+        label=(cfg.label or first) + " (recomendado)",
+        purpose=PROVIDER_PURPOSE.get(first, "modelos de IA"),
+        env=cfg.api_key_env,
+        url=cfg.console_url,
+        scope=scope,
+        out=out,
+        optional=False,
+        test=test,
+    ):
+        working.append(first)
+    rest = [n for n in names if n != first]
+    labels = ", ".join(f.config.providers[n].label or n for n in rest)
+    if rest and typer.confirm(f"\nConfigurar mais algum provedor ({labels})?", default=False):
+        for name in rest:
+            cfg = f.config.providers[name]
+            if collect_key(
+                f,
+                name=name,
+                label=cfg.label or name,
+                purpose=PROVIDER_PURPOSE.get(name, "modelos de IA"),
+                env=cfg.api_key_env,
+                url=cfg.console_url,
+                scope=scope,
+                out=out,
+                optional=True,
+                test=test,
+            ):
+                working.append(name)
     if not working:
         out.print(
             "\nNenhuma chave configurada: a fábrica funciona em modo simulação (--dry-run) "
@@ -294,22 +292,12 @@ def providers_test(
         raise typer.Exit(code=1)
 
 
-@providers_app.command("preset")
-def providers_preset(
-    name: str = typer.Argument(..., help="openrouter | gratuito | economico | maximo"),
+@providers_app.command("keys")
+def providers_keys(
     factory: str | None = typer.Option(None, "--factory", "-f"),
-    keys: bool = typer.Option(True, "--keys/--no-keys", help="Pergunta as chaves faltantes."),
     scope: str = typer.Option("hub", "--scope"),
 ) -> None:
-    """Aplica um preset de modelos (tiers) e, opcionalmente, pede as chaves que faltam."""
+    """Pergunta as chaves dos provedores, uma por uma, e testa cada uma ao guardar."""
     f = resolve_factory(factory)
-    if name not in MODEL_PRESETS:
-        console.print(f"[red]Preset desconhecido:[/red] {name}. Opções: {', '.join(MODEL_PRESETS)}")
-        raise typer.Exit(code=1)
-    if keys:
-        setup_providers_interactive(f, preset=name, scope=scope, out=console)
-    else:
-        apply_preset(f.config, name)
-        f.save()
-        console.print(f"[green]✔[/green] preset {name} aplicado")
+    setup_providers_interactive(f, scope=scope, out=console)
     print_providers(f, console)

@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 
 from loompa.comms import FounderAnswer, FounderMessage, MessageKind, Option
-from loompa.config.schema import LoompaConfig
+from loompa.config.schema import LoompaConfig, Price
 from loompa.engine.context import EngineContext
 from loompa.engine.state import TERMINAL, Stage
 from loompa.llm.catalog import (
@@ -259,3 +259,117 @@ class AliasWatch:
                 allow_free_text=False,
             )
         )
+
+
+PRICE_SEEN = "price_seen:"  # kv: `price_seen:<model>` = the blended USD/1M last told to the founder
+MODEL_GONE = "model_gone:"  # kv: `model_gone:<provider>/<model>` = already reported once
+PRICE_JUMP = 0.10  # a rise under 10% is noise from rounding, not news
+
+
+def _blended(price: Price) -> float:
+    """USD per 1M tokens at 3 input : 1 output, the same mix the ranking prices a model at."""
+    return (3 * price.input + price.output) / 4
+
+
+class ModelWatch:
+    """Two things the founder should hear about between catalogue refreshes (ADR-0011 §5).
+
+    A model that got more expensive: caught when the catalogue is read, by comparing the blended
+    price against the one this factory is billing at. And a model the provider says it does not
+    have: caught on the call itself, because a name that is wrong today was right yesterday.
+
+    Both are told once per model. There is no schedule behind either: the founder refreshes the
+    catalogue when they want to, and a bad id announces itself the first time it is used."""
+
+    def __init__(self, ctx: EngineContext):
+        self.ctx = ctx
+
+    # ------------------------------------------------------------------ prices
+    def check_prices(self, models: list[Any]) -> list[str]:
+        """Compare a freshly read catalogue against the prices in use. Returns the models a note
+        went out for, so a caller can say what happened."""
+        in_use = {
+            c.model
+            for cands in self.ctx.config.models.matrix.values()
+            for cs in cands.values()
+            for c in cs
+            if c.provider == PROVIDER
+        }
+        told: list[str] = []
+        for m in models:
+            if m.id not in in_use:
+                continue
+            now = m.blended
+            if now is None or now <= 0:
+                continue
+            before = self._remembered(m.id)
+            self.ctx.store.set(PRICE_SEEN + m.id, f"{now:.6f}")
+            if before is None or before <= 0:
+                continue  # the first sight is the baseline, not news
+            if now <= before * (1 + PRICE_JUMP):
+                continue
+            self._tell_price(m.id, m.label or m.id, before, now)
+            told.append(m.id)
+        return told
+
+    def _remembered(self, model_id: str) -> float | None:
+        raw = self.ctx.store.get(PRICE_SEEN + model_id)
+        if raw:
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+        configured = self.ctx.config.pricing.get(model_id)
+        return _blended(configured) if configured else None
+
+    def _tell_price(self, model_id: str, label: str, before: float, now: float) -> None:
+        pct = int(round((now / before - 1) * 100))
+        self.ctx.emit("models.price.raised", model=model_id, before=before, now=now)
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                kind=MessageKind.FINANCE,
+                sender=SENDER,
+                title=f"{label} ficou {pct}% mais caro",
+                context=(
+                    f"O modelo {label}, que a fábrica usa, passou de {_usd(before)} para "
+                    f"{_usd(now)} por milhão de tokens. O controle de custos já usa o preço novo."
+                ),
+                impact=(
+                    "O orçamento do período vai render menos com este modelo. Se preferir trocar, "
+                    "peça uma sugestão inteligente na tela de configurações."
+                ),
+                allow_free_text=False,
+            )
+        )
+
+    # ------------------------------------------------------------- missing model
+    def model_gone(self, provider: str, model: str) -> None:
+        """A provider answered 404 for one of the configured ids: it left the air or is a typo."""
+        key = MODEL_GONE + f"{provider}/{model}"
+        if self.ctx.store.get(key):
+            return
+        self.ctx.store.set(key, "1")
+        self.ctx.emit("models.gone", provider=provider, model=model)
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                kind=MessageKind.INFO,
+                sender=SENDER,
+                title="Um modelo configurado não existe mais",
+                context=(
+                    f"O provedor {provider} respondeu que não conhece o modelo {model}. "
+                    "Ou ele saiu do ar, ou o nome foi digitado com algum erro. A fábrica seguiu "
+                    "com o próximo modelo da lista."
+                ),
+                impact=(
+                    "Enquanto o nome não for corrigido, esse modelo é pulado em toda chamada. "
+                    "Na tela de configurações, o botão de testar conexão diz se o caminho existe."
+                ),
+                allow_free_text=False,
+            )
+        )
+
+    def forget(self, provider: str, model: str) -> None:
+        """A model that answers again may fail again later, and that is news once more."""
+        self.ctx.store.set(MODEL_GONE + f"{provider}/{model}", "")

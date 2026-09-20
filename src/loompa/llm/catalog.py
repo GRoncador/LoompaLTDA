@@ -17,11 +17,11 @@ benchmark, 31 force reasoning without any way to limit it):
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
-import json
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,7 @@ FREE_ROUTER = (
 )
 LIMITABLE_EFFORTS = {"minimal", "low"}
 CATALOG_CACHE_DIR = Path.home() / ".loompa" / "cache"
+CATALOG_CACHE_FILE = "openrouter_catalog.json"
 
 # Why a model is out of the ranking, in the order the checks run. `unrated` is last on purpose:
 # it counts only models that would otherwise have qualified.
@@ -93,6 +94,7 @@ class CatalogModel:
     efforts: tuple[str, ...]
     expires: date | None
     intelligence: float | None = None
+    created: date | None = None  # when the vendor published it, for "newest first"
 
     @property
     def vendor(self) -> str:
@@ -136,6 +138,16 @@ class CatalogModel:
         if intel is None:
             return None
         return round(0.55 * self.agentic + 0.30 * intel + 0.15 * self.coding, 1)
+
+    def score_general(self) -> float | None:
+        """One cluster for everyone: the plain mean of the three indices, with no profile in it.
+        A factory that turns clusters off is saying it does not want the three-way distinction."""
+        if self.coding is None or self.agentic is None:
+            return None
+        intel = self.intelligence if self.intelligence is not None else self.quality
+        if intel is None:
+            return None
+        return round((intel + self.coding + self.agentic) / 3, 1)
 
     @property
     def blended(self) -> float | None:
@@ -183,6 +195,13 @@ def parse_model(raw: Any, index: dict[str, dict[str, Any]] | None = None) -> Cat
             expires = date.fromisoformat(entry["expiration_date"][:10])
         except ValueError:
             expires = None
+    created = None
+    created_raw = _number(entry.get("created"))
+    if created_raw:
+        try:
+            created = datetime.fromtimestamp(created_raw, tz=UTC).date()
+        except (OSError, OverflowError, ValueError):
+            created = None
     inputs, outputs = _list(arch.get("input_modalities")), _list(arch.get("output_modalities"))
     context = entry.get("context_length")
     return CatalogModel(
@@ -203,6 +222,7 @@ def parse_model(raw: Any, index: dict[str, dict[str, Any]] | None = None) -> Cat
         efforts=tuple(str(e) for e in _list(reasoning.get("supported_efforts"))),
         expires=expires,
         intelligence=_number(bench.get("intelligence_index")),
+        created=created,
     )
 
 
@@ -226,8 +246,9 @@ def fetch_catalog(
 ) -> list[CatalogModel]:
     """The catalogue of the provider this factory calls OpenRouter with. Public: sends no key.
 
-    Caches the parsed payload locally in ~/.loompa/cache/ by month (YYYY_MM) so opening the
-    dashboard or switching models does not make repeated remote requests."""
+    The payload is cached in ~/.loompa/cache/ and only re-read from the network when the founder
+    asks for it (`force_refresh`), so opening the dashboard costs nothing. There is no schedule
+    behind it: a model swap disturbs tuned prompts, so it happens when a person decides it does."""
     provider = config.providers.get(PROVIDER)
     if provider is None or not provider.base_url:
         raise CatalogError("a OpenRouter não está configurada nesta fábrica")
@@ -246,8 +267,7 @@ def fetch_catalog(
             raise CatalogError("o catálogo da OpenRouter não veio em JSON") from exc
 
     target_dir = cache_dir or CATALOG_CACHE_DIR
-    month_str = date.today().strftime("%Y_%m")
-    cache_file = target_dir / f"openrouter_catalog_{month_str}.json"
+    cache_file = target_dir / CATALOG_CACHE_FILE
 
     if use_cache and not force_refresh and cache_file.is_file():
         try:
@@ -270,7 +290,8 @@ def fetch_catalog(
             return parse_catalog(payload)
     except httpx.HTTPError as exc:
         if use_cache and target_dir.is_dir():
-            for fallback_file in sorted(target_dir.glob("openrouter_catalog_*.json"), reverse=True):
+            # Older builds wrote one file per month; any of them still beats no catalogue at all.
+            for fallback_file in sorted(target_dir.glob("openrouter_catalog*.json"), reverse=True):
                 try:
                     cached_data = json.loads(fallback_file.read_text(encoding="utf-8"))
                     return parse_catalog(cached_data)
@@ -421,21 +442,47 @@ def is_free(model_id: str) -> bool:
     return model_id.endswith(":free") or model_id == FREE_ROUTER
 
 
+def _cost_benefit(score: float | None, cost: float) -> float | None:
+    """Benchmark points per US$ 1M tokens. A free model has no ratio: it is off the scale, not
+    infinitely good, so tier 3 is ranked by score alone."""
+    if score is None or cost <= 0:
+        return None
+    return round(score / cost, 1)
+
+
+# The score each cluster ranks a model by. `general` is the one used when a factory turns the
+# cluster split off; the settings screen shows whichever the founder is filtering by.
+CLUSTER_SCORES: dict[str, Callable[[CatalogModel], float | None]] = {
+    "strategy": lambda m: m.score_tier1(),
+    "engineering": lambda m: m.score_tier2(),
+    "routine": lambda m: m.score_routine(),
+    "general": lambda m: m.score_general(),
+}
+
+
 def _model_summary(m: CatalogModel, score: float | None) -> dict[str, Any]:
-    cost = m.blended or 0.0
-    s = score if score is not None else (m.quality or 0.0)
-    cost_benefit = round(s / cost, 1) if cost > 0 else None
+    """One model as the dashboard reads it: the three benchmarks, the price, and the score and
+    cost-benefit of every cluster, so a filter can change which number is shown without another
+    round trip. Every number is rounded here — a raw mean reaches the screen as 63.800000000000004."""
+    cost = round(m.blended or 0.0, 2)
+    s = round(score, 1) if score is not None else (round(m.quality, 1) if m.quality is not None else None)
+    scores = {c: fn(m) for c, fn in CLUSTER_SCORES.items()}
     return {
         "id": m.id,
         "name": m.label,
         "vendor": m.vendor,
-        "quality": round(m.quality or 0.0, 1),
-        "price": round(cost, 2),
+        "quality": round(m.quality, 1) if m.quality is not None else None,
+        "price": cost,
+        "free": is_free(m.id) or cost == 0.0,
+        "context": m.context,
+        "created": m.created.isoformat() if m.created else None,
         "coding": round(m.coding, 1) if m.coding is not None else None,
         "agentic": round(m.agentic, 1) if m.agentic is not None else None,
         "intelligence": round(m.intelligence, 1) if m.intelligence is not None else None,
-        "score": score,
-        "cost_benefit": cost_benefit,
+        "score": s,
+        "cost_benefit": _cost_benefit(s, cost),
+        "scores": scores,
+        "cost_benefits": {c: _cost_benefit(v, cost) for c, v in scores.items()},
     }
 
 
@@ -545,17 +592,7 @@ def build_proposal(
                 placed = True
         tiers[tier] = merged
         summary[tier] = [
-            {
-                "id": m.id,
-                "name": m.label,
-                "vendor": m.vendor,
-                "quality": round(m.quality or 0.0, 1),
-                "price": round(m.blended or 0.0, 2),
-                "coding": round(m.coding, 1) if m.coding is not None else None,
-                "agentic": round(m.agentic, 1) if m.agentic is not None else None,
-                "intelligence": round(m.intelligence, 1) if m.intelligence is not None else None,
-                "score": m.score_tier1() if tier == "tier1" else m.score_tier2(),
-            }
+            _model_summary(m, m.score_tier1() if tier == "tier1" else m.score_tier2())
             for m in picked[tier]
         ]
 
@@ -585,16 +622,18 @@ def build_proposal(
         if not _same_price(config.pricing.get(mid), Price(**price))
     ]
     clusters = {
-        "strategy": rank_cluster(ranking.eligible, free_eligible, lambda m: m.score_tier1(), policy),
-        "engineering": rank_cluster(ranking.eligible, free_eligible, lambda m: m.score_tier2(), policy),
-        "routine": rank_cluster(ranking.eligible, free_eligible, lambda m: m.score_routine(), policy),
+        name: rank_cluster(ranking.eligible, free_eligible, score_fn, policy)
+        for name, score_fn in CLUSTER_SCORES.items()
     }
-    combined_models = list(ranking.eligible)
-    seen_ids = {m.id for m in combined_models}
-    for m in free_eligible:
-        if m.id not in seen_ids:
-            combined_models.append(m)
-            seen_ids.add(m.id)
+    # Everything the catalogue has, recommended or not: the extended search lets the founder pick
+    # a model the filters rejected, so each row carries why it is not in the ranking.
+    all_models = []
+    for m in sorted(models, key=lambda m: (-(m.quality or -1.0), m.id)):
+        row = _model_summary(m, m.quality)
+        reason = exclusion_reason(m, policy, today, mode)
+        row["eligible"] = reason is None
+        row["excluded"] = REASONS.get(reason, reason) if reason else ""
+        all_models.append(row)
     return Proposal(
         tiers={t: _dump(c) for t, c in tiers.items()},
         base={t: _dump(c) for t, c in config.models.tiers.items()},
@@ -619,10 +658,7 @@ def build_proposal(
             m: by_id[m].target_id for m in sorted(configured) if m in by_id and by_id[m].alias
         },
         clusters=clusters,
-        all_models=[
-            _model_summary(m, m.quality)
-            for m in sorted(combined_models, key=lambda m: (-(m.quality or 0.0), m.id))
-        ],
+        all_models=all_models,
     )
 
 
@@ -631,6 +667,11 @@ def apply_proposal(config: LoompaConfig, proposal: Proposal) -> bool:
     tiers are no longer what the proposal was made from."""
     if _dump_all(config) != proposal.base:
         return False
+    # Tiers first: assigning them mirrors one list into every cluster, which would undo a matrix
+    # written before it. Assigning the matrix afterwards leaves the tiers alone.
+    config.models.tiers = {
+        t: [ModelCandidate.model_validate(c) for c in cands] for t, cands in proposal.tiers.items()
+    }
     if proposal.clusters:
         matrix: dict[str, dict[str, list[ModelCandidate]]] = {}
         for cluster_name, tier_map in proposal.clusters.items():
@@ -644,9 +685,6 @@ def apply_proposal(config: LoompaConfig, proposal: Proposal) -> bool:
                     for m in cands_list
                 ]
         config.models.matrix = matrix
-    config.models.tiers = {
-        t: [ModelCandidate.model_validate(c) for c in cands] for t, cands in proposal.tiers.items()
-    }
     for model_id, price in proposal.pricing.items():
         config.pricing[model_id] = Price.model_validate(price)
     return True

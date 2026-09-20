@@ -1,12 +1,14 @@
 """Recipes for running Loompa on a schedule: cron lines and launchd agents (Fase 6).
 
-Two jobs, both idempotent and safe to run unattended:
+One job, idempotent and safe to run unattended: the nightly cycle, `loompa run`, which works
+through the running sprint until nothing is runnable (without `--watch` it ends by itself, so an
+overlapping night cannot pile up on launchd).
 
-* the nightly cycle, `loompa run`: works through the running sprint until nothing is runnable
-  (without `--watch` it ends by itself, so an overlapping night cannot pile up on launchd), and
-* the monthly model refresh, `loompa models sync`: compares the OpenRouter catalogue and puts a
-  proposal in the inbox, and tells the founder when a `-latest` alias moved. A month, not a week:
-  swapping models disturbs tuned prompts, and the proposal is approved by a person anyway.
+Refreshing the model catalogue is deliberately *not* scheduled. Swapping models disturbs prompts
+tuned for the ones in use, so it happens when the founder asks for it, on the settings screen or
+with `loompa models sync`. What does watch by itself needs no clock: a price that goes up is
+noticed the next time the catalogue is read, and a model that left the air announces itself on
+the first call that fails (`loompa.models_sync.ModelWatch`).
 
 Only builds text. Nothing here installs or loads anything; `loompa schedule` prints it (or writes the
 files where the founder asks) and says how to switch it on. Keys are not part of a job: Loompa
@@ -32,7 +34,7 @@ class ScheduleError(ValueError):
 
 @dataclass(frozen=True)
 class Job:
-    key: str  # run | models-sync
+    key: str  # run
     args: tuple[str, ...]
     hour: int
     minute: int
@@ -52,13 +54,8 @@ def parse_time(value: str) -> tuple[int, int]:
     return int(hour), int(minute)
 
 
-def jobs(
-    slug: str, *, run_at: str = "02:00", sync_day: int = 1, sync_at: str = "09:00"
-) -> list[Job]:
-    if not 1 <= sync_day <= 28:  # every month has a 28th; 29 to 31 would skip some
-        raise ScheduleError("o dia do mês deve ficar entre 1 e 28.")
+def jobs(slug: str, *, run_at: str = "02:00") -> list[Job]:
     run_h, run_m = parse_time(run_at)
-    sync_h, sync_m = parse_time(sync_at)
     return [
         Job(
             "run",
@@ -67,14 +64,6 @@ def jobs(
             run_m,
             None,
             f"todo dia às {run_at}: trabalha no sprint em andamento até não sobrar nada a fazer",
-        ),
-        Job(
-            "models-sync",
-            ("models", "sync", "--factory", slug),
-            sync_h,
-            sync_m,
-            sync_day,
-            f"todo dia {sync_day} às {sync_at}: compara os modelos de IA e propõe a lista no inbox",
         ),
     ]
 

@@ -118,9 +118,7 @@ def print_checklist(
     out.print(table)
 
 
-def run_setup(
-    f: Factory, *, preset: str | None, scope: str, out: Console, test: bool = True
-) -> list[Service]:
+def run_setup(f: Factory, *, scope: str, out: Console, test: bool = True) -> list[Service]:
     """The whole wizard. Returns the final checklist."""
     where = (
         "~/.loompa/secrets.env (valem para todas as fábricas)"
@@ -129,7 +127,7 @@ def run_setup(
     )
     out.print(f"[dim]As chaves ficam em {where}, nunca no git nem na configuração.[/dim]")
     _step(out, 1, "Modelos de IA")
-    setup_providers_interactive(f, preset=preset, scope=scope, out=out, test=test)
+    setup_providers_interactive(f, scope=scope, out=out, test=test)
     _step(out, 2, "Pesquisa na web")
     setup_web_search_interactive(f, scope=scope, out=out, test=test)
     _step(out, 3, "Quem programa")
@@ -153,18 +151,12 @@ def run_setup(
 @app.command()
 def setup(
     factory: str | None = typer.Option(None, "--factory", "-f"),
-    preset: str | None = typer.Option(
-        None,
-        "--preset",
-        "-p",
-        help="Conjunto de modelos: openrouter | gratuito | economico | maximo.",
-    ),
     scope: str = typer.Option("hub", "--scope", help="Onde guardar chaves: hub | factory."),
     test: bool = typer.Option(True, "--test/--no-test", help="Testa cada chave ao guardar."),
 ) -> None:
-    """Assistente: modelos, chaves (OpenRouter, Tavily…), OpenCode e GitHub, um passo por vez."""
+    """Assistente: chaves (OpenRouter, Tavily…), OpenCode e GitHub, um passo por vez."""
     f = resolve_factory(factory)
-    run_setup(f, preset=preset, scope=scope, out=console, test=test)
+    run_setup(f, scope=scope, out=console, test=test)
     print_providers(f, console)
 
 

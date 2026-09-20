@@ -80,6 +80,7 @@ class Scheduler:
     completed: list[str] = field(default_factory=list)
     crashes: dict[str, int] = field(default_factory=dict)  # runner crashes per story (session)
     not_before: dict[str, float] = field(default_factory=dict)  # story -> monotonic retry time
+    _downgraded: bool = False  # the budget put every role on free models, and it was said once
 
     @property
     def slots(self) -> int:
@@ -135,9 +136,22 @@ class Scheduler:
         st = self.budget_ok()
         if st.exhausted:
             self.ctx.emit(
-                "scheduler.paused", reason="budget_exhausted", month_cost_usd=st.month_cost_usd
+                "scheduler.paused",
+                reason="budget_exhausted",
+                period=st.period,
+                period_cost_usd=st.period_cost_usd,
             )
             return 0
+        if st.downgrade and not self._downgraded:
+            # The cap is spent but the founder chose to keep going on free models; the router
+            # forces tier 3 on every call, so dispatch continues. Said once, not every tick.
+            self.ctx.emit(
+                "scheduler.downgraded",
+                reason="budget_exhausted",
+                period=st.period,
+                period_cost_usd=st.period_cost_usd,
+            )
+        self._downgraded = st.downgrade
         n = 0
         for story in self.runnable():
             if len(self.running) >= self.slots:
@@ -283,7 +297,9 @@ class Scheduler:
             "inbox.answered", story_id=msg.story_id, message_id=message_id, option=answer.option_key
         )
         if msg.kind.value == "finance" and answer.option_key in ("raise_10", "raise_30"):
-            self.ctx.config.budget.monthly_cap_usd += 10 if answer.option_key == "raise_10" else 30
+            weekly = self.ctx.config.budget.period == "weekly"
+            small, large = (5.0, 10.0) if weekly else (10.0, 30.0)
+            self.ctx.config.budget.cap_usd += small if answer.option_key == "raise_10" else large
             self.ctx.factory.save()
         ModelSync(self.ctx).on_answer(msg, answer)
         if not msg.story_id:

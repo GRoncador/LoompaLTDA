@@ -5,7 +5,7 @@ from loompa.store import Store
 
 def make() -> tuple[Store, CostTracker]:
     cfg = default_config()
-    cfg.budget.monthly_cap_usd = 1.0
+    cfg.budget.cap_usd = 1.0
     store = Store(":memory:")
     return store, CostTracker(store, cfg, "f")
 
@@ -36,7 +36,7 @@ def test_record_updates_story_and_budget_alerts():
     )
     assert cost == 0.685 and store.get_story("S-1")["cost_usd"] == 0.685
     st = t.status()
-    assert st.month_cost_usd == 0.685 and st.today_cost_usd == 0.685 and not st.warn
+    assert st.period_cost_usd == 0.685 and st.today_cost_usd == 0.685 and not st.warn
     t.record(
         UsageRecord(
             agent="a",
@@ -55,10 +55,10 @@ def test_record_updates_story_and_budget_alerts():
     assert (
         msg is not None
         and msg.kind == "finance"
-        and "orçamento mensal" in msg.title
+        and "orçamento de IA desta semana" in msg.title
         and msg.executive_audit() == []
     )
-    assert t.maybe_alert() is None  # only once per month
+    assert t.maybe_alert() is None  # only once per period
     t.record(
         UsageRecord(
             agent="a",

@@ -26,84 +26,95 @@ worker:
   opencode_timeout_s: 900     # per-task subprocess timeout
 
 budget:
-  monthly_cap_usd: 30.0
+  period: weekly            # weekly (Monday to Sunday) | monthly
+  cap_usd: 5.0              # spending cap of one period
   warn_at_fraction: 0.8     # Finance Loompa alerts the inbox at 80% of the cap
-  hard_stop: true           # pause dispatch when cap reached (stories keep state, nothing lost)
+  on_exceed: pause          # pause (stop dispatch until the next period) | tier3 (every role on free models)
 
-# Model matrix (3 clusters x 3 tiers). Candidates are tried in order; fallback on quota/error.
 models:
-  tier1_ceiling: 5.0        # blended USD per 1M tokens ceiling for Tier 1 reasoning models
+  clusters_enabled: true    # false: every role shares one "general" cluster with the same 3 tiers
+  tier1_ceiling: 1.25       # blended USD per 1M tokens ceiling for Tier 1 reasoning models
   tier2_floor: 0.80         # quality floor fraction for Tier 2 execution models
+  # Candidates are tried in order; a quota error or a 5xx falls through to the next one.
+  # `~vendor/x-latest` ids follow each maker's newest version, so a model that leaves the air
+  # does not stop the factory. Every id here has its own line under `pricing`.
   matrix:
     strategy:
       tier1:
-        - provider: deepseek
-          model: deepseek-reasoner
-        - provider: gemini
-          model: gemini-3.8-flash
-        - provider: anthropic
-          model: claude-sonnet-5
+        - provider: openrouter
+          model: "~z-ai/glm-latest"
+        - provider: openrouter
+          model: "~x-ai/grok-latest"
+        - provider: openrouter
+          model: "~openai/gpt-sol-latest"
       tier2:
-        - provider: gemini
-          model: gemini-3.5-flash-lite
-        - provider: deepseek
-          model: deepseek-chat
-        - provider: gemini
-          model: gemini-3.8-flash
+        - provider: openrouter
+          model: "~z-ai/glm-flash-latest"
+        - provider: openrouter
+          model: "~openai/gpt-luna-latest"
+        - provider: openrouter
+          model: "~google/gemini-flash-latest"
       tier3:
         - provider: openrouter
           model: openrouter/free
     engineering:
       tier1:
-        - provider: deepseek
-          model: deepseek-reasoner
-        - provider: gemini
-          model: gemini-3.8-flash
-        - provider: anthropic
-          model: claude-sonnet-5
+        - provider: openrouter
+          model: "~openai/gpt-sol-latest"
+        - provider: openrouter
+          model: "~z-ai/glm-latest"
+        - provider: openrouter
+          model: "~x-ai/grok-latest"
       tier2:
-        - provider: gemini
-          model: gemini-3.5-flash-lite
-        - provider: deepseek
-          model: deepseek-chat
-        - provider: gemini
-          model: gemini-3.8-flash
-        - provider: anthropic
-          model: claude-haiku-4-5
+        - provider: openrouter
+          model: "~z-ai/glm-flash-latest"
+        - provider: openrouter
+          model: "~openai/gpt-luna-latest"
+        - provider: openrouter
+          model: "~google/gemini-flash-latest"
       tier3:
         - provider: openrouter
           model: openrouter/free
     routine:
       tier1:
-        - provider: gemini
-          model: gemini-3.8-flash
-        - provider: deepseek
-          model: deepseek-chat
+        - provider: openrouter
+          model: "~z-ai/glm-flash-latest"
+        - provider: openrouter
+          model: "~openai/gpt-luna-latest"
       tier2:
-        - provider: gemini
-          model: gemini-3.5-flash-lite
-        - provider: deepseek
-          model: deepseek-chat
+        - provider: openrouter
+          model: "~google/gemini-flash-latest"
+        - provider: openrouter
+          model: openrouter/free
+      tier3:
+        - provider: openrouter
+          model: openrouter/free
+    # Used only when `clusters_enabled` is off: one list for every role.
+    general:
+      tier1:
+        - provider: openrouter
+          model: "~z-ai/glm-latest"
+        - provider: openrouter
+          model: "~openai/gpt-sol-latest"
+      tier2:
+        - provider: openrouter
+          model: "~z-ai/glm-flash-latest"
+        - provider: openrouter
+          model: "~openai/gpt-luna-latest"
       tier3:
         - provider: openrouter
           model: openrouter/free
   tiers:
     tier1:
-      - provider: deepseek
-        model: deepseek-reasoner
-      - provider: gemini
-        model: gemini-3.8-flash
-      - provider: anthropic
-        model: claude-sonnet-5
+      - provider: openrouter
+        model: "~z-ai/glm-latest"
+      - provider: openrouter
+        model: "~openai/gpt-sol-latest"
     tier2:
-      - provider: gemini
-        model: gemini-3.5-flash-lite
-      - provider: deepseek
-        model: deepseek-chat
-      - provider: gemini
-        model: gemini-3.8-flash
-      - provider: anthropic
-        model: claude-haiku-4-5
+      - provider: openrouter
+        model: "~z-ai/glm-flash-latest"
+      - provider: openrouter
+        model: "~openai/gpt-luna-latest"
     tier3:
       - provider: openrouter
         model: openrouter/free
@@ -119,48 +130,70 @@ models:
     compliance: tier2
     metrics: tier2
     storyteller: tier2
+  # Named calls whose profile differs from the role's default tier (loompa/config/schema.py:
+  # ROLE_TASKS). Absent keys use the task's own default.
+  role_tasks:
+    master.classify: tier2
+    master.exec_options: tier2
+    deployer.summary: tier2
   temperature: 0.2
   max_output_tokens: 4096
-  preset: ""                 # gratuito | economico | maximo (see loompa/config/presets.py)
 
 # Providers. `api_key_env` is the NAME of a variable; its value lives in ~/.loompa/secrets.env
 # (all factories) or <repo>/.loompa/.env (this factory) - never here, never in git.
 providers:
-  deepseek:
-    kind: openai_compatible
-    label: DeepSeek
-    base_url: https://api.deepseek.com/v1
-    api_key_env: DEEPSEEK_API_KEY
-    console_url: https://platform.deepseek.com/api_keys
-  gemini:
-    kind: openai_compatible
-    label: Google Gemini
-    base_url: https://generativelanguage.googleapis.com/v1beta/openai
-    api_key_env: GEMINI_API_KEY
-    console_url: https://aistudio.google.com/apikey
-  anthropic:
-    kind: anthropic
-    label: Anthropic Claude
-    base_url: https://api.anthropic.com
-    api_key_env: ANTHROPIC_API_KEY
-    console_url: https://console.anthropic.com/settings/keys
-  groq:
-    kind: openai_compatible
-    label: Groq
-    base_url: https://api.groq.com/openai/v1
-    api_key_env: GROQ_API_KEY
-    console_url: https://console.groq.com/keys
   openrouter:
     kind: openai_compatible
     label: OpenRouter
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
     console_url: https://openrouter.ai/keys
+    models_url: https://openrouter.ai/models
+    probe_model: "~z-ai/glm-flash-latest"
+  gemini:
+    kind: openai_compatible
+    label: Google Gemini
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    console_url: https://aistudio.google.com/apikey
+    models_url: https://ai.google.dev/gemini-api/docs/models
+    probe_model: gemini-3.5-flash-lite
+  anthropic:
+    kind: anthropic
+    label: Anthropic Claude
+    base_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    console_url: https://console.anthropic.com/settings/keys
+    models_url: https://docs.anthropic.com/en/docs/about-claude/models
+    probe_model: claude-haiku-4-5
+  openai:
+    kind: openai_compatible
+    label: OpenAI (ChatGPT)
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    console_url: https://platform.openai.com/api-keys
+    models_url: https://platform.openai.com/docs/models
+  xai:
+    kind: openai_compatible
+    label: xAI (Grok)
+    base_url: https://api.x.ai/v1
+    api_key_env: XAI_API_KEY
+    console_url: https://console.x.ai
+    models_url: https://docs.x.ai/docs/models
+  deepseek:
+    kind: openai_compatible
+    label: DeepSeek
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+    console_url: https://platform.deepseek.com/api_keys
+    models_url: https://api-docs.deepseek.com/quick_start/pricing
+    probe_model: deepseek-chat
   ollama:
     kind: openai_compatible
     label: Ollama (local)
     base_url: http://localhost:11434/v1
     api_key_env: ""          # no key needed
+    models_url: https://ollama.com/library
 
 # External tools the agents may use (Analyst web search). Same rule: only the variable name.
 tools:
@@ -199,8 +232,6 @@ pricing:
   claude-opus-5:            { input: 5.00, output: 25.0, cached_input: 0.50 }
   claude-sonnet-5:          { input: 2.00, output: 10.0, cached_input: 0.20 }
   claude-haiku-4-5:         { input: 1.00, output: 5.00, cached_input: 0.10 }
-  llama-3.3-70b-versatile:  { input: 0.59, output: 0.79, cached_input: 0.59 }
-  llama-3.1-8b-instant:     { input: 0.05, output: 0.08, cached_input: 0.05 }
   # OpenRouter preset. Values read from https://openrouter.ai/api/v1/models on 2026-09-19;
   # `loompa providers` shows what is in use, and OpenRouter bills what its own page says.
   z-ai/glm-5.3:             { input: 0.91, output: 2.86, cached_input: 0.169 }

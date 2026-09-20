@@ -205,10 +205,10 @@ async def test_opencode_gets_the_key_of_its_model_and_no_other(
 ):
     """A key saved by `loompa setup` lives in a file OpenCode never reads: it must be handed over,
     but only the one its model needs."""
-    from loompa.config import apply_preset
+    from conftest import use_openrouter
     from loompa.config.settings import store_key
 
-    apply_preset(factory.config, "openrouter")
+    use_openrouter(factory.config)
     factory.save()
     store_key(factory.root, "OPENROUTER_API_KEY", "sk-or-test-key-123456", scope="hub")
     store_key(factory.root, "GROQ_API_KEY", "gsk_test_key_123456", scope="hub")

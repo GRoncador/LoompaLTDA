@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from loompa.comms import FounderMessage, MessageKind, Option
@@ -17,6 +17,23 @@ def today_start_iso() -> str:
 
 def month_start_iso() -> str:
     return datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
+def week_start_iso() -> str:
+    """Monday 00:00 UTC of the current week: the founder reads a week as Monday to Sunday."""
+    now = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (now - timedelta(days=now.weekday())).isoformat()
+
+
+def period_start_iso(period: str) -> str:
+    return month_start_iso() if period == "monthly" else week_start_iso()
+
+
+PERIOD_LABEL = {"weekly": "semana", "monthly": "mês"}
+
+
+def period_label(period: str) -> str:
+    return PERIOD_LABEL.get(period, PERIOD_LABEL["weekly"])
 
 
 @dataclass
@@ -36,16 +53,25 @@ class UsageRecord:
 
 @dataclass
 class BudgetStatus:
-    month_cost_usd: float
+    """Where the factory stands inside the current budget period."""
+
+    period: str  # weekly | monthly
+    period_cost_usd: float
     today_cost_usd: float
     cap_usd: float
     fraction: float
     warn: bool
-    exhausted: bool
+    over: bool  # the cap is spent, whatever the factory does about it
+    exhausted: bool  # ...and the answer is to stop dispatching
+    downgrade: bool  # ...and the answer is to put every role on free models
 
     @property
     def remaining_usd(self) -> float:
-        return max(0.0, self.cap_usd - self.month_cost_usd)
+        return max(0.0, self.cap_usd - self.period_cost_usd)
+
+    @property
+    def period_label(self) -> str:
+        return period_label(self.period)
 
 
 class CostTracker:
@@ -53,7 +79,15 @@ class CostTracker:
         self.store = store
         self.config = config
         self.factory = factory
-        self._warned_key = f"finance:warned:{datetime.now(UTC):%Y-%m}"
+
+    @property
+    def _warned_key(self) -> str:
+        """One alert per budget period: a new week (or month) starts a new key."""
+        now = datetime.now(UTC)
+        if self.config.budget.period == "monthly":
+            return f"finance:warned:{now:%Y-%m}"
+        monday = now - timedelta(days=now.weekday())
+        return f"finance:warned:{monday:%Y-W%V}"
 
     # ----------------------------------------------------------------- pricing
     def cost_of(
@@ -100,47 +134,71 @@ class CostTracker:
     # ------------------------------------------------------------------ budget
     def status(self, budget: BudgetConfig | None = None) -> BudgetStatus:
         b = budget or self.config.budget
-        month = float(
-            self.store.usage_totals(self.factory, since_iso=month_start_iso())["cost_usd"]
+        spent = float(
+            self.store.usage_totals(self.factory, since_iso=period_start_iso(b.period))["cost_usd"]
         )
         today = float(
             self.store.usage_totals(self.factory, since_iso=today_start_iso())["cost_usd"]
         )
-        fraction = (month / b.monthly_cap_usd) if b.monthly_cap_usd else 0.0
+        fraction = (spent / b.cap_usd) if b.cap_usd else 0.0
+        over = fraction >= 1.0
         return BudgetStatus(
-            month_cost_usd=round(month, 4),
+            period=b.period,
+            period_cost_usd=round(spent, 4),
             today_cost_usd=round(today, 4),
-            cap_usd=b.monthly_cap_usd,
+            cap_usd=b.cap_usd,
             fraction=round(fraction, 4),
             warn=fraction >= b.warn_at_fraction,
-            exhausted=b.hard_stop and fraction >= 1.0,
+            over=over,
+            exhausted=over and b.on_exceed == "pause",
+            downgrade=over and b.on_exceed == "tier3",
         )
 
     def maybe_alert(self) -> FounderMessage | None:
-        """Emit one executive alert per month when the warn threshold is crossed."""
+        """Emit one executive alert per period when the warn threshold is crossed."""
         st = self.status()
         if not st.warn or self.store.get(self._warned_key):
             return None
         self.store.set(self._warned_key, "1")
         pct = int(st.fraction * 100)
+        label = st.period_label
+        this = "esta" if label == "semana" else "este"
+        next_one = "a próxima semana" if label == "semana" else "o próximo mês"
+        pauses = self.config.budget.on_exceed == "pause"
+        bump = (5.0, 10.0) if st.period == "weekly" else (10.0, 30.0)
         msg = FounderMessage(
             factory=self.factory,
             kind=MessageKind.FINANCE,
             sender="Finance Loompa",
-            title=f"Já usamos {pct}% do orçamento mensal de IA (US$ {st.month_cost_usd:.2f} de US$ {st.cap_usd:.2f})",
+            title=(
+                f"Já usamos {pct}% do orçamento de IA d{this} {label} "
+                f"(US$ {st.period_cost_usd:.2f} de US$ {st.cap_usd:.2f})"
+            ),
             context=(
-                "O consumo de IA está acima do ritmo previsto para este mês. "
+                f"O consumo de IA está acima do ritmo previsto para {this} {label}. "
                 + (
                     "A esteira será pausada automaticamente ao atingir o teto."
-                    if st.exhausted or self.config.budget.hard_stop
-                    else ""
+                    if pauses
+                    else "Ao atingir o teto, todos os Loompas passam a usar só modelos gratuitos."
                 )
             ).strip(),
-            impact="Sem ação, novas entregas podem ficar aguardando até o próximo mês. Já apliquei prompts mais curtos nas tarefas rotineiras.",
+            impact=(
+                (
+                    f"Sem ação, novas entregas podem ficar aguardando até {next_one}. "
+                    if pauses
+                    else "Sem ação, as entregas continuam, porém com modelos mais simples. "
+                )
+                + "Já apliquei prompts mais curtos nas tarefas rotineiras."
+            ),
             options=[
-                Option(key="keep", label="Manter o teto (pausar ao atingir)", recommended=True),
-                Option(key="raise_10", label="Aumentar o teto em US$ 10"),
-                Option(key="raise_30", label="Aumentar o teto em US$ 30"),
+                Option(
+                    key="keep",
+                    label="Manter o teto"
+                    + (" (pausar ao atingir)" if pauses else " (modelos gratuitos ao atingir)"),
+                    recommended=True,
+                ),
+                Option(key="raise_10", label=f"Aumentar o teto em US$ {bump[0]:.0f}"),
+                Option(key="raise_30", label=f"Aumentar o teto em US$ {bump[1]:.0f}"),
             ],
         )
         self.store.put_message(msg)
@@ -163,9 +221,11 @@ class CostTracker:
         r = self.daily_report()
         t = r["totals"]
         st = r["budget"]
+        label = period_label(st["period"])
         lines = [
             f"Gasto de hoje: US$ {t['cost_usd']:.2f} em {t['calls']} consultas de IA.",
-            f"Acumulado do mês: US$ {st['month_cost_usd']:.2f} de US$ {st['cap_usd']:.2f} ({int(st['fraction'] * 100)}%).",
+            f"Acumulado {'da' if label == 'semana' else 'do'} {label}: US$ {st['period_cost_usd']:.2f} "
+            f"de US$ {st['cap_usd']:.2f} ({int(st['fraction'] * 100)}%).",
         ]
         if r["by_story"]:
             top = [
@@ -177,7 +237,7 @@ class CostTracker:
     def suggestions(self) -> list[str]:
         """Cheap heuristics the Finance Loompa surfaces in the daily Kaizen summary."""
         out = []
-        by_role = self.store.usage_by("role", self.factory, month_start_iso())
+        by_role = self.store.usage_by("role", self.factory, period_start_iso(self.config.budget.period))
         total = sum(r["cost_usd"] for r in by_role) or 0.0
         for row in by_role:
             if total and row["cost_usd"] / total > 0.5 and row["key"] in ("worker", "inspector"):
@@ -192,7 +252,9 @@ class CostTracker:
                 out.append(
                     f"'{row['key']}' lê muito mais do que escreve (razão {int(row['input_tokens'] / max(1, row['output_tokens']))}:1): paginar leituras e usar busca exata antes de abrir arquivos."
                 )
-        by_tier = self.store.usage_by("tier", self.factory, month_start_iso())
+        by_tier = self.store.usage_by(
+            "tier", self.factory, period_start_iso(self.config.budget.period)
+        )
         t1 = next((r for r in by_tier if r["key"] == "tier1"), None)
         if t1 and total and t1["cost_usd"] / total > 0.4:
             out.append(

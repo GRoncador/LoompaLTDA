@@ -6,7 +6,7 @@ import re
 import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -72,10 +72,38 @@ class WorkerConfig(BaseModel):
     opencode_timeout_s: int = Field(900, ge=1)
 
 
+BudgetPeriod = Literal["weekly", "monthly"]
+# What the factory does once the cap is reached. Binary on purpose: either every agent drops to
+# the free tier and the line keeps moving, or the line stops until the next period.
+OnExceed = Literal["pause", "tier3"]
+
+
 class BudgetConfig(BaseModel):
-    monthly_cap_usd: float = Field(30.0, ge=0)
+    """The spending cap of one period. A week by default: a founder notices a bad week, and a
+    month of drift is a month of drift."""
+
+    period: BudgetPeriod = "weekly"
+    cap_usd: float = Field(5.0, ge=0)
     warn_at_fraction: float = Field(0.8, ge=0, le=1)
-    hard_stop: bool = True
+    on_exceed: OnExceed = "pause"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_legacy(cls, data: Any) -> Any:
+        """config.yaml files written before the weekly budget carry `monthly_cap_usd`/`hard_stop`.
+        Their numbers were chosen for a month, so the period stays monthly and nothing changes
+        under the founder until they open the budget tab."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        cap = data.pop("monthly_cap_usd", None)
+        hard_stop = data.pop("hard_stop", None)
+        if cap is not None and "cap_usd" not in data:
+            data["cap_usd"] = cap
+            data.setdefault("period", "monthly")
+        if hard_stop is not None and "on_exceed" not in data:
+            data["on_exceed"] = "pause" if hard_stop else "tier3"
+        return data
 
 
 REASONING_EFFORTS = ("minimal", "low", "medium", "high", "max")
@@ -101,6 +129,10 @@ class ModelCandidate(BaseModel):
 
 CLUSTERS: tuple[str, ...] = ("strategy", "engineering", "routine")
 TIERS: tuple[str, ...] = ("tier1", "tier2", "tier3")
+# The single cluster every role shares when `models.clusters_enabled` is off: one 3-tier list to
+# fill instead of three, ranked on the plain mean of the three indices.
+GENERAL_CLUSTER = "general"
+ALL_CLUSTERS: tuple[str, ...] = (*CLUSTERS, GENERAL_CLUSTER)
 
 CLUSTER_ROLES: dict[str, tuple[str, ...]] = {
     "strategy": ("master", "architect", "product", "product_owner", "analyst"),
@@ -111,6 +143,47 @@ CLUSTER_ROLES: dict[str, tuple[str, ...]] = {
 ROLE_CLUSTERS: dict[str, str] = {
     role: cluster for cluster, roles in CLUSTER_ROLES.items() for role in roles
 }
+
+
+class RoleTask(BaseModel):
+    """A named call a role makes that does not deserve its role's default tier.
+
+    They are declared here, not discovered: an agent asks for a tier by task key, so the settings
+    screen can show exactly the ones that exist instead of every prompt in the codebase. Tasks
+    with the same profile share a key rather than getting one each."""
+
+    key: str  # "<role>.<task>"
+    role: str
+    label: str  # pt-BR, founder-facing
+    hint: str  # why this task is not the role's default tier
+    default_tier: str
+
+
+ROLE_TASKS: tuple[RoleTask, ...] = (
+    RoleTask(
+        key="master.classify",
+        role="master",
+        label="Classificar histórias",
+        hint="lê a história e diz o tipo e o tamanho; não precisa do tier de decisão",
+        default_tier="tier2",
+    ),
+    RoleTask(
+        key="master.exec_options",
+        role="master",
+        label="Opções para um bloqueio",
+        hint="transforma um problema técnico em opções para o Founder escolher",
+        default_tier="tier2",
+    ),
+    RoleTask(
+        key="deployer.summary",
+        role="deployer",
+        label="Resumo da entrega",
+        hint="reescreve as notas do Worker em uma frase para o Founder",
+        default_tier="tier2",
+    ),
+)
+
+ROLE_TASKS_BY_KEY: dict[str, RoleTask] = {t.key: t for t in ROLE_TASKS}
 
 
 class _SyncedDict(dict):
@@ -129,24 +202,28 @@ class ModelsConfig(BaseModel):
     matrix: dict[str, dict[str, list[ModelCandidate]]] = Field(default_factory=dict)
     tiers: dict[str, list[ModelCandidate]] = Field(default_factory=dict)
     roles: dict[str, str] = Field(default_factory=dict)
+    # `<role>.<task>` -> tier, for the calls in ROLE_TASKS whose profile differs from the role's
+    # default. A key that is absent uses the task's `default_tier`.
+    role_tasks: dict[str, str] = Field(default_factory=dict)
     temperature: float = 0.2
     max_output_tokens: int = 4096
-    preset: str = ""  # last preset applied (informational; matrix is the source of truth)
-    tier1_ceiling: float = Field(5.0, ge=0.0)
+    # Off: every role shares the `general` cluster, one 3-tier list instead of three.
+    clusters_enabled: bool = True
+    tier1_ceiling: float = Field(1.25, ge=0.0)
     tier2_floor: float = Field(0.80, ge=0.0, le=1.0)
 
     def _on_tier_updated(self, tier: str, cands: list[ModelCandidate]) -> None:
         if not hasattr(self, "matrix") or not self.matrix:
-            self.matrix = {c: {} for c in CLUSTERS}
-        for cluster in CLUSTERS:
+            self.matrix = {c: {} for c in ALL_CLUSTERS}
+        for cluster in ALL_CLUSTERS:
             if cluster not in self.matrix:
                 self.matrix[cluster] = {}
             self.matrix[cluster][tier] = [c.model_copy() for c in cands]
 
     def _sync_matrix_from_tiers(self, tiers_dict: dict[str, list[ModelCandidate]]) -> None:
         if not hasattr(self, "matrix") or not self.matrix:
-            self.matrix = {c: {} for c in CLUSTERS}
-        for cluster in CLUSTERS:
+            self.matrix = {c: {} for c in ALL_CLUSTERS}
+        for cluster in ALL_CLUSTERS:
             if cluster not in self.matrix:
                 self.matrix[cluster] = {}
             for t, cands in tiers_dict.items():
@@ -155,18 +232,22 @@ class ModelsConfig(BaseModel):
     def _sync_tiers_from_matrix(self, matrix_dict: dict[str, dict[str, list[ModelCandidate]]]) -> None:
         if not matrix_dict:
             return
+        general = matrix_dict.get(GENERAL_CLUSTER, {})
         t1 = (
-            matrix_dict.get("strategy", {}).get("tier1")
+            general.get("tier1")
+            or matrix_dict.get("strategy", {}).get("tier1")
             or matrix_dict.get("engineering", {}).get("tier1")
             or []
         )
         t2 = (
-            matrix_dict.get("engineering", {}).get("tier2")
+            general.get("tier2")
+            or matrix_dict.get("engineering", {}).get("tier2")
             or matrix_dict.get("strategy", {}).get("tier2")
             or []
         )
         t3 = (
-            matrix_dict.get("routine", {}).get("tier3")
+            general.get("tier3")
+            or matrix_dict.get("routine", {}).get("tier3")
             or matrix_dict.get("engineering", {}).get("tier3")
             or []
         )
@@ -202,7 +283,7 @@ class ModelsConfig(BaseModel):
                         if c.model.endswith(":free") or c.model == "openrouter/free"
                     ],
                 }
-                for cluster in CLUSTERS
+                for cluster in ALL_CLUSTERS
             }
         elif self.matrix and not self.tiers:
             self._sync_tiers_from_matrix(self.matrix)
@@ -210,10 +291,23 @@ class ModelsConfig(BaseModel):
             super().__setattr__("tiers", _SyncedDict(self, self.tiers))
 
     def cluster_for_role(self, role: str) -> str:
+        if not self.clusters_enabled:
+            return GENERAL_CLUSTER
         return ROLE_CLUSTERS.get(role, "routine")
 
     def tier_for(self, role: str) -> str:
         return self.roles.get(role) or "tier2"
+
+    def tier_for_task(self, role: str, task: str | None) -> str:
+        """The tier of one named call: what the founder set for it, else the task's own default,
+        else the role's. An unknown task is the role's tier, never an error."""
+        if not task:
+            return self.tier_for(role)
+        key = task if "." in task else f"{role}.{task}"
+        declared = ROLE_TASKS_BY_KEY.get(key)
+        if declared is None:
+            return self.tier_for(role)
+        return self.role_tasks.get(key) or declared.default_tier
 
     def candidates_for_cluster_tier(self, cluster: str, tier: str) -> list[ModelCandidate]:
         if self.matrix and cluster in self.matrix:
@@ -237,6 +331,13 @@ class ProviderConfig(BaseModel):
     extra_headers: dict[str, str] = Field(default_factory=dict)
     label: str = ""
     console_url: str = ""  # where the founder creates the key
+    # The vendor's own list of model ids. A provider that is not OpenRouter has no catalogue this
+    # factory can read, so the settings screen links here instead of offering a picker.
+    models_url: str = ""
+    # A cheap, long-lived id to test the key with when this provider is in no tier yet. Empty
+    # means the founder has to name a model first: guessing an id would make a working key look
+    # broken, which is worse than asking.
+    probe_model: str = ""
 
     @field_validator("api_key_env")
     @classmethod

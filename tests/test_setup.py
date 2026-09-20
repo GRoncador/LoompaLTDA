@@ -10,8 +10,9 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from conftest import use_openrouter
 from loompa.cli.main import app
-from loompa.config import Secrets, apply_preset, default_config
+from loompa.config import Secrets, default_config
 from loompa.config.secrets import hub_secrets_path, read_dotenv
 from loompa.config.services import collect_services
 from loompa.factory import Factory
@@ -24,8 +25,15 @@ BAD_KEY = "sk-or-bad-key-1234567890"
 
 def openrouter_config():
     config = default_config()
-    apply_preset(config, "openrouter")
+    use_openrouter(config)
     return config
+
+
+def _only_openrouter(root: Path) -> None:
+    """Point the factory's matrix at OpenRouter, so its key is the only one the doctor demands."""
+    f = Factory.open(root)
+    use_openrouter(f.config)
+    f.save()
 
 
 def by_id(services):
@@ -122,8 +130,8 @@ def test_wizard_takes_the_key_tests_it_and_reports_what_is_left(demo: Path, prob
     # preset given; open the page? no; the key; Tavily: no page, skip; Worker: 2 (not installed)
     result = runner.invoke(
         app,
-        ["setup", "--factory", "demo", "--preset", "openrouter"],
-        input=f"n\n{GOOD_KEY}\nn\n\n2\n",
+        ["setup", "--factory", "demo"],
+        input=f"n\n{GOOD_KEY}\nn\nn\n\n2\n",
     )
     out = result.stdout
     assert result.exit_code == 0, out
@@ -140,8 +148,8 @@ def test_wizard_takes_the_key_tests_it_and_reports_what_is_left(demo: Path, prob
 def test_wizard_offers_to_open_the_page_where_the_key_is_created(demo: Path, probes):
     result = runner.invoke(
         app,
-        ["setup", "--factory", "demo", "--preset", "openrouter"],
-        input=f"y\n{GOOD_KEY}\nn\n\n1\n",
+        ["setup", "--factory", "demo"],
+        input=f"y\n{GOOD_KEY}\nn\nn\n\n1\n",
     )
     assert result.exit_code == 0, result.stdout
     assert probes.launched == ["https://openrouter.ai/keys"]
@@ -151,8 +159,8 @@ def test_a_rejected_key_is_wiped_and_asked_again(demo: Path, probes):
     probes.answers.extend([False, True])
     result = runner.invoke(
         app,
-        ["setup", "--factory", "demo", "--preset", "openrouter"],
-        input=f"n\n{BAD_KEY}\n{GOOD_KEY}\nn\n\n1\n",
+        ["setup", "--factory", "demo"],
+        input=f"n\n{BAD_KEY}\n{GOOD_KEY}\nn\nn\n\n1\n",
     )
     assert result.exit_code == 0, result.stdout
     said = " ".join(result.stdout.split())  # the terminal wraps lines
@@ -163,7 +171,7 @@ def test_a_rejected_key_is_wiped_and_asked_again(demo: Path, probes):
 
 def test_skipping_a_key_leaves_it_missing_and_says_how_to_finish(demo: Path, probes):
     result = runner.invoke(
-        app, ["setup", "--factory", "demo", "--preset", "openrouter"], input="n\n\nn\n\n1\n"
+        app, ["setup", "--factory", "demo"], input="n\n\nn\nn\n\n1\n"
     )
     assert result.exit_code == 0, result.stdout
     assert "OPENROUTER_API_KEY" not in read_dotenv(hub_secrets_path())
@@ -174,7 +182,7 @@ def test_the_wizard_keeps_a_key_that_is_already_there(demo: Path, probes):
     hub_secrets_path().parent.mkdir(parents=True, exist_ok=True)
     hub_secrets_path().write_text(f"OPENROUTER_API_KEY={GOOD_KEY}\n")
     result = runner.invoke(
-        app, ["setup", "--factory", "demo", "--preset", "openrouter"], input="\n\n1\n"
+        app, ["setup", "--factory", "demo"], input="n\n\n\n1\n"
     )
     assert result.exit_code == 0, result.stdout
     assert "chave já configurada" in result.stdout and probes.asked == []
@@ -184,7 +192,7 @@ def test_the_wizard_keeps_a_key_that_is_already_there(demo: Path, probes):
 
 
 def test_doctor_fails_on_a_missing_key_and_passes_once_it_works(demo: Path, probes):
-    runner.invoke(app, ["providers", "preset", "openrouter", "--no-keys", "--factory", "demo"])
+    _only_openrouter(demo)
     missing = runner.invoke(app, ["doctor", "--factory", "demo"])
     assert missing.exit_code == 1 and "loompa setup" in missing.stdout
     hub_secrets_path().parent.mkdir(parents=True, exist_ok=True)
@@ -195,7 +203,7 @@ def test_doctor_fails_on_a_missing_key_and_passes_once_it_works(demo: Path, prob
 
 
 def test_doctor_fails_when_the_provider_refuses_the_key(demo: Path, probes):
-    runner.invoke(app, ["providers", "preset", "openrouter", "--no-keys", "--factory", "demo"])
+    _only_openrouter(demo)
     hub_secrets_path().parent.mkdir(parents=True, exist_ok=True)
     hub_secrets_path().write_text(f"OPENROUTER_API_KEY={BAD_KEY}\n")
     probes.answers.append(False)

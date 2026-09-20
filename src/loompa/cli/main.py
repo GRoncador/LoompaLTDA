@@ -65,9 +65,6 @@ def init(
         None, "--mode", help="Força greenfield|brownfield (padrão: detecta)."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Não perguntar nada (usa padrões)."),
-    preset: str | None = typer.Option(
-        None, "--preset", "-p", help="Preset de modelos: openrouter | gratuito | economico | maximo."
-    ),
     secrets_scope: str = typer.Option(
         "hub", "--secrets-scope", help="Onde guardar chaves: hub (todas as fábricas) | factory."
     ),
@@ -131,22 +128,14 @@ def init(
         console.print(table)
         for w in a.warnings:
             console.print(f"[yellow]![/yellow] {w}")
-    # Step "Provedores e modelos": presets + keys (hidden prompt) + connection test.
+    # Step "Provedores e modelos": keys (hidden prompt) + connection test. The models themselves
+    # are the founder's to choose, on the settings screen or with `loompa providers`.
     from loompa.cli.setup import run_setup
-    from loompa.config import MODEL_PRESETS, apply_preset
 
-    if yes:
-        if preset:
-            if preset not in MODEL_PRESETS:
-                console.print(f"[red]Preset desconhecido:[/red] {preset}")
-                raise typer.Exit(code=1)
-            apply_preset(f.config, preset)
-            f.save()
-            console.print(
-                f"[green]✔[/green] preset {preset} aplicado (chaves: loompa setup)"
-            )
+    if not yes:
+        run_setup(f, scope=secrets_scope, out=console)
     else:
-        run_setup(f, preset=preset, scope=secrets_scope, out=console)
+        console.print("Chaves dos provedores: [bold]loompa setup[/bold]")
     console.print(f"Relatório executivo: {f.paths.onboarding_report}")
     console.print('Próximo passo: [bold]loompa meeting "metas de hoje"[/bold]')
 
@@ -220,7 +209,8 @@ def status(
     table.add_row("Testes", c.quality.test_command or "-")
     table.add_row("Lint", c.quality.lint_command or "-")
     table.add_row("Paralelismo", str(c.schedule.max_parallel))
-    table.add_row("Teto mensal", f"US$ {c.budget.monthly_cap_usd:.2f}")
+    period = "semanal" if c.budget.period == "weekly" else "mensal"
+    table.add_row(f"Teto {period}", f"US$ {c.budget.cap_usd:.2f}")
     table.add_row(
         "Tier 1", ", ".join(f"{m.provider}/{m.model}" for m in c.models.tiers.get("tier1", []))
     )

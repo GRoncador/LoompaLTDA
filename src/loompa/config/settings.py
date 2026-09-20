@@ -12,8 +12,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from loompa.config.presets import MODEL_PRESETS, apply_preset, preset_summaries
 from loompa.config.schema import (
+    ROLE_TASKS,
+    ROLE_TASKS_BY_KEY,
     ROLES,
     TIERS,
     LoompaConfig,
@@ -40,20 +41,29 @@ def store_key(root: Path, env_name: str, value: str | None, *, scope: Scope = "h
     return write_dotenv_value(path, env_name, value)
 
 
+# The order the settings screen lists providers in: OpenRouter first because one key there
+# reaches every model, then the houses a founder already knows by name. Anything a factory adds
+# by hand keeps its own order after these.
+PROVIDER_ORDER: tuple[str, ...] = (
+    "openrouter",
+    "gemini",
+    "anthropic",
+    "openai",
+    "xai",
+    "deepseek",
+    "ollama",
+)
+
+
+def _provider_rank(name: str) -> tuple[int, str]:
+    return (PROVIDER_ORDER.index(name), "") if name in PROVIDER_ORDER else (len(PROVIDER_ORDER), name)
+
+
 def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
     """Everything the settings screen shows. Contains no secret values."""
-    used: dict[str, list[str]] = {}
-    if config.models.matrix:
-        for cluster, tier_map in config.models.matrix.items():
-            for tier, cands in tier_map.items():
-                for c in cands:
-                    used.setdefault(c.provider, []).append(f"{cluster}:{tier}:{c.model}")
-    else:
-        for tier, cands in config.models.tiers.items():
-            for c in cands:
-                used.setdefault(c.provider, []).append(f"{tier}:{c.model}")
     providers = []
-    for name, p in config.providers.items():
+    for name in sorted(config.providers, key=_provider_rank):
+        p = config.providers[name]
         providers.append(
             {
                 "name": name,
@@ -62,7 +72,9 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
                 "base_url": p.base_url,
                 "api_key_env": p.api_key_env,
                 "console_url": p.console_url,
+                "models_url": p.models_url,
                 "needs_key": bool(p.api_key_env),
+                "recommended": name == "openrouter",
                 "key": secrets.status(p.api_key_env)
                 if p.api_key_env
                 else {
@@ -71,18 +83,15 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
                     "label": "não precisa de chave",
                     "source": None,
                 },
-                "used_by": used.get(name, []),
             }
         )
     t = config.tools.tavily
     return {
-        "preset": config.models.preset,
-        "presets": preset_summaries(),
         "providers": providers,
         "models": {
-            "preset": config.models.preset,
             "tier1_ceiling": config.models.tier1_ceiling,
             "tier2_floor": config.models.tier2_floor,
+            "clusters_enabled": config.models.clusters_enabled,
         },
         "tiers": {
             tier: [c.model_dump() for c in cands] for tier, cands in config.models.tiers.items()
@@ -100,6 +109,16 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
         "roles": {
             r: config.models.tier_for(r) for r in sorted(set(ROLES) | set(config.models.roles))
         },
+        "role_tasks": [
+            {
+                "key": t.key,
+                "role": t.role,
+                "label": t.label,
+                "hint": t.hint,
+                "tier": config.models.tier_for_task(t.role, t.key),
+            }
+            for t in ROLE_TASKS
+        ],
         "budget": config.budget.model_dump(),
         "schedule": {"max_parallel": config.schedule.max_parallel},
         "worker": {"backend": config.worker.backend},
@@ -136,18 +155,20 @@ class ToolPatch(BaseModel):
 
 
 class BudgetPatch(BaseModel):
-    monthly_cap_usd: float | None = None
+    period: str | None = None
+    cap_usd: float | None = None
     warn_at_fraction: float | None = None
-    hard_stop: bool | None = None
+    on_exceed: str | None = None
 
 
 class SettingsPatch(BaseModel):
-    preset: str | None = None
     providers: dict[str, ProviderPatch] = Field(default_factory=dict)
     remove_providers: list[str] = Field(default_factory=list)
     matrix: dict[str, dict[str, list[ModelCandidate]]] | None = None
     tiers: dict[str, list[ModelCandidate]] | None = None
     roles: dict[str, str] | None = None
+    role_tasks: dict[str, str] | None = None
+    clusters_enabled: bool | None = None
     tier1_ceiling: float | None = None
     tier2_floor: float | None = None
     budget: BudgetPatch | None = None
@@ -160,11 +181,6 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
     """Mutate `config` in place and write keys to the secrets files. Returns a list of
     founder-readable change notes. The caller saves config.yaml and reloads secrets."""
     notes: list[str] = []
-    if patch.preset:
-        if patch.preset not in MODEL_PRESETS:
-            raise ValueError(f"preset desconhecido: {patch.preset}")
-        preset = apply_preset(config, patch.preset)
-        notes.append(f"preset “{preset.label}” aplicado à matriz de modelos")
     for name, pp in patch.providers.items():
         cfg = config.providers.get(name) or ProviderConfig()
         if pp.kind is not None:
@@ -236,6 +252,23 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
             raise ValueError("tiers inexistentes no mapa de papéis: " + ", ".join(sorted(bad)))
         config.models.roles.update({r: t for r, t in patch.roles.items() if r})
         notes.append("mapa papel→tier atualizado")
+    if patch.role_tasks is not None:
+        valid_tiers = set(config.models.tiers) | set(TIERS)
+        unknown = set(patch.role_tasks) - set(ROLE_TASKS_BY_KEY)
+        if unknown:
+            raise ValueError("tarefas desconhecidas: " + ", ".join(sorted(unknown)))
+        bad = {t for t in patch.role_tasks.values() if t not in valid_tiers}
+        if bad:
+            raise ValueError("tiers inexistentes no mapa de tarefas: " + ", ".join(sorted(bad)))
+        config.models.role_tasks.update(patch.role_tasks)
+        notes.append("tiers por tarefa atualizados")
+    if patch.clusters_enabled is not None and patch.clusters_enabled != config.models.clusters_enabled:
+        config.models.clusters_enabled = patch.clusters_enabled
+        notes.append(
+            "modelos separados por cluster de agentes"
+            if patch.clusters_enabled
+            else "um cluster geral para todos os agentes"
+        )
     if patch.tier1_ceiling is not None:
         config.models.tier1_ceiling = patch.tier1_ceiling
         notes.append(f"teto de custo Tier 1: US$ {patch.tier1_ceiling:.2f}/M")
@@ -243,7 +276,12 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
         config.models.tier2_floor = patch.tier2_floor
 
     if patch.budget is not None:
-        for k, v in patch.budget.model_dump(exclude_none=True).items():
+        fields = patch.budget.model_dump(exclude_none=True)
+        if fields.get("period") not in (None, "weekly", "monthly"):
+            raise ValueError("período do orçamento deve ser 'weekly' ou 'monthly'")
+        if fields.get("on_exceed") not in (None, "pause", "tier3"):
+            raise ValueError("comportamento ao estourar deve ser 'pause' ou 'tier3'")
+        for k, v in fields.items():
             setattr(config.budget, k, v)
         notes.append("orçamento atualizado")
     if patch.max_parallel is not None:

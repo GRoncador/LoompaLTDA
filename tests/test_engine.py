@@ -137,6 +137,8 @@ async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
 
 async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory: Factory):
     seen_models: list[str] = []
+    # whatever this factory ships with: only tier 1 writes a passing test
+    tier1_model = factory.config.models.candidates_for("worker", "tier1")[0].model
 
     def worker(model: str, messages: list[Message]) -> Any:
         seen_models.append(model)
@@ -144,7 +146,7 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
         if not results:
             content = (
                 "def test_new():\n    assert 1 == 1\n"
-                if model == "deepseek-reasoner"
+                if model == tier1_model
                 else "def test_new():\n    assert 1 == 2\n"
             )
             return [ToolCall("w1", "write_file", {"path": "tests/test_new.py", "content": content})]
@@ -159,8 +161,8 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     # tier2 twice (initial + one retry), then tier1 fixes it
     tiers = [r["key"] for r in ctx.store.usage_by("tier", factory.slug)]
     assert set(tiers) == {"tier1", "tier2"}
-    tier2_model = factory.config.models.tiers["tier2"][0].model
-    assert seen_models.count(tier2_model) == 4 and seen_models.count("deepseek-reasoner") == 2
+    tier2_model = factory.config.models.candidates_for("worker", "tier2")[0].model
+    assert seen_models.count(tier2_model) == 4 and seen_models.count(tier1_model) == 2
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
     assert types.count("story.retry") == 1 and types.count("story.escalated") == 1
     assert len(state.failure_history) == 2 and "assert 1 == 2" in state.failure_history[0]
@@ -451,7 +453,7 @@ async def test_ops_loompa_escalates_in_plain_language_after_max_recoveries(facto
 
 async def test_budget_exhaustion_pauses_dispatch(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
-    ctx.config.budget.monthly_cap_usd = 0.000001
+    ctx.config.budget.cap_usd = 0.000001
     ctx.store.record_usage(
         factory=factory.slug,
         agent="x",
@@ -472,7 +474,7 @@ async def test_budget_exhaustion_pauses_dispatch(factory: Factory):
     alert = [m for m in ctx.store.list_messages(factory.slug) if m.kind == "finance"]
     assert len(alert) == 1 and alert[0].executive_audit() == []
     state = await Scheduler(ctx).aanswer(alert[0].id, FounderAnswer(option_key="raise_10"))
-    assert state is None and Factory.open(factory.root).config.budget.monthly_cap_usd > 10
+    assert state is None and Factory.open(factory.root).config.budget.cap_usd > 5
     await ctx.aclose()
 
 

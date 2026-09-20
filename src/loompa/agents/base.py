@@ -260,10 +260,14 @@ class LoompaAgent:
         *,
         story: StoryState | None = None,
         tier_override: str | None = None,
+        task: str | None = None,
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
-        """One-shot structured call; retries once asking for valid JSON."""
+        """One-shot structured call; retries once asking for valid JSON.
+
+        `task` names one of `ROLE_TASKS`, so the founder can give that call its own tier without
+        it being hard-coded here (a summary does not need the tier a decision does)."""
         messages = [Message("system", system), Message("user", user)]
         for attempt in range(2):
             routed = await self.ctx.router.complete(
@@ -272,6 +276,7 @@ class LoompaAgent:
                 agent=self.name,
                 story_id=story.story_id if story else None,
                 tier_override=tier_override,
+                task=task,
                 json_mode=True,
                 max_tokens=max_tokens,
                 complexity=str(story.complexity) if story else None,

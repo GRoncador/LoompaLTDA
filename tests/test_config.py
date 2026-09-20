@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from loompa.config import (
-    MODEL_PRESETS,
     LoompaConfig,
     default_config,
     find_factory_root,
@@ -14,12 +13,13 @@ from loompa.config.schema import FactoryRef, HubRegistry, slugify
 def test_defaults_load_and_validate():
     cfg = default_config()
     assert cfg.schedule.max_parallel == 3
-    assert cfg.budget.monthly_cap_usd == 30.0
+    assert (cfg.budget.period, cfg.budget.cap_usd) == ("weekly", 5.0)
+    assert cfg.budget.on_exceed == "pause"
     assert cfg.models.tier_for("master") == "tier1"
     assert cfg.models.tier_for("worker") == "tier2"
-    assert cfg.models.candidates_for("worker")[0].model == "gemini-3.5-flash-lite"
+    assert cfg.models.candidates_for("worker")[0].model == "~z-ai/glm-flash-latest"
     assert cfg.models.tier_for("analyst") == "tier2" and cfg.models.tier_for("novo") == "tier2"
-    assert cfg.providers["deepseek"].kind == "openai_compatible"
+    assert cfg.providers["openrouter"].kind == "openai_compatible"
     assert cfg.price_for("deepseek-chat").output == 1.10
     assert cfg.price_for("unknown-model").input == 1.0
 
@@ -79,29 +79,47 @@ def test_registry_model_upsert_replaces():
     assert len(reg.factories) == 1 and reg.factories[0].name == "X2"
 
 
-def test_every_preset_is_usable_and_priced():
-    """A preset that names a model with no price makes the budget report zero, and one whose
-    provider is missing from `providers` asks for a key the founder is never prompted for."""
+def test_every_configured_model_has_its_own_price():
+    """`price_for` falls back to a generic `default` entry, so asking it proves nothing: a $0.09
+    model billed at the $1.00 default is 10x off. Every id in the matrix needs its own line."""
     cfg = default_config()
-    for key, preset in MODEL_PRESETS.items():
-        assert set(preset.tiers) == {"tier1", "tier2"}, key
-        for tier, candidates in preset.tiers.items():
-            assert candidates, f"{key}/{tier} está vazio"
+    for cluster, tiers in cfg.models.matrix.items():
+        for tier, candidates in tiers.items():
             for c in candidates:
-                assert c.provider in cfg.providers, f"{key}: provedor {c.provider} não existe"
-                # `price_for` falls back to a generic `default` entry, so asking it proves
-                # nothing: a $0.09 model billed at the $1.00 default is 10x off.
-                assert c.model in cfg.pricing, f"{key}: {c.model} sem preço próprio em pricing"
-        declared = {*preset.providers, *preset.optional_providers}
-        used = {c.provider for cs in preset.tiers.values() for c in cs}
-        assert used <= declared, f"{key}: {used - declared} usado sem estar declarado"
+                assert c.provider in cfg.providers, f"{cluster}/{tier}: {c.provider} não existe"
+                assert c.model in cfg.pricing, f"{cluster}/{tier}: {c.model} sem preço próprio"
 
 
-def test_the_default_preset_needs_a_single_key():
-    """Onboarding offers the first preset: it should be the one key a founder can get in one go."""
-    key, preset = next(iter(MODEL_PRESETS.items()))
-    assert key == "openrouter" and preset.providers == ("openrouter",)
-    assert not preset.optional_providers
-    assert all(
-        c.provider == "openrouter" for cs in preset.tiers.values() for c in cs
-    ), "o preset padrão não deve exigir uma segunda chave"
+def test_openrouter_leads_the_provider_list():
+    """One key there reaches every model, so it is the first thing the settings screen offers."""
+    cfg = default_config()
+    assert next(iter(cfg.providers)) == "openrouter"
+    assert cfg.providers["openrouter"].api_key_env == "OPENROUTER_API_KEY"
+    for name, p in cfg.providers.items():
+        assert p.models_url, f"{name} não diz onde ficam os modelos disponíveis"
+
+
+def test_turning_clusters_off_sends_every_role_to_the_general_cluster():
+    cfg = default_config()
+    assert cfg.models.cluster_for_role("worker") == "engineering"
+    cfg.models.clusters_enabled = False
+    assert cfg.models.cluster_for_role("worker") == "general"
+    assert cfg.models.cluster_for_role("master") == "general"
+
+
+def test_a_named_task_can_have_its_own_tier():
+    """The Master decides on tier 1, but classifying a story is not a decision."""
+    cfg = default_config()
+    assert cfg.models.tier_for("master") == "tier1"
+    assert cfg.models.tier_for_task("master", "master.classify") == "tier2"
+    cfg.models.role_tasks["master.classify"] = "tier3"
+    assert cfg.models.tier_for_task("master", "master.classify") == "tier3"
+    # an unknown task is the role's tier, never an error
+    assert cfg.models.tier_for_task("master", "master.inventada") == "tier1"
+
+
+def test_a_legacy_monthly_budget_keeps_its_numbers():
+    """A config.yaml written before the weekly budget must not silently become a US$ 5 week."""
+    cfg = LoompaConfig.model_validate({"budget": {"monthly_cap_usd": 30.0, "hard_stop": False}})
+    assert (cfg.budget.period, cfg.budget.cap_usd) == ("monthly", 30.0)
+    assert cfg.budget.on_exceed == "tier3"

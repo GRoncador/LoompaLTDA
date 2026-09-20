@@ -318,8 +318,36 @@ def scripted(model, messages, tools):
     return f"{model} says hi"
 
 
-async def test_router_falls_through_and_meters_cost():
+def two_provider_matrix():
+    """A factory whose tiers name two providers, so a fall-through can be observed. Written here
+    instead of leaning on the shipped defaults: what a new factory ships with is a product choice
+    and must be free to change without breaking the router's tests."""
+    from loompa.config.schema import ALL_CLUSTERS, ModelCandidate
+
     cfg = default_config()
+    tiers = {
+        "tier1": [ModelCandidate(provider="deepseek", model="deepseek-reasoner")],
+        "tier2": [
+            ModelCandidate(provider="gemini", model="gemini-3.5-flash-lite"),
+            ModelCandidate(provider="deepseek", model="deepseek-chat"),
+        ],
+        "tier3": [ModelCandidate(provider="deepseek", model="deepseek-chat")],
+    }
+    cfg.models.tiers = {t: list(cs) for t, cs in tiers.items()}
+    cfg.models.matrix = {c: {t: list(cs) for t, cs in tiers.items()} for c in ALL_CLUSTERS}
+    return cfg
+
+
+def single_provider_config():
+    cfg = two_provider_matrix()
+    cfg.models.tiers["tier2"] = [
+        c for c in cfg.models.tiers["tier2"] if c.provider == "deepseek"
+    ][:1]
+    return cfg
+
+
+async def test_router_falls_through_and_meters_cost():
+    cfg = two_provider_matrix()
     store = Store(":memory:")
     tracker = CostTracker(store, cfg, "f")
     calls: list[str] = []
@@ -354,10 +382,7 @@ async def test_router_falls_through_and_meters_cost():
 
 
 async def test_router_all_fail_raises():
-    cfg = default_config()
-    cfg.models.tiers["tier2"] = [c for c in cfg.models.tiers["tier2"] if c.provider == "deepseek"][
-        :1
-    ]
+    cfg = single_provider_config()
     router = ModelRouter(
         cfg,
         providers={"deepseek": MockProvider("deepseek", script=lambda *a: LLMError("boom"))},
@@ -368,10 +393,7 @@ async def test_router_all_fail_raises():
 
 
 async def test_router_waits_for_single_candidate_cooldown():
-    cfg = default_config()
-    cfg.models.tiers["tier2"] = [c for c in cfg.models.tiers["tier2"] if c.provider == "deepseek"][
-        :1
-    ]
+    cfg = single_provider_config()
     calls = {"n": 0}
 
     def flaky(model, messages, tools):

@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from loompa.config import MODEL_PRESETS, ConfigStore, default_config
+from loompa.config import ConfigStore, default_config
 
-# Cheapest sensible model per provider for the live smoke test. OpenRouter follows the tier2 lead
-# of its preset, so a preset change cannot leave this testing a model that is no longer the default.
+# Cheapest sensible model per provider for the live smoke test.
 LIVE_DEFAULT_MODEL = {
     "gemini": "gemini-3.5-flash-lite",
     "deepseek": "deepseek-chat",
-    "groq": "llama-3.1-8b-instant",
-    "openrouter": MODEL_PRESETS["openrouter"].tiers["tier2"][0].model,
+    "openrouter": "~z-ai/glm-flash-latest",
     "anthropic": "claude-haiku-4-5",
+    "openai": "gpt-4.1-mini",
+    "xai": "grok-4-fast",
 }
 
 
@@ -192,3 +192,29 @@ def brownfield_repo(git_repo: Path) -> Path:
     git("add", ".", cwd=git_repo)
     git("commit", "-qm", "feat: app", cwd=git_repo)
     return git_repo
+
+
+# The matrix `apply_preset(config, "openrouter")` used to install. Several tests need a factory
+# whose models all come from OpenRouter; presets are gone, so the shape lives here instead.
+OPENROUTER_ALIASES = {
+    "tier1": ["~z-ai/glm-latest", "~x-ai/grok-latest", "~openai/gpt-sol-latest"],
+    "tier2": ["~z-ai/glm-flash-latest", "~openai/gpt-luna-latest", "~google/gemini-flash-latest"],
+    "tier3": ["openrouter/free"],
+}
+
+
+def use_openrouter(config, *, tiers: dict[str, list[str]] | None = None) -> None:
+    """Point every cluster and tier of `config` at OpenRouter ids, in place."""
+    from loompa.config.schema import ALL_CLUSTERS, ModelCandidate
+
+    picked = tiers or OPENROUTER_ALIASES
+    config.models.tiers = {
+        t: [ModelCandidate(provider="openrouter", model=m) for m in ms] for t, ms in picked.items()
+    }
+    config.models.matrix = {
+        cluster: {
+            t: [ModelCandidate(provider="openrouter", model=m) for m in ms]
+            for t, ms in picked.items()
+        }
+        for cluster in ALL_CLUSTERS
+    }

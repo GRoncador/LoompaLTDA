@@ -11,8 +11,9 @@ from typing import Any
 import httpx
 import pytest
 
+from conftest import use_openrouter
 from loompa.comms import FounderAnswer, MessageStatus
-from loompa.config import apply_preset, default_config
+from loompa.config import default_config
 from loompa.config.schema import ModelCandidate
 from loompa.engine import Scheduler, Stage
 from loompa.factory import Factory
@@ -98,7 +99,7 @@ def catalog(rows: list[dict[str, Any]] = CATALOG) -> httpx.Client:
 
 
 def pin_openrouter(config):
-    """The OpenRouter preset as it was before the aliases: concrete ids, one `:free` fallback."""
+    """A factory on pinned OpenRouter ids, with one `:free` fallback."""
     ids = {
         "tier1": ["z-ai/glm-5.3", "qwen/qwen3.8-max-0902"],
         "tier2": [
@@ -160,12 +161,33 @@ def test_fetch_reads_the_models_url_of_the_configured_provider_and_wraps_failure
         assert "Error" not in str(err.value)  # readable, no exception class name
 
 
-def test_fetch_catalog_uses_monthly_cache(tmp_path):
-    month_str = date.today().strftime("%Y_%m")
-    cache_file = tmp_path / f"openrouter_catalog_{month_str}.json"
-    cache_file.write_text(json.dumps({"data": CATALOG}), encoding="utf-8")
+def test_fetch_catalog_reads_the_local_cache_instead_of_the_network(tmp_path):
+    """There is no schedule behind the catalogue: opening the dashboard must cost nothing, and
+    only `force_refresh` (the founder's button) goes out to OpenRouter."""
+    from loompa.llm.catalog import CATALOG_CACHE_FILE
 
+    (tmp_path / CATALOG_CACHE_FILE).write_text(json.dumps({"data": CATALOG}), encoding="utf-8")
     models = fetch_catalog(default_config(), cache_dir=tmp_path)
+    assert len(models) == len(CATALOG)
+
+
+def test_a_cache_written_by_an_older_build_still_beats_no_catalogue(tmp_path, monkeypatch):
+    """Older builds wrote one file per month. When the network is down, a founder who upgraded
+    must get that list back instead of an empty screen."""
+    month = tmp_path / f"openrouter_catalog_{date.today():%Y_%m}.json"
+    month.write_text(json.dumps({"data": CATALOG}), encoding="utf-8")
+
+    class OfflineClient:
+        def __init__(self, **_: object) -> None: ...
+        def __enter__(self) -> OfflineClient:
+            return self
+
+        def __exit__(self, *_: object) -> None: ...
+        def get(self, url: str) -> httpx.Response:
+            raise httpx.ConnectError("sem rede")
+
+    monkeypatch.setattr("loompa.llm.catalog.httpx.Client", OfflineClient)
+    models = fetch_catalog(default_config(), cache_dir=tmp_path, force_refresh=True)
     assert len(models) == len(CATALOG)
 
 
@@ -278,7 +300,7 @@ def test_apply_refuses_a_configuration_edited_since_the_proposal():
 
 
 def swap_ready(factory: Factory):
-    """A factory on the OpenRouter preset with a context, and the proposal a sync would make."""
+    """A factory on pinned OpenRouter ids with a context, and the proposal a sync would make."""
     pin_openrouter(factory.config)
     factory.save()
     ctx = make_ctx(factory, dry_run=True)
@@ -391,8 +413,13 @@ def test_cli_previews_then_proposes_through_the_inbox(hub, brownfield_repo, monk
     from loompa.store import Store
 
     runner = CliRunner()
-    args = ["init", str(brownfield_repo), "--yes", "--name", "Demo", "--preset", "openrouter"]
+    args = ["init", str(brownfield_repo), "--yes", "--name", "Demo"]
     assert runner.invoke(app, args).exit_code == 0
+    from loompa.factory import Factory
+
+    f = Factory.open(brownfield_repo)
+    use_openrouter(f.config)
+    f.save()
     monkeypatch.setattr(
         "loompa.cli.models.plan",
         lambda config, policy: plan(config, policy, client=catalog(), today=TODAY),
@@ -518,16 +545,15 @@ def test_the_same_models_in_another_order_are_left_as_the_founder_ordered_them()
     ]
 
 
-def test_the_openrouter_preset_uses_priced_aliases_that_survive_the_config_file(tmp_path):
-    from loompa.config import MODEL_PRESETS, load_config, save_config
+def test_openrouter_aliases_are_priced_and_survive_the_config_file(tmp_path):
+    from loompa.config import load_config, save_config
 
     config = default_config()
-    apply_preset(config, "openrouter")
+    use_openrouter(config)
     ids = [c.model for cands in config.models.tiers.values() for c in cands]
     assert all(m.startswith("~") or m == "openrouter/free" for m in ids)
     for model_id in ids:  # an unpriced id is billed at the generic $1/$3
         assert model_id in config.pricing, f"{model_id} has no price in defaults.yaml"
-    assert MODEL_PRESETS["openrouter"].tiers["tier2"][-1].model == "openrouter/free"
     (tmp_path / ".loompa").mkdir()
     save_config(tmp_path, config)
     reloaded = load_config(tmp_path)  # `~` opens a YAML null; the ids must come back as text

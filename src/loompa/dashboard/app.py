@@ -34,7 +34,7 @@ from loompa.conversations import (
 )
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, kanban_column, load_state
 from loompa.factory import Factory
-from loompa.finance import month_start_iso, today_start_iso
+from loompa.finance import period_start_iso, today_start_iso
 from loompa.sprints import SprintBoard, SprintError, SprintStatus
 
 log = logging.getLogger("loompa.dashboard")
@@ -117,7 +117,6 @@ class FactoryBody(BaseModel):
     path: str
     name: str | None = None
     stack: str = "custom"
-    preset: str | None = None  # openrouter | gratuito | economico | maximo
     keys: dict[str, str] = {}  # ENV_NAME -> value, written to the secrets file only
     secrets_scope: str = "hub"
     mission: str = ""
@@ -220,6 +219,11 @@ class Hub:
         self.runtimes.clear()
 
 
+def _period_start(ctx: EngineContext) -> str:
+    """Start of the factory's budget period (a week by default), for every cost total shown."""
+    return period_start_iso(ctx.config.budget.period)
+
+
 def _sprint_summary(ctx: EngineContext) -> dict[str, Any] | None:
     """The sprint the founder cares about now: the running one, else the one being planned."""
     board = SprintBoard(ctx.store, ctx.slug)
@@ -304,15 +308,9 @@ def create_app(
             store=hub.store,
         )
         f = result.factory
-        if body.preset or body.keys:
-            from loompa.config import MODEL_PRESETS, apply_preset
+        if body.keys:
             from loompa.config.settings import store_key
 
-            if body.preset:
-                if body.preset not in MODEL_PRESETS:
-                    raise HTTPException(400, f"preset desconhecido: {body.preset}")
-                apply_preset(f.config, body.preset)
-                f.save()
             for env_name, value in body.keys.items():
                 if value.strip():
                     store_key(f.root, env_name, value.strip(), scope=body.secrets_scope)
@@ -378,11 +376,13 @@ def create_app(
             "inbox": [m.model_dump(mode="json") for m in pending],
             "finance": {
                 "today_usd": budget.today_cost_usd,
-                "month_usd": budget.month_cost_usd,
+                "period": budget.period,
+                "period_usd": budget.period_cost_usd,
                 "cap_usd": budget.cap_usd,
                 "fraction": budget.fraction,
                 "warn": budget.warn,
                 "exhausted": budget.exhausted,
+                "downgrade": budget.downgrade,
             },
             "kaizen_today": len(ctx.store.list_learnings(since_iso=today_start_iso())),
             "sprint": _sprint_summary(ctx),
@@ -653,6 +653,19 @@ def create_app(
             )
         return r.as_dict()
 
+    def _openrouter_ready(ctx: EngineContext) -> bool:
+        """The catalogue, the ranking and the guided picker are OpenRouter features: without its
+        key there is no list to read, so the screen offers manual ids instead."""
+        cfg = ctx.config.providers.get("openrouter")
+        if cfg is None or not cfg.api_key_env:
+            return False
+        return bool(ctx.secrets.status(cfg.api_key_env).get("configured"))
+
+    NO_OPENROUTER = (
+        "A lista de modelos e a sugestão inteligente vêm da OpenRouter. Configure a chave da "
+        "OpenRouter na aba Provedores para liberar o catálogo completo e a recomendação automática."
+    )
+
     @app.get("/api/factories/{slug}/models/catalog")
     def get_models_catalog(slug: str) -> dict[str, Any]:
         from loompa.llm.catalog import Policy
@@ -660,15 +673,18 @@ def create_app(
 
         rt = hub.get(slug)
         ctx = rt.ctx
+        empty = {"clusters": {}, "all_models": [], "summary": {}, "openrouter": False}
+        if not _openrouter_ready(ctx):
+            return {**empty, "error": NO_OPENROUTER}
         policy = Policy(
             tier1_ceiling=ctx.config.models.tier1_ceiling,
             tier2_floor=ctx.config.models.tier2_floor,
         )
         try:
             proposal = plan(ctx.config, policy, force_refresh=False)
-            return proposal_to_dict(proposal)
+            return {**proposal_to_dict(proposal), "openrouter": True}
         except Exception as exc:
-            return {"error": str(exc), "clusters": {}, "all_models": [], "summary": {}}
+            return {**empty, "openrouter": True, "error": str(exc)}
 
     @app.post("/api/factories/{slug}/models/preview-sync")
     def preview_models_sync(slug: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -688,17 +704,52 @@ def create_app(
             else ctx.config.models.tier2_floor
         )
         force = bool(body and body.get("force_refresh"))
+        if not _openrouter_ready(ctx):
+            raise HTTPException(400, NO_OPENROUTER)
         try:
             proposal = plan(
                 ctx.config,
                 Policy(tier1_ceiling=ceiling, tier2_floor=floor),
                 force_refresh=force,
             )
-            return proposal_to_dict(proposal)
         except CatalogError as exc:
             raise HTTPException(400, str(exc)) from None
         except Exception as exc:
             raise HTTPException(500, f"Erro ao consultar catálogo da OpenRouter: {exc}") from None
+        warnings: list[str] = []
+        if force:
+            warnings = _watch_prices(ctx)
+        return {**proposal_to_dict(proposal), "price_warnings": warnings}
+
+    def _watch_prices(ctx: EngineContext) -> list[str]:
+        """A freshly read catalogue is the moment to notice a model in use got more expensive.
+        Never lets a notice break the refresh the founder asked for."""
+        from loompa.llm.catalog import fetch_catalog
+        from loompa.models_sync import ModelWatch
+
+        try:
+            return ModelWatch(ctx).check_prices(fetch_catalog(ctx.config, force_refresh=False))
+        except Exception:  # noqa: BLE001
+            log.exception("could not compare model prices after a catalogue refresh")
+            return []
+
+    @app.post("/api/factories/{slug}/models/test")
+    async def test_model(slug: str, body: dict[str, Any]) -> dict[str, Any]:
+        """One minimal call on one cell of the matrix: says whether that model really answers on
+        that provider, which is the only way to catch a typo before a story hits it."""
+        from loompa.llm import probe_provider
+        from loompa.models_sync import ModelWatch
+
+        ctx = hub.get(slug).ctx
+        ctx.reload_secrets()
+        provider = str(body.get("provider") or "").strip()
+        model = str(body.get("model") or "").strip()
+        if not provider or not model:
+            raise HTTPException(400, "informe o provedor e o modelo a testar")
+        r = await probe_provider(ctx.config, provider, secrets=ctx.secrets, model=model)
+        if r.ok:
+            ModelWatch(ctx).forget(provider, model)
+        return r.as_dict()
 
     @app.post("/api/factories/{slug}/models/apply-sync")
     def apply_models_sync(slug: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -721,6 +772,8 @@ def create_app(
             else ctx.config.models.tier2_floor
         )
         force = bool(body and body.get("force_refresh"))
+        if not _openrouter_ready(ctx):
+            raise HTTPException(400, NO_OPENROUTER)
 
         try:
             proposal = plan(
@@ -771,10 +824,11 @@ def create_app(
         ctx = hub.get(slug).ctx
         return {
             "daily": ctx.tracker.daily_report(),
-            "month": {
-                "totals": ctx.store.usage_totals(slug, since_iso=month_start_iso()),
-                "by_model": ctx.store.usage_by("model", slug, month_start_iso()),
-                "by_agent": ctx.store.usage_by("agent", slug, month_start_iso()),
+            "period": {
+                "name": ctx.config.budget.period,
+                "totals": ctx.store.usage_totals(slug, since_iso=_period_start(ctx)),
+                "by_model": ctx.store.usage_by("model", slug, _period_start(ctx)),
+                "by_agent": ctx.store.usage_by("agent", slug, _period_start(ctx)),
             },
             "suggestions": ctx.tracker.suggestions(),
         }
@@ -793,8 +847,8 @@ def create_app(
         usage_rows = [
             r for r in ctx.store.usage_by("agent", slug, today_start_iso()) if r["key"] == name
         ]
-        month_rows = [
-            r for r in ctx.store.usage_by("agent", slug, month_start_iso()) if r["key"] == name
+        period_rows = [
+            r for r in ctx.store.usage_by("agent", slug, _period_start(ctx)) if r["key"] == name
         ]
         story = ctx.store.get_story(row["story_id"]) if row.get("story_id") else None
         role = row.get("role") or next((r for n, r in DEFAULT_AGENTS if n == name), "")
@@ -816,7 +870,7 @@ def create_app(
                 for c in (cluster_matrix.get(tier) or ctx.config.models.tiers.get(tier, []))
             ],
             "today": usage_rows[0] if usage_rows else None,
-            "month": month_rows[0] if month_rows else None,
+            "period": period_rows[0] if period_rows else None,
             "story": _story_card(story) if story else None,
             "worktree": story.get("worktree") if story else None,
         }

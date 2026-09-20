@@ -38,18 +38,21 @@ def test_init_greenfield_with_stack(tmp_path: Path, hub):
     assert (root / "src" / "fresh" / "main.py").is_file()
 
 
-def test_init_preset_and_providers_commands(git_repo, hub, monkeypatch):
+def test_init_and_providers_commands(git_repo, hub, monkeypatch):
     from typer.testing import CliRunner
 
     from loompa.cli.main import app
 
     runner = CliRunner()
     monkeypatch.chdir(git_repo)
-    r = runner.invoke(app, ["init", ".", "--yes", "--name", "Chaves", "--preset", "gratuito"])
+    r = runner.invoke(app, ["init", ".", "--yes", "--name", "Chaves"])
     assert r.exit_code == 0, r.stdout
-    assert "preset gratuito aplicado" in r.stdout
     r = runner.invoke(app, ["providers", "list"])
     assert r.exit_code == 0 and "Google Gemini" in r.stdout and "não configurada" in r.stdout
+    # OpenRouter leads the list and is the one marked as recommended
+    listed = " ".join(r.stdout.split())
+    assert listed.index("OpenRouter") < listed.index("Google Gemini")
+    assert "recomendado" in listed
     # hidden prompt writes to the hub secrets file, never to config.yaml or stdout
     key = "AIzaSyFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE9999"
     r = runner.invoke(app, ["providers", "set-key", "gemini", "--no-test"], input=key + "\n")
@@ -61,5 +64,4 @@ def test_init_preset_and_providers_commands(git_repo, hub, monkeypatch):
     assert "configurada (…9999)" in r.stdout and key not in r.stdout
     r = runner.invoke(app, ["providers", "set-key", "gemini", "--clear"])
     assert r.exit_code == 0 and key not in (hub.home / "secrets.env").read_text()
-    r = runner.invoke(app, ["init", ".", "--yes", "--preset", "nope"])
-    assert r.exit_code == 1
+    assert runner.invoke(app, ["init", ".", "--yes", "--preset", "nope"]).exit_code != 0

@@ -106,7 +106,7 @@ class MasterAgent(LoompaAgent):
                 CLASSIFY_SYSTEM.format(language=self.language),
                 user,
                 story=state,
-                tier_override="tier2",
+                task="master.classify",
                 max_tokens=800,
             )
         except Exception:  # noqa: BLE001
@@ -402,7 +402,7 @@ class MasterAgent(LoompaAgent):
                     EXEC_SYSTEM.format(language=self.language),
                     f"Story: {state.title}\n\nProblem:\n{technical_reason[:3000]}\n\nSuggested options: {options or 'none'}",
                     story=state,
-                    tier_override="tier2",
+                    task="master.exec_options",
                     max_tokens=800,
                 )
                 llm_opts = [

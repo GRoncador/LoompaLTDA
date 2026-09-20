@@ -1,5 +1,6 @@
-from loompa.config.presets import MODEL_PRESETS, ModelPreset, apply_preset, preset_summaries
 from loompa.config.schema import (
+    ROLE_TASKS,
+    ROLE_TASKS_BY_KEY,
     BudgetConfig,
     FactoryConfig,
     LoompaConfig,
@@ -23,14 +24,12 @@ from loompa.config.store import (
 
 __all__ = [
     "LOOMPA_DIR",
-    "MODEL_PRESETS",
-    "ModelPreset",
+    "ROLE_TASKS",
+    "ROLE_TASKS_BY_KEY",
     "Secrets",
     "SecretInConfigError",
-    "apply_preset",
     "looks_like_secret",
     "mask",
-    "preset_summaries",
     "BudgetConfig",
     "ConfigStore",
     "FactoryConfig",

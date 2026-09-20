@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -46,6 +47,7 @@ class ModelRouter:
         providers: dict[str, LLMProvider] | None = None,
         client: httpx.AsyncClient | None = None,
         on_call: Callable[[str, str, RoutedCall], None] | None = None,
+        on_model_gone: Callable[[ModelCandidate, str], None] | None = None,
         max_retries: int = 2,
         max_cooldown_wait: float = 90.0,
         secrets: Mapping[str, str] | None = None,
@@ -54,7 +56,12 @@ class ModelRouter:
         self.tracker = tracker
         self.secrets = secrets
         self.on_call = on_call
+        # A candidate the provider says it does not have: a typo or a model that left the air.
+        # The Ops Loompa turns it into one inbox note (loompa.models_sync.ModelWatch).
+        self.on_model_gone = on_model_gone
         self.max_retries = max_retries
+        self._budget_checked_at = 0.0
+        self._budget_downgrade = False
         # When every candidate of a tier is merely cooling down (typical with a single-model
         # tier on a free-tier rate limit), wait up to this long for the earliest one instead
         # of failing the story outright.
@@ -88,13 +95,33 @@ class ModelRouter:
     # Roles whose judgement matters more on a hard story: lifted to tier1 when COMPLEX.
     LIFT_ON_COMPLEX = ("product", "product_owner", "inspector", "analyst")
 
+    BUDGET_RECHECK_S = 60.0
+
+    def budget_downgrade(self) -> bool:
+        """True while the period's cap is spent and the founder chose free models over a pause.
+        Re-read at most once a minute: it gates every call and costs two aggregates."""
+        if self.tracker is None:
+            return False
+        now = time.monotonic()
+        if now - self._budget_checked_at > self.BUDGET_RECHECK_S:
+            self._budget_checked_at = now
+            try:
+                self._budget_downgrade = self.tracker.status().downgrade
+            except Exception:  # noqa: BLE001 - accounting must never break a call
+                self._budget_downgrade = False
+        return self._budget_downgrade
+
     def candidates(
-        self, role: str, tier_override: str | None = None, complexity: str | None = None
+        self,
+        role: str,
+        tier_override: str | None = None,
+        complexity: str | None = None,
+        task: str | None = None,
     ) -> tuple[str, list[ModelCandidate]]:
-        """Tier for a call: explicit override > story complexity > role/cluster default.
-        Candidates are resolved from the 3x3 matrix: cluster(role) x tier."""
+        """Tier for a call: explicit override > story complexity > task > role/cluster default.
+        Candidates are resolved from the matrix: cluster(role) x tier."""
         cluster = self.config.models.cluster_for_role(role)
-        tier = tier_override or self.config.models.tier_for(role)
+        tier = tier_override or self.config.models.tier_for_task(role, task)
         if tier_override is None and complexity:
             c = str(complexity).upper()
             if c == "SIMPLE":
@@ -103,6 +130,10 @@ class ModelRouter:
                 tier = "tier1"
 
         tier = tier or ("tier3" if cluster == "routine" else "tier2")
+        # The cap is spent and the founder asked for free models instead of a pause: every call
+        # drops to tier 3, whatever the role, the task or the story asked for.
+        if self.budget_downgrade():
+            tier = "tier3"
         cands = self.config.models.candidates_for_cluster_tier(cluster, tier)
 
         # In-cluster fallback if chosen tier has no candidates
@@ -135,8 +166,9 @@ class ModelRouter:
         temperature: float | None = None,
         complexity: str | None = None,
         reasoning_effort: str | None = None,
+        task: str | None = None,
     ) -> RoutedCall:
-        tier, cands = self.candidates(role, tier_override, complexity)
+        tier, cands = self.candidates(role, tier_override, complexity, task)
         if not cands:
             raise LLMError(f"nenhum modelo configurado para o tier {tier}")
         loop = asyncio.get_running_loop()
@@ -243,6 +275,10 @@ class ModelRouter:
                     break  # next candidate
                 except LLMError as exc:
                     errors.append(str(exc))
+                    if exc.status == 404 and self.on_model_gone:
+                        # The provider does not have this id. Retrying cannot fix a name, so the
+                        # founder hears about it once and the candidate is skipped meanwhile.
+                        self.on_model_gone(cand, str(exc))
                     if exc.retryable and retry < self.max_retries:
                         await asyncio.sleep(0.5 * (2**retry))
                         continue

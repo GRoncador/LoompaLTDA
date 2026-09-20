@@ -46,7 +46,8 @@ def test_factories_and_overview(client: TestClient):
     assert len(ov["agents"]) >= 9 and all(
         a["room"] in ("dev", "meeting", "qa", "lounge") for a in ov["agents"]
     )
-    assert ov["finance"]["cap_usd"] == 30.0 and ov["inbox"] == []
+    assert ov["finance"]["cap_usd"] == 5.0 and ov["finance"]["period"] == "weekly"
+    assert ov["inbox"] == []
     assert client.get("/api/factories/nope/overview").status_code == 404
 
 
@@ -100,7 +101,7 @@ def test_meeting_run_inbox_flow(client: TestClient):
         e["type"] for e in events
     }
     fin = client.get("/api/factories/demo-hq/finance").json()
-    assert fin["month"]["totals"]["calls"] > 0
+    assert fin["period"]["totals"]["calls"] > 0 and fin["period"]["name"] == "weekly"
     agent = client.get("/api/factories/demo-hq/agents/Worker Loompa").json()
     assert agent["role"] == "worker" and agent["today"]["calls"] > 0
     rep = client.post("/api/factories/demo-hq/report").json()
@@ -171,12 +172,23 @@ def test_models_sync_endpoints(client: TestClient, monkeypatch):
 
     models = parse_catalog({"data": CATALOG})
     monkeypatch.setattr("loompa.models_sync.fetch_catalog", lambda *args, **kwargs: models)
+    monkeypatch.setattr("loompa.llm.catalog.fetch_catalog", lambda *args, **kwargs: models)
 
     ctx = client.app.state.hub.get("demo-hq").ctx
+    # The catalogue, the ranking and the picker are OpenRouter features: without its key the
+    # endpoints answer with the sentence that tells the founder to configure it.
+    blocked = client.post("/api/factories/demo-hq/models/preview-sync")
+    assert blocked.status_code == 400 and "OpenRouter" in blocked.json()["detail"]
+    assert client.get("/api/factories/demo-hq/models/catalog").json()["openrouter"] is False
+    from loompa.config.settings import store_key
+
+    store_key(ctx.root, "OPENROUTER_API_KEY", "sk-or-test-key-1234567890", scope="hub")
+    ctx.reload_secrets()
     ctx.config.models.tiers["tier1"].insert(0, ModelCandidate(provider="openrouter", model="m1"))
     ctx.config.models.tiers["tier2"].insert(0, ModelCandidate(provider="openrouter", model="m2"))
 
-    r = client.post("/api/factories/demo-hq/models/preview-sync")
+    # the shipped ceiling is US$ 1.25; this fake catalogue is priced for the older US$ 5
+    r = client.post("/api/factories/demo-hq/models/preview-sync", json={"tier1_ceiling": 5.0})
     assert r.status_code == 200
     data = r.json()
     assert "clusters" in data
