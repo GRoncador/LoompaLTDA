@@ -601,3 +601,32 @@ async def test_a_failing_watch_does_not_cost_the_call_that_answered(
     monkeypatch.setattr(AliasWatch, "observe", boom)
     ctx = alias_ctx(factory, "~z-ai/glm-latest", ["z-ai/glm-5.3"])
     await ask(ctx)  # still answers
+
+
+def test_the_proposal_lists_the_model_behind_each_alias_in_use():
+    proposal = build_proposal(aliased_config(), parse_catalog({"data": ALIASED}), POLICY, TODAY)
+    assert proposal.targets == {"~c/mid-latest": "c/mid", "~d/cheap-latest": "d/cheap"}
+    assert (
+        build_proposal(openrouter_config(), parse_catalog({"data": ALIASED}), POLICY, TODAY).targets
+        == {}
+    )
+
+
+async def test_the_catalogue_tells_an_alias_moved_before_any_call_does(factory: Factory):
+    from loompa.models_sync import AliasWatch
+
+    served = ["z-ai/glm-5.3"]
+    ctx = alias_ctx(factory, "~z-ai/glm-latest", served)
+    watch = AliasWatch(ctx)
+    for _ in range(2):
+        watch.check_targets({"~z-ai/glm-latest": "z-ai/glm-5.3"})
+    assert moved_notes(ctx) == []  # the first sight is the baseline
+    for _ in range(2):
+        watch.check_targets({"~z-ai/glm-latest": "z-ai/glm-5.4"})  # `alias_target` moved
+    (note,) = moved_notes(ctx)
+    assert "z-ai/glm-5.4" in note.context and "z-ai/glm-5.3" in note.context
+    served[0] = "z-ai/glm-5.4"
+    await ask(ctx)  # the first call to answer with it: already told
+    assert len(moved_notes(ctx)) == 1
+    watch.check_targets({"~z-ai/glm-latest": ""})  # a catalogue row with no target says nothing
+    assert len(moved_notes(ctx)) == 1

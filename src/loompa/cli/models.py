@@ -9,7 +9,7 @@ from rich.table import Table
 from loompa.cli.main import app, resolve_factory
 from loompa.cli.ops import build_context
 from loompa.llm.catalog import CatalogError, Policy
-from loompa.models_sync import TIER_LABEL, ModelSync, excluded_report, plan
+from loompa.models_sync import TIER_LABEL, AliasWatch, ModelSync, excluded_report, plan
 
 console = Console()
 models_app = typer.Typer(help="Lista de modelos de IA e o catálogo da OpenRouter.")
@@ -80,19 +80,25 @@ def models_sync(
             f"[yellow]serão desativados em breve:[/yellow] {', '.join(proposal.expiring)}"
         )
 
-    if not proposal.changed:
-        console.print("[green]✔[/green] Os modelos atuais já são a melhor lista. Nada a trocar.")
-        return
     if preview:
-        console.print("Prévia: nada foi enviado ao inbox.")
+        console.print(
+            "Prévia: nada foi enviado ao inbox."
+            if proposal.changed
+            else "[green]✔[/green] Os modelos atuais já são a melhor lista. Nada a trocar."
+        )
         return
     # No model is called: dry-run only keeps the context from loading the embedder.
     ctx = build_context(f, dry_run=True)
     try:
+        AliasWatch(ctx).check_targets(
+            proposal.targets
+        )  # an alias that moved is told even if the list holds
         msg = ModelSync(ctx).propose(proposal)
     finally:
         ctx.close()
-    if msg is not None:
+    if msg is None:
+        console.print("[green]✔[/green] Os modelos atuais já são a melhor lista. Nada a trocar.")
+    else:
         console.print(
             f"[green]✔[/green] Proposta enviada ao inbox ({msg.id}). Para aprovar: "
             f"loompa inbox reply {msg.id} --option approve"

@@ -196,17 +196,26 @@ class AliasWatch:
         self.ctx = ctx
 
     def observe(self, role: str, agent: str, routed: Any) -> None:
+        """A call answered: `response.model` says which model is behind the alias right now."""
         alias, served = routed.candidate.model, routed.response.model
-        if routed.candidate.provider != PROVIDER or not alias.startswith("~"):
+        if routed.candidate.provider == PROVIDER and alias.startswith("~") and served != alias:
+            self.note(alias, served)
+
+    def check_targets(self, targets: dict[str, str]) -> None:
+        """The catalogue says which model each alias points to (`alias_target`), so a move shows
+        before any call is made. Same memory as `observe`, so a move is told once."""
+        for alias, target in targets.items():
+            self.note(alias, target)
+
+    def note(self, alias: str, now: str) -> None:
+        if not now:  # a provider that does not say who answers
             return
-        if not served or served == alias:  # a provider that does not say who answered
+        before = self.ctx.store.get(ALIAS_SEEN + alias)
+        if before == now:
             return
-        seen = self.ctx.store.get(ALIAS_SEEN + alias)
-        if seen == served:
-            return
-        self.ctx.store.set(ALIAS_SEEN + alias, served)
-        if seen:  # the first answer is the baseline, not news
-            self._tell(alias, seen, served)
+        self.ctx.store.set(ALIAS_SEEN + alias, now)
+        if before:  # the first sight is the baseline, not news
+            self._tell(alias, before, now)
 
     def _tell(self, alias: str, before: str, now: str) -> None:
         tiers = [

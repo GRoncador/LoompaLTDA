@@ -81,7 +81,8 @@ class CatalogModel:
     tools: bool
     text_only: bool
     alias: bool
-    target: str  # for an alias, the model it points to today
+    target: str  # for an alias, the name of the model it points to today
+    target_id: str  # ...and its id, the one `response.model` reports
     coding: float | None
     agentic: float | None
     mandatory_reasoning: bool
@@ -163,6 +164,7 @@ def parse_model(raw: Any, index: dict[str, dict[str, Any]] | None = None) -> Cat
         text_only="text" in inputs and outputs == ["text"],
         alias=model_id.startswith("~") or bool(entry.get("alias_target")),
         target=str(_dict(entry.get("alias_target")).get("name") or ""),
+        target_id=str(_dict(entry.get("alias_target")).get("slug") or ""),
         coding=_number(bench.get("coding_index")),
         agentic=_number(bench.get("agentic_index")),
         mandatory_reasoning=reasoning.get("mandatory") is True,
@@ -322,6 +324,7 @@ class Proposal:
     excluded: dict[str, int] = field(default_factory=dict)
     mode: str = "pinned"  # alias | pinned: which kind of ids the ranking was made from
     repriced: list[str] = field(default_factory=list)  # in use, priced differently in the config
+    targets: dict[str, str] = field(default_factory=dict)  # aliases in use -> model behind them now
 
     @property
     def changed(self) -> bool:
@@ -438,6 +441,9 @@ def build_proposal(
         excluded=dict(ranking.excluded),
         mode=mode,
         repriced=repriced,
+        targets={
+            m: by_id[m].target_id for m in sorted(configured) if m in by_id and by_id[m].alias
+        },
     )
 
 

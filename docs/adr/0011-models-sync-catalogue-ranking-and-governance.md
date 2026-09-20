@@ -98,9 +98,15 @@ leaves the catalogue cannot leave a tier with dead ids. What the real catalogue 
 
 **The trade.** An alias removes the loud failure (a retired id answers 404 and the router falls to
 the next candidate) and adds a silent one: the model behind it can change without the approval
-ADR-0011 §5 requires for a swap, and the prompts are tuned for the model in use. Nothing yet
-detects that an alias moved; `resp.model` carries the resolved id, so an event/inbox note when it
-differs from the last one seen is the natural guard, and is not built.
+§5 requires for a swap, and the prompts are tuned for the model in use. The guard is `AliasWatch`
+(`models_sync.py`): it remembers, per alias, the model last seen behind it and posts one INFO note
+per change ("O modelo por trás de um apelido mudou": before, now, which tiers use it). It hears
+about a move from two places, which share one memory (`alias_seen:<alias>` in `kv`) so a move is told
+once: the model that answers (`response.model`, through the router's `on_call` hook) and the
+catalogue's `alias_target` (`loompa models sync` checks it even when the list is unchanged, so a
+weekly cron run announces a move before a call would). The first sight is a baseline, not news; the
+free router rotates by design and concrete ids are not aliases, so both are ignored. It only tells:
+the swap has already happened by then.
 
 ## Consequences
 
