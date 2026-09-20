@@ -113,6 +113,16 @@ class AnalystAgent(LoompaAgent):
             yield sess
             return
         async with self.ctx.mcp.session(self.role) as sess:
+            if sess.unavailable and not self.ctx.dry_run:
+                # The founder only ever reads `web_limitation`, which says the search could not be
+                # opened without saying why. The technical reason is kept here: a whole factory
+                # ran without web search because the install was missing `mcp`, and the sentence
+                # looked the same as a network blip. Redacted by the hub before it gets here.
+                self.ctx.emit(
+                    "web.unavailable",
+                    agent=self.name,
+                    reasons=dict(sess.unavailable),
+                )
             yield sess
 
     async def converse(self, conv: Conversation, text: str) -> TurnResult:

@@ -153,6 +153,18 @@ Suggested next (not implemented):
   cause in plain pt-BR, and keeps the technical reason in `ProbeResult.reason`, which
   `loompa providers test` prints. **Not verified:** an actual `tavily_search` call — listing tools
   proves the connection, not that a search returns usable sources.
+- **The install, not the key, was breaking web search** (2026-09-20, found from a brainstorm that
+  declared "a busca na web não estava disponível"). The founder's `loompa` is a `uv tool install
+  --editable` whose *source* is the repo but whose *dependencies* are frozen from before Fase 4,
+  so `mcp` is absent there: every connection died on `ModuleNotFoundError`, which the broad
+  `except` in `McpHub.session` recorded as just another unreachable server. The same install ran
+  `loompa setup`, so the wizard's Tavily warning had this cause too — not the fresh-key race that
+  was guessed. `uv tool upgrade loompa-core` (or running from the repo venv) fixes it. Two code
+  changes so it cannot hide again: `probe_tavily` names an incomplete install as its own cause,
+  and `AnalystAgent._web` emits a `web.unavailable` event with the technical reason, because the
+  founder's sentence deliberately never carries it. A dependency added later still won't reach an
+  existing tool install — nothing in the code can detect that from inside the broken environment
+  beyond reporting it, which is now what happens.
 - **Fase 5** done (2026-09-19, ADR-0010): a conversation is a row in a new `conversations` table
   (turns, a `Draft` of cards + sprint goal, limits the agent declared); until the founder commits, the
   stories and sprints tables are untouched. The model answers `{reply, ops, questions}` and

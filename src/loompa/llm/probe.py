@@ -110,6 +110,11 @@ RETRY_DELAY_S = 3.0
 # generic sentence, and `ProbeResult.reason` always carries the untranslated cause.
 _MCP_CAUSES: tuple[tuple[tuple[str, ...], str], ...] = (
     (
+        ("modulenotfounderror", "no module named", "importerror"),
+        "esta instalação do Loompa está incompleta e não consegue falar com servidores de busca; "
+        "reinstale o Loompa e tente de novo",
+    ),
+    (
         ("401", "403", "unauthorized", "forbidden", "invalid api key"),
         "o servidor de busca ainda não aceita esta chave (chave recém-criada pode levar alguns "
         "minutos, ou o plano não inclui o servidor MCP)",

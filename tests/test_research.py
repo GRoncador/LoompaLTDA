@@ -168,6 +168,10 @@ async def test_without_a_key_the_analyst_declares_the_limitation(factory: Factor
     msg = ctx.store.get_message(state.blocked_message_id)
     assert "busca na web não estava disponível" in msg.context and msg.executive_audit() == []
     assert state.stage == Stage.AWAITING_FOUNDER  # a missing key never blocks the story
+    # the founder's sentence never says why; the technical reason has to survive somewhere
+    events = ctx.store.events_since(limit=500, factory=ctx.slug)
+    reasons = [e for e in events if e["type"] == "web.unavailable"]
+    assert reasons and "TAVILY_API_KEY" in json.dumps(reasons[0]["payload"])
     await ctx.aclose()
 
 

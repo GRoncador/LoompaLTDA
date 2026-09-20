@@ -252,6 +252,21 @@ async def test_a_valid_key_the_mcp_server_refuses_is_not_wiped_and_the_cause_is_
     assert "401" in res.reason  # the untranslated cause survives for whoever has to debug it
 
 
+async def test_an_install_without_the_mcp_package_says_so_instead_of_blaming_the_network():
+    # An install whose dependencies predate Fase 4 has no `mcp`, so every connection raises on
+    # import. A whole factory ran without web search while the founder read "could not open the
+    # search service", which reads like a network blip.
+    res = await probe_tavily(
+        default_config().tools.tavily,
+        secrets={"TAVILY_API_KEY": KEY},
+        hub=broken_hub(ModuleNotFoundError("No module named 'mcp'")),
+        client=rest_says(200),
+        retry_delay_s=0,
+    )
+    assert not res.ok and "instalação do Loompa está incompleta" in res.detail
+    assert "mcp" in res.reason
+
+
 async def test_an_unreadable_mcp_failure_stays_generic_but_keeps_the_technical_reason():
     res = await probe_tavily(
         default_config().tools.tavily,
