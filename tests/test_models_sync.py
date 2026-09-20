@@ -160,6 +160,15 @@ def test_fetch_reads_the_models_url_of_the_configured_provider_and_wraps_failure
         assert "Error" not in str(err.value)  # readable, no exception class name
 
 
+def test_fetch_catalog_uses_monthly_cache(tmp_path):
+    month_str = date.today().strftime("%Y_%m")
+    cache_file = tmp_path / f"openrouter_catalog_{month_str}.json"
+    cache_file.write_text(json.dumps({"data": CATALOG}), encoding="utf-8")
+
+    models = fetch_catalog(default_config(), cache_dir=tmp_path)
+    assert len(models) == len(CATALOG)
+
+
 def test_every_model_left_out_is_counted_with_its_reason():
     ranking = rank(parse_catalog({"data": CATALOG}), POLICY, TODAY)
     assert dict(ranking.excluded) == {

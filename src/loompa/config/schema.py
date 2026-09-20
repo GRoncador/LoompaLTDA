@@ -105,6 +105,8 @@ class ModelsConfig(BaseModel):
     temperature: float = 0.2
     max_output_tokens: int = 4096
     preset: str = ""  # last preset applied (informational; tiers are the source of truth)
+    tier1_ceiling: float = Field(5.0, ge=0.0)
+    tier2_floor: float = Field(0.80, ge=0.0, le=1.0)
 
     def tier_for(self, role: str) -> str:
         return self.roles.get(role) or "tier2"

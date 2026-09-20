@@ -653,15 +653,47 @@ def create_app(
             )
         return r.as_dict()
 
+    @app.get("/api/factories/{slug}/models/catalog")
+    def get_models_catalog(slug: str) -> dict[str, Any]:
+        from loompa.llm.catalog import Policy
+        from loompa.models_sync import plan, proposal_to_dict
+
+        rt = hub.get(slug)
+        ctx = rt.ctx
+        policy = Policy(
+            tier1_ceiling=ctx.config.models.tier1_ceiling,
+            tier2_floor=ctx.config.models.tier2_floor,
+        )
+        try:
+            proposal = plan(ctx.config, policy, force_refresh=False)
+            return proposal_to_dict(proposal)
+        except Exception as exc:
+            return {"error": str(exc), "clusters": {}, "all_models": [], "summary": {}}
+
     @app.post("/api/factories/{slug}/models/preview-sync")
-    def preview_models_sync(slug: str) -> dict[str, Any]:
+    def preview_models_sync(slug: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         from loompa.llm.catalog import CatalogError, Policy
         from loompa.models_sync import plan, proposal_to_dict
 
         rt = hub.get(slug)
         ctx = rt.ctx
+        ceiling = (
+            float(body["tier1_ceiling"])
+            if body and body.get("tier1_ceiling") is not None
+            else ctx.config.models.tier1_ceiling
+        )
+        floor = (
+            float(body["tier2_floor"])
+            if body and body.get("tier2_floor") is not None
+            else ctx.config.models.tier2_floor
+        )
+        force = bool(body and body.get("force_refresh"))
         try:
-            proposal = plan(ctx.config, Policy())
+            proposal = plan(
+                ctx.config,
+                Policy(tier1_ceiling=ceiling, tier2_floor=floor),
+                force_refresh=force,
+            )
             return proposal_to_dict(proposal)
         except CatalogError as exc:
             raise HTTPException(400, str(exc)) from None
@@ -678,9 +710,24 @@ def create_app(
         ctx = rt.ctx
         sync = ModelSync(ctx)
         to_inbox = bool(body and body.get("to_inbox"))
+        ceiling = (
+            float(body["tier1_ceiling"])
+            if body and body.get("tier1_ceiling") is not None
+            else ctx.config.models.tier1_ceiling
+        )
+        floor = (
+            float(body["tier2_floor"])
+            if body and body.get("tier2_floor") is not None
+            else ctx.config.models.tier2_floor
+        )
+        force = bool(body and body.get("force_refresh"))
 
         try:
-            proposal = plan(ctx.config, Policy())
+            proposal = plan(
+                ctx.config,
+                Policy(tier1_ceiling=ceiling, tier2_floor=floor),
+                force_refresh=force,
+            )
         except CatalogError as exc:
             raise HTTPException(400, str(exc)) from None
 
@@ -701,6 +748,11 @@ def create_app(
                 400,
                 "A configuração dos modelos mudou antes da aplicação. Tente novamente.",
             )
+
+        if body and body.get("tier1_ceiling") is not None:
+            ctx.config.models.tier1_ceiling = ceiling
+        if body and body.get("tier2_floor") is not None:
+            ctx.config.models.tier2_floor = floor
 
         rt.factory.save()
         ctx.emit("models.sync.applied", added=proposal.added)

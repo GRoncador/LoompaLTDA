@@ -72,6 +72,11 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
         "preset": config.models.preset,
         "presets": preset_summaries(),
         "providers": providers,
+        "models": {
+            "preset": config.models.preset,
+            "tier1_ceiling": config.models.tier1_ceiling,
+            "tier2_floor": config.models.tier2_floor,
+        },
         "tiers": {
             tier: [c.model_dump() for c in cands] for tier, cands in config.models.tiers.items()
         },
@@ -125,6 +130,8 @@ class SettingsPatch(BaseModel):
     remove_providers: list[str] = Field(default_factory=list)
     tiers: dict[str, list[ModelCandidate]] | None = None
     roles: dict[str, str] | None = None
+    tier1_ceiling: float | None = None
+    tier2_floor: float | None = None
     budget: BudgetPatch | None = None
     max_parallel: int | None = None
     worker_backend: str | None = None  # "aci" | "opencode" (Fase 2 spike, ADR-0007)
@@ -179,6 +186,11 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
             raise ValueError("tiers inexistentes no mapa de papéis: " + ", ".join(sorted(bad)))
         config.models.roles.update({r: t for r, t in patch.roles.items() if r})
         notes.append("mapa papel→tier atualizado")
+    if patch.tier1_ceiling is not None:
+        config.models.tier1_ceiling = patch.tier1_ceiling
+        notes.append(f"teto de custo Tier 1: US$ {patch.tier1_ceiling:.2f}/M")
+    if patch.tier2_floor is not None:
+        config.models.tier2_floor = patch.tier2_floor
     if patch.budget is not None:
         for k, v in patch.budget.model_dump(exclude_none=True).items():
             setattr(config.budget, k, v)

@@ -21,6 +21,8 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -32,6 +34,7 @@ FREE_ROUTER = (
     "openrouter/free"  # a free model chosen per request: the last fallback of an alias list
 )
 LIMITABLE_EFFORTS = {"minimal", "low"}
+CATALOG_CACHE_DIR = Path.home() / ".loompa" / "cache"
 
 # Why a model is out of the ranking, in the order the checks run. `unrated` is last on purpose:
 # it counts only models that would otherwise have qualified.
@@ -213,28 +216,71 @@ def parse_catalog(payload: Any) -> list[CatalogModel]:
 
 
 def fetch_catalog(
-    config: LoompaConfig, *, client: httpx.Client | None = None, timeout: float = 30.0
+    config: LoompaConfig,
+    *,
+    client: httpx.Client | None = None,
+    timeout: float = 30.0,
+    use_cache: bool = True,
+    force_refresh: bool = False,
+    cache_dir: Path | None = None,
 ) -> list[CatalogModel]:
-    """The catalogue of the provider this factory calls OpenRouter with. Public: sends no key."""
+    """The catalogue of the provider this factory calls OpenRouter with. Public: sends no key.
+
+    Caches the parsed payload locally in ~/.loompa/cache/ by month (YYYY_MM) so opening the
+    dashboard or switching models does not make repeated remote requests."""
     provider = config.providers.get(PROVIDER)
     if provider is None or not provider.base_url:
         raise CatalogError("a OpenRouter não está configurada nesta fábrica")
     url = provider.base_url.rstrip("/") + "/models"
-    owned = client is None
-    client = client or httpx.Client(timeout=timeout)
+
+    if client is not None:
+        try:
+            resp = client.get(url)
+            resp.raise_for_status()
+            return parse_catalog(resp.json())
+        except httpx.HTTPError as exc:
+            raise CatalogError(
+                "não consegui ler o catálogo da OpenRouter (sem rede ou serviço fora do ar)"
+            ) from exc
+        except ValueError as exc:
+            raise CatalogError("o catálogo da OpenRouter não veio em JSON") from exc
+
+    target_dir = cache_dir or CATALOG_CACHE_DIR
+    month_str = date.today().strftime("%Y_%m")
+    cache_file = target_dir / f"openrouter_catalog_{month_str}.json"
+
+    if use_cache and not force_refresh and cache_file.is_file():
+        try:
+            cached_data = json.loads(cache_file.read_text(encoding="utf-8"))
+            return parse_catalog(cached_data)
+        except Exception:
+            pass
+
     try:
-        resp = client.get(url)
-        resp.raise_for_status()
-        return parse_catalog(resp.json())
+        with httpx.Client(timeout=timeout) as cli:
+            resp = cli.get(url)
+            resp.raise_for_status()
+            payload = resp.json()
+            if use_cache:
+                try:
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    cache_file.write_text(json.dumps(payload), encoding="utf-8")
+                except Exception:
+                    pass
+            return parse_catalog(payload)
     except httpx.HTTPError as exc:
+        if use_cache and target_dir.is_dir():
+            for fallback_file in sorted(target_dir.glob("openrouter_catalog_*.json"), reverse=True):
+                try:
+                    cached_data = json.loads(fallback_file.read_text(encoding="utf-8"))
+                    return parse_catalog(cached_data)
+                except Exception:
+                    continue
         raise CatalogError(
             "não consegui ler o catálogo da OpenRouter (sem rede ou serviço fora do ar)"
         ) from exc
-    except ValueError as exc:  # not JSON
+    except ValueError as exc:
         raise CatalogError("o catálogo da OpenRouter não veio em JSON") from exc
-    finally:
-        if owned:
-            client.close()
 
 
 # ----------------------------------------------------------------------------- ranking
@@ -356,6 +402,7 @@ class Proposal:
     repriced: list[str] = field(default_factory=list)  # in use, priced differently in the config
     targets: dict[str, str] = field(default_factory=dict)  # aliases in use -> model behind them now
     clusters: dict[str, dict[str, list[dict[str, Any]]]] = field(default_factory=dict)
+    all_models: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
@@ -555,6 +602,10 @@ def build_proposal(
             m: by_id[m].target_id for m in sorted(configured) if m in by_id and by_id[m].alias
         },
         clusters=clusters,
+        all_models=[
+            _model_summary(m, m.quality)
+            for m in sorted(ranking.eligible, key=lambda m: (-(m.quality or 0.0), m.id))
+        ],
     )
 
 

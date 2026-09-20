@@ -173,6 +173,7 @@ export interface ModelProposalDTO {
     engineering?: ClusterTiers;
     routine?: ClusterTiers;
   };
+  all_models?: ModelPick[];
   considered: number;
   eligible: number;
   excluded: Record<string, number>;
@@ -186,6 +187,7 @@ export interface Settings {
   preset: string;
   presets: PresetInfo[];
   providers: ProviderInfo[];
+  models?: { preset: string; tier1_ceiling: number; tier2_floor: number };
   tiers: Record<string, Candidate[]>;
   roles: Record<string, string>;
   budget: { monthly_cap_usd: number; warn_at_fraction: number; hard_stop: boolean };
@@ -200,6 +202,8 @@ export interface SettingsPatch {
   remove_providers?: string[];
   tiers?: Record<string, Candidate[]>;
   roles?: Record<string, string>;
+  tier1_ceiling?: number;
+  tier2_floor?: number;
   budget?: { monthly_cap_usd?: number; warn_at_fraction?: number; hard_stop?: boolean };
   max_parallel?: number;
   tools?: Record<string, { enabled?: boolean; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;

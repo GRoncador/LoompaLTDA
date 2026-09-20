@@ -33,6 +33,8 @@ budget:
 # Model matrix. Tiers are ordered candidate lists; the router falls through on quota/5xx.
 # Tier 3 is deterministic tooling (ruff, pytest, git) and never appears here - cost $0.
 models:
+  tier1_ceiling: 5.0        # blended USD per 1M tokens ceiling for Tier 1 reasoning models
+  tier2_floor: 0.80         # quality floor fraction for Tier 2 execution models
   tiers:
     tier1:                   # deep reasoning: Master (meeting), Architect, escalated bug fixes
       - provider: deepseek

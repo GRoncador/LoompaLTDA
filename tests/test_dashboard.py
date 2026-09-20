@@ -185,10 +185,27 @@ def test_models_sync_endpoints(client: TestClient, monkeypatch):
     assert "routine" in data["clusters"]
     assert len(data["clusters"]["strategy"]["tier1"]) > 0
 
+    r_catalog = client.get("/api/factories/demo-hq/models/catalog")
+    assert r_catalog.status_code == 200
+    cat_data = r_catalog.json()
+    assert "clusters" in cat_data
+    assert "all_models" in cat_data
+
+    # Test preview-sync with low tier1_ceiling
+    r_ceil = client.post(
+        "/api/factories/demo-hq/models/preview-sync", json={"tier1_ceiling": 1.0}
+    )
+    assert r_ceil.status_code == 200
+    for m in r_ceil.json()["summary"].get("tier1", []):
+        assert m["price"] <= 1.0
+
     r_inbox = client.post("/api/factories/demo-hq/models/apply-sync", json={"to_inbox": True})
     assert r_inbox.status_code == 200
     assert r_inbox.json()["to_inbox"] is True
 
-    r_apply = client.post("/api/factories/demo-hq/models/apply-sync", json={"to_inbox": False})
+    r_apply = client.post(
+        "/api/factories/demo-hq/models/apply-sync", json={"to_inbox": False, "tier1_ceiling": 2.5}
+    )
     assert r_apply.status_code == 200
     assert r_apply.json()["applied"] is True
+    assert ctx.config.models.tier1_ceiling == 2.5

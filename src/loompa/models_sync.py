@@ -58,10 +58,15 @@ def plan(
     *,
     client: httpx.Client | None = None,
     today: date | None = None,
+    force_refresh: bool = False,
 ) -> Proposal:
     """Read the catalogue and work out the list this factory would use. Touches nothing."""
-    models = fetch_catalog(config, client=client)
-    return build_proposal(config, models, policy or Policy(), today or date.today())
+    pol = policy or Policy(
+        tier1_ceiling=config.models.tier1_ceiling,
+        tier2_floor=config.models.tier2_floor,
+    )
+    models = fetch_catalog(config, client=client, force_refresh=force_refresh)
+    return build_proposal(config, models, pol, today or date.today())
 
 
 class ModelSync:

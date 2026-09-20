@@ -16,11 +16,13 @@ export const api = {
     req<{ changes: string[]; settings: Settings }>(`/api/factories/${slug}/settings`, { method: "PUT", body: JSON.stringify(patch) }),
   testProvider: (slug: string, name: string, model?: string) =>
     req<ProbeResult>(`/api/factories/${slug}/settings/providers/${encodeURIComponent(name)}/test`, { method: "POST", body: JSON.stringify({ model: model ?? null }) }),
-  previewModelSync: (slug: string) => req<ModelProposalDTO>(`/api/factories/${slug}/models/preview-sync`, { method: "POST" }),
-  applyModelSync: (slug: string, toInbox: boolean = false) =>
+  modelsCatalog: (slug: string) => req<ModelProposalDTO>(`/api/factories/${slug}/models/catalog`),
+  previewModelSync: (slug: string, body?: { tier1_ceiling?: number; tier2_floor?: number; force_refresh?: boolean }) =>
+    req<ModelProposalDTO>(`/api/factories/${slug}/models/preview-sync`, { method: "POST", body: JSON.stringify(body || {}) }),
+  applyModelSync: (slug: string, toInbox: boolean = false, tier1Ceiling?: number) =>
     req<{ applied: boolean; to_inbox: boolean; message?: string; message_id?: string; added?: string[]; removed?: string[]; settings?: Settings }>(
       `/api/factories/${slug}/models/apply-sync`,
-      { method: "POST", body: JSON.stringify({ to_inbox: toInbox }) }
+      { method: "POST", body: JSON.stringify({ to_inbox: toInbox, tier1_ceiling: tier1Ceiling }) }
     ),
   overview: (slug: string) => req<Overview>(`/api/factories/${slug}/overview`),
   engine: (slug: string, action: "start" | "stop") => req<{ engine: boolean }>(`/api/factories/${slug}/engine/${action}`, { method: "POST" }),
