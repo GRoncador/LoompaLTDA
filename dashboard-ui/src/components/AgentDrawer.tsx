@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { ProviderIcon, cleanModelId } from "./ProviderIcon";
 
 const CLUSTER_LABELS: Record<string, string> = {
-  strategy: "🏛️ Estratégia & Produto",
-  engineering: "⚙️ Engenharia de Código",
-  routine: "📋 Rotina & Suporte",
+  strategy: "🏛️ Estratégia & Produto (50% INTEL · 30% CODE · 20% AGENTIC)",
+  engineering: "⚙️ Engenharia de Código (60% CODE · 30% AGENTIC · 10% INTEL)",
+  routine: "📋 Rotina & Suporte (55% AGENTIC · 30% INTEL · 15% CODE)",
 };
 
 export default function AgentDrawer({ slug, name, onClose, onOpenStory }: { slug: string; name: string; onClose: () => void; onOpenStory: (id: string) => void }) {
@@ -20,7 +21,14 @@ export default function AgentDrawer({ slug, name, onClose, onOpenStory }: { slug
             <Row k="Cluster" v={<span className="font-semibold text-slate-200">{CLUSTER_LABELS[data.cluster] || data.cluster}</span>} />
           )}
           <Row k="Estado" v={<span className={`chip ${data.state === "BLOCKED" ? "bg-red-900/60 text-red-200" : data.state === "WORKING" ? "bg-emerald-900/60 text-emerald-200" : data.state === "TESTING" ? "bg-sky-900/60 text-sky-200" : "bg-slate-800 text-slate-300"}`}>{data.state}</span>} />
-          <Row k="Modelo ativo" v={data.model || "—"} />
+          <Row k="Modelo ativo" v={
+            data.model ? (
+              <span className="flex items-center gap-1.5 font-mono text-cyan-300" title={data.model}>
+                <ProviderIcon provider="openrouter" model={data.model} className="w-4 h-4 flex-shrink-0" />
+                <span>{cleanModelId(data.model)}</span>
+              </span>
+            ) : "—"
+          } />
           <Row k="Tier" v={
             <select className="rounded-md border border-line bg-ink px-2 py-0.5 text-sm" value={data.tier || "tier2"} disabled={!data.role || saving}
               onChange={async (e) => { setSaving(true); try { await api.updateSettings(slug, { roles: { [data.role]: e.target.value } }); setData(await api.agent(slug, name)); } finally { setSaving(false); } }}>
@@ -40,9 +48,12 @@ export default function AgentDrawer({ slug, name, onClose, onOpenStory }: { slug
                       <span className="text-[10px] text-slate-500">{cands.length} modelo(s)</span>
                     </div>
                     {cands.length > 0 ? (
-                      <ol className="list-decimal pl-4 mt-1 space-y-0.5 font-mono text-[11px] text-slate-300">
+                      <ol className="list-decimal pl-4 mt-1 space-y-1 font-mono text-[11px] text-slate-300">
                         {cands.map((c: any, i: number) => (
-                          <li key={`${c.provider}/${c.model}-${i}`}>{c.provider} / {c.model}</li>
+                          <li key={`${c.provider}/${c.model}-${i}`} className="flex items-center gap-1.5" title={c.model}>
+                            <ProviderIcon provider={c.provider} model={c.model} className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>{cleanModelId(c.model)}</span>
+                          </li>
                         ))}
                       </ol>
                     ) : (

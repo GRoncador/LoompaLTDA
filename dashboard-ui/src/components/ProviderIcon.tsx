@@ -6,12 +6,46 @@ interface ProviderIconProps {
   className?: string;
 }
 
+export const VENDOR_NAMES: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google Gemini",
+  gemini: "Google Gemini",
+  deepseek: "DeepSeek",
+  meta: "Meta Llama",
+  "meta-llama": "Meta Llama",
+  qwen: "Qwen (Alibaba)",
+  alibaba: "Qwen (Alibaba)",
+  "x-ai": "xAI (Grok)",
+  grok: "xAI (Grok)",
+  mistral: "Mistral AI",
+  mistralai: "Mistral AI",
+  "z-ai": "Z.ai (Zhipu)",
+  glm: "Z.ai (Zhipu)",
+  openrouter: "OpenRouter",
+  groq: "Groq",
+  amazon: "Amazon Nova",
+  microsoft: "Microsoft",
+  nvidia: "NVIDIA",
+  cohere: "Cohere",
+  perplexity: "Perplexity",
+  moonshotai: "Moonshot AI",
+  minimax: "MiniMax",
+  bytedance: "ByteDance",
+  baidu: "Baidu",
+  tencent: "Tencent",
+  xiaomi: "Xiaomi",
+};
+
 export function normalizeVendor(provider: string, model?: string): string {
-  const p = (provider || "").toLowerCase();
+  const p = (provider || "").toLowerCase().replace(/^~/, "");
   const m = (model || "").toLowerCase().replace(/^~/, "");
 
-  if (p === "openrouter" && m.includes("/")) {
-    return m.split("/")[0];
+  if ((p === "openrouter" || !p) && m.includes("/")) {
+    return m.split("/")[0].replace(/^~/, "");
+  }
+  if (p.includes("/")) {
+    return p.split("/")[0].replace(/^~/, "");
   }
   if (m.startsWith("gpt") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("chatgpt")) return "openai";
   if (m.startsWith("claude")) return "anthropic";
@@ -26,11 +60,47 @@ export function normalizeVendor(provider: string, model?: string): string {
   return p;
 }
 
+/**
+ * Cleans the model display name by stripping brand/provider prefixes.
+ * Examples:
+ * - "DeepSeek: DeepSeek V4 Flash Latest" -> "DeepSeek V4 Flash Latest"
+ * - "Z.ai: GLM Flash Latest (hoje: Z.ai: GLM-4-Flash)" -> "GLM Flash Latest (hoje: GLM-4-Flash)"
+ * - "OpenAI: GPT Luna Latest (hoje: OpenAI: GPT-4.1-mini)" -> "GPT Luna Latest (hoje: GPT-4.1-mini)"
+ * - "OpenAI: GPT-4o Mini" -> "GPT-4o Mini"
+ * - "Meta: Llama 3.3 70B Instruct" -> "Llama 3.3 70B Instruct"
+ */
+export function cleanModelName(name: string): string {
+  if (!name) return "";
+  let s = name;
+  // 1. Remove provider prefix inside target alias, e.g. "(hoje: Z.ai: GLM-4-Flash)" -> "(hoje: GLM-4-Flash)"
+  s = s.replace(/\(hoje:\s*[^:]+:\s*/gi, "(hoje: ");
+  // 2. Remove leading provider prefix like "OpenAI: ", "DeepSeek: ", "Z.ai: ", "~Z.ai: "
+  s = s.replace(/^([~]?)[A-Za-z0-9._ -]+:\s*/, "$1");
+  return s.trim();
+}
+
+/**
+ * Strips the provider namespace from a model id (e.g. "openai/gpt-4o-mini" -> "gpt-4o-mini", "~z-ai/glm-flash" -> "~glm-flash")
+ */
+export function cleanModelId(id: string): string {
+  if (!id) return "";
+  if (id.includes("/")) {
+    const isAlias = id.startsWith("~");
+    const parts = id.replace(/^~/, "").split("/");
+    return isAlias ? `~${parts.slice(1).join("/")}` : parts.slice(1).join("/");
+  }
+  return id;
+}
+
 export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-block" }: ProviderIconProps) {
   const vendor = normalizeVendor(provider, model);
+  const providerLabel = VENDOR_NAMES[vendor] || (vendor ? vendor.charAt(0).toUpperCase() + vendor.slice(1) : "Provedor");
 
   const wrap = (svg: React.ReactNode, title: string) => (
-    <span className="inline-flex items-center justify-center" title={title}>
+    <span
+      className="inline-flex items-center justify-center cursor-help transition-transform hover:scale-110"
+      title={`Provedor: ${title}`}
+    >
       {svg}
     </span>
   );
@@ -79,7 +149,7 @@ export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-bloc
         <svg className={className} viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2L3 7v10l9 5 9-5V7l-9-5zm0 3.3l6 3.33v6.74L12 18.7l-6-3.33V8.63l6-3.33zm-1.5 5.2v3h3v-3h-3z"/>
         </svg>,
-        "Qwen"
+        "Qwen (Alibaba)"
       );
     case "x-ai":
     case "grok":
@@ -87,7 +157,7 @@ export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-bloc
         <svg className={className} viewBox="0 0 24 24" fill="currentColor">
           <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
         </svg>,
-        "xAI Grok"
+        "xAI (Grok)"
       );
     case "mistral":
     case "mistralai":
@@ -103,7 +173,7 @@ export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-bloc
         <svg className={className} viewBox="0 0 24 24" fill="currentColor">
           <path d="M4 4h16v4L10 16h10v4H4v-4l10-8H4V4z"/>
         </svg>,
-        "Zhipu GLM"
+        "Z.ai (Zhipu GLM)"
       );
     case "openrouter":
       return wrap(
@@ -120,10 +190,11 @@ export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-bloc
         "Groq"
       );
     default:
-      return (
-        <span className="inline-flex items-center justify-center rounded bg-slate-800 text-[10px] font-bold text-slate-300 uppercase px-1 py-0.5 border border-slate-700" title={vendor}>
+      return wrap(
+        <span className="inline-flex items-center justify-center rounded bg-slate-800 text-[10px] font-bold text-slate-300 uppercase px-1 py-0.5 border border-slate-700">
           {vendor.slice(0, 3)}
-        </span>
+        </span>,
+        providerLabel
       );
   }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { Candidate, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, Settings, SettingsPatch } from "../types";
 import { Modal } from "./Modal";
-import { ProviderIcon } from "./ProviderIcon";
+import { ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
 
 const input = "w-full rounded-md border border-line bg-ink px-2 py-1 text-sm";
 const select = "rounded-md border border-line bg-ink px-2 py-1 text-sm";
@@ -19,7 +19,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
     try { const r = await api.updateSettings(slug, patch); setS(r.settings); setNotes(r.changes); } catch (e) { setErr(String(e)); }
   };
   return (
-    <Modal title="⚙ Configurações da fábrica" onClose={onClose} className="max-w-6xl xl:max-w-7xl 2xl:max-w-[1400px] w-full">
+    <Modal title="⚙ Configurações da fábrica" onClose={onClose} className="w-[96vw] max-w-[1600px]">
       {!s ? <p className="text-sm text-slate-400">{err ?? "carregando…"}</p> : (
         <div className="scroll-thin max-h-[82vh] space-y-4 overflow-y-auto pr-1 text-sm">
           <div className="flex gap-2 border-b border-line pb-2">
@@ -171,7 +171,7 @@ function renderModelCard(
         <ProviderIcon provider={m.vendor || m.id} model={m.id} className="w-4 h-4 flex-shrink-0" />
         <div className="min-w-0">
           <div className="font-semibold text-slate-200 truncate flex items-center gap-1.5">
-            <span className="truncate">{m.name}</span>
+            <span className="truncate" title={m.name}>{cleanModelName(m.name)}</span>
             {isOverCeiling && (
               <span
                 className="text-[10px] text-amber-300 bg-amber-950/90 px-1.5 py-0.2 rounded border border-amber-800/70 font-mono"
@@ -312,10 +312,10 @@ function OpenRouterModelPickerModal({
 
           <div className="flex flex-wrap gap-1.5 border-b border-line/60 pb-2">
             {[
-              { key: "strategy", label: "🏛️ Estratégia & Produto" },
-              { key: "engineering", label: "⚙️ Engenharia de Código" },
-              { key: "routine", label: "📋 Rotina & Suporte" },
-              { key: "all", label: `🌐 Todos (${allFiltered.length})` },
+              { key: "strategy", label: "🏛️ Estratégia & Produto", hint: "50% INTEL · 30% CODE · 20% AGENTIC" },
+              { key: "engineering", label: "⚙️ Engenharia de Código", hint: "60% CODE · 30% AGENTIC · 10% INTEL" },
+              { key: "routine", label: "📋 Rotina & Suporte", hint: "55% AGENTIC · 30% INTEL · 15% CODE" },
+              { key: "all", label: `🌐 Todos (${allFiltered.length})`, hint: "Todos os modelos do catálogo OpenRouter" },
             ].map((t) => (
               <button
                 key={t.key}
@@ -325,6 +325,7 @@ function OpenRouterModelPickerModal({
                     : "bg-slate-800/80 text-slate-300 hover:bg-slate-700"
                 }`}
                 onClick={() => setActiveTab(t.key as any)}
+                title={t.hint}
               >
                 {t.label}
               </button>
@@ -393,6 +394,12 @@ const CLUSTERS_CONFIG = [
     icon: "🏛️",
     roles: ["Master", "Architect", "Spec Loompa", "Product Owner", "Analyst"],
     description: "Cognição elevada, raciocínio aprofundado, decomposição de histórias e arquitetura",
+    composition: "50% INTEL · 30% CODE · 20% AGENTIC",
+    weights: [
+      { label: "INTEL", pct: "50%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
+      { label: "CODE", pct: "30%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
+      { label: "AGENTIC", pct: "20%", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
+    ],
   },
   {
     key: "engineering",
@@ -400,6 +407,12 @@ const CLUSTERS_CONFIG = [
     icon: "⚙️",
     roles: ["Worker (Dev)", "Inspector (QA Judge)"],
     description: "Codificação, refatoração, implementação de testes e julgamento de qualidade",
+    composition: "60% CODE · 30% AGENTIC · 10% INTEL",
+    weights: [
+      { label: "CODE", pct: "60%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
+      { label: "AGENTIC", pct: "30%", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
+      { label: "INTEL", pct: "10%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
+    ],
   },
   {
     key: "routine",
@@ -407,6 +420,12 @@ const CLUSTERS_CONFIG = [
     icon: "📋",
     roles: ["Deployer", "Storyteller", "Compliance", "Metrics"],
     description: "Automação contínua, documentação, git worktrees e tarefas rotineiras",
+    composition: "55% AGENTIC · 30% INTEL · 15% CODE",
+    weights: [
+      { label: "AGENTIC", pct: "55%", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
+      { label: "INTEL", pct: "30%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
+      { label: "CODE", pct: "15%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
+    ],
   },
 ] as const;
 
@@ -855,11 +874,25 @@ function ModelsPanel({
                   const clusterProp = proposal.clusters?.[col.key];
                   return (
                     <div key={col.key} className="rounded-md border border-line/70 bg-ink/70 p-2 text-xs space-y-2">
-                      <div className="font-semibold text-slate-200 border-b border-line/40 pb-1 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <span>{col.icon}</span>
-                          <span>{col.label}</span>
-                        </span>
+                      <div className="border-b border-line/40 pb-1.5 space-y-1">
+                        <div className="font-semibold text-slate-200 flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <span>{col.icon}</span>
+                            <span>{col.label}</span>
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1 text-[10px]">
+                          <span className="text-slate-500 font-sans">Mix:</span>
+                          {col.weights.map((w) => (
+                            <span
+                              key={w.label}
+                              className={`px-1 py-0 rounded border font-mono text-[9px] ${w.color}`}
+                              title={`Peso de ${w.label} no score do cluster`}
+                            >
+                              {w.pct} {w.label}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                       <div className="space-y-2">
                         {TIERS_CONFIG.map((t) => {
@@ -879,12 +912,13 @@ function ModelsPanel({
                                     const isNew = !currentCands.some(
                                       (c: Candidate) => c.model === pick.id || c.model.replace(/^~/, "") === pick.id.replace(/^~/, "")
                                     );
+                                    const cb = pick.cost_benefit ?? (pick.price > 0 && (pick.score ?? pick.quality) ? Math.round(((pick.score ?? pick.quality) / pick.price) * 10) / 10 : null);
                                     return (
                                       <div key={pick.id} className="flex items-center justify-between gap-1.5 rounded bg-slate-900/70 px-1.5 py-1 border border-line/40">
                                         <div className="min-w-0 flex-1 flex items-center gap-1.5">
                                           <ProviderIcon provider={pick.vendor || pick.id} model={pick.id} className="w-3.5 h-3.5 flex-shrink-0" />
-                                          <span className="font-mono text-[11px] text-cyan-300 truncate" title={pick.id}>
-                                            {pick.name}
+                                          <span className="font-mono text-[11px] text-cyan-300 truncate" title={`${pick.name} (${pick.id})`}>
+                                            {cleanModelName(pick.name)}
                                           </span>
                                           {isNew && (
                                             <span className="bg-emerald-500/20 text-emerald-300 font-bold text-[9px] border border-emerald-500/40 px-1 py-0 rounded flex-shrink-0 animate-pulse">
@@ -894,6 +928,14 @@ function ModelsPanel({
                                         </div>
                                         <div className="flex items-center gap-1.5 flex-shrink-0 text-right font-mono text-[10px]">
                                           <span className="font-bold text-amber-300">★ {pick.score ?? pick.quality}</span>
+                                          {t.key !== "tier3" && cb != null && (
+                                            <span
+                                              className="text-cyan-300 bg-cyan-950/70 px-1 py-0.2 rounded border border-cyan-800/50 font-mono text-[9px]"
+                                              title={`Custo-Benefício: ${cb} pontos por US$ 1M tokens`}
+                                            >
+                                              {cb} pts/$
+                                            </span>
+                                          )}
                                           <span className="text-slate-300">{pick.price === 0 ? "GRÁTIS" : `$${pick.price.toFixed(2)}/M`}</span>
                                         </div>
                                       </div>
@@ -942,14 +984,26 @@ function ModelsPanel({
             return (
               <div key={col.key} className="rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs space-y-2.5 flex flex-col justify-between">
                 <div>
-                  {/* Cluster Header - SEM NENHUM badge de Padrão Tier */}
-                  <div className="border-b border-line/40 pb-2 mb-2">
+                  {/* Cluster Header */}
+                  <div className="border-b border-line/40 pb-2 mb-2 space-y-1">
                     <div className="font-semibold text-slate-100 flex items-center gap-1.5 text-xs">
                       <span className="text-sm">{col.icon}</span>
                       <span>{col.label}</span>
                     </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5 truncate" title={col.roles.join(", ")}>
+                    <div className="text-[10px] text-slate-400 truncate" title={col.roles.join(", ")}>
                       Loompas: {col.roles.join(", ")}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1 text-[10px] pt-0.5">
+                      <span className="text-slate-500 font-sans">Mix:</span>
+                      {col.weights.map((w) => (
+                        <span
+                          key={w.label}
+                          className={`px-1 py-0 rounded border font-mono text-[9px] ${w.color}`}
+                          title={`Peso de ${w.label} no score do cluster`}
+                        >
+                          {w.pct} {w.label}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
@@ -1006,10 +1060,14 @@ function ModelsPanel({
                                             type="button"
                                             className="flex-1 flex items-center justify-between text-left rounded border border-line bg-ink px-1.5 py-0.5 text-[11px] text-slate-200 hover:border-brand/70 transition-colors min-w-0"
                                             onClick={() => setPickerTarget({ cluster: col.key, tier: t.key, index: i })}
-                                            title="Clique para trocar o modelo"
+                                            title={`Clique para trocar o modelo (ID: ${c.model})`}
                                           >
                                             <span className="truncate font-mono font-medium text-cyan-300">
-                                              {c.model || <span className="text-slate-500 italic">Escolher…</span>}
+                                              {c.model ? (
+                                                info?.name ? cleanModelName(info.name) : cleanModelId(c.model)
+                                              ) : (
+                                                <span className="text-slate-500 italic">Escolher…</span>
+                                              )}
                                             </span>
                                             <span className="text-slate-400 text-[9px] ml-1 flex-shrink-0">▾</span>
                                           </button>
