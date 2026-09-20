@@ -57,7 +57,7 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         description="Gemini no plano gratuito, com Groq como reserva. Custo zero, limites de uso por minuto.",
         tiers={
             "tier1": [
-                _c("gemini", "gemini-2.5-flash"),
+                _c("gemini", "gemini-3.8-flash"),
                 _c("groq", "llama-3.3-70b-versatile"),
             ],
             "tier2": [
@@ -73,7 +73,7 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         label="Econômico",
         description="DeepSeek para raciocínio e execução, Gemini Flash-Lite como reserva. Centavos por história.",
         tiers={
-            "tier1": [_c("deepseek", "deepseek-reasoner"), _c("gemini", "gemini-2.5-pro")],
+            "tier1": [_c("deepseek", "deepseek-reasoner"), _c("gemini", "gemini-3.8-flash")],
             "tier2": [_c("deepseek", "deepseek-chat"), _c("gemini", "gemini-3.5-flash-lite")],
         },
         providers=("deepseek",),
@@ -82,10 +82,10 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
     "maximo": ModelPreset(
         key="maximo",
         label="Máximo",
-        description="Claude Opus 5 e Gemini 2.5 Pro no tier de raciocínio; Claude Sonnet 5 e Gemini Flash na execução. Melhor qualidade, maior custo.",
+        description="Claude Opus 5 no raciocínio e Claude Sonnet 5 na execução, com Gemini Flash como reserva. Melhor qualidade, maior custo.",
         tiers={
-            "tier1": [_c("anthropic", "claude-opus-5"), _c("gemini", "gemini-2.5-pro")],
-            "tier2": [_c("anthropic", "claude-sonnet-5"), _c("gemini", "gemini-2.5-flash")],
+            "tier1": [_c("anthropic", "claude-opus-5"), _c("gemini", "gemini-3.8-flash")],
+            "tier2": [_c("anthropic", "claude-sonnet-5"), _c("gemini", "gemini-3.8-flash")],
         },
         providers=("anthropic",),
         optional_providers=("gemini",),

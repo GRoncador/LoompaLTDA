@@ -197,7 +197,7 @@ def test_proposal_takes_the_openrouter_slot_keeps_other_providers_and_prices_the
     config = default_config()
     config.models.tiers = {  # a mixed factory: gemini and groq first, OpenRouter's free model last
         "tier1": [
-            ModelCandidate(provider="gemini", model="gemini-2.5-flash"),
+            ModelCandidate(provider="gemini", model="gemini-3.8-flash"),
             ModelCandidate(provider="openrouter", model="x/old:free"),  # left the catalogue
         ],
         "tier2": [
