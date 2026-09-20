@@ -30,32 +30,87 @@ budget:
   warn_at_fraction: 0.8     # Finance Loompa alerts the inbox at 80% of the cap
   hard_stop: true           # pause dispatch when cap reached (stories keep state, nothing lost)
 
-# Model matrix. Tiers are ordered candidate lists; the router falls through on quota/5xx.
-# Tier 3 is deterministic tooling (ruff, pytest, git) and never appears here - cost $0.
+# Model matrix (3 clusters x 3 tiers). Candidates are tried in order; fallback on quota/error.
 models:
   tier1_ceiling: 5.0        # blended USD per 1M tokens ceiling for Tier 1 reasoning models
   tier2_floor: 0.80         # quality floor fraction for Tier 2 execution models
+  matrix:
+    strategy:
+      tier1:
+        - provider: deepseek
+          model: deepseek-reasoner
+        - provider: gemini
+          model: gemini-3.8-flash
+        - provider: anthropic
+          model: claude-sonnet-5
+      tier2:
+        - provider: gemini
+          model: gemini-3.5-flash-lite
+        - provider: deepseek
+          model: deepseek-chat
+        - provider: gemini
+          model: gemini-3.8-flash
+      tier3:
+        - provider: openrouter
+          model: openrouter/free
+    engineering:
+      tier1:
+        - provider: deepseek
+          model: deepseek-reasoner
+        - provider: gemini
+          model: gemini-3.8-flash
+        - provider: anthropic
+          model: claude-sonnet-5
+      tier2:
+        - provider: gemini
+          model: gemini-3.5-flash-lite
+        - provider: deepseek
+          model: deepseek-chat
+        - provider: gemini
+          model: gemini-3.8-flash
+        - provider: anthropic
+          model: claude-haiku-4-5
+      tier3:
+        - provider: openrouter
+          model: openrouter/free
+    routine:
+      tier1:
+        - provider: gemini
+          model: gemini-3.8-flash
+        - provider: deepseek
+          model: deepseek-chat
+      tier2:
+        - provider: gemini
+          model: gemini-3.5-flash-lite
+        - provider: deepseek
+          model: deepseek-chat
+      tier3:
+        - provider: openrouter
+          model: openrouter/free
   tiers:
-    tier1:                   # deep reasoning: Master (meeting), Architect, escalated bug fixes
+    tier1:
       - provider: deepseek
         model: deepseek-reasoner
       - provider: gemini
         model: gemini-3.8-flash
       - provider: anthropic
         model: claude-sonnet-5
-    tier2:                   # high-throughput executors: Worker, Inspector, Product, Finance, Copy
+    tier2:
       - provider: gemini
-        model: gemini-3.5-flash-lite   # first free candidate (2.5-flash-lite is closed to new accounts)
+        model: gemini-3.5-flash-lite
       - provider: deepseek
         model: deepseek-chat
       - provider: gemini
         model: gemini-3.8-flash
       - provider: anthropic
         model: claude-haiku-4-5
+    tier3:
+      - provider: openrouter
+        model: openrouter/free
   roles:                     # any role not listed here uses tier2
     master: tier1
     architect: tier1
-    product: tier2           # Spec Loompa (especificação técnica e critérios BDD)
+    product: tier2
     product_owner: tier2
     analyst: tier2
     worker: tier2

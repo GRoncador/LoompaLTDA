@@ -422,47 +422,61 @@ def is_free(model_id: str) -> bool:
 
 
 def _model_summary(m: CatalogModel, score: float | None) -> dict[str, Any]:
+    cost = m.blended or 0.0
+    s = score if score is not None else (m.quality or 0.0)
+    cost_benefit = round(s / cost, 1) if cost > 0 else None
     return {
         "id": m.id,
         "name": m.label,
         "vendor": m.vendor,
         "quality": round(m.quality or 0.0, 1),
-        "price": round(m.blended or 0.0, 2),
+        "price": round(cost, 2),
         "coding": round(m.coding, 1) if m.coding is not None else None,
         "agentic": round(m.agentic, 1) if m.agentic is not None else None,
         "intelligence": round(m.intelligence, 1) if m.intelligence is not None else None,
         "score": score,
+        "cost_benefit": cost_benefit,
     }
 
 
 def rank_cluster(
     eligible: list[CatalogModel],
+    free_eligible: list[CatalogModel],
     score_fn: Callable[[CatalogModel], float | None],
     policy: Policy,
 ) -> dict[str, list[dict[str, Any]]]:
-    scored = [(m, score_fn(m) or 0.0) for m in eligible]
-    best_score = max((s for _, s in scored), default=0.0)
+    # Paid scored models (cost > 0)
+    paid_scored = [
+        (m, score_fn(m) or 0.0)
+        for m in eligible
+        if not is_free(m.id) and (m.blended or 0.0) > 0.0
+    ]
 
     # Tier 1: highest score under ceiling
-    t1_candidates = [m for m, _ in scored if (m.blended or 0.0) <= policy.tier1_ceiling]
+    t1_candidates = [m for m, _ in paid_scored if (m.blended or 0.0) <= policy.tier1_ceiling]
     t1_picks = _one_per_vendor(
         sorted(t1_candidates, key=lambda m: (-(score_fn(m) or 0.0), m.blended or 0.0, m.id)),
         policy.picks,
     )
 
-    # Tier 2: lowest cost above floor
-    t2_candidates = [m for m, s in scored if s >= policy.tier2_floor * best_score]
+    # Tier 2: highest cost-benefit (score / cost) under ceiling
+    t2_candidates = [m for m, _ in paid_scored if (m.blended or 0.0) <= policy.tier1_ceiling]
     t2_picks = _one_per_vendor(
-        sorted(t2_candidates, key=lambda m: (m.blended or 0.0, -(score_fn(m) or 0.0), m.id)),
+        sorted(
+            t2_candidates,
+            key=lambda m: (
+                -((score_fn(m) or 0.0) / (m.blended or 1.0)),
+                -(score_fn(m) or 0.0),
+                m.id,
+            ),
+        ),
         policy.picks,
     )
 
     # Tier 3: highest score among free models
-    t3_candidates = [
-        m for m, _ in scored if is_free(m.id) or (m.blended is not None and m.blended == 0.0)
-    ]
+    free_candidates = [m for m in free_eligible]
     t3_picks = _one_per_vendor(
-        sorted(t3_candidates, key=lambda m: (-(score_fn(m) or 0.0), m.id)),
+        sorted(free_candidates, key=lambda m: (-(score_fn(m) or 0.0), m.id)),
         policy.picks,
     )
 
@@ -545,21 +559,18 @@ def build_proposal(
             for m in picked[tier]
         ]
 
-    free_cands = [m for m in ranking.eligible if is_free(m.id) or (m.blended is not None and m.blended == 0.0)]
-    if free_cands:
+    free_eligible = [
+        m
+        for m in models
+        if (is_free(m.id) or (m.blended is not None and m.blended == 0.0))
+        and m.tools
+        and not unavailable_reason(m, policy, today)
+        and m.quality is not None
+    ]
+    if free_eligible:
         summary["tier3_free"] = [
-            {
-                "id": m.id,
-                "name": m.label,
-                "vendor": m.vendor,
-                "quality": round(m.quality or 0.0, 1),
-                "price": 0.0,
-                "coding": round(m.coding, 1) if m.coding is not None else None,
-                "agentic": round(m.agentic, 1) if m.agentic is not None else None,
-                "intelligence": round(m.intelligence, 1) if m.intelligence is not None else None,
-                "score": m.score_routine(),
-            }
-            for m in sorted(free_cands, key=lambda m: (-(m.quality or 0.0), m.id))[: policy.picks]
+            _model_summary(m, m.score_routine())
+            for m in sorted(free_eligible, key=lambda m: (-(m.quality or 0.0), m.id))[: policy.picks]
         ]
 
     used_after = {c.model for cands in tiers.values() for c in cands if c.provider == PROVIDER}
@@ -574,10 +585,16 @@ def build_proposal(
         if not _same_price(config.pricing.get(mid), Price(**price))
     ]
     clusters = {
-        "strategy": rank_cluster(ranking.eligible, lambda m: m.score_tier1(), policy),
-        "engineering": rank_cluster(ranking.eligible, lambda m: m.score_tier2(), policy),
-        "routine": rank_cluster(ranking.eligible, lambda m: m.score_routine(), policy),
+        "strategy": rank_cluster(ranking.eligible, free_eligible, lambda m: m.score_tier1(), policy),
+        "engineering": rank_cluster(ranking.eligible, free_eligible, lambda m: m.score_tier2(), policy),
+        "routine": rank_cluster(ranking.eligible, free_eligible, lambda m: m.score_routine(), policy),
     }
+    combined_models = list(ranking.eligible)
+    seen_ids = {m.id for m in combined_models}
+    for m in free_eligible:
+        if m.id not in seen_ids:
+            combined_models.append(m)
+            seen_ids.add(m.id)
     return Proposal(
         tiers={t: _dump(c) for t, c in tiers.items()},
         base={t: _dump(c) for t, c in config.models.tiers.items()},
@@ -604,16 +621,29 @@ def build_proposal(
         clusters=clusters,
         all_models=[
             _model_summary(m, m.quality)
-            for m in sorted(ranking.eligible, key=lambda m: (-(m.quality or 0.0), m.id))
+            for m in sorted(combined_models, key=lambda m: (-(m.quality or 0.0), m.id))
         ],
     )
 
 
 def apply_proposal(config: LoompaConfig, proposal: Proposal) -> bool:
-    """Write the proposed tiers and prices into `config`. False (and nothing written) when the
+    """Write the proposed tiers, matrix and prices into `config`. False (and nothing written) when the
     tiers are no longer what the proposal was made from."""
     if _dump_all(config) != proposal.base:
         return False
+    if proposal.clusters:
+        matrix: dict[str, dict[str, list[ModelCandidate]]] = {}
+        for cluster_name, tier_map in proposal.clusters.items():
+            matrix[cluster_name] = {}
+            for t_name, cands_list in tier_map.items():
+                matrix[cluster_name][t_name] = [
+                    ModelCandidate(
+                        provider=PROVIDER,
+                        model=m["id"] if isinstance(m, dict) else getattr(m, "id", str(m)),
+                    )
+                    for m in cands_list
+                ]
+        config.models.matrix = matrix
     config.models.tiers = {
         t: [ModelCandidate.model_validate(c) for c in cands] for t, cands in proposal.tiers.items()
     }

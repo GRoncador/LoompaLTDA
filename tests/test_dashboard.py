@@ -43,7 +43,7 @@ def test_factories_and_overview(client: TestClient):
         "AWAITING_FOUNDER",
         "DONE",
     ]
-    assert len(ov["agents"]) >= 10 and all(
+    assert len(ov["agents"]) >= 9 and all(
         a["room"] in ("dev", "meeting", "qa", "lounge") for a in ov["agents"]
     )
     assert ov["finance"]["cap_usd"] == 30.0 and ov["inbox"] == []

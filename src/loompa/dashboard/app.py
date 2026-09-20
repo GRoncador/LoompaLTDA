@@ -49,12 +49,9 @@ OFFICE_ROOMS = {
     "worker": "dev",
     "inspector": "qa",
     "deployer": "dev",
-    "ops": "qa",
-    "finance": "qa",
     "compliance": "lounge",
     "metrics": "lounge",
     "storyteller": "lounge",
-    "kaizen": "lounge",
 }
 DEFAULT_AGENTS = [
     ("Master Loompa", "master"),
@@ -64,9 +61,6 @@ DEFAULT_AGENTS = [
     ("Worker Loompa", "worker"),
     ("Inspector Loompa", "inspector"),
     ("Deployer Loompa", "deployer"),
-    ("Ops Loompa", "ops"),
-    ("Finance Loompa", "finance"),
-    ("Kaizen Loompa", "kaizen"),
     ("Storyteller Loompa", "storyteller"),
     ("Metrics Loompa", "metrics"),
 ]
@@ -343,7 +337,13 @@ def create_app(
         columns: dict[str, list[dict[str, Any]]] = {k: [] for k, _ in KANBAN_COLUMNS}
         for s in stories:
             columns[kanban_column(s["stage"])].append(_story_card(s))
-        agents = {a["name"]: a for a in ctx.store.list_agents()}
+        backend_services = {"ops", "finance", "kaizen"}
+        agents = {
+            a["name"]: a
+            for a in ctx.store.list_agents()
+            if a.get("role", "").lower() not in backend_services
+            and not any(s in a.get("name", "").lower() for s in ("ops", "finance", "kaizen"))
+        }
         for name, role in DEFAULT_AGENTS:
             agents.setdefault(
                 name,
@@ -798,13 +798,23 @@ def create_app(
         ]
         story = ctx.store.get_story(row["story_id"]) if row.get("story_id") else None
         role = row.get("role") or next((r for n, r in DEFAULT_AGENTS if n == name), "")
+        cluster = ctx.config.models.cluster_for_role(role)
+        cluster_matrix = ctx.config.models.matrix.get(cluster, {})
         tier = ctx.config.models.tier_for(role)  # unknown roles map to tier2 like any new role
         return {
             **row,
             "role": role,
+            "cluster": cluster,
+            "matrix": {
+                t: [c.model_dump() for c in cluster_matrix.get(t, [])]
+                for t in ("tier1", "tier2", "tier3")
+            },
             "tier": tier,
             "tiers": list(ctx.config.models.tiers),
-            "candidates": [c.model_dump() for c in ctx.config.models.tiers.get(tier, [])],
+            "candidates": [
+                c.model_dump()
+                for c in (cluster_matrix.get(tier) or ctx.config.models.tiers.get(tier, []))
+            ],
             "today": usage_rows[0] if usage_rows else None,
             "month": month_rows[0] if month_rows else None,
             "story": _story_card(story) if story else None,

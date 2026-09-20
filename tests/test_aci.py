@@ -79,6 +79,10 @@ async def test_run_command_bounded(tmp_path: Path):
     assert res.timed_out and not res.ok
 
 
+import shlex
+import sys
+
+
 @pytest.fixture
 def aci(tmp_path: Path) -> ACI:
     (tmp_path / "src").mkdir()
@@ -86,7 +90,11 @@ def aci(tmp_path: Path) -> ACI:
         "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
     )
     (tmp_path / "tests").mkdir()
-    return ACI(tmp_path, test_command="python3 -m pytest -q", allowed_paths=["src/", "tests/"])
+    return ACI(
+        tmp_path,
+        test_command=f"{shlex.quote(sys.executable)} -m pytest -q",
+        allowed_paths=["src/", "tests/"],
+    )
 
 
 async def test_aci_read_list_search_symbol(aci: ACI):

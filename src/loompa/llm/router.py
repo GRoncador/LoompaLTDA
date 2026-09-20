@@ -91,20 +91,35 @@ class ModelRouter:
     def candidates(
         self, role: str, tier_override: str | None = None, complexity: str | None = None
     ) -> tuple[str, list[ModelCandidate]]:
-        """Tier for a call: explicit override > story complexity > role default.
-        SIMPLE stories run every role on tier2; COMPLEX ones lift the review roles to tier1."""
+        """Tier for a call: explicit override > story complexity > role/cluster default.
+        Candidates are resolved from the 3x3 matrix: cluster(role) x tier."""
+        cluster = self.config.models.cluster_for_role(role)
         tier = tier_override or self.config.models.tier_for(role)
         if tier_override is None and complexity:
             c = str(complexity).upper()
-            if c == "SIMPLE" and "tier2" in self.config.models.tiers:
+            if c == "SIMPLE":
                 tier = "tier2"
-            elif (
-                c == "COMPLEX"
-                and role in self.LIFT_ON_COMPLEX
-                and "tier1" in self.config.models.tiers
-            ):
+            elif c == "COMPLEX" and role in self.LIFT_ON_COMPLEX:
                 tier = "tier1"
-        return tier, list(self.config.models.tiers.get(tier, []))
+
+        tier = tier or ("tier3" if cluster == "routine" else "tier2")
+        cands = self.config.models.candidates_for_cluster_tier(cluster, tier)
+
+        # In-cluster fallback if chosen tier has no candidates
+        if not cands:
+            for fallback_tier in ("tier2", "tier1", "tier3"):
+                if fallback_tier != tier:
+                    cands = self.config.models.candidates_for_cluster_tier(cluster, fallback_tier)
+                    if cands:
+                        tier = fallback_tier
+                        break
+
+        # Fallback to legacy tiers if cluster matrix has no models
+        if not cands:
+            cands = self.config.models.tiers.get(tier, [])
+
+        return tier, list(cands)
+
 
     async def complete(
         self,

@@ -15,12 +15,12 @@ const ROOMS: Record<string, { x: number; y: number; w: number; h: number; label:
   dev: { x: 16, y: 40, w: 300, h: 190, label: "Sala de Dev", color: 0x1e293b },
   meeting: { x: 332, y: 40, w: 300, h: 190, label: "Sala de Reunião", color: 0x1f2937 },
   lounge: { x: 16, y: 246, w: 300, h: 170, label: "Lounge / Café", color: 0x27272a },
-  qa: { x: 332, y: 246, w: 300, h: 170, label: "Finanças & QA", color: 0x1a2e3b },
+  qa: { x: 332, y: 246, w: 300, h: 170, label: "Laboratório de QA", color: 0x1a2e3b },
 };
 
 const ROLE_COLORS: Record<string, number> = {
   master: 0xf59e0b, product: 0xa78bfa, architect: 0x60a5fa, worker: 0x34d399, inspector: 0x38bdf8,
-  deployer: 0xf472b6, finance: 0xfbbf24, kaizen: 0x4ade80, storyteller: 0xfb7185, metrics: 0x94a3b8, compliance: 0xc084fc,
+  deployer: 0xf472b6, storyteller: 0xfb7185, metrics: 0x94a3b8, compliance: 0xc084fc,
 };
 
 interface Sprite {
@@ -96,10 +96,19 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   sync(agents: Agent[]) {
-    this.agents = agents;
+    const BACKEND_SERVICES = new Set(["ops", "finance", "kaizen"]);
+    const visibleAgents = agents.filter(
+      (a) =>
+        !BACKEND_SERVICES.has(a.role?.toLowerCase()) &&
+        !BACKEND_SERVICES.has(a.name?.toLowerCase()) &&
+        !a.name?.toLowerCase().includes("kaizen") &&
+        !a.name?.toLowerCase().includes("ops") &&
+        !a.name?.toLowerCase().includes("finance")
+    );
+    this.agents = visibleAgents;
     if (!this.sys.isActive()) return;
     const taken: Record<string, number> = { dev: 0, meeting: 0, lounge: 0, qa: 0 };
-    agents.forEach((a) => {
+    visibleAgents.forEach((a) => {
       let sp = this.sprites.get(a.name);
       if (!sp) sp = this.spawn(a);
       const room = a.state === "TESTING" ? "qa" : a.state === "IDLE" && a.room !== "lounge" && Math.random() < 0 ? "lounge" : a.room;
@@ -113,7 +122,12 @@ export class OfficeScene extends Phaser.Scene {
       sp.label.setText(a.name.replace(" Loompa", ""));
       this.tweens.add({ targets: sp.root, x: seat.x, y: seat.y, duration: 900, ease: "Sine.easeInOut" });
     });
-    this.sprites.forEach((sp, name) => { if (!agents.find((a) => a.name === name)) { sp.root.destroy(); this.sprites.delete(name); } });
+    this.sprites.forEach((sp, name) => {
+      if (!visibleAgents.find((a) => a.name === name)) {
+        sp.root.destroy();
+        this.sprites.delete(name);
+      }
+    });
   }
 
   private spawn(a: Agent): Sprite {

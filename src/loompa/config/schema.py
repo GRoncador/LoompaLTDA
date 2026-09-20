@@ -99,20 +99,133 @@ class ModelCandidate(BaseModel):
         return v
 
 
+CLUSTERS: tuple[str, ...] = ("strategy", "engineering", "routine")
+TIERS: tuple[str, ...] = ("tier1", "tier2", "tier3")
+
+CLUSTER_ROLES: dict[str, tuple[str, ...]] = {
+    "strategy": ("master", "architect", "product", "product_owner", "analyst"),
+    "engineering": ("worker", "inspector"),
+    "routine": ("deployer", "storyteller", "compliance", "metrics"),
+}
+
+ROLE_CLUSTERS: dict[str, str] = {
+    role: cluster for cluster, roles in CLUSTER_ROLES.items() for role in roles
+}
+
+
+class _SyncedDict(dict):
+    def __init__(self, owner: Any, initial: dict | None = None):
+        super().__init__(initial or {})
+        self._owner = owner
+
+    def __setitem__(self, key: str, value: Any):
+        super().__setitem__(key, value)
+        owner = getattr(self, "_owner", None)
+        if owner is not None:
+            owner._on_tier_updated(key, value)
+
+
 class ModelsConfig(BaseModel):
+    matrix: dict[str, dict[str, list[ModelCandidate]]] = Field(default_factory=dict)
     tiers: dict[str, list[ModelCandidate]] = Field(default_factory=dict)
     roles: dict[str, str] = Field(default_factory=dict)
     temperature: float = 0.2
     max_output_tokens: int = 4096
-    preset: str = ""  # last preset applied (informational; tiers are the source of truth)
+    preset: str = ""  # last preset applied (informational; matrix is the source of truth)
     tier1_ceiling: float = Field(5.0, ge=0.0)
     tier2_floor: float = Field(0.80, ge=0.0, le=1.0)
+
+    def _on_tier_updated(self, tier: str, cands: list[ModelCandidate]) -> None:
+        if not hasattr(self, "matrix") or not self.matrix:
+            self.matrix = {c: {} for c in CLUSTERS}
+        for cluster in CLUSTERS:
+            if cluster not in self.matrix:
+                self.matrix[cluster] = {}
+            self.matrix[cluster][tier] = [c.model_copy() for c in cands]
+
+    def _sync_matrix_from_tiers(self, tiers_dict: dict[str, list[ModelCandidate]]) -> None:
+        if not hasattr(self, "matrix") or not self.matrix:
+            self.matrix = {c: {} for c in CLUSTERS}
+        for cluster in CLUSTERS:
+            if cluster not in self.matrix:
+                self.matrix[cluster] = {}
+            for t, cands in tiers_dict.items():
+                self.matrix[cluster][t] = [c.model_copy() for c in cands]
+
+    def _sync_tiers_from_matrix(self, matrix_dict: dict[str, dict[str, list[ModelCandidate]]]) -> None:
+        if not matrix_dict:
+            return
+        t1 = (
+            matrix_dict.get("strategy", {}).get("tier1")
+            or matrix_dict.get("engineering", {}).get("tier1")
+            or []
+        )
+        t2 = (
+            matrix_dict.get("engineering", {}).get("tier2")
+            or matrix_dict.get("strategy", {}).get("tier2")
+            or []
+        )
+        t3 = (
+            matrix_dict.get("routine", {}).get("tier3")
+            or matrix_dict.get("engineering", {}).get("tier3")
+            or []
+        )
+        synced = {
+            "tier1": [c.model_copy() for c in t1],
+            "tier2": [c.model_copy() for c in t2],
+            "tier3": [c.model_copy() for c in t3],
+        }
+        super().__setattr__("tiers", _SyncedDict(self, synced))
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "tiers" and isinstance(value, dict) and not isinstance(value, _SyncedDict):
+            synced = _SyncedDict(self, value)
+            super().__setattr__("tiers", synced)
+            self._sync_matrix_from_tiers(value)
+            return
+        super().__setattr__(name, value)
+        if name == "matrix" and isinstance(value, dict):
+            if not self.tiers:
+                self._sync_tiers_from_matrix(value)
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.matrix and self.tiers:
+            self.matrix = {
+                cluster: {
+                    "tier1": [c.model_copy() for c in self.tiers.get("tier1", [])],
+                    "tier2": [c.model_copy() for c in self.tiers.get("tier2", [])],
+                    "tier3": [c.model_copy() for c in self.tiers.get("tier3", [])]
+                    if "tier3" in self.tiers
+                    else [
+                        c.model_copy()
+                        for c in self.tiers.get("tier2", [])
+                        if c.model.endswith(":free") or c.model == "openrouter/free"
+                    ],
+                }
+                for cluster in CLUSTERS
+            }
+        elif self.matrix and not self.tiers:
+            self._sync_tiers_from_matrix(self.matrix)
+        if not isinstance(self.tiers, _SyncedDict):
+            super().__setattr__("tiers", _SyncedDict(self, self.tiers))
+
+    def cluster_for_role(self, role: str) -> str:
+        return ROLE_CLUSTERS.get(role, "routine")
 
     def tier_for(self, role: str) -> str:
         return self.roles.get(role) or "tier2"
 
-    def candidates_for(self, role: str) -> list[ModelCandidate]:
-        return self.tiers.get(self.tier_for(role), [])
+    def candidates_for_cluster_tier(self, cluster: str, tier: str) -> list[ModelCandidate]:
+        if self.matrix and cluster in self.matrix:
+            cands = self.matrix[cluster].get(tier, [])
+            if cands:
+                return cands
+        return self.tiers.get(tier, [])
+
+    def candidates_for(self, role: str, tier: str | None = None) -> list[ModelCandidate]:
+        cluster = self.cluster_for_role(role)
+        resolved_tier = tier or self.tier_for(role)
+        return self.candidates_for_cluster_tier(cluster, resolved_tier)
 
 
 class ProviderConfig(BaseModel):

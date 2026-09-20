@@ -150,6 +150,7 @@ export interface ModelPick {
   agentic?: number | null;
   intelligence?: number | null;
   score?: number | null;
+  cost_benefit?: number | null;
 }
 
 export interface ClusterTiers {
@@ -183,12 +184,18 @@ export interface ModelProposalDTO {
 
 export interface PresetInfo { key: string; label: string; description: string; providers: string[]; optional_providers: string[]; tiers: Record<string, Candidate[]> }
 
+export type ClusterName = "strategy" | "engineering" | "routine";
+export type TierName = "tier1" | "tier2" | "tier3";
+export type ModelMatrix = Record<string, Record<string, Candidate[]>>;
+
 export interface Settings {
   preset: string;
   presets: PresetInfo[];
   providers: ProviderInfo[];
   models?: { preset: string; tier1_ceiling: number; tier2_floor: number };
   tiers: Record<string, Candidate[]>;
+  matrix?: ModelMatrix;
+  role_clusters?: Record<string, string>;
   roles: Record<string, string>;
   budget: { monthly_cap_usd: number; warn_at_fraction: number; hard_stop: boolean };
   schedule: { max_parallel: number };
@@ -201,6 +208,7 @@ export interface SettingsPatch {
   providers?: Record<string, { kind?: string; base_url?: string; api_key_env?: string; label?: string; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
   remove_providers?: string[];
   tiers?: Record<string, Candidate[]>;
+  matrix?: ModelMatrix;
   roles?: Record<string, string>;
   tier1_ceiling?: number;
   tier2_floor?: number;

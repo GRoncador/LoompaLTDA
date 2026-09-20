@@ -639,3 +639,32 @@ async def test_the_catalogue_tells_an_alias_moved_before_any_call_does(factory: 
     assert len(moved_notes(ctx)) == 1
     watch.check_targets({"~z-ai/glm-latest": ""})  # a catalogue row with no target says nothing
     assert len(moved_notes(ctx)) == 1
+
+
+def test_clusters_tier1_score_tier2_cost_benefit_tier3_free():
+    cat = [
+        *CATALOG,
+        entry("z/free-coder:free", 0, 0, coding=65, agentic=45),
+        entry("w/free-chat:free", 0, 0, coding=60, agentic=40),
+    ]
+    proposal = build_proposal(openrouter_config(), parse_catalog({"data": cat}), POLICY, TODAY)
+    eng = proposal.clusters["engineering"]
+
+    # Tier 1: under ceiling ($5.0), ranked by pure score
+    assert len(eng["tier1"]) > 0
+    assert all(p["price"] <= POLICY.tier1_ceiling for p in eng["tier1"])
+    scores_t1 = [p["score"] for p in eng["tier1"]]
+    assert scores_t1 == sorted(scores_t1, reverse=True)
+    assert all(p["score"] is not None for p in eng["tier1"])
+    assert all(p["cost_benefit"] is not None for p in eng["tier1"])
+
+    # Tier 2: under ceiling ($5.0), ranked by cost-benefit (score / cost)
+    assert len(eng["tier2"]) > 0
+    assert all(p["price"] <= POLICY.tier1_ceiling for p in eng["tier2"])
+    cb_t2 = [p["cost_benefit"] for p in eng["tier2"]]
+    assert cb_t2 == sorted(cb_t2, reverse=True)
+
+    # Tier 3: free models ($0.0), ranked by score
+    assert len(eng["tier3"]) > 0
+    assert all(p["price"] == 0.0 for p in eng["tier3"])
+    assert any(p["id"] == "z/free-coder:free" for p in eng["tier3"])

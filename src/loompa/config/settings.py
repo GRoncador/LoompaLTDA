@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from loompa.config.presets import MODEL_PRESETS, apply_preset, preset_summaries
 from loompa.config.schema import (
     ROLES,
+    TIERS,
     LoompaConfig,
     ModelCandidate,
     ProviderConfig,
@@ -42,9 +43,15 @@ def store_key(root: Path, env_name: str, value: str | None, *, scope: Scope = "h
 def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
     """Everything the settings screen shows. Contains no secret values."""
     used: dict[str, list[str]] = {}
-    for tier, cands in config.models.tiers.items():
-        for c in cands:
-            used.setdefault(c.provider, []).append(f"{tier}:{c.model}")
+    if config.models.matrix:
+        for cluster, tier_map in config.models.matrix.items():
+            for tier, cands in tier_map.items():
+                for c in cands:
+                    used.setdefault(c.provider, []).append(f"{cluster}:{tier}:{c.model}")
+    else:
+        for tier, cands in config.models.tiers.items():
+            for c in cands:
+                used.setdefault(c.provider, []).append(f"{tier}:{c.model}")
     providers = []
     for name, p in config.providers.items():
         providers.append(
@@ -79,6 +86,16 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
         },
         "tiers": {
             tier: [c.model_dump() for c in cands] for tier, cands in config.models.tiers.items()
+        },
+        "matrix": {
+            cluster: {
+                tier: [c.model_dump() for c in cands]
+                for tier, cands in tier_map.items()
+            }
+            for cluster, tier_map in config.models.matrix.items()
+        },
+        "role_clusters": {
+            r: config.models.cluster_for_role(r) for r in sorted(set(ROLES) | set(config.models.roles))
         },
         "roles": {
             r: config.models.tier_for(r) for r in sorted(set(ROLES) | set(config.models.roles))
@@ -128,6 +145,7 @@ class SettingsPatch(BaseModel):
     preset: str | None = None
     providers: dict[str, ProviderPatch] = Field(default_factory=dict)
     remove_providers: list[str] = Field(default_factory=list)
+    matrix: dict[str, dict[str, list[ModelCandidate]]] | None = None
     tiers: dict[str, list[ModelCandidate]] | None = None
     roles: dict[str, str] | None = None
     tier1_ceiling: float | None = None
@@ -146,7 +164,7 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
         if patch.preset not in MODEL_PRESETS:
             raise ValueError(f"preset desconhecido: {patch.preset}")
         preset = apply_preset(config, patch.preset)
-        notes.append(f"preset “{preset.label}” aplicado aos tiers")
+        notes.append(f"preset “{preset.label}” aplicado à matriz de modelos")
     for name, pp in patch.providers.items():
         cfg = config.providers.get(name) or ProviderConfig()
         if pp.kind is not None:
@@ -174,14 +192,46 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
     for name in patch.remove_providers:
         if config.providers.pop(name, None) is not None:
             notes.append(f"provedor {name} removido")
+    if patch.matrix is not None:
+        unknown = {
+            c.provider
+            for cluster_tiers in patch.matrix.values()
+            for cs in cluster_tiers.values()
+            for c in cs
+        } - set(config.providers)
+        if unknown:
+            raise ValueError("provedores desconhecidos na matriz: " + ", ".join(sorted(unknown)))
+        config.models.matrix = {
+            cluster: {
+                t: [c for c in cs if c.model.strip()]
+                for t, cs in tier_map.items()
+            }
+            for cluster, tier_map in patch.matrix.items()
+        }
+        # Keep fallback tiers in sync
+        config.models.tiers = {
+            "tier1": [c.model_copy() for c in config.models.matrix.get("engineering", {}).get("tier1", [])]
+            or [c.model_copy() for c in config.models.matrix.get("strategy", {}).get("tier1", [])],
+            "tier2": [c.model_copy() for c in config.models.matrix.get("engineering", {}).get("tier2", [])]
+            or [c.model_copy() for c in config.models.matrix.get("strategy", {}).get("tier2", [])],
+            "tier3": [c.model_copy() for c in config.models.matrix.get("routine", {}).get("tier3", [])],
+        }
+        notes.append("matriz de modelos atualizada")
     if patch.tiers is not None:
         unknown = {c.provider for cs in patch.tiers.values() for c in cs} - set(config.providers)
         if unknown:
             raise ValueError("provedores desconhecidos nos tiers: " + ", ".join(sorted(unknown)))
         config.models.tiers = {t: list(cs) for t, cs in patch.tiers.items() if cs}
+        if not patch.matrix:
+            for cluster in ("strategy", "engineering", "routine"):
+                if cluster not in config.models.matrix:
+                    config.models.matrix[cluster] = {}
+                for t, cs in config.models.tiers.items():
+                    config.models.matrix[cluster][t] = [c.model_copy() for c in cs]
         notes.append("tiers atualizados")
     if patch.roles is not None:
-        bad = {t for t in patch.roles.values() if t not in config.models.tiers}
+        valid_tiers = set(config.models.tiers) | set(TIERS)
+        bad = {t for t in patch.roles.values() if t not in valid_tiers}
         if bad:
             raise ValueError("tiers inexistentes no mapa de papéis: " + ", ".join(sorted(bad)))
         config.models.roles.update({r: t for r, t in patch.roles.items() if r})
@@ -191,6 +241,7 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
         notes.append(f"teto de custo Tier 1: US$ {patch.tier1_ceiling:.2f}/M")
     if patch.tier2_floor is not None:
         config.models.tier2_floor = patch.tier2_floor
+
     if patch.budget is not None:
         for k, v in patch.budget.model_dump(exclude_none=True).items():
             setattr(config.budget, k, v)
