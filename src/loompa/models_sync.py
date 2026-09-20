@@ -83,6 +83,8 @@ class ModelSync:
             lines.append(f"\nEntram: {', '.join(p.added)}.")
         if p.removed:
             lines.append(f"Saem: {', '.join(p.removed)}.")
+        if p.repriced and not p.added:
+            lines.append(f"\nPreços atualizados: {', '.join(p.repriced)}.")
         if p.gone:
             lines.append(f"Já saíram do catálogo e serão retirados: {', '.join(p.gone)}.")
         if p.expiring:

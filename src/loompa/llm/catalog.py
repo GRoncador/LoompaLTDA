@@ -27,12 +27,16 @@ import httpx
 from loompa.config.schema import LoompaConfig, ModelCandidate, Price
 
 PROVIDER = "openrouter"
+FREE_ROUTER = (
+    "openrouter/free"  # a free model chosen per request: the last fallback of an alias list
+)
 LIMITABLE_EFFORTS = {"minimal", "low"}
 
 # Why a model is out of the ranking, in the order the checks run. `unrated` is last on purpose:
 # it counts only models that would otherwise have qualified.
 REASONS = {
-    "alias": "apelido que aponta para outro modelo",
+    "alias": "apelido (-latest); esta fábrica usa ids fixos",
+    "pinned": "id fixo; esta fábrica usa apelidos -latest",
     "variant": "variante (lote, gratuita) que não entra no ranking",
     "no_tools": "não usa ferramentas",
     "not_text": "não é de texto",
@@ -77,6 +81,7 @@ class CatalogModel:
     tools: bool
     text_only: bool
     alias: bool
+    target: str  # for an alias, the model it points to today
     coding: float | None
     agentic: float | None
     mandatory_reasoning: bool
@@ -85,7 +90,12 @@ class CatalogModel:
 
     @property
     def vendor(self) -> str:
-        return self.id.split("/", 1)[0]
+        return self.id.lstrip("~").split("/", 1)[0]
+
+    @property
+    def label(self) -> str:
+        """The name a person reads: an alias also says what it points to today."""
+        return f"{self.name} (hoje: {self.target})" if self.alias and self.target else self.name
 
     @property
     def quality(self) -> float | None:
@@ -109,16 +119,25 @@ class CatalogModel:
         )
 
 
-def parse_model(raw: Any) -> CatalogModel | None:
+def _benchmarks(entry: dict[str, Any]) -> dict[str, Any]:
+    return _dict(_dict(entry.get("benchmarks")).get("artificial_analysis"))
+
+
+def parse_model(raw: Any, index: dict[str, dict[str, Any]] | None = None) -> CatalogModel | None:
     """One catalogue entry, or None when it has no usable id. Every field is read defensively:
-    a provider changing one shape must cost one model, never the whole sync."""
+    a provider changing one shape must cost one model, never the whole sync.
+
+    An alias (`~z-ai/glm-latest`) carries no benchmark of its own: it is rated by the model it
+    points to today, looked up in `index` (raw entries by id and canonical slug)."""
     entry = _dict(raw)
     model_id = entry.get("id")
     if not isinstance(model_id, str) or not model_id:
         return None
     arch = _dict(entry.get("architecture"))
     pricing = _dict(entry.get("pricing"))
-    bench = _dict(_dict(entry.get("benchmarks")).get("artificial_analysis"))
+    bench = _benchmarks(entry)
+    if not bench and index:
+        bench = _benchmarks(index.get(str(_dict(entry.get("alias_target")).get("slug")), {}))
     reasoning = _dict(entry.get("reasoning"))
 
     def per_million(value: Any) -> float | None:
@@ -143,6 +162,7 @@ def parse_model(raw: Any) -> CatalogModel | None:
         tools="tools" in _list(entry.get("supported_parameters")),
         text_only="text" in inputs and outputs == ["text"],
         alias=model_id.startswith("~") or bool(entry.get("alias_target")),
+        target=str(_dict(entry.get("alias_target")).get("name") or ""),
         coding=_number(bench.get("coding_index")),
         agentic=_number(bench.get("agentic_index")),
         mandatory_reasoning=reasoning.get("mandatory") is True,
@@ -152,7 +172,9 @@ def parse_model(raw: Any) -> CatalogModel | None:
 
 
 def parse_catalog(payload: Any) -> list[CatalogModel]:
-    models = [m for raw in _list(_dict(payload).get("data")) if (m := parse_model(raw))]
+    rows = [row for row in _list(_dict(payload).get("data")) if isinstance(row, dict)]
+    index = {str(k): row for row in rows for k in (row.get("id"), row.get("canonical_slug")) if k}
+    models = [m for raw in _list(_dict(payload).get("data")) if (m := parse_model(raw, index))]
     if not models:
         raise CatalogError("o catálogo veio vazio ou em um formato desconhecido")
     return models
@@ -197,6 +219,7 @@ class Policy:
     picks: int = 3  # candidates per tier (one per vendor, so a fallback is not the same outage)
     min_context: int = 128_000
     expiry_margin_days: int = 60
+    ids: str = "auto"  # alias | pinned | auto (follow what the factory already uses)
 
 
 def unavailable_reason(m: CatalogModel, policy: Policy, today: date) -> str | None:
@@ -212,9 +235,11 @@ def unavailable_reason(m: CatalogModel, policy: Policy, today: date) -> str | No
     return None
 
 
-def exclusion_reason(m: CatalogModel, policy: Policy, today: date) -> str | None:
-    if m.alias:
-        return "alias"
+def exclusion_reason(
+    m: CatalogModel, policy: Policy, today: date, mode: str = "pinned"
+) -> str | None:
+    if m.alias != (mode == "alias"):
+        return "pinned" if mode == "alias" else "alias"
     if ":" in m.id:
         return "variant"
     if not m.tools:
@@ -250,13 +275,13 @@ def _one_per_vendor(ordered: list[CatalogModel], n: int) -> list[CatalogModel]:
     return picked
 
 
-def rank(models: list[CatalogModel], policy: Policy, today: date) -> Ranking:
+def rank(models: list[CatalogModel], policy: Policy, today: date, mode: str = "pinned") -> Ranking:
     """tier1 is "best quality under a price ceiling"; tier2 is "cheapest above a quality floor".
     A plain quality/price ratio would put the cheapest acceptable model first in both."""
     excluded: Counter[str] = Counter()
     eligible: list[CatalogModel] = []
     for m in models:
-        reason = exclusion_reason(m, policy, today)
+        reason = exclusion_reason(m, policy, today, mode)
         if reason:
             excluded[reason] += 1
         else:
@@ -295,10 +320,12 @@ class Proposal:
     considered: int = 0
     eligible: int = 0
     excluded: dict[str, int] = field(default_factory=dict)
+    mode: str = "pinned"  # alias | pinned: which kind of ids the ranking was made from
+    repriced: list[str] = field(default_factory=list)  # in use, priced differently in the config
 
     @property
     def changed(self) -> bool:
-        return self.tiers != self.base
+        return self.tiers != self.base or bool(self.repriced)
 
 
 def _dump(cands: list[ModelCandidate]) -> list[dict[str, Any]]:
@@ -309,10 +336,33 @@ def _dump_all(config: LoompaConfig) -> dict[str, list[dict[str, Any]]]:
     return {t: _dump(c) for t, c in config.models.tiers.items()}
 
 
+def is_free(model_id: str) -> bool:
+    return model_id.endswith(":free") or model_id == FREE_ROUTER
+
+
+def detect_mode(config: LoompaConfig) -> str:
+    """A factory whose OpenRouter candidates are `~vendor/x-latest` aliases keeps using aliases."""
+    aliased = any(
+        c.model.startswith("~")
+        for cands in config.models.tiers.values()
+        for c in cands
+        if c.provider == PROVIDER
+    )
+    return "alias" if aliased else "pinned"
+
+
+def _same_price(a: Price | None, b: Price) -> bool:
+    return a is not None and all(
+        abs(x - y) <= 1e-6
+        for x, y in zip(a.model_dump().values(), b.model_dump().values(), strict=True)
+    )
+
+
 def build_proposal(
     config: LoompaConfig, models: list[CatalogModel], policy: Policy, today: date
 ) -> Proposal:
-    ranking = rank(models, policy, today)
+    mode = detect_mode(config) if policy.ids == "auto" else policy.ids
+    ranking = rank(models, policy, today, mode)
     by_id = {m.id: m for m in models}
     configured = {
         c.model for cands in config.models.tiers.values() for c in cands if c.provider == PROVIDER
@@ -331,7 +381,10 @@ def build_proposal(
         block = [
             mine.get(m.id) or ModelCandidate(provider=PROVIDER, model=m.id) for m in picked[tier]
         ]
-        for free in (c for c in current if c.provider == PROVIDER and c.model.endswith(":free")):
+        paid = [c for c in current if c.provider == PROVIDER and not is_free(c.model)]
+        if {c.model for c in block} == {c.model for c in paid}:
+            block = paid  # same models: the order is the founder's, near-ties are not worth a swap
+        for free in (c for c in current if c.provider == PROVIDER and is_free(c.model)):
             live = by_id.get(free.model)
             if live and live.tools and not unavailable_reason(live, policy, today):
                 block.append(free)  # a free model still on offer stays as the last fallback
@@ -347,7 +400,7 @@ def build_proposal(
         summary[tier] = [
             {
                 "id": m.id,
-                "name": m.name,
+                "name": m.label,
                 "quality": round(m.quality or 0.0, 1),
                 "price": round(m.blended or 0.0, 2),
             }
@@ -358,8 +411,13 @@ def build_proposal(
     pricing = {
         mid: by_id[mid].price().model_dump()
         for mid in sorted(used_after)
-        if mid in by_id and not mid.endswith(":free")
+        if mid in by_id and not is_free(mid)
     }
+    repriced = [
+        mid
+        for mid, price in pricing.items()
+        if not _same_price(config.pricing.get(mid), Price(**price))
+    ]
     return Proposal(
         tiers={t: _dump(c) for t, c in tiers.items()},
         base={t: _dump(c) for t, c in config.models.tiers.items()},
@@ -378,6 +436,8 @@ def build_proposal(
         considered=ranking.total,
         eligible=len(ranking.eligible),
         excluded=dict(ranking.excluded),
+        mode=mode,
+        repriced=repriced,
     )
 
 

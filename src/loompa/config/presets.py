@@ -31,16 +31,22 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
     "openrouter": ModelPreset(
         key="openrouter",
         label="OpenRouter (recomendado)",
-        description="Uma única chave para todos os modelos, com teto de gastos no painel da OpenRouter. GLM 5.3 no raciocínio, GLM Flash e DeepSeek Flash na execução — centavos por história, com modelos gratuitos como reserva.",
+        description="Uma única chave para todos os modelos, com teto de gastos no painel da OpenRouter. GLM, Grok e GPT Sol no raciocínio; GLM Flash, GPT Luna e Gemini Flash na execução, sempre na versão mais nova de cada fabricante (ids -latest), então uma versão que sai do ar não trava a fábrica. Modelo gratuito como última reserva.",
         tiers={
+            # `~vendor/model-latest` follows the vendor's newest version, so a retired version
+            # cannot leave a tier with dead ids. Ranked with the `loompa models sync` rules on
+            # 2026-09-20 and each one answered a text and a tool call live. GLM leads both tiers:
+            # it is the one Loompa's own flows were validated on.
             "tier1": [
-                _c("openrouter", "z-ai/glm-5.3"),
-                _c("openrouter", "qwen/qwen3.8-max-0902"),
+                _c("openrouter", "~z-ai/glm-latest"),
+                _c("openrouter", "~x-ai/grok-latest"),
+                _c("openrouter", "~openai/gpt-sol-latest"),
             ],
             "tier2": [
-                _c("openrouter", "z-ai/glm-5.3-flash"),
-                _c("openrouter", "deepseek/deepseek-v4-flash-0731"),
-                _c("openrouter", "deepseek/deepseek-v4-flash-0731:free"),
+                _c("openrouter", "~z-ai/glm-flash-latest"),
+                _c("openrouter", "~openai/gpt-luna-latest"),
+                _c("openrouter", "~google/gemini-flash-latest"),
+                _c("openrouter", "openrouter/free"),  # a free model picked per request
             ],
         },
         providers=("openrouter",),

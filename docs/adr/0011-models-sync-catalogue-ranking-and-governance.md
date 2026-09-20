@@ -74,6 +74,34 @@ A newer proposal withdraws (archives) the one still waiting. Nothing changes unt
 The command is on demand. Running it weekly is a cron/launchd line (the recipe belongs to Fase 6);
 it is idempotent, and posts nothing when the current list is already the answer.
 
+### 6. `-latest` aliases (addendum, 2026-09-20)
+
+The OpenRouter preset now names `~vendor/model-latest` aliases (`~z-ai/glm-latest`,
+`~x-ai/grok-latest`, `~openai/gpt-sol-latest`, `~z-ai/glm-flash-latest`, `~openai/gpt-luna-latest`,
+`~google/gemini-flash-latest`) and `openrouter/free` as the last tier2 fallback, so a version that
+leaves the catalogue cannot leave a tier with dead ids. What the real catalogue and a live run showed:
+
+* An alias has its own price and reasoning limits but **no benchmark**: it is rated by the model it
+  points to today (`alias_target`). A first version of the ranking found zero eligible aliases
+  because of that.
+* The cost tracker bills the id that was *asked for*, not the one that answered, so every alias needs
+  its own `pricing` entry (`defaults.yaml`); an unpriced alias is billed at the generic $1/$3.
+  Sync therefore also proposes a price update when the price of an id in use moved (`repriced`), even
+  if the list is the same.
+* The mode follows the factory: aliases in the config → the ranking considers aliases only;
+  otherwise concrete ids only (`--ids alias|pinned|auto` overrides). Same models in another order
+  are left as the founder ordered them. `openrouter/free` is kept like a `:free` model.
+* Verified live on 2026-09-20: each alias answered a text and a tool call and resolved to the
+  expected model (`served=`), and the project's four `live` tests passed 4/4 on `~z-ai/glm-flash-latest`
+  (tier2) and on `~z-ai/glm-latest` (tier1). `openrouter/free` answers with a different free model
+  per request, so it is a last resort, not a tuned choice.
+
+**The trade.** An alias removes the loud failure (a retired id answers 404 and the router falls to
+the next candidate) and adds a silent one: the model behind it can change without the approval
+ADR-0011 §5 requires for a swap, and the prompts are tuned for the model in use. Nothing yet
+detects that an alias moved; `resp.model` carries the resolved id, so an event/inbox note when it
+differs from the last one seen is the natural guard, and is not built.
+
 ## Consequences
 
 * The ranking depends on Artificial Analysis indices as OpenRouter republishes them. A model can
@@ -82,5 +110,5 @@ it is idempotent, and posts nothing when the current list is already the answer.
   test: `uv run pytest --live -m live --live-provider openrouter --live-model <id>`.
 * `apply_preset` now copies the candidates it hands to a config; before, every factory shared the
   preset's mutable objects.
-* Not done: a dashboard screen for the proposal (the inbox card is enough to decide), and
+* Not done: a guard for an alias that moves (see §6), a dashboard screen for the proposal (the inbox card is enough to decide), and
   syncing providers other than OpenRouter.

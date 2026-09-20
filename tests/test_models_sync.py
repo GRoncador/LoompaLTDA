@@ -45,7 +45,7 @@ def entry(
     context: int = 200_000,
     expires: str | None = None,
     cache: float | None = None,
-    alias: bool = False,
+    alias: str | None = None,  # slug of the model an alias points to
     outputs: tuple[str, ...] = ("text",),
 ) -> dict[str, Any]:
     """One catalogue row; prices are USD per 1M tokens here and per token, as strings, in the payload."""
@@ -67,7 +67,7 @@ def entry(
             "artificial_analysis": {"coding_index": coding, "agentic_index": agentic}
         }
     if alias:
-        row["alias_target"] = {"slug": "x/y"}
+        row["alias_target"] = {"slug": alias, "name": alias.title()}
     return row
 
 
@@ -84,7 +84,7 @@ CATALOG = [
     entry("h/forced", 0.1, 0.3, coding=76, agentic=60, mandatory=True),  # cannot be limited
     entry("i/limited", 0.1, 0.3, coding=60, agentic=54, mandatory=True, efforts=["high", "low"]),
     entry("j/leaving", 0.1, 0.3, expires="2026-10-20"),
-    entry("~k/alias", 1, 3, alias=True),
+    entry("~k/alias", 1, 3, alias="x/y"),
     entry("l/short", 1, 3, context=32_000),
     entry("m/router", -1, -1),
 ]
@@ -96,10 +96,25 @@ def catalog(rows: list[dict[str, Any]] = CATALOG) -> httpx.Client:
     )
 
 
-def openrouter_config():
-    config = default_config()
-    apply_preset(config, "openrouter")
+def pin_openrouter(config):
+    """The OpenRouter preset as it was before the aliases: concrete ids, one `:free` fallback."""
+    ids = {
+        "tier1": ["z-ai/glm-5.3", "qwen/qwen3.8-max-0902"],
+        "tier2": [
+            "z-ai/glm-5.3-flash",
+            "deepseek/deepseek-v4-flash-0731",
+            "deepseek/deepseek-v4-flash-0731:free",
+        ],
+    }
+    config.models.tiers = {
+        tier: [ModelCandidate(provider="openrouter", model=m) for m in models]
+        for tier, models in ids.items()
+    }
     return config
+
+
+def openrouter_config():
+    return pin_openrouter(default_config())
 
 
 # ------------------------------------------------------------------------------ the catalogue
@@ -221,10 +236,7 @@ def test_an_expiring_model_in_use_is_flagged_and_a_settled_list_proposes_nothing
     config.models.tiers["tier2"][0].model = "j/leaving"
     models = parse_catalog({"data": CATALOG})
     assert build_proposal(config, models, POLICY, TODAY).expiring == ["j/leaving"]
-    settled = build_proposal(config, models, POLICY, TODAY)
-    config.models.tiers = {
-        t: [ModelCandidate.model_validate(c) for c in cs] for t, cs in settled.tiers.items()
-    }
+    assert apply_proposal(config, build_proposal(config, models, POLICY, TODAY))
     assert not build_proposal(config, models, POLICY, TODAY).changed
 
 
@@ -248,7 +260,7 @@ def test_apply_refuses_a_configuration_edited_since_the_proposal():
 
 def swap_ready(factory: Factory):
     """A factory on the OpenRouter preset with a context, and the proposal a sync would make."""
-    apply_preset(factory.config, "openrouter")
+    pin_openrouter(factory.config)
     factory.save()
     ctx = make_ctx(factory, dry_run=True)
     return ctx, plan(ctx.config, POLICY, client=catalog(), today=TODAY)
@@ -280,9 +292,7 @@ async def test_a_new_proposal_withdraws_the_one_still_waiting(factory: Factory):
 
 async def test_nothing_is_proposed_when_the_list_is_already_the_best(factory: Factory):
     ctx, proposal = swap_ready(factory)
-    ctx.config.models.tiers = {
-        t: [ModelCandidate.model_validate(c) for c in cs] for t, cs in proposal.tiers.items()
-    }
+    assert apply_proposal(ctx.config, proposal)
     assert ModelSync(ctx).propose(plan(ctx.config, POLICY, client=catalog(), today=TODAY)) is None
     assert ctx.store.list_messages(factory.slug) == []
 
@@ -368,14 +378,141 @@ def test_cli_previews_then_proposes_through_the_inbox(hub, brownfield_repo, monk
         "loompa.cli.models.plan",
         lambda config, policy: plan(config, policy, client=catalog(), today=TODAY),
     )
-    shown = runner.invoke(app, ["models", "sync", "--factory", "demo", "--preview", "--picks", "2"])
+    shown = runner.invoke(
+        app, ["models", "sync", "--factory", "demo", "--preview", "--picks", "2", "--ids", "pinned"]
+    )
     assert shown.exit_code == 0 and "b/strong" in shown.stdout and "sem nota" in shown.stdout
     assert "nada foi enviado" in shown.stdout
     f = Factory.open(brownfield_repo)
     assert Store(f.paths.state_db).list_messages(f.slug) == []
 
-    sent = runner.invoke(app, ["models", "sync", "--factory", "demo", "--picks", "2"])
+    sent = runner.invoke(
+        app, ["models", "sync", "--factory", "demo", "--picks", "2", "--ids", "pinned"]
+    )
     assert sent.exit_code == 0 and "loompa inbox reply" in sent.stdout
     (msg,) = Store(f.paths.state_db).list_messages(f.slug, status="pending")
     assert msg.title.startswith("Nova lista de modelos")
-    assert tier_ids(Factory.open(brownfield_repo).config, "tier1")[0] == "z-ai/glm-5.3"  # unchanged
+    assert (
+        tier_ids(Factory.open(brownfield_repo).config, "tier1")[0] == "~z-ai/glm-latest"
+    )  # unchanged
+
+
+# ------------------------------------------------------------------------- `-latest` aliases
+
+ALIASED = [
+    entry("b/strong", 2, 6, coding=76, agentic=56),  # quality 66
+    entry("c/mid", 1, 3, coding=70, agentic=54),  # quality 62
+    entry("d/cheap", 0.1, 0.3, coding=64, agentic=52),  # quality 58
+    entry("~b/strong-latest", 1.9, 5.5, coding=None, agentic=None, alias="b/strong"),
+    entry("~c/mid-latest", 1, 3, coding=None, agentic=None, alias="c/mid"),
+    entry("~d/cheap-latest", 0.1, 0.3, coding=None, agentic=None, alias="d/cheap"),
+    entry("~e/orphan-latest", 1, 3, coding=None, agentic=None, alias="e/gone"),  # target unknown
+    entry("openrouter/free", 0, 0, coding=None, agentic=None),
+]
+for _row in ALIASED[3:7]:
+    _row["benchmarks"] = (
+        None  # what the catalogue really does: an alias has no benchmark of its own
+    )
+
+
+def aliased_config():
+    config = default_config()
+    config.models.tiers = {
+        "tier1": [ModelCandidate(provider="openrouter", model="~c/mid-latest")],
+        "tier2": [
+            ModelCandidate(provider="openrouter", model="~d/cheap-latest"),
+            ModelCandidate(provider="openrouter", model="openrouter/free"),
+        ],
+    }
+    return config
+
+
+def test_an_alias_is_rated_by_the_model_it_points_to():
+    models = {m.id: m for m in parse_catalog({"data": ALIASED})}
+    alias = models["~b/strong-latest"]
+    assert alias.alias and alias.quality == pytest.approx(66)  # inherited from b/strong
+    assert alias.label == "~B: strong-latest (hoje: B/Strong)"  # says what it points to today
+    assert models["~e/orphan-latest"].quality is None  # a target that is not in the catalogue
+
+
+def test_a_factory_on_aliases_is_ranked_on_aliases_only_and_a_pinned_one_on_ids():
+    models = parse_catalog({"data": ALIASED})
+    ranking = rank(models, POLICY, TODAY, "alias")
+    assert {m.id for m in ranking.eligible} == {
+        "~b/strong-latest",
+        "~c/mid-latest",
+        "~d/cheap-latest",
+    }
+    assert ranking.excluded["unrated"] == 1  # the orphan: counted, not scored 0
+    assert ranking.excluded["pinned"] >= 3
+    pinned = rank(models, POLICY, TODAY, "pinned")
+    assert not any(m.alias for m in pinned.eligible) and pinned.excluded["alias"] == 4
+
+
+def test_the_mode_follows_what_the_factory_uses_and_can_be_forced():
+    models = parse_catalog({"data": ALIASED})
+    assert build_proposal(aliased_config(), models, POLICY, TODAY).mode == "alias"
+    assert build_proposal(openrouter_config(), models, POLICY, TODAY).mode == "pinned"
+    forced = Policy(picks=2, ids="pinned")
+    assert build_proposal(aliased_config(), models, forced, TODAY).mode == "pinned"
+
+
+def test_an_alias_list_keeps_the_free_router_last_and_prices_every_alias_it_uses():
+    config = aliased_config()
+    proposal = build_proposal(config, parse_catalog({"data": ALIASED}), POLICY, TODAY)
+    assert [c["model"] for c in proposal.tiers["tier2"]][-1] == "openrouter/free"
+    assert "openrouter/free" not in proposal.pricing  # free needs no price
+    assert proposal.pricing["~b/strong-latest"]["output"] == 5.5  # the alias's own price
+    assert set(proposal.repriced) == set(proposal.pricing)  # none of them priced in this config
+    assert apply_proposal(config, proposal)
+    assert config.price_for("~b/strong-latest").output == 5.5  # billed by the id that was asked for
+    assert build_proposal(config, parse_catalog({"data": ALIASED}), POLICY, TODAY).repriced == []
+
+
+def test_a_price_that_moved_is_proposed_even_when_the_list_is_the_same():
+    config = aliased_config()
+    models = parse_catalog({"data": ALIASED})
+    assert apply_proposal(config, build_proposal(config, models, POLICY, TODAY))
+    moved = [dict(r) for r in ALIASED]
+    for row in moved:
+        if row["id"] == "~b/strong-latest":
+            row["pricing"] = {"prompt": str(3 / 1e6), "completion": str(8 / 1e6)}
+    again = build_proposal(config, parse_catalog({"data": moved}), POLICY, TODAY)
+    assert again.repriced == ["~b/strong-latest"] and again.changed
+
+
+def test_the_same_models_in_another_order_are_left_as_the_founder_ordered_them():
+    config = default_config()
+    config.models.tiers = {
+        "tier1": [
+            ModelCandidate(provider="openrouter", model="~c/mid-latest"),
+            ModelCandidate(provider="openrouter", model="~b/strong-latest"),
+        ],
+        "tier2": [ModelCandidate(provider="openrouter", model="~d/cheap-latest")],
+    }
+    models = parse_catalog({"data": ALIASED})
+    assert apply_proposal(config, build_proposal(config, models, POLICY, TODAY))
+    settled = build_proposal(config, models, POLICY, TODAY)
+    assert not settled.changed and [c["model"] for c in settled.tiers["tier1"]] == [
+        "~c/mid-latest",
+        "~b/strong-latest",  # the ranking would put b/strong first; the founder's order stays
+    ]
+
+
+def test_the_openrouter_preset_uses_priced_aliases_that_survive_the_config_file(tmp_path):
+    from loompa.config import MODEL_PRESETS, load_config, save_config
+
+    config = default_config()
+    apply_preset(config, "openrouter")
+    ids = [c.model for cands in config.models.tiers.values() for c in cands]
+    assert all(m.startswith("~") or m == "openrouter/free" for m in ids)
+    for model_id in ids:  # an unpriced id is billed at the generic $1/$3
+        assert model_id in config.pricing, f"{model_id} has no price in defaults.yaml"
+    assert MODEL_PRESETS["openrouter"].tiers["tier2"][-1].model == "openrouter/free"
+    (tmp_path / ".loompa").mkdir()
+    save_config(tmp_path, config)
+    reloaded = load_config(tmp_path)  # `~` opens a YAML null; the ids must come back as text
+    assert [c.model for c in reloaded.models.tiers["tier1"]] == [
+        c.model for c in config.models.tiers["tier1"]
+    ]
+    assert reloaded.price_for("~z-ai/glm-latest") == config.price_for("~z-ai/glm-latest")

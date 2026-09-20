@@ -215,6 +215,12 @@ Suggested next (not implemented):
   Grok 4.6, GLM 5.3 and tier2 as GLM 5.3 Flash, GPT-5.6 Luna, Qwen3.8 27B — Luna, Qwen 27B and Grok are
   **not validated live**. Also fixed: `LIVE_DEFAULT_MODEL["openrouter"]` now reads the preset's tier2
   lead; `apply_preset` copies its candidates instead of sharing them across factories.
+  **Follow-up (same day): the OpenRouter preset now uses `-latest` aliases** (ADR-0011 §6) and
+  `models sync` understands them. Checked live: 8 aliases answered a text and a tool call, and the four
+  `live` tests passed 4/4 on `~z-ai/glm-flash-latest` and on `~z-ai/glm-latest`. Two things only the
+  live catalogue could show: aliases have no benchmark (rated through their target) and the cost
+  tracker bills the *requested* id, so every alias has a `pricing` entry. Open trade: an alias can move
+  to a new model without the inbox approval — nothing detects that yet.
   Found while doing it: the `gratuito` preset names `deepseek/deepseek-r1:free` and
   `deepseek/deepseek-chat-v3-0324:free`, which are gone from the OpenRouter catalogue (not changed).
 
