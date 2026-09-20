@@ -103,7 +103,11 @@ class MasterAgent(LoompaAgent):
         out = Classification()
         try:
             data = await self.ask_json(
-                CLASSIFY_SYSTEM.format(language=self.language), user, story=state, max_tokens=800
+                CLASSIFY_SYSTEM.format(language=self.language),
+                user,
+                story=state,
+                tier_override="tier2",
+                max_tokens=800,
             )
         except Exception:  # noqa: BLE001
             self.set_state("IDLE")
@@ -398,6 +402,7 @@ class MasterAgent(LoompaAgent):
                     EXEC_SYSTEM.format(language=self.language),
                     f"Story: {state.title}\n\nProblem:\n{technical_reason[:3000]}\n\nSuggested options: {options or 'none'}",
                     story=state,
+                    tier_override="tier2",
                     max_tokens=800,
                 )
                 llm_opts = [

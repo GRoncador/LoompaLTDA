@@ -1,8 +1,8 @@
 """Kaizen loop: every discovery becomes a learning entry, a backlog card and searchable memory.
 
-The card is proposed to the Product Owner, the only writer of the backlog: it lands as a new card
-or, when an open card already says the same, points at that one. Either way the story that raised
-it remembers the card (`finding_cards`), so the delivery can ask the founder what to do with it.
+Factory Memory Service ($0,00 IA):
+Kaizen operates as a deterministic collector of learnings and technical debt,
+indexing resolutions and memory without direct LLM consumption.
 """
 
 from __future__ import annotations

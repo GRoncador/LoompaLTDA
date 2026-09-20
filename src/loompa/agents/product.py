@@ -1,4 +1,4 @@
-"""Product Loompa (PO): writes spec.md with BDD acceptance criteria."""
+"""Spec Loompa: writes spec.md with BDD acceptance criteria."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from loompa.engine.state import StoryState
 from loompa.speckit import SpecArtifacts, story_dir
 
 SYSTEM = """<!-- role:product -->
-You are the Product Loompa, product owner of an autonomous software factory.
+You are the Spec Loompa of an autonomous software factory.
 Turn the user story into a precise, minimal specification following the GitHub Spec Kit protocol.
 Rules:
 - Stay strictly within the story; list anything tempting but unrelated under out_of_scope.
@@ -26,7 +26,7 @@ Write all strings in {language}.
 
 class ProductAgent(LoompaAgent):
     role = "product"
-    display = "Product Loompa"
+    display = "Spec Loompa"
 
     async def run(self, state: StoryState) -> AgentResult:
         self.set_state("WORKING", state, detail="escrevendo spec.md")

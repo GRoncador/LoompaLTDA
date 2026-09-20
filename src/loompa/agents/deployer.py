@@ -88,6 +88,7 @@ class DeployerAgent(LoompaAgent):
                 + "\n".join(log[:10])
                 + f"\n\nChanged files:\n{stat[:1500]}",
                 story=state,
+                tier_override="tier2",
                 max_tokens=400,
             )
             text = str(data.get("summary") or "").strip()

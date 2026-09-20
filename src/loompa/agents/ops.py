@@ -1,9 +1,9 @@
-"""Ops Loompa: first responder when a story crashes.
+"""Ops: deterministic first responder and SRE when a story crashes.
 
-Triage is deterministic on purpose (it must work while the LLM itself is down): transient
-failures (rate limit / cooldown, network, 5xx, locked database) are retried with backoff and
-the Founder only hears about it afterwards, in one plain-language note. Anything else, or a
-transient failure that keeps coming back, is escalated to the inbox in the same plain language.
+SRE / Factory Backend Service ($0,00 IA):
+Ops operates as a 100% deterministic resilience engine. It handles transient
+failures (rate limit / cooldown, network, 5xx, locked database) with exponential
+backoff and self-healing. It consumes zero LLM tokens.
 """
 
 from __future__ import annotations

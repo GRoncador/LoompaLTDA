@@ -53,18 +53,15 @@ models:
   roles:                     # any role not listed here uses tier2
     master: tier1
     architect: tier1
-    product: tier2
+    product: tier2           # Spec Loompa (especificação técnica e critérios BDD)
     product_owner: tier2
     analyst: tier2
     worker: tier2
     inspector: tier2
     deployer: tier2
-    ops: tier2
-    finance: tier2
     compliance: tier2
     metrics: tier2
     storyteller: tier2
-    kaizen: tier2
   temperature: 0.2
   max_output_tokens: 4096
   preset: ""                 # gratuito | economico | maximo (see loompa/config/presets.py)

@@ -133,6 +133,23 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
 
 // ------------------------------------------------------------------- tiers + roles
 
+const ROLE_DISPLAY: Record<string, string> = {
+  master: "Master (COO)",
+  architect: "Architect (Tech Lead)",
+  product: "Spec Loompa (BDD)",
+  product_owner: "Product Owner (PO)",
+  analyst: "Analyst (Pesquisa)",
+  worker: "Worker (Engenharia)",
+  inspector: "Inspector (QA Judge)",
+  deployer: "Deployer (Entrega)",
+  compliance: "Compliance",
+  metrics: "Metrics",
+  storyteller: "Storyteller",
+};
+
+// Deterministic backend engine services ($0 AI) excluded from AI LLM role mapping
+const BACKEND_SERVICES = new Set(["ops", "finance", "kaizen"]);
+
 function ModelsPanel({
   slug,
   s,
@@ -289,9 +306,12 @@ function ModelsPanel({
               {/* Cluster 1: Estratégia */}
               <div className="rounded-md border border-line/70 bg-ink/60 p-2 text-xs">
                 <div className="font-semibold text-slate-200 mb-1 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
+                  <span
+                    className="flex items-center gap-1 cursor-help"
+                    title="Loompas cognitivos: Master, Architect, Spec Loompa, Product Owner, Analyst"
+                  >
                     <span>🏛️</span>
-                    <span>Estratégia</span>
+                    <span>Estratégia & Produto</span>
                   </span>
                   <span className="text-[10px] text-brand/80 font-normal">Padrão: Tier 1</span>
                 </div>
@@ -342,9 +362,12 @@ function ModelsPanel({
               {/* Cluster 2: Engenharia */}
               <div className="rounded-md border border-line/70 bg-ink/60 p-2 text-xs">
                 <div className="font-semibold text-slate-200 mb-1 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
+                  <span
+                    className="flex items-center gap-1 cursor-help"
+                    title="Loompas cognitivos de código: Worker (Engenharia) e Inspector (QA Judge)"
+                  >
                     <span>⚙️</span>
-                    <span>Engenharia</span>
+                    <span>Engenharia de Código</span>
                   </span>
                   <span className="text-[10px] text-brand/80 font-normal">Padrão: Tier 2</span>
                 </div>
@@ -395,9 +418,12 @@ function ModelsPanel({
               {/* Cluster 3: Rotina */}
               <div className="rounded-md border border-line/70 bg-ink/60 p-2 text-xs">
                 <div className="font-semibold text-slate-200 mb-1 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
+                  <span
+                    className="flex items-center gap-1 cursor-help"
+                    title="Loompas de rotina e suporte: Deployer (Entrega), Storyteller, Compliance, Metrics"
+                  >
                     <span>📋</span>
-                    <span>Rotina & Pesquisa</span>
+                    <span>Rotina & Suporte</span>
                   </span>
                   <span className="text-[10px] text-emerald-400 font-normal">Padrão: Tier 3</span>
                 </div>
@@ -576,21 +602,28 @@ function ModelsPanel({
             — papéis novos usam tier2 por padrão
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-1 md:grid-cols-3">
-          {Object.entries(roles).map(([role, tier]) => (
-            <label key={role} className="flex items-center justify-between gap-2 text-xs">
-              <span>{role}</span>
-              <select
-                className={select}
-                value={tier}
-                onChange={(e) => setRoles({ ...roles, [role]: e.target.value })}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+          {Object.entries(roles)
+            .filter(([role]) => !BACKEND_SERVICES.has(role))
+            .map(([role, tier]) => (
+              <label
+                key={role}
+                className="flex items-center justify-between gap-2 text-xs bg-slate-900/40 p-1.5 rounded border border-line/40"
               >
-                {Object.keys(tiers).map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
-            </label>
-          ))}
+                <span className="truncate font-medium text-slate-200" title={role}>
+                  {ROLE_DISPLAY[role] || role}
+                </span>
+                <select
+                  className={select}
+                  value={tier}
+                  onChange={(e) => setRoles({ ...roles, [role]: e.target.value })}
+                >
+                  {Object.keys(tiers).map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
         </div>
       </div>
       <div className="text-right">
