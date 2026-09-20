@@ -183,7 +183,9 @@ class OpenCodeWorker(LoompaAgent):
             model,
             prompt,
         ]
-        res = await self._exec(argv, cwd=wt.path, timeout=cfg.opencode_timeout_s)
+        res = await self._exec(
+            argv, cwd=wt.path, timeout=cfg.opencode_timeout_s, env=self._child_env(model)
+        )
         self._record_cost(state, model, prompt, res.output)
         if res.timed_out:
             raise TimeoutError(f"opencode excedeu {cfg.opencode_timeout_s}s na tarefa T{number}")
@@ -217,14 +219,28 @@ class OpenCodeWorker(LoompaAgent):
                 return line.split(":", 1)[1].strip(), None
         return text[:300], None
 
-    async def _exec(self, argv: list[str], *, cwd: Path, timeout: int) -> _ExecResult:
+    def _child_env(self, model: str) -> dict[str, str]:
+        """OpenCode is another process and does not read Loompa's secrets files, so a key stored by
+        `loompa setup` would never reach it. It gets the one key its model needs, not the others:
+        the agent runs shell commands and should not hold keys it has no use for."""
+        provider = self.ctx.config.providers.get(model.partition("/")[0])
+        key = (
+            self.ctx.secrets.get(provider.api_key_env)
+            if provider and provider.api_key_env
+            else None
+        )
+        return {provider.api_key_env: key} if provider and key else {}
+
+    async def _exec(
+        self, argv: list[str], *, cwd: Path, timeout: int, env: dict[str, str] | None = None
+    ) -> _ExecResult:
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
                 cwd=str(cwd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "CI": "1", "NO_COLOR": "1"},
+                env={**os.environ, **(env or {}), "CI": "1", "NO_COLOR": "1"},
             )
         except (FileNotFoundError, PermissionError, OSError) as exc:
             raise RuntimeError(f"não foi possível executar `{argv[0]}`: {exc}") from exc

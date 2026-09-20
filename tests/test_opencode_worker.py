@@ -23,6 +23,11 @@ echo "changed" >> CHANGED.txt
 echo '{"text": "DONE: fake task done"}'
 """
 
+FAKE_OPENCODE_ENV = """#!/bin/sh
+echo "openrouter=${OPENROUTER_API_KEY:+set} groq=${GROQ_API_KEY:+set}" >> "$OPENCODE_LOG"
+echo '{"text": "DONE: fake task done"}'
+"""
+
 FAKE_OPENCODE_BLOCKED = """#!/bin/sh
 echo '{"text": "BLOCKED: falta uma credencial"}'
 """
@@ -192,4 +197,33 @@ async def test_opencode_agent_cannot_change_shared_history(factory: Factory):
     for denied in ("git push*", "git * merge*", "git rebase*", "git checkout*", "gh *"):
         assert bash[denied] == "deny" and keys.index(denied) > 0
     assert front["permission"]["edit"]["*"] == "deny"
+    await ctx.aclose()
+
+
+async def test_opencode_gets_the_key_of_its_model_and_no_other(
+    factory: Factory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A key saved by `loompa setup` lives in a file OpenCode never reads: it must be handed over,
+    but only the one its model needs."""
+    from loompa.config import apply_preset
+    from loompa.config.settings import store_key
+
+    apply_preset(factory.config, "openrouter")
+    factory.save()
+    store_key(factory.root, "OPENROUTER_API_KEY", "sk-or-test-key-123456", scope="hub")
+    store_key(factory.root, "GROQ_API_KEY", "gsk_test_key_123456", scope="hub")
+    ctx = make_ctx(factory)
+    bin_dir = tmp_path / "bin"
+    _install_fake_opencode(bin_dir, FAKE_OPENCODE_ENV)
+    log_file = tmp_path / "opencode.log"
+    monkeypatch.setenv("OPENCODE_LOG", str(log_file))
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    state = seed_story_with_tasks(ctx)
+    wt = ctx.worktrees.create(state.story_id, title=state.title)
+    state.worktree, state.branch = str(wt.path), wt.branch
+
+    result = await OpenCodeWorker(ctx).run(state, wt)
+
+    assert result.ok
+    assert log_file.read_text().strip() == "openrouter=set groq="
     await ctx.aclose()

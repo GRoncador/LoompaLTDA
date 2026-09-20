@@ -10,6 +10,7 @@ from rich.table import Table
 
 from loompa.cli.main import app, resolve_factory
 from loompa.config import MODEL_PRESETS, Secrets, apply_preset
+from loompa.config.services import PROVIDER_PURPOSE
 from loompa.config.settings import describe_settings, store_key
 from loompa.factory import Factory
 from loompa.llm import probe_provider, probe_tavily
@@ -72,52 +73,149 @@ def print_probe(results: list[tuple[str, bool, str]], out: Console) -> None:
         out.print(f"  {mark} {name}: {detail}")
 
 
+def probe_one(f: Factory, name: str) -> tuple[bool, str]:
+    """One connection test: (worked, pt-BR detail)."""
+    _, ok, detail = asyncio.run(_probe_all(f, [name]))[0]
+    return ok, detail
+
+
+def collect_key(
+    f: Factory,
+    *,
+    name: str,
+    label: str,
+    purpose: str,
+    env: str,
+    url: str,
+    scope: str,
+    out: Console,
+    optional: bool = False,
+    test: bool = True,
+) -> bool:
+    """Ask for one key the way a founder can follow: what it is for, where to create it (and offer
+    to open the page), a hidden prompt, and an immediate connection test. A key the provider
+    rejects is wiped and asked for again (three tries); a failure that is not the key's fault
+    (rate limit, network) keeps it. Returns whether a working key is in place."""
+    out.print(f"\n[bold]{label}[/bold]{' (opcional)' if optional else ''} — {purpose}")
+    if Secrets.load(f.root).get(env):
+        out.print(
+            f"  [green]✔[/green] chave já configurada ({Secrets.load(f.root).status(env)['source']})"
+        )
+        return True
+    if url:
+        out.print(f"  Crie a chave em {url}")
+        if typer.confirm("  Abrir a página no navegador agora?", default=not optional):
+            try:
+                typer.launch(url)
+            except Exception:  # noqa: BLE001 - no browser (ssh, container): the link is printed
+                pass
+    for _ in range(3):
+        value = typer.prompt(
+            "  Cole a chave aqui (não aparece na tela; Enter para pular)",
+            default="",
+            hide_input=True,
+            show_default=False,
+        ).strip()
+        if not value:
+            out.print("  pulado. Rode [bold]loompa setup[/bold] quando tiver a chave.")
+            return False
+        store_key(f.root, env, value, scope=scope)
+        if not test:
+            return True
+        ok, detail = probe_one(f, name)
+        if ok:
+            out.print(f"  [green]✔[/green] {detail}")
+            return True
+        if "recusada" not in detail:  # rate limit, network: the key is not what is wrong
+            out.print(f"  [yellow]![/yellow] chave guardada, mas o teste não passou: {detail}")
+            return True
+        store_key(f.root, env, None, scope=scope)
+        out.print(f"  [red]✘[/red] {detail}. Confira se copiou a chave inteira e tente de novo.")
+    out.print(
+        "  Não consegui validar a chave. Rode [bold]loompa setup[/bold] para tentar outra vez."
+    )
+    return False
+
+
+def choose_preset(out: Console) -> str | None:
+    """Numbered menu of the model presets; None keeps the current configuration."""
+    out.print("\n[bold]Modelos de IA[/bold] — escolha um conjunto pronto (dá para mudar depois):")
+    keys = list(MODEL_PRESETS)
+    for i, p in enumerate(MODEL_PRESETS.values(), 1):
+        out.print(f"  [cyan]{i}[/cyan]) {p.label} — {p.description}")
+    out.print("  [cyan]0[/cyan]) manter a configuração atual")
+    while True:
+        raw = typer.prompt("Número ou nome", default="1").strip().lower()
+        if raw in ("0", "pular", "manter"):
+            return None
+        if raw.isdigit() and 1 <= int(raw) <= len(keys):
+            return keys[int(raw) - 1]
+        if raw in MODEL_PRESETS:
+            return raw
+        out.print(f"  [red]Não entendi “{raw}”.[/red] Digite um número de 0 a {len(keys)}.")
+
+
 def setup_providers_interactive(
     f: Factory, *, preset: str | None, scope: str, out: Console, test: bool = True
 ) -> None:
-    """The "Provedores e modelos" onboarding step, shared with `loompa init`."""
+    """Models and their keys, then the optional web search: `loompa providers preset` and the
+    first two steps of `loompa setup`."""
     if preset is None:
-        out.print("\n[bold]Provedores e modelos[/bold]")
-        for key, p in MODEL_PRESETS.items():
-            out.print(f"  [cyan]{key:10}[/cyan] {p.label} — {p.description}")
-        out.print("  [cyan]{:10}[/cyan] manter a configuração atual".format("pular"))
-        preset = typer.prompt("Preset", default=next(iter(MODEL_PRESETS))).strip().lower()
+        preset = choose_preset(out)
+    wanted: list[str]
     if preset in MODEL_PRESETS:
         chosen = apply_preset(f.config, preset)
         f.save()
-        out.print(f"[green]✔[/green] preset [bold]{chosen.label}[/bold] aplicado")
+        out.print(f"[green]✔[/green] conjunto [bold]{chosen.label}[/bold] aplicado")
         wanted = [*chosen.providers, *chosen.optional_providers]
+        required = set(chosen.providers)
     else:
         wanted = sorted({c.provider for cs in f.config.models.tiers.values() for c in cs})
-    secrets = _secrets(f)
-    touched: list[str] = []
+        required = set(wanted)
+    working: list[str] = []
     for name in wanted:
         cfg = f.config.providers.get(name)
         if cfg is None or not cfg.api_key_env:
             continue
-        label = cfg.label or name
-        if secrets.get(cfg.api_key_env):
-            out.print(f"  {label}: chave já {secrets.status(cfg.api_key_env)['label']}")
-            touched.append(name)
-            continue
-        hint = f" (crie em {cfg.console_url})" if cfg.console_url else ""
-        out.print(f"  {label}{hint}")
-        value = _prompt_key(label, cfg.api_key_env)
-        if value:
-            store_key(f.root, cfg.api_key_env, value, scope=scope)
-            touched.append(name)
+        ok = collect_key(
+            f,
+            name=name,
+            label=cfg.label or name,
+            purpose=PROVIDER_PURPOSE.get(name, "modelos de IA"),
+            env=cfg.api_key_env,
+            url=cfg.console_url,
+            scope=scope,
+            out=out,
+            optional=name not in required,
+            test=test,
+        )
+        if ok:
+            working.append(name)
+    if not working:
+        out.print(
+            "\nNenhuma chave configurada: a fábrica funciona em modo simulação (--dry-run) "
+            "até você rodar [bold]loompa setup[/bold]."
+        )
+
+
+def setup_web_search_interactive(
+    f: Factory, *, scope: str, out: Console, test: bool = True
+) -> bool:
     t = f.config.tools.tavily
-    if t.enabled and t.api_key_env and not secrets.get(t.api_key_env):
-        out.print(f"  Busca web do Analyst (Tavily, opcional; crie em {t.console_url})")
-        value = _prompt_key("Tavily", t.api_key_env)
-        if value:
-            store_key(f.root, t.api_key_env, value, scope=scope)
-            touched.append("tavily")
-    if test and touched:
-        out.print("Testando conexões…")
-        print_probe(asyncio.run(_probe_all(f, touched)), out)
-    if not touched:
-        out.print("Nenhuma chave configurada: a fábrica funciona em modo simulação (--dry-run).")
+    if not t.enabled or not t.api_key_env:
+        return False
+    return collect_key(
+        f,
+        name="tavily",
+        label="Tavily (busca na web)",
+        purpose="deixa o Analyst pesquisar na internet e citar as fontes",
+        env=t.api_key_env,
+        url=t.console_url,
+        scope=scope,
+        out=out,
+        optional=True,
+        test=test,
+    )
 
 
 @providers_app.command("list")

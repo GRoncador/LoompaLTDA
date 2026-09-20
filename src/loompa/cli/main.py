@@ -132,7 +132,7 @@ def init(
         for w in a.warnings:
             console.print(f"[yellow]![/yellow] {w}")
     # Step "Provedores e modelos": presets + keys (hidden prompt) + connection test.
-    from loompa.cli.providers import setup_providers_interactive
+    from loompa.cli.setup import run_setup
     from loompa.config import MODEL_PRESETS, apply_preset
 
     if yes:
@@ -143,10 +143,10 @@ def init(
             apply_preset(f.config, preset)
             f.save()
             console.print(
-                f"[green]✔[/green] preset {preset} aplicado (chaves via loompa providers set-key)"
+                f"[green]✔[/green] preset {preset} aplicado (chaves: loompa setup)"
             )
     else:
-        setup_providers_interactive(f, preset=preset, scope=secrets_scope, out=console)
+        run_setup(f, preset=preset, scope=secrets_scope, out=console)
     console.print(f"Relatório executivo: {f.paths.onboarding_report}")
     console.print('Próximo passo: [bold]loompa meeting "metas de hoje"[/bold]')
 
@@ -246,6 +246,7 @@ try:  # extended commands (meeting/run/inbox/dashboard) registered when the engi
     from loompa.cli import models as _models  # noqa: F401
     from loompa.cli import ops as _ops  # noqa: F401
     from loompa.cli import providers as _providers  # noqa: F401
+    from loompa.cli import setup as _setup  # noqa: F401
     from loompa.cli import worker as _worker  # noqa: F401
 except ImportError:  # pragma: no cover
     pass

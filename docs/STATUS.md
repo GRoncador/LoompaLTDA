@@ -221,8 +221,14 @@ Suggested next (not implemented):
   live catalogue could show: aliases have no benchmark (rated through their target) and the cost
   tracker bills the *requested* id, so every alias has a `pricing` entry. Open trade: an alias can move
   to a new model without the inbox approval — nothing detects that yet.
-  Found while doing it: the `gratuito` preset names `deepseek/deepseek-r1:free` and
-  `deepseek/deepseek-chat-v3-0324:free`, which are gone from the OpenRouter catalogue (not changed).
+  **Later the same day:** the two dead `:free` ids are gone from the `gratuito` preset and pricing.
+  `AliasWatch` tells the founder, once per change, when an alias starts answering with another model
+  (from `response.model` and from the catalogue's `alias_target`; ADR-0011 §6). Onboarding: `loompa setup`
+  (models, keys tested as they are typed, web search, OpenCode, GitHub) and `loompa doctor` read one
+  checklist (`config/services.py`, ADR-0012); `loompa init` ends in the wizard. Fixed on the way: an
+  OpenCode subprocess never saw a key stored in the secrets file, it now gets its model's key. Checked
+  live: `doctor` against the real OpenRouter key passes. **Not verified:** OpenCode itself (not installed
+  here), and the dashboard settings screen does not show the checklist yet.
 
 ## Known gaps / next steps
 

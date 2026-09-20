@@ -20,7 +20,9 @@ Factory A         Factory B          each: .loompa/{config.yaml, constitution.md
 ```bash
 uv tool install loompa-core            # or: pip install loompa-core
 cd my-project
-loompa init                            # greenfield vs brownfield detection + calibration
+loompa init                            # greenfield vs brownfield detection + calibration, ends in `loompa setup`
+loompa setup                           # wizard: models + keys (tested as you type them), web search, OpenCode, GitHub
+loompa doctor                          # is everything still working? (exit 1 when something required is not)
 loompa meeting "Recuperação de senha; refatorar webhook de cobrança"   # goals → backlog
 loompa sprint start                    # the Product Owner admits the cards; the sprint begins
 loompa run                             # batch execution in isolated worktrees (Ctrl-C safe, resumable)
@@ -80,7 +82,9 @@ BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → T
 
 | Command | Purpose |
 | --- | --- |
-| `loompa init [path] [--stack python-fastapi\|python-cli\|node-react\|custom]` | Onboard a repo (Brownfield scanner / Greenfield initializer) |
+| `loompa init [path] [--stack python-fastapi\|python-cli\|node-react\|custom]` | Onboard a repo (Brownfield scanner / Greenfield initializer), then the setup wizard |
+| `loompa setup [--preset openrouter\|gratuito\|economico\|maximo]` | Re-runnable wizard: model preset, each key (opens the page where it is created, hides the input, tests it, asks again if it is refused), Tavily, Worker backend (built-in / OpenCode), GitHub |
+| `loompa doctor [--no-test]` | Checklist of every service the factory uses, with a connection test per key |
 | `loompa meeting "goals" [--run] [--file transcript.txt]` | Morning meeting (one chat turn) → backlog cards |
 | `loompa chat meeting\|brainstorm [text]`, `chat resume ID`, `chat list` | Conversations: Sprint Meeting with the Master, brainstorm with the Analyst; a draft of the backlog and sprint until `/sprint` or `/backlog` |
 | `loompa sprint start\|add\|status` | Sprints: the Product Owner admits the cards, the factory runs them |
