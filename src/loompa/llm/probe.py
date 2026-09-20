@@ -5,10 +5,11 @@ returns or logs the key; error text is trimmed and never includes the request.""
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 import httpx
 
@@ -23,6 +24,10 @@ class ProbeResult:
     detail: str  # pt-BR, founder-facing
     model: str = ""
     latency_ms: int = 0
+    # The technical cause behind `detail`, already redacted: an error class, a status line. It is
+    # never shown by the wizard — `loompa providers test` prints it when a founder needs to say
+    # what actually failed. `detail` alone cannot carry it and stay plain language.
+    reason: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -97,12 +102,43 @@ async def probe_provider(
     return ProbeResult(name, False, "o provedor respondeu vazio", model=model, latency_ms=ms)
 
 
+RETRY_DELAY_S = 3.0
+
+# The MCP connection failed and the REST endpoint accepted the same key, so the key is good and
+# something else is wrong. `_explain` gives an exception name and message; these substrings are a
+# best-effort reading of it, not a documented contract — whatever matches nothing keeps the
+# generic sentence, and `ProbeResult.reason` always carries the untranslated cause.
+_MCP_CAUSES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("401", "403", "unauthorized", "forbidden", "invalid api key"),
+        "o servidor de busca ainda não aceita esta chave (chave recém-criada pode levar alguns "
+        "minutos, ou o plano não inclui o servidor MCP)",
+    ),
+    (("sem resposta", "timeout", "timed out"), "o servidor de busca não respondeu a tempo"),
+    (("429", "rate limit", "too many"), "o servidor de busca está com limite de uso no momento"),
+    (
+        ("connect", "network", "dns", "nodename", "name or service", "ssl", "certificate"),
+        "não consegui chegar ao servidor de busca",
+    ),
+    (("500", "502", "503", "504", "bad gateway"), "o servidor de busca está fora do ar"),
+)
+
+
+def _mcp_cause(reason: str) -> str:
+    low = reason.lower()
+    for needles, plain in _MCP_CAUSES:
+        if any(n in low for n in needles):
+            return plain
+    return "não consegui abrir o servidor de busca"
+
+
 async def probe_tavily(
     cfg: McpServerConfig,
     *,
     secrets: Mapping[str, str] | None = None,
     client: httpx.AsyncClient | None = None,
     hub: object | None = None,
+    retry_delay_s: float = RETRY_DELAY_S,
 ) -> ProbeResult:
     """Tavily as the Analyst uses it: through its MCP server. When that fails, the REST search
     endpoint says whether the key itself is the problem or only the MCP connection."""
@@ -115,6 +151,13 @@ async def probe_tavily(
     config.tools.tavily = cfg
     mcp_hub = hub if isinstance(hub, McpHub) else McpHub(config, secrets)
     result = await probe_server(mcp_hub, "tavily")
+    if not result.ok:
+        # A key pasted seconds after it was created can already work on the REST API while the
+        # MCP gateway still refuses it. One extra try costs three seconds and spares the founder
+        # a verdict that blames the configuration for a race.
+        if retry_delay_s > 0:
+            await asyncio.sleep(retry_delay_s)
+        result = await probe_server(mcp_hub, "tavily")
     if result.ok:
         return ProbeResult(
             "tavily", True, "busca web ok (servidor MCP)", latency_ms=result.latency_ms
@@ -124,11 +167,11 @@ async def probe_tavily(
         return ProbeResult(
             "tavily",
             False,
-            "a chave é válida, mas não consegui abrir o servidor MCP de busca; "
-            "veja `tools.tavily.auth` na configuração",
+            f"a chave é válida, mas {_mcp_cause(result.reason)}",
             latency_ms=rest.latency_ms,
+            reason=result.reason,
         )
-    return rest
+    return replace(rest, reason=result.reason)
 
 
 async def _probe_tavily_rest(

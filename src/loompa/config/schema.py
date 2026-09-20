@@ -277,7 +277,10 @@ class McpServerConfig(ToolProviderConfig):
 
 TAVILY_MCP_URL = "https://mcp.tavily.com/mcp/"
 # Search and extract answer a research question; crawl/map/research burn credits on their own.
-TAVILY_MCP_ALLOW = ["*search*", "*extract*"]
+# Exact names, not globs: `*search*` also matched `tavily_research`, and a glob silently admits
+# whatever the vendor adds next. A renamed tool shows up as an empty allow list in the probe.
+TAVILY_MCP_ALLOW = ["tavily_search", "tavily_extract"]
+_TAVILY_LEAKY_ALLOW = ["*search*", "*extract*"]  # the old default, corrected on load
 TAVILY_DEFAULT_PARAMETERS = (
     '{"include_images": false, "include_raw_content": false, "max_results": 5}'
 )
@@ -304,6 +307,11 @@ class ToolsConfig(BaseModel):
         if self.tavily.transport == "http" and not self.tavily.url:
             self.tavily.url = TAVILY_MCP_URL
         if not self.tavily.allow:
+            self.tavily.allow = list(TAVILY_MCP_ALLOW)
+        elif self.tavily.allow == _TAVILY_LEAKY_ALLOW:
+            # Factories onboarded before 2026-09-20 carry the glob that also admitted
+            # `tavily_research`. Nobody chose it deliberately — it was the default — so it is
+            # corrected on load instead of leaving those factories with the expensive tool.
             self.tavily.allow = list(TAVILY_MCP_ALLOW)
         return self
 

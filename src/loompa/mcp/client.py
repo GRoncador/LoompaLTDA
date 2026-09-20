@@ -339,4 +339,6 @@ async def probe_server(hub: McpHub, name: str) -> ProbeResult:
                 latency_ms=ms,
             )
         reason = sess.unavailable.get(name, "sem detalhes")
-    return ProbeResult(name, False, f"servidor MCP indisponível: {reason}", latency_ms=ms)
+    return ProbeResult(
+        name, False, f"servidor MCP indisponível: {reason}", latency_ms=ms, reason=reason
+    )

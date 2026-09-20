@@ -182,8 +182,8 @@ def doctor(
     if test:
         keyed = [s.id for s in services if s.key_env and s.ok]
         if keyed:
-            for name, ok, detail in asyncio.run(_probe_all(f, keyed)):
-                probes[name] = (ok, detail)
+            for r in asyncio.run(_probe_all(f, keyed)):
+                probes[r.name] = (r.ok, r.detail)
     print_checklist(services, console, probes)
     failing = [
         s

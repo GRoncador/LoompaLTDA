@@ -139,11 +139,20 @@ Suggested next (not implemented):
   have been returned by a web tool in that run, the "no web search" limitation is added by code,
   the Product Owner reviews (two objective checks no reviewer can waive), follow-ups become cards
   offered on the delivery, the report is `research.md` (story drawer tab) and is indexed as a
-  precedent. `--dry-run` never opens MCP. **Not verified:** the real Tavily server (no key in the
-  build session): `Bearer` in the Authorization header is assumed (fallback: `tools.tavily.auth:
-  query`, `auth_name: tavilyApiKey`); the transports themselves are covered by tests against a
-  local server subprocess. The dashboard research tab was type-checked and built, not viewed in a
-  browser.
+  precedent. `--dry-run` never opens MCP. The dashboard research tab was type-checked and built,
+  not viewed in a browser.
+- **Tavily against the real server** (2026-09-20, ADR-0009 "Verified"): `Bearer` in the
+  Authorization header works, so the `auth: query` fallback is not needed. Two fixes came out of
+  the founder's onboarding run: (1) the default `allow` glob `*search*` also matched
+  `tavily_research` — an agentic tool that bills on its own and answers in prose instead of the
+  checkable sources the research route requires — so `allow` now names `tavily_search` and
+  `tavily_extract` exactly, and a factory onboarded with the old glob is corrected on load;
+  (2) when the MCP server failed but the REST API accepted the key, the wizard printed a fixed
+  sentence blaming `tools.tavily.auth` and threw the real cause away. `probe_tavily` now retries
+  once (a key pasted seconds after creation is often not live on the MCP gateway yet), names the
+  cause in plain pt-BR, and keeps the technical reason in `ProbeResult.reason`, which
+  `loompa providers test` prints. **Not verified:** an actual `tavily_search` call — listing tools
+  proves the connection, not that a search returns usable sources.
 - **Fase 5** done (2026-09-19, ADR-0010): a conversation is a row in a new `conversations` table
   (turns, a `Draft` of cards + sprint goal, limits the agent declared); until the founder commits, the
   stories and sprints tables are untouched. The model answers `{reply, ops, questions}` and

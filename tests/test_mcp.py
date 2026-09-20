@@ -12,6 +12,7 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from mcp.server.mcpserver import MCPServer
 
@@ -26,20 +27,31 @@ KEY = "tvly-dev-fakefakefakefakefakefake5678"
 def fake_tavily() -> MCPServer:
     srv = MCPServer("fake-tavily")
 
-    @srv.tool(name="tavily-search")
+    # The names are the ones the real server answers with (checked against mcp.tavily.com).
+    @srv.tool(name="tavily_search")
     def search(query: str, max_results: int = 5) -> str:
         """Search the web."""
         return f"1. {query}\nhttps://Example.com/a/\n2. outro https://example.org/b#frag"
 
-    @srv.tool(name="tavily-extract")
+    @srv.tool(name="tavily_extract")
     def extract(urls: str) -> str:
         """Extract page content."""
         return f"conteúdo de {urls}"
 
-    @srv.tool(name="tavily-crawl")
+    @srv.tool(name="tavily_crawl")
     def crawl(url: str) -> str:
         """Crawl a whole site (expensive)."""
         return "crawled"
+
+    @srv.tool(name="tavily_map")
+    def site_map(url: str) -> str:
+        """Map a whole site (expensive)."""
+        return "mapped"
+
+    @srv.tool(name="tavily_research")
+    def research(input: str) -> str:
+        """Agentic multi-source research: expensive, and it answers in prose of its own."""
+        return "pesquisa"
 
     @srv.tool(name="read_file")  # collides with a local tool name
     def read_file(path: str) -> str:
@@ -86,7 +98,7 @@ def test_tavily_is_the_first_mcp_server_and_old_configs_still_load():
         "https://mcp.tavily.com/mcp/",
         "bearer",
     )
-    assert tavily.roles == ["analyst"] and tavily.allow == ["*search*", "*extract*"]
+    assert tavily.roles == ["analyst"] and tavily.allow == ["tavily_search", "tavily_extract"]
     assert cfg.tools.servers() == {"tavily": tavily}
     legacy = ToolsConfig.model_validate(  # what a config.yaml written before Fase 4 carries
         {
@@ -98,6 +110,11 @@ def test_tavily_is_the_first_mcp_server_and_old_configs_still_load():
         }
     )
     assert legacy.tavily.url == "https://mcp.tavily.com/mcp/" and legacy.tavily.allow
+    # a factory onboarded before 2026-09-20 carries the glob that also admitted tavily_research
+    leaky = ToolsConfig.model_validate({"tavily": {"allow": ["*search*", "*extract*"]}})
+    assert leaky.tavily.allow == ["tavily_search", "tavily_extract"]
+    chosen = ToolsConfig.model_validate({"tavily": {"allow": ["*search*"]}})  # a real choice
+    assert chosen.tavily.allow == ["*search*"]
     extra = ToolsConfig.model_validate({"mcp": {"docs": {"transport": "stdio", "command": "npx"}}})
     assert set(extra.servers()) == {"tavily", "docs"} and extra.mcp["docs"].roles == ["analyst"]
 
@@ -112,20 +129,22 @@ def test_the_key_never_lands_in_config():
 
 
 async def test_session_lists_only_allowed_tools_with_safe_names():
-    hub = hub_with(fake_tavily(), allow=["*search*", "*extract*", "read_file", "explode", "echo*"])
+    hub = hub_with(
+        fake_tavily(), allow=["tavily_search", "tavily_extract", "read_file", "explode", "echo*"]
+    )
     async with hub.session("analyst") as web:
         assert web.available and not web.unavailable
         # crawl is filtered out by `allow`; the remote read_file is renamed so it cannot shadow
         # the local tool of the same name
         assert set(web.tools) == {
-            "tavily-search",
-            "tavily-extract",
+            "tavily_search",
+            "tavily_extract",
             "tavily_read_file",
             "explode",
             "echo_key",
         }
         assert web.tools["tavily_read_file"].remote_name == "read_file"
-        spec = next(s for s in web.specs() if s["name"] == "tavily-search")
+        spec = next(s for s in web.specs() if s["name"] == "tavily_search")
         assert (
             spec["parameters"]["type"] == "object" and "query" in spec["parameters"]["properties"]
         )
@@ -148,9 +167,9 @@ async def test_only_the_configured_roles_get_web_tools():
 async def test_search_result_is_wrapped_as_external_data():
     hub = hub_with(fake_tavily())
     async with hub.session("analyst") as web:
-        res = await web.call("tavily-search", {"query": "gateways de pagamento"})
+        res = await web.call("tavily_search", {"query": "gateways de pagamento"})
         assert res.ok and web.calls_ok == 1
-        assert res.output.startswith('<external_data source="tavily/tavily-search">')
+        assert res.output.startswith('<external_data source="tavily/tavily_search">')
         assert "gateways de pagamento" in res.output and res.output.endswith("</external_data>")
         unknown = await web.call("tavily-nope", {})
         assert not unknown.ok
@@ -191,7 +210,7 @@ async def test_a_server_that_echoes_the_key_cannot_leak_it_into_the_prompt():
 
 async def test_probe_reports_a_plain_verdict():
     ok = await probe_server(hub_with(fake_tavily()), "tavily")
-    assert ok.ok and "tavily-search" in ok.detail
+    assert ok.ok and "tavily_search" in ok.detail
     assert not (await probe_server(hub_with(fake_tavily(), secrets={}), "tavily")).ok
     assert not (await probe_server(hub_with(fake_tavily()), "nao-existe")).ok
     via = await probe_tavily(
@@ -200,6 +219,89 @@ async def test_probe_reports_a_plain_verdict():
     assert via.ok and "MCP" in via.detail
     nokey = await probe_tavily(default_config().tools.tavily, secrets={})
     assert not nokey.ok and "chave" in nokey.detail
+
+
+def broken_hub(exc: BaseException) -> McpHub:
+    async def broken(stack: AsyncExitStack, name: str, spec: McpServerConfig, key: str) -> Any:
+        raise exc
+
+    return McpHub(default_config(), {"TAVILY_API_KEY": KEY}, connector=broken)
+
+
+def rest_says(status: int) -> httpx.AsyncClient:
+    """Tavily's REST endpoint, which tells a bad key from a bad MCP connection."""
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(status, json={"results": []}))
+    )
+
+
+async def test_a_valid_key_the_mcp_server_refuses_is_not_wiped_and_the_cause_is_named():
+    # The wizard re-asks for the key only when the verdict says "recusada"; a key the REST API
+    # accepts must never produce that word, or a working key is thrown away (seen 2026-09-20,
+    # where the verdict blamed `tools.tavily.auth` for what the server had simply not accepted yet).
+    res = await probe_tavily(
+        default_config().tools.tavily,
+        secrets={"TAVILY_API_KEY": KEY},
+        hub=broken_hub(RuntimeError("Client error '401 Unauthorized' for url 'https://mcp/'")),
+        client=rest_says(200),
+        retry_delay_s=0,
+    )
+    assert not res.ok
+    assert "a chave é válida" in res.detail and "recusada" not in res.detail
+    assert "ainda não aceita" in res.detail  # the cause, not a pointer at the configuration
+    assert "401" in res.reason  # the untranslated cause survives for whoever has to debug it
+
+
+async def test_an_unreadable_mcp_failure_stays_generic_but_keeps_the_technical_reason():
+    res = await probe_tavily(
+        default_config().tools.tavily,
+        secrets={"TAVILY_API_KEY": KEY},
+        hub=broken_hub(RuntimeError("something nobody mapped")),
+        client=rest_says(200),
+        retry_delay_s=0,
+    )
+    assert not res.ok and "não consegui abrir o servidor de busca" in res.detail
+    assert "something nobody mapped" in res.reason
+
+
+async def test_a_key_the_search_service_itself_rejects_is_reported_as_refused():
+    res = await probe_tavily(
+        default_config().tools.tavily,
+        secrets={"TAVILY_API_KEY": KEY},
+        hub=broken_hub(RuntimeError("401")),
+        client=rest_says(401),
+        retry_delay_s=0,
+    )
+    assert not res.ok and "recusada" in res.detail  # this one the wizard should ask again
+
+
+async def test_the_mcp_probe_tries_again_before_reporting_a_failure():
+    # A key is often pasted into the wizard seconds after being created, while the MCP gateway
+    # still does not know it.
+    tries: list[int] = []
+    server = fake_tavily()
+
+    async def flaky(stack: AsyncExitStack, name: str, spec: McpServerConfig, key: str) -> Any:
+        tries.append(1)
+        if len(tries) == 1:
+            raise ConnectionError("not yet")
+        return server
+
+    hub = McpHub(default_config(), {"TAVILY_API_KEY": KEY}, connector=flaky)
+    res = await probe_tavily(
+        default_config().tools.tavily,
+        secrets={"TAVILY_API_KEY": KEY},
+        hub=hub,
+        retry_delay_s=0,
+    )
+    assert res.ok and len(tries) == 2
+
+
+async def test_the_default_allow_list_keeps_the_expensive_tavily_tools_out():
+    # `*search*` also matched `tavily_research`: an agentic tool that burns credits on its own
+    # and answers in prose instead of returning sources the Analyst can check (ADR-0009).
+    async with hub_with(fake_tavily()).session("analyst") as web:
+        assert set(web.tools) == {"tavily_search", "tavily_extract"}
 
 
 def test_schema_and_result_helpers():

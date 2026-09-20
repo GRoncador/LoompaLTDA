@@ -13,7 +13,7 @@ from loompa.config import MODEL_PRESETS, Secrets, apply_preset
 from loompa.config.services import PROVIDER_PURPOSE
 from loompa.config.settings import describe_settings, store_key
 from loompa.factory import Factory
-from loompa.llm import probe_provider, probe_tavily
+from loompa.llm import ProbeResult, probe_provider, probe_tavily
 
 console = Console()
 providers_app = typer.Typer(help="Provedores de IA, modelos por tier e chaves de API.")
@@ -55,28 +55,34 @@ def _prompt_key(label: str, env_name: str) -> str | None:
     return value.strip() or None
 
 
-async def _probe_all(f: Factory, names: list[str]) -> list[tuple[str, bool, str]]:
+async def _probe_all(f: Factory, names: list[str]) -> list[ProbeResult]:
     secrets = _secrets(f)
-    out: list[tuple[str, bool, str]] = []
+    out: list[ProbeResult] = []
     for name in names:
         if name == "tavily":
             r = await probe_tavily(f.config.tools.tavily, secrets=secrets)
         else:
             r = await probe_provider(f.config, name, secrets=secrets)
-        out.append((name, r.ok, r.detail + (f" · {r.model}" if r.model else "")))
+        out.append(r)
     return out
 
 
-def print_probe(results: list[tuple[str, bool, str]], out: Console) -> None:
-    for name, ok, detail in results:
-        mark = "[green]✔[/green]" if ok else "[red]✘[/red]"
-        out.print(f"  {mark} {name}: {detail}")
+def _line(r: ProbeResult) -> str:
+    return r.detail + (f" · {r.model}" if r.model else "")
+
+
+def print_probe(results: list[ProbeResult], out: Console) -> None:
+    for r in results:
+        mark = "[green]✔[/green]" if r.ok else "[red]✘[/red]"
+        out.print(f"  {mark} {r.name}: {_line(r)}")
+        if r.reason and not r.ok:  # the technical cause, for a founder reporting a failure
+            out.print(f"      [dim]detalhe técnico: {r.reason}[/dim]")
 
 
 def probe_one(f: Factory, name: str) -> tuple[bool, str]:
     """One connection test: (worked, pt-BR detail)."""
-    _, ok, detail = asyncio.run(_probe_all(f, [name]))[0]
-    return ok, detail
+    r = asyncio.run(_probe_all(f, [name]))[0]
+    return r.ok, _line(r)
 
 
 def collect_key(
@@ -284,7 +290,7 @@ def providers_test(
         return
     results = asyncio.run(_probe_all(f, names))
     print_probe(results, console)
-    if not all(ok for _, ok, _ in results):
+    if not all(r.ok for r in results):
         raise typer.Exit(code=1)
 
 

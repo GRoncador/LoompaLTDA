@@ -132,11 +132,21 @@ fails, the old REST call tells "bad key" from "MCP connection failed" and the me
 * `mcp` and its dependencies (`httpx2`, `jsonschema`, `pyjwt`, `cryptography`, …) join the install.
 * Research is a new story kind the Master decides at intake; nothing changes for features/bugs.
 
+## Verified against the real server (2026-09-20)
+
+* `Bearer` in the Authorization header is accepted by `https://mcp.tavily.com/mcp/`, as is the
+  SDK's protocol negotiation: the session lists tools in under a second. The `auth: query` +
+  `auth_name: tavilyApiKey` fallback stays in the schema but is not needed.
+* The server offers `tavily_search`, `tavily_extract`, `tavily_crawl`, `tavily_map` and
+  `tavily_research`. The default `allow` was the glob `*search*`, which also matched
+  `tavily_research` — an agentic tool that bills on its own and returns prose rather than the
+  sources this ADR requires the Analyst to cite. `allow` now names the two tools exactly, so a
+  tool added by the vendor is never admitted by accident; a renamed tool shows up as
+  "o servidor não oferece nenhuma ferramenta permitida" in `loompa providers test tavily`.
+* Calling `tavily_search` for real is still untested: listing tools proves the connection and the
+  key, not that a search returns usable sources.
+
 ## Not verified
 
-* The real Tavily server has not been exercised (no key in the build environment). The docs say
-  the key may be sent in the Authorization header but do not show the scheme; `Bearer` is assumed.
-  If it is refused, set `tools.tavily.auth: query` and `auth_name: tavilyApiKey` in `config.yaml`;
-  `loompa providers test tavily` reports the difference. The SDK's `auto` protocol negotiation
-  against that server is likewise untested.
+* Gemini's handling of MCP tool schemas beyond the two stripped keys.
 * Gemini's handling of MCP tool schemas beyond the two stripped keys.

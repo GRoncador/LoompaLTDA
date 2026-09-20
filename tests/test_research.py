@@ -65,7 +65,7 @@ def searching_analyst(final: str, prompts: list[str] | None = None):
         if prompts is not None and not tool_results(messages):
             prompts.append(messages[-1].content)
         if not tool_results(messages):
-            return [ToolCall("a1", "tavily-search", {"query": "gateways de pagamento Pix"})]
+            return [ToolCall("a1", "tavily_search", {"query": "gateways de pagamento Pix"})]
         return final
 
     return analyst
@@ -98,7 +98,7 @@ async def test_research_story_ends_in_a_report_for_the_founder(factory: Factory)
     assert state.route == ["intake", "research", "research_review"]
     assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == BlockedReason.DELIVERY
     assert not state.worktree and ctx.worktrees.list() == [] and not state.commits  # no code
-    assert "web tools available: tavily-extract, tavily-search" in prompts[0]  # told what it has
+    assert "web tools available: tavily_extract, tavily_search" in prompts[0]  # told what it has
 
     # the report keeps what was verified and drops what the model made up
     text = (factory.paths.specs / sid / "research.md").read_text(encoding="utf-8")
@@ -120,7 +120,7 @@ async def test_research_story_ends_in_a_report_for_the_founder(factory: Factory)
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
     assert "research.written" in types and "research.approved" in types
     assert any(
-        e["type"] == "tool.call" and e["payload"]["tool"] == "tavily-search"
+        e["type"] == "tool.call" and e["payload"]["tool"] == "tavily_search"
         for e in ctx.store.events_since(0, limit=10_000)
     )
 

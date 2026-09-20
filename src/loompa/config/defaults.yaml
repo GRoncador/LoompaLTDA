@@ -170,13 +170,15 @@ tools:
     base_url: https://api.tavily.com       # REST API, used only to tell a bad key from a bad connection
     console_url: https://app.tavily.com
     # The Analyst reaches Tavily through its MCP server (ADR-0009). The key travels in the
-    # Authorization header; if that is ever refused, `auth: query` + `auth_name: tavilyApiKey`
-    # sends it as a URL parameter instead.
+    # Authorization header, confirmed against the real server on 2026-09-20; if that is ever
+    # refused, `auth: query` + `auth_name: tavilyApiKey` sends it as a URL parameter instead.
     transport: http
     url: https://mcp.tavily.com/mcp/
     auth: bearer
     roles: [analyst]                       # who may call its tools
-    allow: ["*search*", "*extract*"]       # tool-name globs; crawl/map cost more and stay out
+    # Exact tool names, not globs: crawl/map/research cost more and stay out, and a glob such as
+    # `*search*` both matched `tavily_research` and would admit whatever the vendor adds next.
+    allow: ["tavily_search", "tavily_extract"]
     headers:
       DEFAULT_PARAMETERS: '{"include_images": false, "include_raw_content": false, "max_results": 5}'
   # mcp:                                   # any other MCP server takes the same fields

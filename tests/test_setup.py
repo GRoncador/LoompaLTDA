@@ -15,6 +15,7 @@ from loompa.config import Secrets, apply_preset, default_config
 from loompa.config.secrets import hub_secrets_path, read_dotenv
 from loompa.config.services import collect_services
 from loompa.factory import Factory
+from loompa.llm import ProbeResult
 
 runner = CliRunner()
 GOOD_KEY = "sk-or-good-key-1234567890"
@@ -94,7 +95,7 @@ def probes(monkeypatch: pytest.MonkeyPatch):
     async def fake_probe(f, names):
         asked.extend(names)
         return [
-            (n, ok, "tudo certo" if ok else "chave recusada pelo provedor")
+            ProbeResult(n, ok, "tudo certo" if ok else "chave recusada pelo provedor")
             for n in names
             for ok in [answers.pop(0) if answers else True]
         ]
