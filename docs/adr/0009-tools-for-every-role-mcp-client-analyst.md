@@ -143,8 +143,10 @@ fails, the old REST call tells "bad key" from "MCP connection failed" and the me
   sources this ADR requires the Analyst to cite. `allow` now names the two tools exactly, so a
   tool added by the vendor is never admitted by accident; a renamed tool shows up as
   "o servidor não oferece nenhuma ferramenta permitida" in `loompa providers test tavily`.
-* Calling `tavily_search` for real is still untested: listing tools proves the connection and the
-  key, not that a search returns usable sources.
+* A real search was exercised the same day in a brainstorm: the Analyst called `tavily_search`
+  twice and `tavily_extract` once, and the URL it cited survived the turn's citation gate, which
+  strips any link a web tool did not return in that run. `tavily_research` was never offered, so
+  the exact-name `allow` holds against the live server.
 
 ## Not verified
 

@@ -151,8 +151,9 @@ Suggested next (not implemented):
   sentence blaming `tools.tavily.auth` and threw the real cause away. `probe_tavily` now retries
   once (a key pasted seconds after creation is often not live on the MCP gateway yet), names the
   cause in plain pt-BR, and keeps the technical reason in `ProbeResult.reason`, which
-  `loompa providers test` prints. **Not verified:** an actual `tavily_search` call — listing tools
-  proves the connection, not that a search returns usable sources.
+  `loompa providers test` prints. A real search followed once the install was fixed (below): a
+  brainstorm called `tavily_search` twice and `tavily_extract` once, cited a source that survived
+  the citation gate, and was never offered `tavily_research`.
 - **The install, not the key, was breaking web search** (2026-09-20, found from a brainstorm that
   declared "a busca na web não estava disponível"). The founder's `loompa` is a `uv tool install
   --editable` whose *source* is the repo but whose *dependencies* are frozen from before Fase 4,
