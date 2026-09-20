@@ -203,7 +203,7 @@ Suggested next (not implemented):
   there is a token budget, not an effort label). `ask_json`/`ask_json_with_tools` now log the reply,
   `finish_reason` and output tokens when the answer is not JSON — that log is what identified this.
   Live: **OpenRouter 4/4 on both tiers**, full suite green.
-- Next: Fase 6 (technical backlog: CodeRabbit webhook, cron/launchd recipe, dashboard priority drag,
+- Next: Fase 6 (technical backlog: CodeRabbit webhook, dashboard priority drag,
   story diff, cost charts, token suggestions 1-3, PyPI).
 - **`loompa models sync` built (2026-09-20, ADR-0011), the first item of Fase 6.** Ranking rules were
   decided against the real catalogue (447 models, 85 pass the filters), not in the abstract: no
@@ -229,6 +229,14 @@ Suggested next (not implemented):
   OpenCode subprocess never saw a key stored in the secrets file, it now gets its model's key. Checked
   live: `doctor` against the real OpenRouter key passes. **Not verified:** OpenCode itself (not installed
   here), and the dashboard settings screen does not show the checklist yet.
+  **Then:** the Gemini 2.5 ids (`gemini-2.5-flash`/`-pro`, leaving the catalogue on 2026-10-20) are replaced
+  by `gemini-3.8-flash` in the default tiers and in `gratuito`/`economico`/`maximo`. Verified only against
+  OpenRouter's catalogue, whose ids mirror Google's own (`gemini-3.5-flash-lite` is the same in both and
+  passed live); **a Gemini key is needed to confirm the direct id and that it is on the free tier.** The
+  `gemini-3.5-flash-lite` price was 3x/6x too low (copied from 2.5) and is now the catalogue's.
+  `loompa schedule` (`scheduling.py`) prints the recipe for the nightly `loompa run` and the **monthly**
+  `loompa models sync`, as launchd agents (`--write DIR` writes them; checked with `plutil -lint`, not
+  loaded) or crontab lines. Nothing switches itself on.
 
 ## Known gaps / next steps
 
@@ -240,7 +248,6 @@ Suggested next (not implemented):
   the standard. Its `.opencode/agents/*.md` permission schema hasn't been run against a real
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
 - CodeRabbit webhook mode; PR review comments feeding back into the Worker.
-- Nightly cycle scheduler (`loompa run --watch` exists; a cron/launchd recipe is not shipped).
 - Dashboard: drag-and-drop priority, story diff viewer, finance charts.
 - Packaging: publish to PyPI; `uvx loompa` verified locally via `uv run loompa` only.
 - The full test suite intermittently hangs after reaching 100% on some machines (a thread-join flake at

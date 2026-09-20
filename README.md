@@ -84,6 +84,7 @@ BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → T
 | --- | --- |
 | `loompa init [path] [--stack python-fastapi\|python-cli\|node-react\|custom]` | Onboard a repo (Brownfield scanner / Greenfield initializer), then the setup wizard |
 | `loompa setup [--preset openrouter\|gratuito\|economico\|maximo]` | Re-runnable wizard: model preset, each key (opens the page where it is created, hides the input, tests it, asks again if it is refused), Tavily, Worker backend (built-in / OpenCode), GitHub |
+| `loompa schedule [--for launchd\|cron] [--write DIR]` | Prints (or writes) the recipe that runs `loompa run` every night and `loompa models sync` every month; nothing is switched on for you |
 | `loompa doctor [--no-test]` | Checklist of every service the factory uses, with a connection test per key |
 | `loompa meeting "goals" [--run] [--file transcript.txt]` | Morning meeting (one chat turn) → backlog cards |
 | `loompa chat meeting\|brainstorm [text]`, `chat resume ID`, `chat list` | Conversations: Sprint Meeting with the Master, brainstorm with the Analyst; a draft of the backlog and sprint until `/sprint` or `/backlog` |

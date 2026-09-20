@@ -71,8 +71,10 @@ A newer proposal withdraws (archives) the one still waiting. Nothing changes unt
 * The proposal carries the tiers it was made from. If they differ at apply time, nothing is
   written and the founder is told to ask for a new proposal.
 
-The command is on demand. Running it weekly is a cron/launchd line (the recipe belongs to Fase 6);
-it is idempotent, and posts nothing when the current list is already the answer.
+The command is on demand, and `loompa schedule` prints the cron/launchd recipe that runs it every
+month (`--sync-day`, default the 1st at 09:00). Monthly, not weekly: a swap disturbs tuned prompts and a
+person approves each proposal anyway. It is idempotent, and posts nothing when the current list is
+already the answer.
 
 ### 6. `-latest` aliases (addendum, 2026-09-20)
 
@@ -104,7 +106,7 @@ per change ("O modelo por trás de um apelido mudou": before, now, which tiers u
 about a move from two places, which share one memory (`alias_seen:<alias>` in `kv`) so a move is told
 once: the model that answers (`response.model`, through the router's `on_call` hook) and the
 catalogue's `alias_target` (`loompa models sync` checks it even when the list is unchanged, so a
-weekly cron run announces a move before a call would). The first sight is a baseline, not news; the
+monthly scheduled run announces a move before a call would). The first sight is a baseline, not news; the
 free router rotates by design and concrete ids are not aliases, so both are ignored. It only tells:
 the swap has already happened by then.
 
