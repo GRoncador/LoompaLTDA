@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from datetime import date
+from typing import Any
 
 import httpx
 
@@ -20,6 +21,7 @@ from loompa.config.schema import LoompaConfig
 from loompa.engine.context import EngineContext
 from loompa.engine.state import TERMINAL, Stage
 from loompa.llm.catalog import (
+    PROVIDER,
     REASONS,
     Policy,
     Proposal,
@@ -32,6 +34,7 @@ from loompa.sprints import SprintBoard, SprintStatus
 SENDER = "Ops Loompa"
 PREFIX = "models_sync:"  # kv: `models_sync:<message id>` holds the proposal that message asks about
 DEFERRED = PREFIX + "deferred"  # kv: id of an approved proposal waiting for the sprint to end
+ALIAS_SEEN = "alias_seen:"  # kv: `alias_seen:<alias>` = the model that last answered for it
 TIER_LABEL = {"tier1": "Raciocínio (Master, Architect)", "tier2": "Execução (Worker e demais)"}
 
 
@@ -180,3 +183,55 @@ def excluded_report(proposal: Proposal) -> list[tuple[str, int]]:
         (REASONS.get(reason, reason), n)
         for reason, n in sorted(proposal.excluded.items(), key=lambda kv: -kv[1])
     ]
+
+
+class AliasWatch:
+    """Tells the founder when a `~vendor/model-latest` alias starts answering with another model.
+
+    An alias follows the vendor's newest version, so the swap ADR-0011 §5 wants approved happens
+    without one. The provider hands back the model that answered (`response.model`); the first one
+    seen is remembered silently and every later change becomes one inbox note."""
+
+    def __init__(self, ctx: EngineContext):
+        self.ctx = ctx
+
+    def observe(self, role: str, agent: str, routed: Any) -> None:
+        alias, served = routed.candidate.model, routed.response.model
+        if routed.candidate.provider != PROVIDER or not alias.startswith("~"):
+            return
+        if not served or served == alias:  # a provider that does not say who answered
+            return
+        seen = self.ctx.store.get(ALIAS_SEEN + alias)
+        if seen == served:
+            return
+        self.ctx.store.set(ALIAS_SEEN + alias, served)
+        if seen:  # the first answer is the baseline, not news
+            self._tell(alias, seen, served)
+
+    def _tell(self, alias: str, before: str, now: str) -> None:
+        tiers = [
+            TIER_LABEL.get(tier, tier)
+            for tier, cands in self.ctx.config.models.tiers.items()
+            if any(c.provider == PROVIDER and c.model == alias for c in cands)
+        ]
+        self.ctx.emit("models.alias.moved", alias=alias, before=before, now=now)
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                kind=MessageKind.INFO,
+                sender=SENDER,
+                title="O modelo por trás de um apelido mudou",
+                context=(
+                    f"O apelido {alias}"
+                    + (f", usado em {' e '.join(tiers)}," if tiers else "")
+                    + f" agora responde com {now}; antes era {before}. "
+                    "A fábrica já está usando o modelo novo."
+                ),
+                impact=(
+                    "Cada modelo responde de um jeito e cobra um preço, e os textos dos agentes "
+                    "foram ajustados para o anterior. Se algo piorar, avise. A próxima comparação "
+                    "de modelos atualiza os preços."
+                ),
+                allow_free_text=False,
+            )
+        )

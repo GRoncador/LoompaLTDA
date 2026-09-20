@@ -54,21 +54,19 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
     "gratuito": ModelPreset(
         key="gratuito",
         label="Gratuito",
-        description="Gemini 2.5 Flash-Lite e Flash no plano gratuito, com Groq e OpenRouter como reserva. Custo zero, limites de uso por minuto.",
+        description="Gemini no plano gratuito, com Groq como reserva. Custo zero, limites de uso por minuto.",
         tiers={
             "tier1": [
                 _c("gemini", "gemini-2.5-flash"),
                 _c("groq", "llama-3.3-70b-versatile"),
-                _c("openrouter", "deepseek/deepseek-r1:free"),
             ],
             "tier2": [
                 _c("gemini", "gemini-3.5-flash-lite"),
                 _c("groq", "llama-3.1-8b-instant"),
-                _c("openrouter", "deepseek/deepseek-chat-v3-0324:free"),
             ],
         },
         providers=("gemini",),
-        optional_providers=("groq", "openrouter"),
+        optional_providers=("groq",),
     ),
     "economico": ModelPreset(
         key="economico",

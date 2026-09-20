@@ -16,6 +16,7 @@ from loompa.config import apply_preset, default_config
 from loompa.config.schema import ModelCandidate
 from loompa.engine import Scheduler, Stage
 from loompa.factory import Factory
+from loompa.llm import LLMResponse, Message
 from loompa.llm.catalog import (
     CatalogError,
     Policy,
@@ -194,8 +195,17 @@ def test_a_mandatory_reasoning_model_stays_when_its_effort_can_be_lowered():
 
 def test_proposal_takes_the_openrouter_slot_keeps_other_providers_and_prices_the_new_models():
     config = default_config()
-    apply_preset(config, "gratuito")  # gemini, groq and openrouter :free, in that order
-    config.models.tiers["tier2"][2].model = "d/free:free"
+    config.models.tiers = {  # a mixed factory: gemini and groq first, OpenRouter's free model last
+        "tier1": [
+            ModelCandidate(provider="gemini", model="gemini-2.5-flash"),
+            ModelCandidate(provider="openrouter", model="x/old:free"),  # left the catalogue
+        ],
+        "tier2": [
+            ModelCandidate(provider="gemini", model="gemini-3.5-flash-lite"),
+            ModelCandidate(provider="groq", model="llama-3.1-8b-instant"),
+            ModelCandidate(provider="openrouter", model="d/free:free"),
+        ],
+    }
     proposal = build_proposal(
         config, parse_catalog({"data": [*CATALOG, entry("d/free:free", 0, 0)]}), POLICY, TODAY
     )
@@ -209,7 +219,7 @@ def test_proposal_takes_the_openrouter_slot_keeps_other_providers_and_prices_the
     ]
     assert proposal.pricing["b/strong"] == {"input": 2.0, "output": 6.0, "cached_input": 0.5}
     assert "d/free:free" not in proposal.pricing  # free needs no price
-    assert proposal.gone == ["deepseek/deepseek-r1:free"]  # in the preset, gone from the catalogue
+    assert proposal.gone == ["x/old:free"]  # in use, gone from the catalogue: reported
 
 
 def test_a_free_model_that_left_the_catalogue_is_dropped_and_reported():
@@ -516,3 +526,78 @@ def test_the_openrouter_preset_uses_priced_aliases_that_survive_the_config_file(
         c.model for c in config.models.tiers["tier1"]
     ]
     assert reloaded.price_for("~z-ai/glm-latest") == config.price_for("~z-ai/glm-latest")
+
+
+# ------------------------------------------------------------------------- an alias that moves
+
+
+def alias_ctx(factory: Factory, model: str, served: list[str]):
+    """A context whose models are `model` on both tiers, answered by whichever model `served[0]`
+    names: what OpenRouter reports as `response.model` for an alias."""
+    candidate = ModelCandidate(provider="openrouter", model=model)
+    factory.config.models.tiers = {"tier1": [candidate], "tier2": [candidate]}
+
+    def script(requested, messages, tools):
+        return LLMResponse(
+            content="ok",
+            tool_calls=[],
+            model=served[0],
+            provider="openrouter",
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    return make_ctx(factory, script)
+
+
+async def ask(ctx) -> None:
+    await ctx.router.complete("worker", [Message("user", "oi")], tier_override="tier2")
+
+
+def moved_notes(ctx) -> list:
+    return [m for m in ctx.store.list_messages(ctx.slug) if "apelido" in m.title]
+
+
+async def test_the_founder_is_told_once_when_an_alias_starts_answering_with_another_model(
+    factory: Factory,
+):
+    served = ["z-ai/glm-5.3"]
+    ctx = alias_ctx(factory, "~z-ai/glm-latest", served)
+    await ask(ctx)
+    await ask(ctx)
+    assert moved_notes(ctx) == []  # the first answer is the baseline, the same one is not news
+    served[0] = "z-ai/glm-5.4"
+    await ask(ctx)
+    await ask(ctx)  # the same new model again: already told
+    (note,) = moved_notes(ctx)
+    assert "~z-ai/glm-latest" in note.context and "z-ai/glm-5.4" in note.context
+    assert "z-ai/glm-5.3" in note.context and "Raciocínio" in note.context
+    assert note.executive_audit() == [] and not note.requires_action
+    served[0] = "z-ai/glm-6"
+    await ask(ctx)
+    assert len(moved_notes(ctx)) == 2  # every later move is told
+    events = [e for e in ctx.store.events_since(0, limit=500) if e["type"] == "models.alias.moved"]
+    assert [e["payload"]["now"] for e in events] == ["z-ai/glm-5.4", "z-ai/glm-6"]
+
+
+async def test_a_concrete_id_and_the_free_router_never_raise_the_notice(factory: Factory):
+    for model, served in (("z-ai/glm-5.3", "z-ai/glm-5.3-0901"), ("openrouter/free", "a/free-1")):
+        answers = [served]
+        ctx = alias_ctx(factory, model, answers)
+        await ask(ctx)
+        answers[0] = "b/free-2"  # the free router rotates by design; a pinned id is not an alias
+        await ask(ctx)
+        assert moved_notes(ctx) == []
+
+
+async def test_a_failing_watch_does_not_cost_the_call_that_answered(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    from loompa.models_sync import AliasWatch
+
+    def boom(self, role, agent, routed):
+        raise RuntimeError("store unavailable")
+
+    monkeypatch.setattr(AliasWatch, "observe", boom)
+    ctx = alias_ctx(factory, "~z-ai/glm-latest", ["z-ai/glm-5.3"])
+    await ask(ctx)  # still answers

@@ -146,8 +146,6 @@ pricing:
   claude-haiku-4-5:         { input: 1.00, output: 5.00, cached_input: 0.10 }
   llama-3.3-70b-versatile:  { input: 0.59, output: 0.79, cached_input: 0.59 }
   llama-3.1-8b-instant:     { input: 0.05, output: 0.08, cached_input: 0.05 }
-  deepseek/deepseek-r1:free: { input: 0.0, output: 0.0, cached_input: 0.0 }
-  deepseek/deepseek-chat-v3-0324:free: { input: 0.0, output: 0.0, cached_input: 0.0 }
   # OpenRouter preset. Values read from https://openrouter.ai/api/v1/models on 2026-09-19;
   # `loompa providers` shows what is in use, and OpenRouter bills what its own page says.
   z-ai/glm-5.3:             { input: 0.91, output: 2.86, cached_input: 0.169 }

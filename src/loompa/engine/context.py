@@ -110,6 +110,7 @@ class EngineContext:
         return self.secrets
 
     def _on_llm_call(self, role: str, agent: str, routed: Any) -> None:
+        self._watch_aliases(role, agent, routed)
         self.emit(
             "llm.call",
             agent=agent,
@@ -120,6 +121,14 @@ class EngineContext:
             input_tokens=routed.response.input_tokens,
             output_tokens=routed.response.output_tokens,
         )
+
+    def _watch_aliases(self, role: str, agent: str, routed: Any) -> None:
+        from loompa.models_sync import AliasWatch
+
+        try:
+            AliasWatch(self).observe(role, agent, routed)
+        except Exception:  # noqa: BLE001 - a notice must never cost the call that already answered
+            log.exception("could not check whether a model alias moved")
 
     # ----------------------------------------------------------------- events
     def emit(
