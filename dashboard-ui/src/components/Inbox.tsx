@@ -28,7 +28,7 @@ export default function Inbox(props: {
       <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3">
         {finance && (
           <div className="flex items-center justify-between rounded-md border border-line bg-ink/60 px-3 py-2 text-xs">
-            <span>💰 Gasto hoje: <b>US$ {finance.today_usd.toFixed(2)}</b> · mês: US$ {finance.month_usd.toFixed(2)} de {finance.cap_usd.toFixed(0)}</span>
+            <span>💰 Gasto hoje: <b>US$ {finance.today_usd.toFixed(2)}</b> · {finance.period === "weekly" ? "semana" : "mês"}: US$ {finance.period_usd.toFixed(2)} de {finance.cap_usd.toFixed(2)}</span>
             <span>💡 {kaizen} melhorias catalogadas hoje</span>
           </div>
         )}

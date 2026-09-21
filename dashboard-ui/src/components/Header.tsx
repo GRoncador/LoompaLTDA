@@ -27,7 +27,7 @@ export default function Header(props: {
           {overview.factory.dry_run && <span className="chip bg-amber-900/60 text-amber-200">simulação</span>}
           {fin && (
             <span className={`text-sm ${fin.warn ? "text-amber-300" : "text-slate-300"}`} title="Custo hoje / mês / teto">
-              💰 US$ {fin.today_usd.toFixed(2)} hoje · {fin.month_usd.toFixed(2)}/{fin.cap_usd.toFixed(0)}
+              💰 US$ {fin.today_usd.toFixed(2)} hoje · {fin.period_usd.toFixed(2)}/{fin.cap_usd.toFixed(2)} {fin.period === "weekly" ? "na semana" : "no mês"}
             </span>
           )}
           <span className="text-sm" title="Decisões aguardando você">📬 {pending}</span>

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { Candidate, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, Settings, SettingsPatch } from "../types";
+import type { BudgetPeriod, Candidate, ClusterName, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
 import { Modal } from "./Modal";
-import { ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
+import { PROVIDER_NAMES, ProviderBadge, ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
 
 const input = "w-full rounded-md border border-line bg-ink px-2 py-1 text-sm";
 const select = "rounded-md border border-line bg-ink px-2 py-1 text-sm";
@@ -50,12 +50,12 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
   const [scope, setScope] = useState<"hub" | "factory">("hub");
   const [probe, setProbe] = useState<Record<string, ProbeResult | "…">>({});
   const [tavilyKey, setTavilyKey] = useState("");
-  const used = new Set(Object.values(s.tiers).flat().map((c) => c.provider));
+  const used = new Set(Object.values(s.matrix ?? {}).flatMap((t) => Object.values(t).flat()).map((c) => c.provider));
   const providers = onlyNeeded ? s.providers.filter((p) => used.has(p.name)) : s.providers;
 
   const test = async (name: string) => {
     setProbe((p) => ({ ...p, [name]: "…" }));
-    try { setProbe((p) => ({ ...p, [name]: undefined as any })); const r = await api.testProvider(slug, name); setProbe((p) => ({ ...p, [name]: r })); }
+    try { const r = await api.testProvider(slug, name); setProbe((p) => ({ ...p, [name]: r })); }
     catch (e) { setProbe((p) => ({ ...p, [name]: { name, ok: false, detail: String(e), model: "", latency_ms: 0 } })); }
   };
   const saveKeys = async () => {
@@ -65,71 +65,123 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
     await onSave(patch);
     setKeys({}); setTavilyKey("");
   };
-  const dirty = Object.values(keys).some((v) => v.trim()) || tavilyKey.trim();
+  const dirty = Object.values(keys).some((v) => v.trim()) || Boolean(tavilyKey.trim());
+
+  /** One row of the list. Tavily is the same shape with a different subtitle: it is a search API,
+   * not a model provider, and saying so in place is clearer than a footnote. */
+  const row = (opts: {
+    name: string; label: string; note: string; recommended?: boolean;
+    configured: boolean; keyLabel: string; source: string | null; env: string;
+    consoleUrl: string; modelsUrl?: string; needsKey: boolean;
+    value: string; onChange: (v: string) => void; onClear?: () => void;
+  }) => {
+    const r = probe[opts.name];
+    return (
+      <div key={opts.name} className="grid grid-cols-1 gap-2 border-t border-line/60 py-2.5 md:grid-cols-[minmax(190px,1.1fr)_minmax(150px,1fr)_minmax(190px,1.2fr)_auto] md:items-center">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 font-medium text-slate-200">
+            <ProviderBadge provider={opts.name} className="h-4 w-4" />
+            {opts.recommended && (
+              <span className="rounded border border-brand/40 bg-brand/15 px-1.5 py-0 text-[10px] font-semibold text-brand">recomendado</span>
+            )}
+          </div>
+          <div className="mt-0.5 text-[11px] text-slate-500">{opts.note}</div>
+          <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px]">
+            {opts.consoleUrl && <a className="text-brand hover:underline" href={opts.consoleUrl} target="_blank" rel="noreferrer">criar chave ↗</a>}
+            {opts.modelsUrl && <a className="text-slate-400 hover:text-brand hover:underline" href={opts.modelsUrl} target="_blank" rel="noreferrer">modelos disponíveis ↗</a>}
+          </div>
+        </div>
+
+        <div className="min-w-0 text-xs">
+          <span className={opts.configured ? "text-emerald-300" : "text-amber-300"}>{opts.keyLabel}</span>
+          {opts.source && <span className="ml-1 text-slate-500">({opts.source})</span>}
+          {r === "…" && <div className="text-slate-400">testando…</div>}
+          {r && r !== "…" && (
+            <div className={r.ok ? "text-emerald-300" : "text-red-300"}>
+              {r.ok ? "✔" : "✘"} {r.detail}{r.latency_ms ? ` · ${r.latency_ms} ms` : ""}
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0">
+          {opts.needsKey
+            ? <input type="password" autoComplete="off" placeholder={opts.env} className={input} value={opts.value} onChange={(e) => opts.onChange(e.target.value)} />
+            : <span className="text-xs text-slate-500">não precisa de chave</span>}
+        </div>
+
+        <div className="flex items-center gap-1 md:justify-end">
+          <button className="btn-ghost whitespace-nowrap text-xs" onClick={() => test(opts.name)} disabled={opts.needsKey && !opts.configured}>Testar</button>
+          {opts.configured && opts.needsKey && opts.onClear && (
+            <button className="btn-ghost px-2 text-xs text-rose-300 hover:text-rose-200" title="remover chave" onClick={opts.onClear}>✕</button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-slate-400">Preset:</span>
-        {s.presets.map((p) => (
-          <button key={p.key} className={s.preset === p.key ? "btn-primary" : "btn-ghost"} title={p.description} onClick={() => onSave({ preset: p.key })}>{p.label}</button>
-        ))}
-        <span className="text-xs text-slate-500">{s.presets.find((p) => p.key === s.preset)?.description ?? "escolha um preset ou edite os tiers na aba Modelos"}</span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-slate-400">
+          Uma chave da OpenRouter já alcança todos os modelos. As outras são opcionais — use a de quem você já tem conta.
+        </p>
+        <label className="flex items-center gap-2 text-xs text-slate-400">Guardar novas chaves em
+          <select className={select} value={scope} onChange={(e) => setScope(e.target.value as "hub" | "factory")}>
+            <option value="hub">hub (todas as fábricas)</option>
+            <option value="factory">só esta fábrica</option>
+          </select>
+        </label>
       </div>
-      <label className="flex items-center gap-2 text-xs text-slate-400">Guardar novas chaves em
-        <select className={select} value={scope} onChange={(e) => setScope(e.target.value as any)}>
-          <option value="hub">hub (todas as fábricas)</option>
-          <option value="factory">só esta fábrica</option>
-        </select>
-      </label>
-      <table className="w-full text-xs">
-        <thead className="text-slate-500"><tr><th className="text-left">provedor</th><th className="text-left">chave</th><th className="text-left">nova chave</th><th></th></tr></thead>
-        <tbody>
-          {providers.map((p) => {
-            const r = probe[p.name];
-            return (
-              <tr key={p.name} className="border-t border-line/60 align-top">
-                <td className="py-1.5 pr-2">
-                  <div className="font-medium text-slate-200">{p.label}{used.has(p.name) && <span className="ml-1 text-brand" title="usado nos tiers">●</span>}</div>
-                  <div className="text-slate-500">{p.used_by.join(", ") || "não usado nos tiers"}</div>
-                  {p.console_url && <a className="text-brand hover:underline" href={p.console_url} target="_blank" rel="noreferrer">criar chave ↗</a>}
-                </td>
-                <td className="py-1.5 pr-2">
-                  <span className={p.key.configured ? "text-emerald-300" : "text-amber-300"}>{p.key.label}</span>
-                  {p.key.source && <span className="ml-1 text-slate-500">({p.key.source})</span>}
-                  {r && r !== "…" && <div className={r.ok ? "text-emerald-300" : "text-red-300"}>{r.ok ? "✔" : "✘"} {r.detail}{r.latency_ms ? ` · ${r.latency_ms} ms` : ""}</div>}
-                  {r === "…" && <div className="text-slate-400">testando…</div>}
-                </td>
-                <td className="py-1.5 pr-2">
-                  {p.needs_key ? <input type="password" autoComplete="off" placeholder={p.api_key_env} className={input} value={keys[p.name] ?? ""} onChange={(e) => setKeys({ ...keys, [p.name]: e.target.value })} /> : <span className="text-slate-500">sem chave</span>}
-                </td>
-                <td className="py-1.5 text-right whitespace-nowrap">
-                  <button className="btn-ghost" onClick={() => test(p.name)} disabled={p.needs_key && !p.key.configured}>Testar</button>
-                  {p.key.configured && p.needs_key && <button className="btn-ghost ml-1" title="remover chave" onClick={() => onSave({ providers: { [p.name]: { clear_key: true } } })}>✕</button>}
-                </td>
-              </tr>
-            );
-          })}
-          <tr className="border-t border-line/60 align-top">
-            <td className="py-1.5 pr-2">
-              <div className="font-medium text-slate-200">Tavily (busca web do Analyst)</div>
-              <a className="text-brand hover:underline" href={s.tools.tavily.console_url} target="_blank" rel="noreferrer">criar chave ↗</a>
-            </td>
-            <td className="py-1.5 pr-2">
-              <span className={s.tools.tavily.key.configured ? "text-emerald-300" : "text-amber-300"}>{s.tools.tavily.key.label}</span>
-              {probe.tavily && probe.tavily !== "…" && <div className={probe.tavily.ok ? "text-emerald-300" : "text-red-300"}>{probe.tavily.ok ? "✔" : "✘"} {probe.tavily.detail}</div>}
-            </td>
-            <td className="py-1.5 pr-2"><input type="password" autoComplete="off" placeholder={s.tools.tavily.api_key_env} className={input} value={tavilyKey} onChange={(e) => setTavilyKey(e.target.value)} /></td>
-            <td className="py-1.5 text-right whitespace-nowrap">
-              <button className="btn-ghost" onClick={() => test("tavily")} disabled={!s.tools.tavily.key.configured}>Testar</button>
-              {s.tools.tavily.key.configured && <button className="btn-ghost ml-1" onClick={() => onSave({ tools: { tavily: { clear_key: true } } })}>✕</button>}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+
+      <div className="rounded-lg border border-line bg-slate-900/40 px-3 pb-2">
+        {providers.map((p) =>
+          row({
+            name: p.name,
+            label: p.label,
+            note: PROVIDER_NOTE[p.name] ?? "modelos de IA",
+            recommended: p.recommended,
+            configured: p.key.configured,
+            keyLabel: p.key.label,
+            source: p.key.source,
+            env: p.api_key_env,
+            consoleUrl: p.console_url,
+            modelsUrl: p.models_url,
+            needsKey: p.needs_key,
+            value: keys[p.name] ?? "",
+            onChange: (v) => setKeys({ ...keys, [p.name]: v }),
+            onClear: () => onSave({ providers: { [p.name]: { clear_key: true } } }),
+          })
+        )}
+        {!onlyNeeded && row({
+          name: "tavily",
+          label: "Tavily",
+          note: "API de pesquisa na web — não é provedor de modelos",
+          configured: s.tools.tavily.key.configured,
+          keyLabel: s.tools.tavily.key.label,
+          source: s.tools.tavily.key.source,
+          env: s.tools.tavily.api_key_env,
+          consoleUrl: s.tools.tavily.console_url,
+          needsKey: true,
+          value: tavilyKey,
+          onChange: setTavilyKey,
+          onClear: () => onSave({ tools: { tavily: { clear_key: true } } }),
+        })}
+      </div>
+
       <div className="text-right"><button className="btn-primary" disabled={!dirty} onClick={saveKeys}>Guardar chaves</button></div>
     </div>
   );
 }
+
+const PROVIDER_NOTE: Record<string, string> = {
+  openrouter: "uma chave para todos os modelos, com teto de gastos no painel deles",
+  gemini: "modelos Gemini, do Google",
+  anthropic: "modelos Claude, da Anthropic",
+  openai: "modelos GPT, da OpenAI",
+  xai: "modelos Grok, da xAI",
+  deepseek: "modelos DeepSeek",
+  ollama: "modelos rodando na sua própria máquina",
+};
 
 // ------------------------------------------------------------------- tiers + roles
 
@@ -150,251 +202,12 @@ const ROLE_DISPLAY: Record<string, string> = {
 // Deterministic backend engine services ($0 AI) excluded from AI LLM role mapping
 const BACKEND_SERVICES = new Set(["ops", "finance", "kaizen"]);
 
-function renderModelCard(
-  m: ModelPick,
-  tierTarget: string,
-  tier1Ceiling: number,
-  onSelect: (id: string) => void,
-  onClose: () => void
-) {
-  const isOverCeiling = tierTarget === "tier1" && m.price > tier1Ceiling;
-  return (
-    <div
-      key={m.id}
-      className={`flex items-center justify-between gap-2 rounded-md border p-2 text-xs transition-all ${
-        isOverCeiling
-          ? "border-amber-900/50 bg-amber-950/20 hover:border-amber-700/60"
-          : "border-line/70 bg-slate-800/40 hover:border-brand/60 hover:bg-slate-800/80"
-      }`}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <ProviderIcon provider={m.vendor || m.id} model={m.id} className="w-4 h-4 flex-shrink-0" />
-        <div className="min-w-0">
-          <div className="font-semibold text-slate-200 truncate flex items-center gap-1.5">
-            <span className="truncate" title={m.name}>{cleanModelName(m.name)}</span>
-            {isOverCeiling && (
-              <span
-                className="text-[10px] text-amber-300 bg-amber-950/90 px-1.5 py-0.2 rounded border border-amber-800/70 font-mono"
-                title={`Preço ($${m.price.toFixed(2)}) excede o teto configurado para Tier 1 ($${tier1Ceiling.toFixed(2)})`}
-              >
-                ⚠️ &gt; teto (${tier1Ceiling.toFixed(2)})
-              </span>
-            )}
-          </div>
-          <div className="text-[11px] font-mono text-slate-400 truncate">{m.id}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
-            {m.coding != null && (
-              <span>
-                Cod: <strong className="text-slate-300">{m.coding}</strong>
-              </span>
-            )}
-            {m.agentic != null && (
-              <span>
-                Agt: <strong className="text-slate-300">{m.agentic}</strong>
-              </span>
-            )}
-            {m.intelligence != null && (
-              <span>
-                Int: <strong className="text-slate-300">{m.intelligence}</strong>
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2.5 flex-shrink-0 text-right">
-        <div>
-          <div className="flex items-center justify-end gap-1.5">
-            <span className="font-bold text-amber-300 text-sm">
-              ★ {m.score ?? m.quality}
-            </span>
-            {(() => {
-              const cb = m.cost_benefit ?? (m.price > 0 && (m.score ?? m.quality) ? Math.round(((m.score ?? m.quality) / m.price) * 10) / 10 : null);
-              return cb != null ? (
-                <span
-                  className="text-[10px] text-cyan-300 bg-cyan-950/70 px-1.5 py-0.5 rounded border border-cyan-800/60 font-mono font-medium"
-                  title={`Custo-Benefício: ${cb} pontos de benchmark por US$ 1M tokens`}
-                >
-                  {cb} pts/$
-                </span>
-              ) : null;
-            })()}
-          </div>
-          <div className="text-[11px] font-mono text-slate-300">
-            {m.price === 0 ? (
-              <span className="text-emerald-400 font-semibold">GRÁTIS</span>
-            ) : (
-              `$${m.price.toFixed(2)}/M`
-            )}
-          </div>
-        </div>
-        <button
-          className="btn-primary text-xs py-1 px-2.5 font-semibold"
-          onClick={() => {
-            onSelect(m.id);
-            onClose();
-          }}
-        >
-          Escolher
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function OpenRouterModelPickerModal({
-  isOpen,
-  onClose,
-  onSelect,
-  tierTarget,
-  clusterTarget,
-  tier1Ceiling,
-  catalog,
-  modelsMap,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  onSelect: (modelId: string) => void;
-  tierTarget: string;
-  clusterTarget?: string;
-  tier1Ceiling: number;
-  catalog: ModelProposalDTO | null;
-  modelsMap: Record<string, ModelPick>;
-}) {
-  const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"strategy" | "engineering" | "routine" | "all">(
-    (clusterTarget as any) || "strategy"
-  );
-
-  if (!isOpen) return null;
-
-  const filterPick = (m: ModelPick) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      m.name.toLowerCase().includes(q) ||
-      m.id.toLowerCase().includes(q) ||
-      (m.vendor || "").toLowerCase().includes(q)
-    );
-  };
-
-  const allList = catalog?.all_models || Object.values(modelsMap);
-  const allFiltered = allList.filter(filterPick);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
-      <div className="flex max-h-[88vh] w-full max-w-4xl xl:max-w-5xl flex-col rounded-xl border border-brand/50 bg-ink p-4 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-line pb-2 mb-3">
-          <div>
-            <h3 className="font-semibold text-slate-100 flex items-center gap-2 text-sm">
-              <span>⚡</span> Selecionar Modelo OpenRouter
-              <span className="chip bg-brand/20 text-brand text-xs font-mono">{tierTarget}</span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Escolha a partir da lista categorizada por cluster e tier com notas da Artificial Analysis.
-            </p>
-          </div>
-          <button className="btn-ghost text-xs py-1" onClick={onClose}>
-            ✕ Fechar
-          </button>
-        </div>
-
-        {/* Search & Tabs */}
-        <div className="space-y-2 mb-3">
-          <input
-            type="text"
-            className="w-full rounded-md border border-line bg-slate-900 px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-brand focus:outline-none"
-            placeholder="Buscar por nome, id ou fabricante (ex: grok, glm, gemini, qwen, openai)..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            autoFocus
-          />
-
-          <div className="flex flex-wrap gap-1.5 border-b border-line/60 pb-2">
-            {[
-              { key: "strategy", label: "🏛️ Estratégia & Produto", hint: "50% INTEL · 30% CODE · 20% AGENTIC" },
-              { key: "engineering", label: "⚙️ Engenharia de Código", hint: "60% CODE · 30% AGENTIC · 10% INTEL" },
-              { key: "routine", label: "📋 Rotina & Suporte", hint: "55% AGENTIC · 30% INTEL · 15% CODE" },
-              { key: "all", label: `🌐 Todos (${allFiltered.length})`, hint: "Todos os modelos do catálogo OpenRouter" },
-            ].map((t) => (
-              <button
-                key={t.key}
-                className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
-                  activeTab === t.key
-                    ? "bg-brand text-ink font-semibold"
-                    : "bg-slate-800/80 text-slate-300 hover:bg-slate-700"
-                }`}
-                onClick={() => setActiveTab(t.key as any)}
-                title={t.hint}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Content list */}
-        <div className="scroll-thin flex-1 overflow-y-auto space-y-3 pr-1">
-          {activeTab === "all" ? (
-            <div className="space-y-1.5">
-              {allFiltered.length === 0 ? (
-                <p className="text-xs text-slate-500 py-4 text-center">
-                  Nenhum modelo encontrado com os termos pesquisados.
-                </p>
-              ) : (
-                allFiltered.map((m) =>
-                  renderModelCard(m, tierTarget, tier1Ceiling, onSelect, onClose)
-                )
-              )}
-            </div>
-          ) : (
-            <>
-              {(["tier1", "tier2", "tier3"] as const).map((tKey) => {
-                const clusterKey = activeTab as "strategy" | "engineering" | "routine";
-                const clusterPicks = catalog?.clusters?.[clusterKey]?.[tKey] || [];
-                const filtered = clusterPicks.filter(filterPick);
-                if (filtered.length === 0) return null;
-
-                const tierTitle =
-                  tKey === "tier1"
-                    ? "Tier 1 — Alta Cognição / Raciocínio Profundo"
-                    : tKey === "tier2"
-                    ? "Tier 2 — Custo-Benefício / Execução e Código"
-                    : "Tier 3 — Gratuito / Tarefas Leves e Contingência";
-
-                return (
-                  <div
-                    key={tKey}
-                    className="space-y-1.5 rounded-lg border border-line/60 bg-slate-900/40 p-2.5"
-                  >
-                    <div className="text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
-                      <span>{tierTitle}</span>
-                      <span className="text-[10px] text-slate-500">{filtered.length} modelo(s)</span>
-                    </div>
-                    <div className="space-y-1">
-                      {filtered.map((m) =>
-                        renderModelCard(m, tierTarget, tier1Ceiling, onSelect, onClose)
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 const CLUSTERS_CONFIG = [
   {
     key: "strategy",
     label: "Estratégia & Produto",
     icon: "🏛️",
     roles: ["Master", "Architect", "Spec Loompa", "Product Owner", "Analyst"],
-    description: "Cognição elevada, raciocínio aprofundado, decomposição de histórias e arquitetura",
-    composition: "50% INTEL · 30% CODE · 20% AGENTIC",
     weights: [
       { label: "INTEL", pct: "50%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
       { label: "CODE", pct: "30%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
@@ -406,8 +219,6 @@ const CLUSTERS_CONFIG = [
     label: "Engenharia de Código",
     icon: "⚙️",
     roles: ["Worker (Dev)", "Inspector (QA Judge)"],
-    description: "Codificação, refatoração, implementação de testes e julgamento de qualidade",
-    composition: "60% CODE · 30% AGENTIC · 10% INTEL",
     weights: [
       { label: "CODE", pct: "60%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
       { label: "AGENTIC", pct: "30%", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
@@ -419,8 +230,6 @@ const CLUSTERS_CONFIG = [
     label: "Rotina & Suporte",
     icon: "📋",
     roles: ["Deployer", "Storyteller", "Compliance", "Metrics"],
-    description: "Automação contínua, documentação, git worktrees e tarefas rotineiras",
-    composition: "55% AGENTIC · 30% INTEL · 15% CODE",
     weights: [
       { label: "AGENTIC", pct: "55%", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
       { label: "INTEL", pct: "30%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
@@ -429,28 +238,449 @@ const CLUSTERS_CONFIG = [
   },
 ] as const;
 
+// What every role shares when the cluster split is off: the plain mean of the three indices.
+const GENERAL_CONFIG = {
+  key: "general",
+  label: "Cluster geral",
+  icon: "🧩",
+  roles: ["Todos os Loompas"],
+  weights: [
+    { label: "INTEL", pct: "⅓", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
+    { label: "CODE", pct: "⅓", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
+    { label: "AGENTIC", pct: "⅓", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
+  ],
+} as const;
+
+type ClusterConfig = {
+  key: string;
+  label: string;
+  icon: string;
+  roles: readonly string[];
+  weights: readonly { label: string; pct: string; color: string }[];
+};
+
+const CLUSTER_ICON: Record<string, string> = {
+  strategy: "🏛️",
+  engineering: "⚙️",
+  routine: "📋",
+  general: "🧩",
+};
+
 const TIERS_CONFIG = [
   {
     key: "tier1",
     label: "Tier 1",
     sublabel: "Alta Cognição / Raciocínio",
+    rankedBy: "maior nota do cluster, abaixo do teto de custo",
     badgeColor: "text-amber-300 border-amber-800/60 bg-amber-950/40",
   },
   {
     key: "tier2",
     label: "Tier 2",
     sublabel: "Custo-Benefício / Execução Ágil",
+    rankedBy: "melhor custo-benefício (pontos por US$ 1M de tokens)",
     badgeColor: "text-cyan-300 border-cyan-800/60 bg-cyan-950/40",
   },
   {
     key: "tier3",
     label: "Tier 3",
-    sublabel: "Rotina / Custo $0 ou Ultra-Leve",
+    sublabel: "Rotina / Custo US$ 0",
+    rankedBy: "maior nota entre os modelos gratuitos",
     badgeColor: "text-emerald-300 border-emerald-800/60 bg-emerald-950/40",
   },
 ] as const;
 
+type TierKey = "tier1" | "tier2" | "tier3";
+
 const MAX_MODELS_PER_TIER = 6;
+const NO_OPENROUTER_HINT =
+  "A lista de modelos e a sugestão inteligente vêm da OpenRouter. Configure a chave da OpenRouter na aba " +
+  "“Provedores e chaves” para liberar o catálogo completo e a recomendação automática.";
+
+/** The score a model gets in one cluster, and the points it buys per dollar. */
+function clusterScore(m: ModelPick, cluster: ClusterName): number | null {
+  return m.scores?.[cluster] ?? m.score ?? m.quality ?? null;
+}
+function clusterValue(m: ModelPick, cluster: ClusterName): number | null {
+  const declared = m.cost_benefits?.[cluster];
+  if (declared != null) return declared;
+  const s = clusterScore(m, cluster);
+  return s != null && m.price > 0 ? Math.round((s / m.price) * 10) / 10 : null;
+}
+function isFree(m: ModelPick): boolean {
+  return m.free ?? m.price === 0;
+}
+function priceLabel(price: number): string {
+  return price === 0 ? "GRÁTIS" : `$${price.toFixed(2)}/M`;
+}
+
+/** A provider picker that shows a mark and a name while open, and only the mark once chosen —
+ * a native <select> cannot draw an SVG, and the marks are what make a dense row readable. */
+function ProviderSelect({
+  value,
+  providers,
+  onChange,
+}: {
+  value: string;
+  providers: ProviderInfo[];
+  onChange: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [open]);
+  const known = providers.some((p) => p.name === value);
+  return (
+    <span className="relative flex-shrink-0">
+      <button
+        type="button"
+        className={`flex items-center gap-0.5 rounded border px-1 py-0.5 transition-colors ${known ? "border-line bg-ink hover:border-brand/70" : "border-amber-800/70 bg-amber-950/30"}`}
+        aria-label={`Provedor: ${PROVIDER_NAMES[value] ?? value}`}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+      >
+        <ProviderBadge provider={value} nameless className="h-3.5 w-3.5" />
+        <span className="text-[8px] text-slate-500">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-1 min-w-[190px] rounded-md border border-line bg-ink p-1 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          {providers.length === 0 ? (
+            <p className="p-1.5 text-[10px] text-slate-400">Nenhum provedor com chave configurada.</p>
+          ) : (
+            providers.map((p) => (
+              <button
+                key={p.name}
+                type="button"
+                className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] transition-colors ${p.name === value ? "bg-brand/15 text-brand" : "text-slate-200 hover:bg-slate-800"}`}
+                onClick={() => { onChange(p.name); setOpen(false); }}
+              >
+                <ProviderBadge provider={p.name} className="h-3.5 w-3.5" />
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** The three benchmark indices, always in the same order and colours. */
+function Benchmarks({ m }: { m: ModelPick }) {
+  const cells: [string, number | null | undefined, string][] = [
+    ["Int", m.intelligence, "text-purple-300"],
+    ["Cod", m.coding, "text-blue-300"],
+    ["Agt", m.agentic, "text-emerald-300"],
+  ];
+  return (
+    <span className="flex flex-wrap gap-x-2 font-mono text-[10px] text-slate-500">
+      {cells.map(([label, v, color]) =>
+        v == null ? null : (
+          <span key={label}>
+            {label} <strong className={color}>{v.toFixed(1)}</strong>
+          </span>
+        )
+      )}
+    </span>
+  );
+}
+
+/** The cluster's own number, carrying the cluster's emoji so several stay distinguishable. */
+function ClusterScore({ cluster, m, mode }: { cluster: ClusterName; m: ModelPick; mode: "score" | "value" }) {
+  const v = mode === "value" ? clusterValue(m, cluster) : clusterScore(m, cluster);
+  if (v == null) return null;
+  return (
+    <span
+      className={`flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[11px] font-semibold ${mode === "value" ? "border-cyan-800/60 bg-cyan-950/70 text-cyan-300" : "border-amber-800/60 bg-amber-950/60 text-amber-300"}`}
+      title={mode === "value" ? "Custo-benefício: pontos de benchmark por US$ 1M de tokens" : "Nota deste cluster"}
+    >
+      <span aria-hidden="true">{CLUSTER_ICON[cluster]}</span>
+      {mode === "value" ? `${v} pts/$` : v.toFixed(1)}
+    </span>
+  );
+}
+
+// --------------------------------------------------------------- the model picker
+
+type SortKey = "score" | "value" | "price" | "new" | "name";
+
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "score", label: "nota" },
+  { key: "value", label: "custo-benefício" },
+  { key: "price", label: "preço" },
+  { key: "new", label: "lançamento" },
+  { key: "name", label: "nome" },
+];
+
+const RECOMMENDED_PER_TIER = 12;
+
+/** The list one tier of one cluster offers, ranked the way that tier is meant to be read:
+ * Tier 1 by the cluster's score, Tier 2 by what a dollar buys, Tier 3 by score among the free
+ * ones. The catalogue's own picks (one per vendor) are flagged, not the only thing offered. */
+function recommendedFor(all: ModelPick[], cluster: ClusterName, tier: TierKey, ceiling: number): ModelPick[] {
+  // `eligible === false` already excludes every alias; the explicit check says why out loud.
+  const eligible = all.filter((m) => m.eligible !== false && !m.alias);
+  if (tier === "tier3") {
+    return eligible
+      .filter(isFree)
+      .sort((a, b) => (clusterScore(b, cluster) ?? 0) - (clusterScore(a, cluster) ?? 0))
+      .slice(0, RECOMMENDED_PER_TIER);
+  }
+  const paid = eligible.filter((m) => !isFree(m) && m.price > 0);
+  if (tier === "tier1") {
+    return paid
+      .filter((m) => m.price <= ceiling)
+      .sort((a, b) => (clusterScore(b, cluster) ?? 0) - (clusterScore(a, cluster) ?? 0))
+      .slice(0, RECOMMENDED_PER_TIER);
+  }
+  return paid
+    .sort((a, b) => (clusterValue(b, cluster) ?? 0) - (clusterValue(a, cluster) ?? 0))
+    .slice(0, RECOMMENDED_PER_TIER);
+}
+
+function sortModels(list: ModelPick[], by: SortKey, cluster: ClusterName | null): ModelPick[] {
+  const ranked = [...list];
+  const score = (m: ModelPick) => (cluster ? clusterScore(m, cluster) : m.quality) ?? -1;
+  const value = (m: ModelPick) => (cluster ? clusterValue(m, cluster) : m.cost_benefit) ?? -1;
+  ranked.sort((a, b) => {
+    switch (by) {
+      case "value": return value(b) - value(a);
+      case "price": return a.price - b.price;
+      case "new": return (b.created ?? "").localeCompare(a.created ?? "");
+      case "name": return a.name.localeCompare(b.name);
+      default: return score(b) - score(a);
+    }
+  });
+  return ranked;
+}
+
+function ModelRow({
+  m,
+  cluster,
+  mode,
+  suggested,
+  overCeiling,
+  onSelect,
+}: {
+  m: ModelPick;
+  /** null in the extended search with no cluster filter: then only the raw benchmarks show. */
+  cluster: ClusterName | null;
+  mode: "score" | "value";
+  suggested?: boolean;
+  overCeiling?: boolean;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-2 rounded-md border p-2 text-xs transition-colors ${
+        overCeiling
+          ? "border-amber-900/50 bg-amber-950/20 hover:border-amber-700/60"
+          : "border-line/70 bg-slate-800/40 hover:border-brand/60 hover:bg-slate-800/80"
+      }`}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <ProviderIcon provider={m.vendor || m.id} model={m.id} className="h-4 w-4 flex-shrink-0 text-slate-300" />
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 truncate font-semibold text-slate-200">
+            <span className="truncate">{m.name}</span>
+            {suggested && (
+              <span className="flex-shrink-0 rounded border border-emerald-500/40 bg-emerald-500/20 px-1 text-[9px] font-bold text-emerald-300">
+                sugerido
+              </span>
+            )}
+            {m.alias && (
+              <span
+                className="flex-shrink-0 rounded border border-violet-700/60 bg-violet-950/50 px-1 text-[9px] text-violet-300"
+                title={`Apelido: segue sozinho a versão nova do fabricante${m.alias_target ? ` (hoje: ${m.alias_target})` : ""}. Nunca é recomendado — some se você quiser essa atualização automática.`}
+              >
+                apelido
+              </span>
+            )}
+            {!m.alias && m.eligible === false && m.excluded && (
+              <span className="flex-shrink-0 rounded border border-slate-700 bg-slate-900 px-1 text-[9px] text-slate-400" title={`Fora do ranking: ${m.excluded}`}>
+                fora do ranking
+              </span>
+            )}
+            {overCeiling && (
+              <span className="flex-shrink-0 rounded border border-amber-800/70 bg-amber-950/90 px-1 font-mono text-[9px] text-amber-300">
+                acima do teto
+              </span>
+            )}
+          </div>
+          <div className="truncate font-mono text-[11px] text-slate-400">{m.id}</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2">
+            <Benchmarks m={m} />
+            {m.created && <span className="font-mono text-[10px] text-slate-600">{m.created.slice(0, 7)}</span>}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-shrink-0 items-center gap-2">
+        <div className="flex flex-col items-end gap-0.5">
+          {cluster && <ClusterScore cluster={cluster} m={m} mode={mode} />}
+          <span className={`font-mono text-[11px] ${m.price === 0 ? "font-semibold text-emerald-400" : "text-slate-300"}`}>
+            {priceLabel(m.price)}
+          </span>
+        </div>
+        <button className="btn-primary px-2.5 py-1 text-xs font-semibold" onClick={() => onSelect(m.id)}>
+          Escolher
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ModelPickerModal({
+  onClose,
+  onSelect,
+  tierTarget,
+  clusterTarget,
+  tier1Ceiling,
+  catalog,
+  clusters,
+}: {
+  onClose: () => void;
+  onSelect: (modelId: string) => void;
+  tierTarget: TierKey;
+  clusterTarget: ClusterName;
+  tier1Ceiling: number;
+  catalog: ModelProposalDTO | null;
+  clusters: ClusterConfig[];
+}) {
+  const [extended, setExtended] = useState(false);
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState<"all" | "pinned" | "alias" | "free">("all");
+  const [sort, setSort] = useState<SortKey>(tierTarget === "tier2" ? "value" : "score");
+  const [cluster, setCluster] = useState<ClusterName | "all">(clusterTarget);
+
+  const all = catalog?.all_models ?? [];
+  const tier = TIERS_CONFIG.find((t) => t.key === tierTarget)!;
+  const mode: "score" | "value" = tierTarget === "tier2" ? "value" : "score";
+  const suggested = new Set(
+    (catalog?.clusters?.[clusterTarget]?.[tierTarget] ?? []).map((m) => m.id)
+  );
+
+  const matches = (m: ModelPick) => {
+    if (kind === "pinned" && m.alias) return false;
+    if (kind === "alias" && !m.alias) return false;
+    if (kind === "free" && !isFree(m)) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || (m.vendor ?? "").toLowerCase().includes(q);
+  };
+
+  const recommended = recommendedFor(all, clusterTarget, tierTarget, tier1Ceiling).filter(matches);
+  const activeCluster: ClusterName | null = cluster === "all" ? null : cluster;
+  const extendedList = sortModels(all.filter(matches), sort, activeCluster);
+
+  const pick = (id: string) => { onSelect(id); onClose(); };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
+      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col rounded-xl border border-brand/50 bg-ink p-4 shadow-2xl">
+        <div className="mb-3 flex items-start justify-between gap-2 border-b border-line pb-2">
+          <div className="min-w-0">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <span aria-hidden="true">{CLUSTER_ICON[clusterTarget]}</span>
+              {extended ? "Todos os modelos da OpenRouter" : `Modelos recomendados · ${tier.label}`}
+              <span className="chip bg-brand/20 font-mono text-xs text-brand">{tier.sublabel}</span>
+            </h3>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {extended
+                ? "O catálogo inteiro, inclusive apelidos -latest e o que a recomendação descartou. Filtre por cluster para ver a nota dele."
+                : `Ordenados por ${tier.rankedBy}. A recomendação usa só versões fixas — apelidos -latest ficam em “mais modelos”.`}
+            </p>
+          </div>
+          <button className="btn-ghost py-1 text-xs" onClick={onClose}>✕ Fechar</button>
+        </div>
+
+        <div className="mb-3 space-y-2">
+          <input
+            type="text"
+            className="w-full rounded-md border border-line bg-slate-900 px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-brand focus:outline-none"
+            placeholder="Buscar por fabricante, nome ou id (ex.: grok, glm, gemini, qwen)…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            autoFocus
+          />
+          {extended && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500">Nota do cluster:</span>
+                <select className={select} value={cluster} onChange={(e) => setCluster(e.target.value as ClusterName | "all")}>
+                  {clusters.map((c) => (
+                    <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
+                  ))}
+                  <option value="all">sem filtro (só os benchmarks)</option>
+                </select>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500">Ordenar por:</span>
+                <select className={select} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+                  {SORTS.map((o) => (
+                    <option key={o.key} value={o.key} disabled={!activeCluster && (o.key === "score" || o.key === "value")}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500">Tipo:</span>
+                <select className={select} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+                  <option value="all">todos</option>
+                  <option value="pinned">só versões fixas</option>
+                  <option value="alias">só apelidos (-latest)</option>
+                  <option value="free">só gratuitos</option>
+                </select>
+              </span>
+              <span className="text-slate-500">{extendedList.length} modelo(s)</span>
+            </div>
+          )}
+        </div>
+
+        <div className="scroll-thin flex-1 space-y-1.5 overflow-y-auto pr-1">
+          {(extended ? extendedList : recommended).length === 0 ? (
+            <p className="py-6 text-center text-xs text-slate-500">
+              {all.length === 0
+                ? "Nenhum catálogo carregado. Use “Atualizar lista de modelos OpenRouter”."
+                : "Nenhum modelo encontrado com os termos pesquisados."}
+            </p>
+          ) : (
+            (extended ? extendedList : recommended).map((m) => (
+              <ModelRow
+                key={m.id}
+                m={m}
+                cluster={extended ? activeCluster : clusterTarget}
+                mode={extended ? (sort === "value" ? "value" : "score") : mode}
+                suggested={!extended && suggested.has(m.id)}
+                overCeiling={tierTarget === "tier1" && m.price > tier1Ceiling}
+                onSelect={pick}
+              />
+            ))
+          )}
+        </div>
+
+        <div className="mt-3 border-t border-line pt-2 text-center">
+          <button
+            className="text-xs text-brand hover:underline"
+            onClick={() => { setExtended((e) => !e); setSearch(""); setKind("all"); }}
+          >
+            {extended
+              ? "← voltar aos recomendados deste tier"
+              : `mais modelos — buscar nos ${all.length} modelos do catálogo →`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------- the models tab
+
+function emptyMatrix(clusters: string[]): ModelMatrix {
+  return Object.fromEntries(clusters.map((c) => [c, { tier1: [], tier2: [], tier3: [] }]));
+}
 
 function ModelsPanel({
   slug,
@@ -463,189 +693,97 @@ function ModelsPanel({
   onSave: (p: SettingsPatch) => Promise<void>;
   onReload: () => void;
 }) {
-  const [matrix, setMatrix] = useState<ModelMatrix>(() => {
-    if (s.matrix && Object.keys(s.matrix).length > 0) {
-      return s.matrix;
-    }
-    return {
-      strategy: {
-        tier1: s.tiers?.tier1 || [],
-        tier2: s.tiers?.tier2 || [],
-        tier3: s.tiers?.tier3 || [],
-      },
-      engineering: {
-        tier1: s.tiers?.tier1 || [],
-        tier2: s.tiers?.tier2 || [],
-        tier3: s.tiers?.tier3 || [],
-      },
-      routine: {
-        tier1: s.tiers?.tier1 || [],
-        tier2: s.tiers?.tier2 || [],
-        tier3: s.tiers?.tier3 || [],
-      },
-    };
-  });
+  const [matrix, setMatrix] = useState<ModelMatrix>(s.matrix ?? {});
   const [roles, setRoles] = useState<Record<string, string>>(s.roles);
-  const [tier1Ceiling, setTier1Ceiling] = useState<number>(s.models?.tier1_ceiling ?? 5.0);
+  const [roleTasks, setRoleTasks] = useState<Record<string, string>>(
+    Object.fromEntries((s.role_tasks ?? []).map((t) => [t.key, t.tier]))
+  );
+  const [clustersEnabled, setClustersEnabled] = useState(s.models?.clusters_enabled ?? true);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const [proposal, setProposal] = useState<ModelProposalDTO | null>(null);
   const [catalog, setCatalog] = useState<ModelProposalDTO | null>(null);
-  const [editingRaw, setEditingRaw] = useState<Record<string, boolean>>({});
-  const [pickerTarget, setPickerTarget] = useState<{ cluster: string; tier: string; index?: number } | null>(null);
+  const [pickerTarget, setPickerTarget] = useState<{ cluster: ClusterName; tier: TierKey; index?: number } | null>(null);
+  const [probes, setProbes] = useState<Record<string, ProbeResult | "…">>({});
+
+  const ceiling = s.models?.tier1_ceiling ?? 1.25;
+  const openrouterReady = Boolean(s.providers.find((p) => p.name === "openrouter")?.key.configured);
+  const withKeys = s.providers.filter((p) => p.key.configured);
+  const activeClusters: ClusterConfig[] = clustersEnabled ? [...CLUSTERS_CONFIG] : [GENERAL_CONFIG];
 
   useEffect(() => {
-    if (s.matrix && Object.keys(s.matrix).length > 0) {
-      setMatrix(s.matrix);
-    } else if (s.tiers) {
-      setMatrix({
-        strategy: {
-          tier1: s.tiers?.tier1 || [],
-          tier2: s.tiers?.tier2 || [],
-          tier3: s.tiers?.tier3 || [],
-        },
-        engineering: {
-          tier1: s.tiers?.tier1 || [],
-          tier2: s.tiers?.tier2 || [],
-          tier3: s.tiers?.tier3 || [],
-        },
-        routine: {
-          tier1: s.tiers?.tier1 || [],
-          tier2: s.tiers?.tier2 || [],
-          tier3: s.tiers?.tier3 || [],
-        },
-      });
-    }
+    setMatrix(s.matrix ?? {});
     setRoles(s.roles);
-    if (s.models?.tier1_ceiling != null) {
-      setTier1Ceiling(s.models.tier1_ceiling);
-    }
+    setRoleTasks(Object.fromEntries((s.role_tasks ?? []).map((t) => [t.key, t.tier])));
+    setClustersEnabled(s.models?.clusters_enabled ?? true);
   }, [s]);
 
-  // Load cached catalog on mount (using monthly local cache)
+  // The catalogue is read from the local cache; only the founder's button goes to the network.
   useEffect(() => {
+    if (!openrouterReady) return;
     api.modelsCatalog(slug)
-      .then((cat) => {
-        if (cat && (cat.clusters || cat.all_models)) {
-          setCatalog(cat);
-        }
-      })
+      .then((cat) => { if (cat && (cat.clusters || cat.all_models)) setCatalog(cat); })
       .catch(() => {});
-  }, [slug]);
+  }, [slug, openrouterReady]);
 
-  // Unified models lookup dictionary for benchmarks and prices
+  /** Everything the screen knows about a model id, from whichever list carried it. */
   const modelsMap = useMemo(() => {
     const map: Record<string, ModelPick> = {};
-    const sources = [catalog, proposal];
-    for (const src of sources) {
+    for (const src of [catalog, proposal]) {
       if (!src) continue;
-      if (src.all_models) {
-        for (const m of src.all_models) {
-          map[m.id] = m;
-          if (m.id.startsWith("~")) map[m.id.slice(1)] = m;
-        }
+      const lists: ModelPick[][] = [src.all_models ?? [], ...Object.values(src.summary ?? {})];
+      for (const cluster of Object.values(src.clusters ?? {})) {
+        if (cluster) lists.push(...Object.values(cluster));
       }
-      for (const picks of Object.values(src.summary || {})) {
-        for (const m of picks) {
-          map[m.id] = m;
-          if (m.id.startsWith("~")) map[m.id.slice(1)] = m;
-        }
-      }
-      if (src.clusters) {
-        for (const cluster of Object.values(src.clusters)) {
-          if (!cluster) continue;
-          for (const picks of Object.values(cluster)) {
-            for (const m of picks || []) {
-              map[m.id] = m;
-              if (m.id.startsWith("~")) map[m.id.slice(1)] = m;
-            }
-          }
-        }
-      }
+      for (const list of lists) for (const m of list ?? []) map[m.id] = m;
     }
     return map;
   }, [catalog, proposal]);
 
-  const providers = s.providers.map((p) => p.name);
+  const cell = (cluster: string, tier: string): Candidate[] => matrix[cluster]?.[tier] ?? [];
+  const writeCell = (cluster: string, tier: string, list: Candidate[]) =>
+    setMatrix({ ...matrix, [cluster]: { ...(matrix[cluster] ?? {}), [tier]: list } });
 
-  const setCandidate = (cluster: string, tier: string, i: number, patch: Partial<Candidate>) => {
-    const list = matrix[cluster]?.[tier] || [];
-    const updated = list.map((c: Candidate, j: number) => (j === i ? { ...c, ...patch } : c));
-    setMatrix({
-      ...matrix,
-      [cluster]: {
-        ...(matrix[cluster] || {}),
-        [tier]: updated,
-      },
-    });
-  };
-
+  const setCandidate = (cluster: string, tier: string, i: number, patch: Partial<Candidate>) =>
+    writeCell(cluster, tier, cell(cluster, tier).map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const moveCandidate = (cluster: string, tier: string, i: number, delta: number) => {
-    const list = [...(matrix[cluster]?.[tier] || [])];
+    const list = [...cell(cluster, tier)];
     const j = i + delta;
     if (j < 0 || j >= list.length) return;
     [list[i], list[j]] = [list[j], list[i]];
-    setMatrix({
-      ...matrix,
-      [cluster]: {
-        ...(matrix[cluster] || {}),
-        [tier]: list,
-      },
-    });
+    writeCell(cluster, tier, list);
   };
-
-  const removeCandidate = (cluster: string, tier: string, i: number) => {
-    const list = (matrix[cluster]?.[tier] || []).filter((_: Candidate, j: number) => j !== i);
-    setMatrix({
-      ...matrix,
-      [cluster]: {
-        ...(matrix[cluster] || {}),
-        [tier]: list,
-      },
-    });
-  };
-
-  const addCandidate = (cluster: string, tier: string, modelId: string, provider: string = "openrouter") => {
-    const list = matrix[cluster]?.[tier] || [];
-    if (list.length >= MAX_MODELS_PER_TIER) {
-      setSyncNote(`Limite de ${MAX_MODELS_PER_TIER} modelos por tier atingido.`);
-      return;
-    }
-    if (list.some((c: Candidate) => c.model === modelId)) {
-      setSyncNote(`O modelo ${modelId} já está na lista deste tier.`);
-      return;
-    }
-    setMatrix({
-      ...matrix,
-      [cluster]: {
-        ...(matrix[cluster] || {}),
-        [tier]: [...list, { provider, model: modelId }],
-      },
-    });
-    setSyncNote(`✔ Modelo ${modelId} adicionado ao ${tier}! Clique em "Salvar modelos" para gravar.`);
+  const removeCandidate = (cluster: string, tier: string, i: number) =>
+    writeCell(cluster, tier, cell(cluster, tier).filter((_, j) => j !== i));
+  const addCandidate = (cluster: string, tier: string, model: string, provider: string) => {
+    const list = cell(cluster, tier);
+    if (list.length >= MAX_MODELS_PER_TIER) return setSyncNote(`Limite de ${MAX_MODELS_PER_TIER} modelos por tier atingido.`);
+    if (model && list.some((c) => c.model === model)) return setSyncNote(`O modelo ${model} já está neste tier.`);
+    writeCell(cluster, tier, [...list, { provider, model }]);
   };
 
   const dirty =
-    JSON.stringify(matrix) !== JSON.stringify(s.matrix) ||
+    JSON.stringify(matrix) !== JSON.stringify(s.matrix ?? {}) ||
     JSON.stringify(roles) !== JSON.stringify(s.roles) ||
-    tier1Ceiling !== (s.models?.tier1_ceiling ?? 5.0);
+    JSON.stringify(roleTasks) !== JSON.stringify(Object.fromEntries((s.role_tasks ?? []).map((t) => [t.key, t.tier]))) ||
+    clustersEnabled !== (s.models?.clusters_enabled ?? true);
 
-  const handleSyncOrRecalc = async (forceRefresh: boolean) => {
-    setSyncing(true);
-    setSyncError(null);
-    setSyncNote(null);
+  const runSync = async (forceRefresh: boolean) => {
+    if (!openrouterReady) { setSyncError(NO_OPENROUTER_HINT); setSyncNote(null); return; }
+    setSyncing(true); setSyncError(null); setSyncNote(null);
     try {
-      const p = await api.previewModelSync(slug, {
-        tier1_ceiling: tier1Ceiling,
-        force_refresh: forceRefresh,
-      });
-      setProposal(p);
+      const p = await api.previewModelSync(slug, { tier1_ceiling: ceiling, force_refresh: forceRefresh });
       setCatalog(p);
       if (forceRefresh) {
-        setSyncNote("✔ Catálogo OpenRouter sincronizado e cache local atualizado para este mês!");
-      } else if (!p.changed) {
-        setSyncNote("✔ Os modelos atuais atendem aos critérios de custo e qualidade sob o teto definido.");
+        const warned = p.price_warnings ?? [];
+        setSyncNote(
+          `✔ Lista de modelos atualizada: ${p.all_models?.length ?? 0} modelos no catálogo.` +
+          (warned.length ? ` Aviso na Caixa de Entrada: ${warned.join(", ")} ficou mais caro.` : "")
+        );
+      } else {
+        setProposal(p);
+        if (!p.changed) setSyncNote("✔ Os modelos atuais já são a melhor escolha sob o teto definido.");
       }
     } catch (e) {
       setSyncError(String(e));
@@ -654,600 +792,310 @@ function ModelsPanel({
     }
   };
 
+  const testCell = async (cluster: string, tier: string, i: number, c: Candidate) => {
+    const key = `${cluster}:${tier}:${i}`;
+    setProbes((p) => ({ ...p, [key]: "…" }));
+    try {
+      const r = await api.testModel(slug, c.provider, c.model);
+      setProbes((p) => ({ ...p, [key]: r }));
+    } catch (e) {
+      setProbes((p) => ({ ...p, [key]: { name: c.provider, ok: false, detail: String(e), model: c.model, latency_ms: 0 } }));
+    }
+  };
+
   const fillFromProposal = () => {
-    if (!proposal || !proposal.clusters) return;
-    const newMatrix: ModelMatrix = {
-      strategy: { tier1: [], tier2: [], tier3: [] },
-      engineering: { tier1: [], tier2: [], tier3: [] },
-      routine: { tier1: [], tier2: [], tier3: [] },
-    };
-    for (const cKey of ["strategy", "engineering", "routine"] as const) {
-      for (const tKey of ["tier1", "tier2", "tier3"] as const) {
-        newMatrix[cKey][tKey] = (proposal.clusters?.[cKey]?.[tKey] || []).map((p) => ({
+    if (!proposal?.clusters) return;
+    const next = emptyMatrix(activeClusters.map((c) => c.key));
+    for (const col of activeClusters) {
+      for (const t of TIERS_CONFIG) {
+        next[col.key][t.key] = (proposal.clusters[col.key as ClusterName]?.[t.key] ?? []).map((p) => ({
           provider: "openrouter",
           model: p.id,
         }));
       }
     }
-    setMatrix(newMatrix);
-    setSyncNote("✔ Matriz proposta carregada no editor! Revise os modelos e clique em 'Salvar modelos'.");
+    setMatrix({ ...matrix, ...next });
+    setSyncNote("✔ Sugestão carregada no editor. Revise e clique em “Salvar modelos”.");
     setProposal(null);
   };
 
-  const sendToInbox = async () => {
-    if (!proposal) return;
-    setSyncing(true);
-    try {
-      const res = await api.applyModelSync(slug, true, tier1Ceiling);
-      setSyncNote(res.message || "✔ Proposta enviada à Caixa de Entrada para aprovação do Founder.");
-      setProposal(null);
-    } catch (e) {
-      setSyncError(String(e));
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const applyImmediately = async () => {
-    if (!proposal) return;
     setSyncing(true);
     try {
-      await api.applyModelSync(slug, false, tier1Ceiling);
-      setSyncNote("✔ Matriz oficial de modelos e tabela de preços atualizadas com sucesso!");
+      await api.applyModelSync(slug, false, ceiling);
+      setSyncNote("✔ Matriz oficial de modelos e tabela de preços atualizadas.");
       setProposal(null);
       onReload();
-    } catch (e) {
-      setSyncError(String(e));
-    } finally {
-      setSyncing(false);
-    }
+    } catch (e) { setSyncError(String(e)); } finally { setSyncing(false); }
   };
+
+  const sendToInbox = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.applyModelSync(slug, true, ceiling);
+      setSyncNote(res.message || "✔ Sugestão enviada à Caixa de Entrada para sua aprovação.");
+      setProposal(null);
+    } catch (e) { setSyncError(String(e)); } finally { setSyncing(false); }
+  };
+
+  const save = () =>
+    onSave({
+      matrix,
+      roles,
+      role_tasks: roleTasks,
+      clusters_enabled: clustersEnabled,
+    });
 
   return (
     <div className="space-y-4">
-      {/* Header with OpenRouter sync and Tier 1 Cost Ceiling */}
-      <div className="rounded-lg border border-line bg-slate-900/60 p-3 space-y-3">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+      {/* ------------------------------------------------------------ actions */}
+      <div className="space-y-3 rounded-lg border border-line bg-slate-900/60 p-3">
+        <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
           <div>
-            <div className="font-semibold text-slate-100 flex items-center gap-2">
-              <span>Matriz de Modelos & Clusters</span>
-              <span className="chip bg-brand/20 text-brand text-[10px]">OpenRouter</span>
-              <span className="text-[10px] text-slate-400 font-normal bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">
-                Cache mensal ativo
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Rankeia os modelos por clusters de inteligência usando índices compostos da Artificial Analysis.
+            <div className="font-semibold text-slate-100">Matriz de modelos</div>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Cada Loompa busca no seu cluster o tier da tarefa. Se um modelo falhar ou faltar cota, cai para o próximo da lista.
             </p>
           </div>
-
           <div className="flex flex-wrap items-center gap-2">
             <button
-              className="btn-ghost flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold"
+              className={`flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold ${openrouterReady ? "btn-ghost" : "btn-ghost opacity-50"}`}
               disabled={syncing}
-              onClick={() => handleSyncOrRecalc(false)}
-              title="Recalcula a proposta com o teto de custo atual usando o catálogo do cache local"
+              onClick={() => runSync(true)}
+              title="Baixa o catálogo da OpenRouter de novo e grava os modelos e preços no cache local"
             >
-              <span>🔄</span>
-              <span>Recalcular Matriz</span>
+              <span aria-hidden="true">{syncing ? "⟳" : "📡"}</span>
+              Atualizar lista de modelos OpenRouter
             </button>
             <button
-              className="btn-primary flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold"
+              className={`flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold ${openrouterReady ? "btn-primary" : "btn-ghost opacity-50"}`}
               disabled={syncing}
-              onClick={() => handleSyncOrRecalc(true)}
-              title="Baixa a versão mais recente do catálogo OpenRouter e atualiza o cache mensal"
+              onClick={() => runSync(false)}
+              title="Rankeia o catálogo por cluster e tier e propõe uma matriz sob o teto de custo"
             >
-              {syncing ? (
-                <>
-                  <span className="inline-block animate-spin">⟳</span>
-                  <span>Sincronizando…</span>
-                </>
-              ) : (
-                <>
-                  <span>⚡</span>
-                  <span>Sincronizar Catálogo (OpenRouter)</span>
-                </>
-              )}
+              <span aria-hidden="true">{syncing ? "⟳" : "✨"}</span>
+              {syncing ? "Calculando…" : "Sugestão inteligente"}
             </button>
           </div>
         </div>
 
-        {/* Tier 1 Ceiling Configuration */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-line/60 bg-ink/30 px-2 py-1.5 rounded">
-          <div className="flex items-center gap-2">
-            <label htmlFor="tier1-ceiling-input" className="text-xs font-medium text-amber-300 flex items-center gap-1">
-              <span>🎯</span> Teto de Custo Tier 1 (US$/1M tokens):
-            </label>
-            <input
-              id="tier1-ceiling-input"
-              type="number"
-              min={0.1}
-              step={0.5}
-              className="w-24 rounded border border-line bg-ink px-2 py-0.5 text-xs font-mono font-bold text-amber-300"
-              value={tier1Ceiling}
-              onChange={(e) => setTier1Ceiling(Number(e.target.value))}
-            />
-          </div>
-          <span className="text-[11px] text-slate-400">
-            Filtra modelos cujo custo combinado (3 entrada : 1 saída) ultrapassa este valor no Tier 1 (raciocínio).
+        {!openrouterReady && (
+          <p className="rounded border border-amber-900/50 bg-amber-950/30 p-2 text-[11px] text-amber-200">
+            {NO_OPENROUTER_HINT}
+          </p>
+        )}
+
+        <label className="flex cursor-pointer items-start gap-2 border-t border-line/60 pt-2 text-xs">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={clustersEnabled}
+            onChange={(e) => setClustersEnabled(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium text-slate-200">Separar modelos por cluster de agentes (recomendado)</span>
+            <span className="mt-0.5 block text-slate-400">
+              Ligado, cada grupo de Loompas tem a sua lista, pesada para o que ele faz. Desligado, todos usam um
+              <strong className="text-slate-300"> cluster geral</strong> com os mesmos três tiers, ranqueado pela média simples
+              das três notas — menos escolhas para fazer.
+            </span>
           </span>
-        </div>
+        </label>
       </div>
 
-      {syncError && (
-        <p className="text-xs text-red-300 rounded border border-red-900/50 bg-red-950/40 p-2">
-          ✘ {syncError}
-        </p>
-      )}
-      {syncNote && (
-        <p className="text-xs text-emerald-300 rounded border border-emerald-900/50 bg-emerald-950/40 p-2">
-          {syncNote}
-        </p>
-      )}
+      {syncError && <p className="rounded border border-red-900/50 bg-red-950/40 p-2 text-xs text-red-300">✘ {syncError}</p>}
+      {syncNote && <p className="rounded border border-emerald-900/50 bg-emerald-950/40 p-2 text-xs text-emerald-300">{syncNote}</p>}
 
-      {/* Proposal preview card (if sync or preview action was taken) */}
+      {/* ------------------------------------------------------------ suggestion */}
       {proposal && (
-        <div className="rounded-lg border border-brand/60 bg-slate-900/95 p-3.5 space-y-3 shadow-xl">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-line pb-2.5">
+        <div className="space-y-3 rounded-lg border border-brand/60 bg-slate-900/95 p-3.5 shadow-xl">
+          <div className="flex flex-col items-start justify-between gap-2 border-b border-line pb-2.5 sm:flex-row sm:items-center">
             <div>
-              <span className="font-semibold text-brand text-sm flex items-center gap-1.5">
-                <span>🎯</span> Proposta de Atualização da Matriz de Modelos
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-brand">
+                <span aria-hidden="true">✨</span> Sugestão para a matriz de modelos
               </span>
-              <span className="text-xs text-slate-400 block mt-0.5">
-                {proposal.eligible} de {proposal.considered} modelos qualificados (
-                {proposal.mode === "alias" ? "apelidos -latest" : "versões fixas"}). Teto Tier 1: US${" "}
-                {tier1Ceiling.toFixed(2)}/M.
+              <span className="mt-0.5 block text-xs text-slate-400">
+                {proposal.eligible} de {proposal.considered} modelos qualificados, só versões fixas.
+                Teto do Tier 1: US$ {ceiling.toFixed(2)}/M (ajustável na aba Orçamento).
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                className="btn-primary text-xs font-semibold py-1 px-3 flex items-center gap-1.5 shadow"
-                onClick={applyImmediately}
-                title="Aplica a matriz proposta como a configuração oficial imediatamente"
-              >
-                <span>✔</span> Atualizar Matriz Oficial
-              </button>
-              <button
-                className="btn-ghost text-xs py-1 px-2.5 flex items-center gap-1"
-                onClick={fillFromProposal}
-                title="Carrega os modelos propostos no editor abaixo para revisão antes de salvar"
-              >
-                <span>✏️</span> Carregar no Editor
-              </button>
-              <button
-                className="btn-ghost text-xs py-1 px-2.5 flex items-center gap-1"
-                onClick={sendToInbox}
-                title="Envia para a Caixa de Entrada do Founder como proposta formal assíncrona"
-              >
-                <span>📬</span> Enviar ao Inbox
-              </button>
-              <button className="btn-ghost text-xs py-1 px-2 text-slate-400 hover:text-white" onClick={() => setProposal(null)}>
-                ✕ Fechar
-              </button>
+              <button className="btn-primary px-3 py-1 text-xs font-semibold" onClick={applyImmediately}>✔ Aplicar agora</button>
+              <button className="btn-ghost px-2.5 py-1 text-xs" onClick={fillFromProposal}>✏️ Carregar no editor</button>
+              <button className="btn-ghost px-2.5 py-1 text-xs" onClick={sendToInbox}>📬 Enviar ao Inbox</button>
+              <button className="btn-ghost px-2 py-1 text-xs text-slate-400 hover:text-white" onClick={() => setProposal(null)}>✕</button>
             </div>
           </div>
-
-          {/* Diffs alert */}
-          <div className="text-xs space-y-1 bg-ink/50 p-2.5 rounded border border-line">
-            {proposal.added.length > 0 && (
-              <div>
-                <span className="text-emerald-400 font-semibold">Modelos sugeridos:</span>{" "}
-                {proposal.added.join(", ")}
-              </div>
-            )}
-            {proposal.removed.length > 0 && (
-              <div>
-                <span className="text-rose-400 font-semibold">Modelos substituídos:</span>{" "}
-                {proposal.removed.join(", ")}
-              </div>
-            )}
-            {proposal.repriced.length > 0 && (
-              <div>
-                <span className="text-amber-400 font-semibold">Preços atualizados:</span>{" "}
-                {proposal.repriced.join(", ")}
-              </div>
-            )}
-            {proposal.expiring.length > 0 && (
-              <div>
-                <span className="text-orange-400 font-semibold">Descontinuados em breve:</span>{" "}
-                {proposal.expiring.join(", ")}
-              </div>
-            )}
-            {!proposal.changed && (
-              <div className="text-slate-400">
-                Os modelos configurados atualmente já são a melhor escolha do catálogo sob o teto de US$ {tier1Ceiling.toFixed(2)}.
-              </div>
-            )}
+          <div className="space-y-1 rounded border border-line bg-ink/50 p-2.5 text-xs">
+            {proposal.added.length > 0 && <div><span className="font-semibold text-emerald-400">Entram:</span> {proposal.added.join(", ")}</div>}
+            {proposal.removed.length > 0 && <div><span className="font-semibold text-rose-400">Saem:</span> {proposal.removed.join(", ")}</div>}
+            {proposal.repriced.length > 0 && <div><span className="font-semibold text-amber-400">Preços atualizados:</span> {proposal.repriced.join(", ")}</div>}
+            {proposal.expiring.length > 0 && <div><span className="font-semibold text-orange-400">Descontinuados em breve:</span> {proposal.expiring.join(", ")}</div>}
+            {!proposal.changed && <div className="text-slate-400">Os modelos configurados já são a melhor escolha sob o teto atual.</div>}
           </div>
+        </div>
+      )}
 
-          {/* Matriz Proposta com destaque NOVO */}
-          {proposal.clusters && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs border-b border-line/40 pb-1">
-                <span className="font-semibold text-slate-200">Matriz Proposta (Valores Sugeridos)</span>
-                <span className="text-[11px] text-emerald-400">
-                  Modelos com tag <span className="bg-emerald-500/20 text-emerald-300 font-bold px-1 py-0.2 rounded border border-emerald-500/40 text-[10px]">NOVO</span> são recomendações que não estão na sua matriz
-                </span>
+      {/* ------------------------------------------------------------ the matrix */}
+      <div className={`grid grid-cols-1 gap-3 ${clustersEnabled ? "lg:grid-cols-3" : ""}`}>
+        {activeClusters.map((col) => (
+          <div key={col.key} className="space-y-2.5 rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs">
+            <div className="space-y-1 border-b border-line/40 pb-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-100">
+                <span className="text-sm" aria-hidden="true">{col.icon}</span>
+                {col.label}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {CLUSTERS_CONFIG.map((col) => {
-                  const clusterProp = proposal.clusters?.[col.key];
-                  return (
-                    <div key={col.key} className="rounded-md border border-line/70 bg-ink/70 p-2 text-xs space-y-2">
-                      <div className="border-b border-line/40 pb-1.5 space-y-1">
-                        <div className="font-semibold text-slate-200 flex items-center justify-between">
-                          <span className="flex items-center gap-1.5">
-                            <span>{col.icon}</span>
-                            <span>{col.label}</span>
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1 text-[10px]">
-                          <span className="text-slate-500 font-sans">Mix:</span>
-                          {col.weights.map((w) => (
-                            <span
-                              key={w.label}
-                              className={`px-1 py-0 rounded border font-mono text-[9px] ${w.color}`}
-                              title={`Peso de ${w.label} no score do cluster`}
-                            >
-                              {w.pct} {w.label}
-                            </span>
-                          ))}
-                        </div>
+              <div className="text-[10px] text-slate-400">Loompas: {col.roles.join(", ")}</div>
+              <div className="flex flex-wrap items-center gap-1 pt-0.5 text-[10px]">
+                <span className="font-sans text-slate-500">Peso:</span>
+                {col.weights.map((w) => (
+                  <span key={w.label} className={`rounded border px-1 font-mono text-[9px] ${w.color}`}>{w.pct} {w.label}</span>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              {TIERS_CONFIG.map((t) => {
+                const candidates = cell(col.key, t.key);
+                return (
+                  <div key={t.key} className="space-y-1.5 rounded-md border border-slate-700/60 bg-slate-900/60 p-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className={`rounded border px-1.5 text-[10px] font-semibold ${t.badgeColor}`}>{t.label}</span>
+                        <span className="truncate text-[10px] text-slate-400">{t.sublabel}</span>
                       </div>
-                      <div className="space-y-2">
-                        {TIERS_CONFIG.map((t) => {
-                          const picks = clusterProp?.[t.key as "tier1" | "tier2" | "tier3"] || [];
-                          const currentCands = matrix[col.key]?.[t.key] || [];
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-[9px] text-slate-500">{candidates.length}/{MAX_MODELS_PER_TIER}</span>
+                        {candidates.length < MAX_MODELS_PER_TIER && (
+                          <button
+                            type="button"
+                            className="btn-ghost px-1 py-0 text-[10px] text-brand hover:text-white"
+                            onClick={() => addCandidate(col.key, t.key, "", withKeys[0]?.name ?? "openrouter")}
+                          >
+                            + modelo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {candidates.length === 0 ? (
+                      <div className="py-2 text-center text-[10px] italic text-slate-500">
+                        Nenhum modelo.{" "}
+                        <button type="button" className="text-brand hover:underline" onClick={() => addCandidate(col.key, t.key, "", withKeys[0]?.name ?? "openrouter")}>
+                          + adicionar
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {candidates.map((c, i) => {
+                          const info = modelsMap[c.model];
+                          const provider = s.providers.find((p) => p.name === c.provider);
+                          const overCeiling = t.key === "tier1" && info && info.price > ceiling;
+                          const probeKey = `${col.key}:${t.key}:${i}`;
+                          const probe = probes[probeKey];
                           return (
-                            <div key={t.key} className="rounded bg-slate-800/60 p-1.5 border border-slate-700/50 space-y-1">
-                              <div className="flex items-center justify-between text-[10px]">
-                                <span className={`font-semibold px-1 py-0.2 rounded border ${t.badgeColor}`}>
-                                  {t.label}
-                                </span>
-                                <span className="text-[9px] text-slate-400">{picks.length} modelo(s)</span>
-                              </div>
-                              {picks.length > 0 ? (
-                                <div className="space-y-1">
-                                  {picks.map((pick) => {
-                                    const isNew = !currentCands.some(
-                                      (c: Candidate) => c.model === pick.id || c.model.replace(/^~/, "") === pick.id.replace(/^~/, "")
-                                    );
-                                    const cb = pick.cost_benefit ?? (pick.price > 0 && (pick.score ?? pick.quality) ? Math.round(((pick.score ?? pick.quality) / pick.price) * 10) / 10 : null);
-                                    return (
-                                      <div key={pick.id} className="flex items-center justify-between gap-1.5 rounded bg-slate-900/70 px-1.5 py-1 border border-line/40">
-                                        <div className="min-w-0 flex-1 flex items-center gap-1.5">
-                                          <ProviderIcon provider={pick.vendor || pick.id} model={pick.id} className="w-3.5 h-3.5 flex-shrink-0" />
-                                          <span className="font-mono text-[11px] text-cyan-300 truncate" title={`${pick.name} (${pick.id})`}>
-                                            {cleanModelName(pick.name)}
-                                          </span>
-                                          {isNew && (
-                                            <span className="bg-emerald-500/20 text-emerald-300 font-bold text-[9px] border border-emerald-500/40 px-1 py-0 rounded flex-shrink-0 animate-pulse">
-                                              NOVO
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="flex items-center gap-1.5 flex-shrink-0 text-right font-mono text-[10px]">
-                                          <span className="font-bold text-amber-300">★ {pick.score ?? pick.quality}</span>
-                                          {t.key !== "tier3" && cb != null && (
-                                            <span
-                                              className="text-cyan-300 bg-cyan-950/70 px-1 py-0.2 rounded border border-cyan-800/50 font-mono text-[9px]"
-                                              title={`Custo-Benefício: ${cb} pontos por US$ 1M tokens`}
-                                            >
-                                              {cb} pts/$
-                                            </span>
-                                          )}
-                                          <span className="text-slate-300">{pick.price === 0 ? "GRÁTIS" : `$${pick.price.toFixed(2)}/M`}</span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                            <div key={i} className="space-y-1 rounded border border-line/60 bg-slate-950/70 p-1.5">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <span className="w-3 flex-shrink-0 font-mono text-[10px] text-slate-500">{i + 1}</span>
+                                <ProviderSelect
+                                  value={c.provider}
+                                  providers={withKeys}
+                                  onChange={(name) => setCandidate(col.key, t.key, i, { provider: name, model: "" })}
+                                />
+                                {c.provider === "openrouter" ? (
+                                  <button
+                                    type="button"
+                                    className="flex min-w-0 flex-1 items-center justify-between rounded border border-line bg-ink px-1.5 py-0.5 text-left text-[11px] text-slate-200 transition-colors hover:border-brand/70"
+                                    onClick={() => setPickerTarget({ cluster: col.key as ClusterName, tier: t.key, index: i })}
+                                    title={info ? info.name : c.model || "Escolher um modelo"}
+                                  >
+                                    <span className="truncate font-mono font-medium text-cyan-300">
+                                      {c.model
+                                        ? info?.name ? cleanModelName(info.name) : cleanModelId(c.model)
+                                        : <span className="italic text-slate-500">Escolher…</span>}
+                                    </span>
+                                    <span className="ml-1 flex-shrink-0 text-[9px] text-slate-400">▾</span>
+                                  </button>
+                                ) : (
+                                  <input
+                                    className="min-w-0 flex-1 rounded border border-line bg-ink px-1.5 py-0.5 font-mono text-[11px] text-slate-200"
+                                    value={c.model}
+                                    placeholder="id do modelo neste provedor"
+                                    title={c.model}
+                                    onChange={(e) => setCandidate(col.key, t.key, i, { model: e.target.value })}
+                                  />
+                                )}
+                                <div className="flex flex-shrink-0 items-center gap-0.5">
+                                  <button type="button" className="btn-ghost px-1 py-0 text-[10px]" title="Testar conexão com este modelo"
+                                    disabled={!c.model || probe === "…"} onClick={() => testCell(col.key, t.key, i, c)}>
+                                    {probe === "…" ? "⟳" : "▶"}
+                                  </button>
+                                  <button type="button" className="btn-ghost px-1 py-0 text-[10px] disabled:opacity-30" disabled={i === 0}
+                                    title="Subir (prioridade maior)" onClick={() => moveCandidate(col.key, t.key, i, -1)}>↑</button>
+                                  <button type="button" className="btn-ghost px-1 py-0 text-[10px] disabled:opacity-30" disabled={i === candidates.length - 1}
+                                    title="Descer (usado como reserva)" onClick={() => moveCandidate(col.key, t.key, i, 1)}>↓</button>
+                                  <button type="button" className="btn-ghost px-1 py-0 text-[10px] text-rose-400 hover:text-rose-200"
+                                    title="Remover" onClick={() => removeCandidate(col.key, t.key, i)}>✕</button>
                                 </div>
-                              ) : (
-                                <span className="text-slate-500 italic text-[10px]">nenhum sob o teto</span>
+                              </div>
+
+                              {c.provider !== "openrouter" && provider?.models_url && (
+                                <a className="ml-4 block text-[10px] text-slate-500 hover:text-brand hover:underline" href={provider.models_url} target="_blank" rel="noreferrer">
+                                  modelos disponíveis em {provider.label} ↗
+                                </a>
+                              )}
+
+                              {info && (
+                                <div className="ml-4 flex flex-wrap items-center gap-1.5 text-[10px]">
+                                  <ClusterScore cluster={col.key as ClusterName} m={info} mode={t.key === "tier2" ? "value" : "score"} />
+                                  <span className={`font-mono ${info.price === 0 ? "font-semibold text-emerald-400" : "text-slate-300"}`}>
+                                    {priceLabel(info.price)}
+                                  </span>
+                                  {info.alias && (
+                                    <span className="rounded border border-violet-700/60 bg-violet-950/50 px-1 text-violet-300" title="Apelido: troca de modelo sozinho quando o fabricante lança uma versão nova">
+                                      apelido
+                                    </span>
+                                  )}
+                                  {overCeiling && (
+                                    <span className="rounded border border-amber-800 bg-amber-950/80 px-1 font-semibold text-amber-300"
+                                      title={`Acima do teto do Tier 1 (US$ ${ceiling.toFixed(2)})`}>
+                                      acima do teto
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              {probe && probe !== "…" && (
+                                <div className={`ml-4 text-[10px] ${probe.ok ? "text-emerald-300" : "text-red-300"}`}>
+                                  {probe.ok ? "✔" : "✘"} {probe.detail}{probe.latency_ms ? ` · ${probe.latency_ms} ms` : ""}
+                                </div>
                               )}
                             </div>
                           );
                         })}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Matriz Oficial de Execução (3 Clusters x 3 Tiers) */}
-      <div className="space-y-3 rounded-lg border border-line p-3.5 bg-slate-900/40">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 border-b border-line pb-2">
-          <div>
-            <div className="font-semibold text-xs text-slate-100 flex items-center gap-2">
-              <span>Matriz Oficial de Execução (3 Clusters × 3 Tiers)</span>
-              <span className="text-[10px] text-brand bg-brand/10 border border-brand/30 px-1.5 py-0.2 rounded font-mono">
-                Fonte de verdade ativa
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Cada agente busca no seu cluster o tier da tarefa. Se o modelo falhar ou faltar cota, cai na ordem para o próximo da lista.
-            </p>
           </div>
-          <span className="text-[10px] text-slate-500">
-            Até {MAX_MODELS_PER_TIER} modelos de fallback por célula
-          </span>
-        </div>
-
-        {/* 3 Colunas para os 3 Clusters */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          {CLUSTERS_CONFIG.map((col) => {
-            const clusterMatrix = matrix[col.key] || { tier1: [], tier2: [], tier3: [] };
-            return (
-              <div key={col.key} className="rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs space-y-2.5 flex flex-col justify-between">
-                <div>
-                  {/* Cluster Header */}
-                  <div className="border-b border-line/40 pb-2 mb-2 space-y-1">
-                    <div className="font-semibold text-slate-100 flex items-center gap-1.5 text-xs">
-                      <span className="text-sm">{col.icon}</span>
-                      <span>{col.label}</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 truncate" title={col.roles.join(", ")}>
-                      Loompas: {col.roles.join(", ")}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1 text-[10px] pt-0.5">
-                      <span className="text-slate-500 font-sans">Mix:</span>
-                      {col.weights.map((w) => (
-                        <span
-                          key={w.label}
-                          className={`px-1 py-0 rounded border font-mono text-[9px] ${w.color}`}
-                          title={`Peso de ${w.label} no score do cluster`}
-                        >
-                          {w.pct} {w.label}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 3 Tiers dentro deste Cluster */}
-                  <div className="space-y-2.5">
-                    {TIERS_CONFIG.map((t) => {
-                      const candidates = clusterMatrix[t.key as "tier1" | "tier2" | "tier3"] || [];
-                      return (
-                        <div key={t.key} className="rounded-md bg-slate-900/60 p-2 border border-slate-700/60 space-y-1.5">
-                          {/* Cabeçalho da célula */}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5">
-                              <span className={`font-semibold px-1.5 py-0.2 rounded border text-[10px] ${t.badgeColor}`}>
-                                {t.label}
-                              </span>
-                              <span className="text-[10px] text-slate-400 truncate max-w-[130px]" title={t.sublabel}>
-                                {t.sublabel}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[9px] text-slate-500 font-mono">
-                                {candidates.length}/{MAX_MODELS_PER_TIER}
-                              </span>
-                              {candidates.length < MAX_MODELS_PER_TIER && (
-                                <button
-                                  type="button"
-                                  className="btn-ghost py-0 px-1 text-[10px] text-brand hover:text-white"
-                                  onClick={() => setPickerTarget({ cluster: col.key, tier: t.key })}
-                                  title={`Adicionar modelo ao ${col.label} > ${t.label}`}
-                                >
-                                  + modelo
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Lista ordenada de candidatos */}
-                          {candidates.length > 0 ? (
-                            <div className="space-y-1.5">
-                              {candidates.map((c: Candidate, i: number) => {
-                                const info = modelsMap[c.model] || modelsMap[c.model.replace(/^~/, "")];
-                                const isOverCeiling = t.key === "tier1" && info && info.price > tier1Ceiling;
-                                const isRaw = editingRaw[`${col.key}:${t.key}:${i}`];
-
-                                return (
-                                  <div key={i} className="rounded border border-line/60 bg-slate-950/70 p-1.5 text-xs space-y-1">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                      <span className="w-3 text-[10px] text-slate-500 font-mono flex-shrink-0">{i + 1}</span>
-                                      <ProviderIcon provider={c.provider} model={c.model} className="w-3.5 h-3.5 flex-shrink-0 text-slate-300" />
-                                      
-                                      {c.provider === "openrouter" && !isRaw ? (
-                                        <div className="flex-1 flex items-center gap-1 min-w-0">
-                                          <button
-                                            type="button"
-                                            className="flex-1 flex items-center justify-between text-left rounded border border-line bg-ink px-1.5 py-0.5 text-[11px] text-slate-200 hover:border-brand/70 transition-colors min-w-0"
-                                            onClick={() => setPickerTarget({ cluster: col.key, tier: t.key, index: i })}
-                                            title={`Clique para trocar o modelo (ID: ${c.model})`}
-                                          >
-                                            <span className="truncate font-mono font-medium text-cyan-300">
-                                              {c.model ? (
-                                                info?.name ? cleanModelName(info.name) : cleanModelId(c.model)
-                                              ) : (
-                                                <span className="text-slate-500 italic">Escolher…</span>
-                                              )}
-                                            </span>
-                                            <span className="text-slate-400 text-[9px] ml-1 flex-shrink-0">▾</span>
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="btn-ghost py-0.5 px-1 text-[10px]"
-                                            title="Editar ID manualmente"
-                                            onClick={() => setEditingRaw({ ...editingRaw, [`${col.key}:${t.key}:${i}`]: true })}
-                                          >
-                                            ✏️
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <div className="flex-1 flex items-center gap-1 min-w-0">
-                                          <input
-                                            className="flex-1 rounded border border-line bg-ink px-1.5 py-0.5 text-[11px] font-mono text-slate-200 min-w-0"
-                                            value={c.model}
-                                            placeholder="id do modelo"
-                                            onChange={(e) => setCandidate(col.key, t.key, i, { model: e.target.value })}
-                                          />
-                                          {c.provider === "openrouter" && (
-                                            <button
-                                              type="button"
-                                              className="btn-ghost py-0.5 px-1 text-[10px]"
-                                              title="Escolher da lista guiada"
-                                              onClick={() => {
-                                                setEditingRaw({ ...editingRaw, [`${col.key}:${t.key}:${i}`]: false });
-                                                setPickerTarget({ cluster: col.key, tier: t.key, index: i });
-                                              }}
-                                            >
-                                              📋
-                                            </button>
-                                          )}
-                                        </div>
-                                      )}
-
-                                      <div className="flex items-center gap-0.5 flex-shrink-0">
-                                        <button
-                                          type="button"
-                                          className="btn-ghost py-0 px-1 text-[10px] disabled:opacity-30"
-                                          disabled={i === 0}
-                                          onClick={() => moveCandidate(col.key, t.key, i, -1)}
-                                          title="Mover para cima (prioridade maior)"
-                                        >
-                                          ↑
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="btn-ghost py-0 px-1 text-[10px] disabled:opacity-30"
-                                          disabled={i === candidates.length - 1}
-                                          onClick={() => moveCandidate(col.key, t.key, i, 1)}
-                                          title="Mover para baixo (fallback posterior)"
-                                        >
-                                          ↓
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="btn-ghost py-0 px-1 text-[10px] text-rose-400 hover:text-rose-200"
-                                          onClick={() => removeCandidate(col.key, t.key, i)}
-                                          title="Remover modelo"
-                                        >
-                                          ✕
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {/* Metadados e benchmarks */}
-                                    {info ? (
-                                      <div className="ml-4 flex flex-wrap items-center gap-1.5 text-[10px]">
-                                        <span className="font-bold text-amber-300">★ {info.score ?? info.quality}</span>
-                                        {(() => {
-                                          const cb = info.cost_benefit ?? (info.price > 0 && (info.score ?? info.quality) ? Math.round(((info.score ?? info.quality) / info.price) * 10) / 10 : null);
-                                          return cb != null ? (
-                                            <span className="text-cyan-300 bg-cyan-950/70 px-1 py-0 rounded border border-cyan-800/50 font-mono">
-                                              {cb} pts/$
-                                            </span>
-                                          ) : null;
-                                        })()}
-                                        <span className="font-mono text-slate-300">
-                                          {info.price === 0 ? <span className="text-emerald-400 font-semibold">GRÁTIS</span> : `$${info.price.toFixed(2)}/M`}
-                                        </span>
-                                        {isOverCeiling && (
-                                          <span className="text-amber-300 bg-amber-950/80 px-1 py-0 rounded border border-amber-800 font-semibold" title={`Acima do teto de Tier 1 ($${tier1Ceiling.toFixed(2)})`}>
-                                            ⚠️ &gt; teto
-                                          </span>
-                                        )}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="text-center py-2 text-[10px] text-slate-500 italic">
-                              Nenhum modelo configurado.{" "}
-                              <button
-                                type="button"
-                                className="text-brand hover:underline"
-                                onClick={() => setPickerTarget({ cluster: col.key, tier: t.key })}
-                              >
-                                + adicionar
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        ))}
       </div>
 
-      {/* Mapeamento de Papel -> Tier */}
-      <div className="rounded-md border border-line p-2.5 bg-slate-900/30">
-        <div className="mb-1 font-semibold text-xs text-slate-200">
-          Papel → Tier Padrão{" "}
-          <span className="text-xs font-normal text-slate-400">
-            — define qual tier da matriz o agente usa para tarefas padrão (tarefas complexas escalam para Tier 1)
-          </span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-          {Object.entries(roles)
-            .filter(([role]) => !BACKEND_SERVICES.has(role))
-            .map(([role, tier]) => (
-              <label
-                key={role}
-                className="flex items-center justify-between gap-2 text-xs bg-slate-900/60 p-1.5 rounded border border-line/40"
-              >
-                <span className="truncate font-medium text-slate-200" title={role}>
-                  {ROLE_DISPLAY[role] || role}
-                </span>
-                <select
-                  className={select}
-                  value={tier}
-                  onChange={(e) => setRoles({ ...roles, [role]: e.target.value })}
-                >
-                  {["tier1", "tier2", "tier3"].map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </label>
-            ))}
-        </div>
-      </div>
+      {/* ------------------------------------------------------------ roles */}
+      <RolesPanel roles={roles} setRoles={setRoles} tasks={s.role_tasks ?? []} roleTasks={roleTasks} setRoleTasks={setRoleTasks} />
 
       <div className="text-right">
-        <button
-          className="btn-primary"
-          disabled={!dirty}
-          onClick={() =>
-            onSave({
-              matrix,
-              tiers: {
-                tier1: (matrix.strategy?.tier1 || matrix.engineering?.tier1 || []).filter((c: Candidate) => c.model.trim()),
-                tier2: (matrix.engineering?.tier2 || matrix.strategy?.tier2 || []).filter((c: Candidate) => c.model.trim()),
-                tier3: (matrix.routine?.tier3 || []).filter((c: Candidate) => c.model.trim()),
-              },
-              roles,
-              tier1_ceiling: tier1Ceiling,
-            })
-          }
-        >
-          Salvar modelos
-        </button>
+        <button className="btn-primary" disabled={!dirty} onClick={save}>Salvar modelos</button>
       </div>
 
-      {/* Modal de seleção de modelo interativo */}
       {pickerTarget && (
-        <OpenRouterModelPickerModal
-          isOpen={Boolean(pickerTarget)}
+        <ModelPickerModal
           onClose={() => setPickerTarget(null)}
           onSelect={(modelId) => {
             if (pickerTarget.index !== undefined) {
-              setCandidate(pickerTarget.cluster, pickerTarget.tier, pickerTarget.index, {
-                model: modelId,
-                provider: "openrouter",
-              });
+              setCandidate(pickerTarget.cluster, pickerTarget.tier, pickerTarget.index, { model: modelId, provider: "openrouter" });
             } else {
               addCandidate(pickerTarget.cluster, pickerTarget.tier, modelId, "openrouter");
             }
@@ -1255,11 +1103,75 @@ function ModelsPanel({
           }}
           clusterTarget={pickerTarget.cluster}
           tierTarget={pickerTarget.tier}
-          tier1Ceiling={tier1Ceiling}
-          catalog={proposal || catalog}
-          modelsMap={modelsMap}
+          tier1Ceiling={ceiling}
+          catalog={catalog}
+          clusters={activeClusters}
         />
       )}
+    </div>
+  );
+}
+
+const TIER_OPTIONS = ["tier1", "tier2", "tier3"] as const;
+
+/** One card per Loompa, alphabetical, carrying its default tier and the named calls that do not
+ * use it. Only tasks whose profile really differs are declared, so a card stays short. */
+function RolesPanel({
+  roles,
+  setRoles,
+  tasks,
+  roleTasks,
+  setRoleTasks,
+}: {
+  roles: Record<string, string>;
+  setRoles: (r: Record<string, string>) => void;
+  tasks: RoleTaskInfo[];
+  roleTasks: Record<string, string>;
+  setRoleTasks: (r: Record<string, string>) => void;
+}) {
+  const listed = Object.entries(roles)
+    .filter(([role]) => !BACKEND_SERVICES.has(role))
+    .map(([role, tier]) => ({ role, tier, label: ROLE_DISPLAY[role] ?? role }))
+    .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+
+  return (
+    <div className="rounded-md border border-line bg-slate-900/30 p-2.5">
+      <div className="mb-2 text-xs font-semibold text-slate-200">
+        Loompa → Tier padrão{" "}
+        <span className="font-normal text-slate-400">
+          — o tier que cada um usa nas tarefas do dia a dia (uma história complexa escala para o Tier 1 sozinha)
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+        {listed.map(({ role, tier, label }) => {
+          const mine = tasks.filter((t) => t.role === role);
+          return (
+            <div key={role} className="space-y-1.5 rounded border border-line/40 bg-slate-900/60 p-1.5 text-xs">
+              <label className="flex items-center justify-between gap-2">
+                <span className="truncate font-medium text-slate-200">{label}</span>
+                <select className={select} value={tier} onChange={(e) => setRoles({ ...roles, [role]: e.target.value })}>
+                  {TIER_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </label>
+              {mine.map((t) => (
+                <label key={t.key} className="flex items-center justify-between gap-2 border-t border-line/30 pt-1.5 pl-2">
+                  <span className="min-w-0">
+                    <span className="block truncate text-[11px] text-slate-300">↳ {t.label}</span>
+                    <span className="block truncate text-[10px] text-slate-500" title={t.hint}>{t.hint}</span>
+                  </span>
+                  <select
+                    className={select}
+                    value={roleTasks[t.key] ?? t.tier}
+                    onChange={(e) => setRoleTasks({ ...roleTasks, [t.key]: e.target.value })}
+                  >
+                    {TIER_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1269,86 +1181,84 @@ function ModelsPanel({
 function BudgetPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) => Promise<void> }) {
   const [b, setB] = useState(s.budget);
   const [par, setPar] = useState(s.schedule.max_parallel);
-  const [tier1Ceil, setTier1Ceil] = useState(s.models?.tier1_ceiling ?? 5.0);
+  const [ceiling, setCeiling] = useState(s.models?.tier1_ceiling ?? 1.25);
 
   useEffect(() => {
     setB(s.budget);
     setPar(s.schedule.max_parallel);
-    setTier1Ceil(s.models?.tier1_ceiling ?? 5.0);
+    setCeiling(s.models?.tier1_ceiling ?? 1.25);
   }, [s]);
 
+  const periodWord = b.period === "weekly" ? "semana" : "mês";
+  const quarter = Math.round((b.cap_usd / 4) * 100) / 100;
+
   return (
-    <div className="space-y-3">
-      <label className="block">
-        Teto de custo por modelo Tier 1 (US$/1M tokens)
-        <input
-          type="number"
-          min={0.1}
-          step={0.5}
-          className={input}
-          value={tier1Ceil}
-          onChange={(e) => setTier1Ceil(Number(e.target.value))}
-        />
-        <span className="text-[11px] text-slate-400 block mt-0.5">
-          Limite superior de custo combinado (3 entrada : 1 saída) para modelos de raciocínio profundo (Tier 1). Modelos mais caros que este valor são desqualificados do Tier 1.
-        </span>
-      </label>
-      <label className="block">
-        Teto mensal (US$)
-        <input
-          type="number"
-          min={0}
-          step={5}
-          className={input}
-          value={b.monthly_cap_usd}
-          onChange={(e) => setB({ ...b, monthly_cap_usd: Number(e.target.value) })}
-        />
-      </label>
-      <label className="block">
-        Alerta em (fração do teto)
-        <input
-          type="number"
-          min={0}
-          max={1}
-          step={0.05}
-          className={input}
-          value={b.warn_at_fraction}
-          onChange={(e) => setB({ ...b, warn_at_fraction: Number(e.target.value) })}
-        />
-      </label>
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={b.hard_stop}
-          onChange={(e) => setB({ ...b, hard_stop: e.target.checked })}
-        />{" "}
-        Pausar a esteira ao atingir o teto
-      </label>
-      <label className="block">
+    <div className="max-w-3xl space-y-4">
+      <div className="space-y-3 rounded-lg border border-line bg-slate-900/40 p-3">
+        <div className="font-semibold text-slate-100">Teto de gastos</div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="block text-xs text-slate-400">
+            Período
+            <select className={`${select} mt-1 w-full`} value={b.period} onChange={(e) => setB({ ...b, period: e.target.value as BudgetPeriod })}>
+              <option value="weekly">semanal (segunda a domingo)</option>
+              <option value="monthly">mensal</option>
+            </select>
+          </label>
+          <label className="block text-xs text-slate-400">
+            Teto por {periodWord} (US$)
+            <input type="number" min={0} step={1} className={`${input} mt-1`} value={b.cap_usd} onChange={(e) => setB({ ...b, cap_usd: Number(e.target.value) })} />
+          </label>
+        </div>
+        <label className="block text-xs text-slate-400">
+          Avisar ao atingir (fração do teto)
+          <input type="number" min={0} max={1} step={0.05} className={`${input} mt-1`} value={b.warn_at_fraction} onChange={(e) => setB({ ...b, warn_at_fraction: Number(e.target.value) })} />
+          <span className="mt-0.5 block text-[11px] text-slate-500">
+            {Math.round(b.warn_at_fraction * 100)}% do teto (US$ {(b.cap_usd * b.warn_at_fraction).toFixed(2)}) manda um aviso para a Caixa de Entrada.
+          </span>
+        </label>
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-line bg-slate-900/40 p-3">
+        <div className="font-semibold text-slate-100">Se o teto estourar</div>
+        {([
+          { key: "pause", title: `Pausar a esteira até ${b.period === "weekly" ? "a próxima semana" : "o próximo mês"}`, note: "Nada em andamento é perdido: as histórias guardam o estado e voltam de onde pararam." },
+          { key: "tier3", title: "Passar todos os Loompas para o Tier 3 (gratuito)", note: "A fábrica continua entregando, com modelos mais simples, sem custo adicional." },
+        ] as const).map((o) => (
+          <label key={o.key} className={`flex cursor-pointer gap-2 rounded-md border p-2 text-xs transition-colors ${b.on_exceed === o.key ? "border-brand/60 bg-brand/10" : "border-line/60 hover:border-line"}`}>
+            <input type="radio" name="on_exceed" className="mt-0.5" checked={b.on_exceed === o.key} onChange={() => setB({ ...b, on_exceed: o.key })} />
+            <span>
+              <span className="font-medium text-slate-200">{o.title}</span>
+              <span className="mt-0.5 block text-slate-400">{o.note}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-line bg-slate-900/40 p-3">
+        <div className="font-semibold text-slate-100">Limite por modelo</div>
+        <label className="block text-xs text-slate-400">
+          Teto para recomendação de modelos (US$ por 1M de tokens)
+          <input type="number" min={0} step={0.25} className={`${input} mt-1`} value={ceiling} onChange={(e) => setCeiling(Number(e.target.value))} />
+        </label>
+        <p className="text-[11px] text-slate-500">
+          Usado pela <strong className="text-slate-400">sugestão inteligente</strong>: modelos cujo custo combinado (3 de entrada : 1 de saída) passa deste valor
+          ficam fora do Tier 1. O padrão é um quarto do teto do período — hoje US$ {quarter.toFixed(2)}, cerca de 4M de tokens por {periodWord}.
+          {Math.abs(ceiling - quarter) > 0.01 && (
+            <button type="button" className="ml-1 text-brand hover:underline" onClick={() => setCeiling(quarter)}>usar US$ {quarter.toFixed(2)}</button>
+          )}
+        </p>
+      </div>
+
+      <label className="block text-xs text-slate-400">
         Histórias em paralelo
-        <input
-          type="number"
-          min={1}
-          max={32}
-          className={input}
-          value={par}
-          onChange={(e) => setPar(Number(e.target.value))}
-        />
+        <input type="number" min={1} max={32} className={`${input} mt-1`} value={par} onChange={(e) => setPar(Number(e.target.value))} />
       </label>
-      <p className="text-xs text-slate-500">
+
+      <p className="text-[11px] text-slate-500">
         O custo exato é acompanhado no painel de cada provedor; aqui é uma estimativa por tokens.
       </p>
       <div className="text-right">
-        <button
-          className="btn-primary"
-          onClick={() =>
-            onSave({
-              budget: b,
-              max_parallel: par,
-              tier1_ceiling: tier1Ceil,
-            })
-          }
-        >
+        <button className="btn-primary" onClick={() => onSave({ budget: b, max_parallel: par, tier1_ceiling: ceiling })}>
           Salvar orçamento
         </button>
       </div>

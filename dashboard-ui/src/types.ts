@@ -104,7 +104,7 @@ export interface Overview {
   columns: Column[];
   agents: Agent[];
   inbox: Message[];
-  finance: { today_usd: number; month_usd: number; cap_usd: number; fraction: number; warn: boolean; exhausted: boolean };
+  finance: { today_usd: number; period: BudgetPeriod; period_usd: number; cap_usd: number; fraction: number; warn: boolean; exhausted: boolean; downgrade: boolean };
   kaizen_today: number;
   sprint: SprintSummary | null;
   conversations: ConversationSummary[];
@@ -126,7 +126,7 @@ export interface KeyStatus { env: string; configured: boolean; label: string; so
 
 export interface ProviderInfo {
   name: string; label: string; kind: string; base_url: string; api_key_env: string; console_url: string;
-  needs_key: boolean; key: KeyStatus; used_by: string[];
+  models_url: string; needs_key: boolean; recommended: boolean; key: KeyStatus;
 }
 
 export interface Candidate {
@@ -144,13 +144,25 @@ export interface ModelPick {
   id: string;
   name: string;
   vendor?: string;
-  quality: number;
+  quality: number | null;
   price: number;
+  free?: boolean;
+  /** a `~vendor/x-latest` id: never recommended, offered only in the full catalogue */
+  alias?: boolean;
+  alias_target?: string;
+  context?: number;
+  created?: string | null;
   coding?: number | null;
   agentic?: number | null;
   intelligence?: number | null;
   score?: number | null;
   cost_benefit?: number | null;
+  /** score of every cluster, so a filter can change which number is shown without a round trip */
+  scores?: Partial<Record<ClusterName, number | null>>;
+  cost_benefits?: Partial<Record<ClusterName, number | null>>;
+  /** only on the full catalogue list: whether the ranking would consider it, and why not */
+  eligible?: boolean;
+  excluded?: string;
 }
 
 export interface ClusterTiers {
@@ -158,6 +170,11 @@ export interface ClusterTiers {
   tier2: ModelPick[];
   tier3: ModelPick[];
 }
+
+export interface RoleTaskInfo { key: string; role: string; label: string; hint: string; tier: string }
+
+export type BudgetPeriod = "weekly" | "monthly";
+export type OnExceed = "pause" | "tier3";
 
 export interface ModelProposalDTO {
   tiers: Record<string, Candidate[]>;
@@ -169,12 +186,12 @@ export interface ModelProposalDTO {
   expiring: string[];
   repriced: string[];
   summary: Record<string, ModelPick[]>;
-  clusters?: {
-    strategy?: ClusterTiers;
-    engineering?: ClusterTiers;
-    routine?: ClusterTiers;
-  };
+  clusters?: Partial<Record<ClusterName, ClusterTiers>>;
   all_models?: ModelPick[];
+  /** false when OpenRouter has no key here: there is no catalogue to read */
+  openrouter?: boolean;
+  error?: string;
+  price_warnings?: string[];
   considered: number;
   eligible: number;
   excluded: Record<string, number>;
@@ -182,37 +199,35 @@ export interface ModelProposalDTO {
   changed: boolean;
 }
 
-export interface PresetInfo { key: string; label: string; description: string; providers: string[]; optional_providers: string[]; tiers: Record<string, Candidate[]> }
-
-export type ClusterName = "strategy" | "engineering" | "routine";
+export type ClusterName = "strategy" | "engineering" | "routine" | "general";
 export type TierName = "tier1" | "tier2" | "tier3";
 export type ModelMatrix = Record<string, Record<string, Candidate[]>>;
 
 export interface Settings {
-  preset: string;
-  presets: PresetInfo[];
   providers: ProviderInfo[];
-  models?: { preset: string; tier1_ceiling: number; tier2_floor: number };
+  models?: { tier1_ceiling: number; tier2_floor: number; clusters_enabled: boolean };
   tiers: Record<string, Candidate[]>;
   matrix?: ModelMatrix;
   role_clusters?: Record<string, string>;
   roles: Record<string, string>;
-  budget: { monthly_cap_usd: number; warn_at_fraction: number; hard_stop: boolean };
+  role_tasks?: RoleTaskInfo[];
+  budget: { period: BudgetPeriod; cap_usd: number; warn_at_fraction: number; on_exceed: OnExceed };
   schedule: { max_parallel: number };
   tools: { tavily: { enabled: boolean; api_key_env: string; console_url: string; key: KeyStatus } };
   secrets_files: { hub: string; factory: string };
 }
 
 export interface SettingsPatch {
-  preset?: string;
   providers?: Record<string, { kind?: string; base_url?: string; api_key_env?: string; label?: string; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
   remove_providers?: string[];
   tiers?: Record<string, Candidate[]>;
   matrix?: ModelMatrix;
   roles?: Record<string, string>;
+  role_tasks?: Record<string, string>;
+  clusters_enabled?: boolean;
   tier1_ceiling?: number;
   tier2_floor?: number;
-  budget?: { monthly_cap_usd?: number; warn_at_fraction?: number; hard_stop?: boolean };
+  budget?: { period?: BudgetPeriod; cap_usd?: number; warn_at_fraction?: number; on_exceed?: OnExceed };
   max_parallel?: number;
   tools?: Record<string, { enabled?: boolean; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
 }

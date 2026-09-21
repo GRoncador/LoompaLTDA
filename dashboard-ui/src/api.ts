@@ -9,13 +9,16 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   factories: () => req<{ active: string | null; factories: FactoryRef[]; dry_run: boolean }>("/api/factories"),
   activate: (slug: string) => req(`/api/factories/${slug}/activate`, { method: "POST" }),
-  addFactory: (body: { path: string; name?: string; stack?: string; mission?: string; preset?: string; keys?: Record<string, string>; secrets_scope?: "hub" | "factory" }) =>
+  addFactory: (body: { path: string; name?: string; stack?: string; mission?: string; keys?: Record<string, string>; secrets_scope?: "hub" | "factory" }) =>
     req<{ slug: string; mode: string; report: string }>("/api/factories", { method: "POST", body: JSON.stringify(body) }),
   settings: (slug: string) => req<Settings>(`/api/factories/${slug}/settings`),
   updateSettings: (slug: string, patch: SettingsPatch) =>
     req<{ changes: string[]; settings: Settings }>(`/api/factories/${slug}/settings`, { method: "PUT", body: JSON.stringify(patch) }),
   testProvider: (slug: string, name: string, model?: string) =>
     req<ProbeResult>(`/api/factories/${slug}/settings/providers/${encodeURIComponent(name)}/test`, { method: "POST", body: JSON.stringify({ model: model ?? null }) }),
+  /** One minimal call on one cell of the matrix: does this model really answer on this provider? */
+  testModel: (slug: string, provider: string, model: string) =>
+    req<ProbeResult>(`/api/factories/${slug}/models/test`, { method: "POST", body: JSON.stringify({ provider, model }) }),
   modelsCatalog: (slug: string) => req<ModelProposalDTO>(`/api/factories/${slug}/models/catalog`),
   previewModelSync: (slug: string, body?: { tier1_ceiling?: number; tier2_floor?: number; force_refresh?: boolean }) =>
     req<ModelProposalDTO>(`/api/factories/${slug}/models/preview-sync`, { method: "POST", body: JSON.stringify(body || {}) }),

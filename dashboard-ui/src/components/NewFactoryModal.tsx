@@ -9,7 +9,6 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
   const [name, setName] = useState("");
   const [stack, setStack] = useState("custom");
   const [mission, setMission] = useState("");
-  const [preset, setPreset] = useState("gratuito");
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<string | null>(null);
   const [slug, setSlug] = useState<string | null>(null);
@@ -20,7 +19,7 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const r = await api.addFactory({ path, name: name || undefined, stack, mission, preset: preset || undefined });
+      const r = await api.addFactory({ path, name: name || undefined, stack, mission });
       setReport(r.report); setSlug(r.slug); setStep(2);
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   };
@@ -44,14 +43,11 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
               <option value="custom">Custom / brownfield</option>
             </select>
           </label>
-          <label className="block">Modelos de IA (preset; ajustável depois em Configurações)
-            <select value={preset} onChange={(e) => setPreset(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-1">
-              <option value="gratuito">Gratuito — Gemini Flash-Lite + Groq/OpenRouter free</option>
-              <option value="economico">Econômico — DeepSeek</option>
-              <option value="maximo">Máximo — Claude Opus 5 / Gemini Pro</option>
-              <option value="">Manter padrão (simulação até configurar chaves)</option>
-            </select>
-          </label>
+          <p className="rounded-md border border-line/60 bg-slate-900/50 p-2 text-xs text-slate-400">
+            A fábrica nasce usando a OpenRouter: uma chave alcança todos os modelos. No próximo passo você cola
+            a chave, e em <strong className="text-slate-300">Configurações › Modelos</strong> escolhe quais modelos cada
+            Loompa usa (ou pede uma sugestão inteligente).
+          </p>
           {err && <p className="text-xs text-red-300">{err}</p>}
           <div className="text-right"><button className="btn-primary" disabled={busy || !path} onClick={submit}>{busy ? "Escaneando…" : "Conectar fábrica"}</button></div>
         </div>
@@ -67,10 +63,10 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
       )}
       {step === 3 && slug && (
         <div className="scroll-thin max-h-[70vh] space-y-3 overflow-y-auto text-sm">
-          <p className="text-slate-400">Cole a chave de cada provedor do preset e teste a conexão. Sem chave, a fábrica roda em simulação.</p>
+          <p className="text-slate-400">Cole a chave dos provedores que quiser usar e teste a conexão. Sem chave, a fábrica roda em simulação.</p>
           {err && <p className="text-xs text-red-300">{err}</p>}
           {notes.length > 0 && <p className="text-xs text-emerald-300">✔ {notes.join(" · ")}</p>}
-          {settings ? <ProvidersPanel slug={slug} s={settings} onSave={save} onlyNeeded /> : <p className="text-slate-400">carregando…</p>}
+          {settings ? <ProvidersPanel slug={slug} s={settings} onSave={save} /> : <p className="text-slate-400">carregando…</p>}
           <div className="text-right"><button className="btn-primary" onClick={() => onClose(slug)}>Abrir fábrica</button></div>
         </div>
       )}

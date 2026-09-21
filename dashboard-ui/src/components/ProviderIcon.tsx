@@ -6,6 +6,19 @@ interface ProviderIconProps {
   className?: string;
 }
 
+/** The API providers a factory can hold a key for, in the order the settings screen lists them.
+ * `xai` is the company behind Grok; `google` is the vendor tag OpenRouter uses for Gemini. */
+export const PROVIDER_NAMES: Record<string, string> = {
+  openrouter: "OpenRouter",
+  gemini: "Google Gemini",
+  anthropic: "Anthropic Claude",
+  openai: "OpenAI (ChatGPT)",
+  xai: "xAI (Grok)",
+  deepseek: "DeepSeek",
+  ollama: "Ollama (local)",
+  tavily: "Tavily",
+};
+
 export const VENDOR_NAMES: Record<string, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
@@ -17,7 +30,10 @@ export const VENDOR_NAMES: Record<string, string> = {
   qwen: "Qwen (Alibaba)",
   alibaba: "Qwen (Alibaba)",
   "x-ai": "xAI (Grok)",
+  xai: "xAI (Grok)",
   grok: "xAI (Grok)",
+  ollama: "Ollama (local)",
+  tavily: "Tavily",
   mistral: "Mistral AI",
   mistralai: "Mistral AI",
   "z-ai": "Z.ai (Zhipu)",
@@ -54,6 +70,8 @@ export function normalizeVendor(provider: string, model?: string): string {
   if (m.startsWith("llama")) return "meta";
   if (m.startsWith("qwen")) return "qwen";
   if (m.startsWith("grok")) return "x-ai";
+  if (p === "xai") return "x-ai";
+  if (p === "gemini") return "google";
   if (m.startsWith("mistral") || m.startsWith("codestral")) return "mistralai";
   if (m.startsWith("glm")) return "z-ai";
 
@@ -96,11 +114,10 @@ export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-bloc
   const vendor = normalizeVendor(provider, model);
   const providerLabel = VENDOR_NAMES[vendor] || (vendor ? vendor.charAt(0).toUpperCase() + vendor.slice(1) : "Provedor");
 
-  const wrap = (svg: React.ReactNode, title: string) => (
-    <span
-      className="inline-flex items-center justify-center cursor-help transition-transform hover:scale-110"
-      title={`Provedor: ${title}`}
-    >
+  // No `title` here: Safari turns a title on an inline element into a question-mark cursor and
+  // never shows the text. Whatever needs a name shows it next to the mark instead.
+  const wrap = (svg: React.ReactNode, _name: string) => (
+    <span className="inline-flex items-center justify-center" aria-hidden="true">
       {svg}
     </span>
   );
@@ -182,12 +199,20 @@ export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-bloc
         </svg>,
         "OpenRouter"
       );
-    case "groq":
+    case "ollama":
       return wrap(
         <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" fill="none" strokeDasharray="40 10"/>
+          <path d="M6.2 3c-1.2 0-2 1.5-2.1 3.3-.05.9.1 1.7.35 2.3C3.55 9.6 3 11 3 12.6c0 2.3 1.1 4.2 2.8 5.4-.3.7-.5 1.5-.5 2.3 0 .4.3.7.7.7h.6c.4 0 .7-.3.7-.7 0-.5.1-1 .3-1.4 1.1.4 2.3.6 3.6.6s2.5-.2 3.6-.6c.2.4.3.9.3 1.4 0 .4.3.7.7.7h.6c.4 0 .7-.3.7-.7 0-.8-.2-1.6-.5-2.3 1.7-1.2 2.8-3.1 2.8-5.4 0-1.6-.55-3-1.45-4 .25-.6.4-1.4.35-2.3C17.8 4.5 17 3 15.8 3c-1.1 0-1.9 1.2-2.15 2.8-.5-.1-1.05-.15-1.65-.15s-1.15.05-1.65.15C10.1 4.2 9.3 3 8.2 3h-2zm3.05 8.1c.7 0 1.25.7 1.25 1.55s-.55 1.55-1.25 1.55S8 13.5 8 12.65s.55-1.55 1.25-1.55zm5.5 0c.7 0 1.25.7 1.25 1.55s-.55 1.55-1.25 1.55-1.25-.7-1.25-1.55.55-1.55 1.25-1.55zM12 15.1c.9 0 1.7.4 1.7.9 0 .5-.8.9-1.7.9s-1.7-.4-1.7-.9c0-.5.8-.9 1.7-.9z"/>
         </svg>,
-        "Groq"
+        "Ollama"
+      );
+    case "tavily":
+      return wrap(
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="10.5" cy="10.5" r="6.5"/>
+          <path d="M15.5 15.5L21 21" strokeLinecap="round"/>
+        </svg>,
+        "Tavily"
       );
     default:
       return wrap(
@@ -197,4 +222,31 @@ export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-bloc
         providerLabel
       );
   }
+}
+
+/**
+ * A provider's mark next to its name — what the providers tab lists and what a provider select
+ * shows while it is open. Once one is chosen, only the mark stays (the `nameless` variant).
+ */
+export function ProviderBadge({
+  provider,
+  nameless = false,
+  className = "w-4 h-4",
+}: {
+  provider: string;
+  nameless?: boolean;
+  className?: string;
+}) {
+  const name = PROVIDER_NAMES[provider] || VENDOR_NAMES[normalizeVendor(provider)] || provider;
+  return (
+    <span className="inline-flex items-center gap-1.5 min-w-0">
+      <ProviderIcon provider={provider} className={`${className} flex-shrink-0 text-slate-300`} />
+      {!nameless && <span className="truncate">{name}</span>}
+    </span>
+  );
+}
+
+/** The name a person reads for a model: "Fabricante: Modelo", and what an alias points to today. */
+export function fullModelName(name: string, id: string): string {
+  return name && name !== id ? name : id;
 }
