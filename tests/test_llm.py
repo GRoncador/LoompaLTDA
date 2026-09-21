@@ -16,6 +16,7 @@ from loompa.llm import (
     OpenAICompatibleProvider,
     QuotaExhausted,
     ToolCall,
+    model_not_found,
 )
 from loompa.llm.providers import AnthropicProvider, _retry_after_seconds, extract_json
 from loompa.store import Store
@@ -468,3 +469,31 @@ async def test_the_candidate_sets_the_default_effort_and_the_call_overrides_it()
     assert mock.calls[-1]["reasoning_effort"] == "high"  # from the candidate
     await router.complete("worker", [Message("user", "u")], reasoning_effort="low")
     assert mock.calls[-1]["reasoning_effort"] == "low"  # the call wins, like max_tokens
+
+
+def test_a_model_the_provider_does_not_have_is_told_apart_from_other_errors():
+    """OpenRouter answers 400 with a sentence, not 404, so a status check alone misses it."""
+    assert model_not_found(LLMError("x/y is not a valid model ID", status=400))
+    assert model_not_found(LLMError("No endpoints found for a/b", status=400))
+    assert model_not_found(LLMError("modelo sumiu", status=404))
+    assert not model_not_found(LLMError("invalid api key", status=400))
+    assert not model_not_found(LLMError("overloaded", status=503))
+
+
+async def test_the_router_reports_a_missing_model_once_and_falls_through():
+    """A wrong name cannot be fixed by retrying: the candidate is skipped and said out loud."""
+    cfg = two_provider_matrix()
+    gone: list[tuple[str, str]] = []
+    bad = MockProvider(
+        "gemini", script=lambda *a: LLMError("gemini-3.5-flash-lite is not a valid model ID", status=400)
+    )
+    router = ModelRouter(
+        cfg,
+        providers={"gemini": bad, "deepseek": MockProvider("deepseek", script=scripted)},
+        on_model_gone=lambda cand, detail: gone.append((cand.provider, cand.model)),
+        max_retries=2,
+    )
+    rc = await router.complete("worker", [Message("user", "x")])
+    assert rc.candidate.provider == "deepseek"  # fell through to the next candidate
+    assert gone == [("gemini", "gemini-3.5-flash-lite")]  # said once, not once per retry
+    assert len(bad.calls) == 1  # and not retried: a name does not get better on the second try

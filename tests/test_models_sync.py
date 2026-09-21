@@ -27,7 +27,7 @@ from loompa.llm.catalog import (
     parse_catalog,
     rank,
 )
-from loompa.models_sync import ModelSync, excluded_report, plan
+from loompa.models_sync import ModelSync, ModelWatch, excluded_report, plan
 from test_engine import factory, make_ctx, seed_story  # noqa: F401
 
 TODAY = date(2026, 9, 20)
@@ -418,28 +418,28 @@ def test_cli_previews_then_proposes_through_the_inbox(hub, brownfield_repo, monk
     from loompa.factory import Factory
 
     f = Factory.open(brownfield_repo)
-    use_openrouter(f.config)
+    pin_openrouter(f.config)
     f.save()
     monkeypatch.setattr(
         "loompa.cli.models.plan",
         lambda config, policy: plan(config, policy, client=catalog(), today=TODAY),
     )
+    # this fake catalogue is priced for the older US$ 5 ceiling; the shipped one is US$ 1.25
+    ceiling = ["--tier1-ceiling", "5"]
     shown = runner.invoke(
-        app, ["models", "sync", "--factory", "demo", "--preview", "--picks", "2", "--ids", "pinned"]
+        app, ["models", "sync", "--factory", "demo", "--preview", "--picks", "2", *ceiling]
     )
     assert shown.exit_code == 0 and "b/strong" in shown.stdout and "sem nota" in shown.stdout
     assert "nada foi enviado" in shown.stdout
     f = Factory.open(brownfield_repo)
     assert Store(f.paths.state_db).list_messages(f.slug) == []
 
-    sent = runner.invoke(
-        app, ["models", "sync", "--factory", "demo", "--picks", "2", "--ids", "pinned"]
-    )
+    sent = runner.invoke(app, ["models", "sync", "--factory", "demo", "--picks", "2", *ceiling])
     assert sent.exit_code == 0 and "loompa inbox reply" in sent.stdout
     (msg,) = Store(f.paths.state_db).list_messages(f.slug, status="pending")
     assert msg.title.startswith("Nova lista de modelos")
     assert (
-        tier_ids(Factory.open(brownfield_repo).config, "tier1")[0] == "~z-ai/glm-latest"
+        tier_ids(Factory.open(brownfield_repo).config, "tier1")[0] == "z-ai/glm-5.3"
     )  # unchanged
 
 
@@ -481,67 +481,64 @@ def test_an_alias_is_rated_by_the_model_it_points_to():
     assert models["~e/orphan-latest"].quality is None  # a target that is not in the catalogue
 
 
-def test_a_factory_on_aliases_is_ranked_on_aliases_only_and_a_pinned_one_on_ids():
+def test_an_alias_is_never_recommended_but_stays_in_the_full_catalogue():
+    """A `-latest` alias follows whatever the vendor ships next, so it can get worse or cost more
+    with nobody approving it. Three pinned candidates per tier already cover a model going down,
+    so the ranking leaves every alias out — and still lists it, with the reason, for a founder
+    who wants to add one by hand."""
     models = parse_catalog({"data": ALIASED})
-    ranking = rank(models, POLICY, TODAY, "alias")
-    assert {m.id for m in ranking.eligible} == {
-        "~b/strong-latest",
-        "~c/mid-latest",
-        "~d/cheap-latest",
-    }
-    assert ranking.excluded["unrated"] == 1  # the orphan: counted, not scored 0
-    assert ranking.excluded["pinned"] >= 3
-    pinned = rank(models, POLICY, TODAY, "pinned")
-    assert not any(m.alias for m in pinned.eligible) and pinned.excluded["alias"] == 4
+    ranking = rank(models, POLICY, TODAY)
+    assert not any(m.alias for m in ranking.eligible)
+    assert ranking.excluded["alias"] == 4
+
+    proposal = build_proposal(openrouter_config(), models, POLICY, TODAY)
+    assert proposal.mode == "pinned"
+    assert not any(c["model"].startswith("~") for cs in proposal.tiers.values() for c in cs)
+    listed = {m["id"]: m for m in proposal.all_models}
+    alias = listed["~b/strong-latest"]
+    assert alias["alias"] and alias["eligible"] is False and "apelido" in alias["excluded"]
+    assert alias["alias_target"] == "B/Strong"  # what it points to today
 
 
-def test_the_mode_follows_what_the_factory_uses_and_can_be_forced():
-    models = parse_catalog({"data": ALIASED})
-    assert build_proposal(aliased_config(), models, POLICY, TODAY).mode == "alias"
-    assert build_proposal(openrouter_config(), models, POLICY, TODAY).mode == "pinned"
-    forced = Policy(picks=2, ids="pinned")
-    assert build_proposal(aliased_config(), models, forced, TODAY).mode == "pinned"
-
-
-def test_an_alias_list_keeps_the_free_router_last_and_prices_every_alias_it_uses():
+def test_a_suggestion_replaces_an_alias_the_founder_had_with_fixed_ids():
+    """Accepting a suggestion means taking the suggested list, and it is made of fixed ids. An
+    alias only stays while the founder does not ask for a new one."""
     config = aliased_config()
     proposal = build_proposal(config, parse_catalog({"data": ALIASED}), POLICY, TODAY)
     assert [c["model"] for c in proposal.tiers["tier2"]][-1] == "openrouter/free"
     assert "openrouter/free" not in proposal.pricing  # free needs no price
-    assert proposal.pricing["~b/strong-latest"]["output"] == 5.5  # the alias's own price
-    assert set(proposal.repriced) == set(proposal.pricing)  # none of them priced in this config
     assert apply_proposal(config, proposal)
-    assert config.price_for("~b/strong-latest").output == 5.5  # billed by the id that was asked for
-    assert build_proposal(config, parse_catalog({"data": ALIASED}), POLICY, TODAY).repriced == []
+    left = {c.model for cands in config.models.tiers.values() for c in cands}
+    assert not any(m.startswith("~") for m in left)
 
 
 def test_a_price_that_moved_is_proposed_even_when_the_list_is_the_same():
-    config = aliased_config()
-    models = parse_catalog({"data": ALIASED})
+    config = openrouter_config()
+    models = parse_catalog({"data": CATALOG})
     assert apply_proposal(config, build_proposal(config, models, POLICY, TODAY))
-    moved = [dict(r) for r in ALIASED]
+    moved = [dict(r) for r in CATALOG]
     for row in moved:
-        if row["id"] == "~b/strong-latest":
+        if row["id"] == "b/strong":
             row["pricing"] = {"prompt": str(3 / 1e6), "completion": str(8 / 1e6)}
     again = build_proposal(config, parse_catalog({"data": moved}), POLICY, TODAY)
-    assert again.repriced == ["~b/strong-latest"] and again.changed
+    assert again.repriced == ["b/strong"] and again.changed
 
 
 def test_the_same_models_in_another_order_are_left_as_the_founder_ordered_them():
     config = default_config()
     config.models.tiers = {
         "tier1": [
-            ModelCandidate(provider="openrouter", model="~c/mid-latest"),
-            ModelCandidate(provider="openrouter", model="~b/strong-latest"),
+            ModelCandidate(provider="openrouter", model="c/mid"),
+            ModelCandidate(provider="openrouter", model="b/strong"),
         ],
-        "tier2": [ModelCandidate(provider="openrouter", model="~d/cheap-latest")],
+        "tier2": [ModelCandidate(provider="openrouter", model="d/cheaper")],
     }
-    models = parse_catalog({"data": ALIASED})
+    models = parse_catalog({"data": CATALOG})
     assert apply_proposal(config, build_proposal(config, models, POLICY, TODAY))
     settled = build_proposal(config, models, POLICY, TODAY)
     assert not settled.changed and [c["model"] for c in settled.tiers["tier1"]] == [
-        "~c/mid-latest",
-        "~b/strong-latest",  # the ranking would put b/strong first; the founder's order stays
+        "c/mid",
+        "b/strong",  # the ranking would put b/strong first; the founder's order stays
     ]
 
 
@@ -694,3 +691,52 @@ def test_clusters_tier1_score_tier2_cost_benefit_tier3_free():
     assert len(eng["tier3"]) > 0
     assert all(p["price"] == 0.0 for p in eng["tier3"])
     assert any(p["id"] == "z/free-coder:free" for p in eng["tier3"])
+
+
+# --------------------------------------------------------------------- the model watch
+
+
+async def test_a_model_that_got_more_expensive_becomes_one_inbox_note(factory: Factory):
+    """No schedule watches prices: the comparison happens when the founder refreshes the
+    catalogue, against what the factory is billing at today."""
+    pin_openrouter(factory.config)
+    ctx = make_ctx(factory, dry_run=True)
+    watch = ModelWatch(ctx)
+    models = parse_catalog({"data": CATALOG})
+
+    assert watch.check_prices(models) == []  # the first sight is the baseline, not news
+    assert ctx.store.list_messages(factory.slug) == []
+
+    dearer = [dict(r) for r in CATALOG]
+    for row in dearer:
+        if row["id"] == "z-ai/glm-5.3":
+            row["pricing"] = {"prompt": str(4 / 1e6), "completion": str(12 / 1e6)}
+    told = watch.check_prices(parse_catalog({"data": dearer}))
+    assert told == []  # z-ai/glm-5.3 is not one of this factory's models
+
+    pricier = [dict(r) for r in CATALOG]
+    for row in pricier:
+        if row["id"] == "b/strong":
+            row["pricing"] = {"prompt": str(6 / 1e6), "completion": str(18 / 1e6)}
+    factory.config.models.matrix["engineering"]["tier1"] = [
+        ModelCandidate(provider="openrouter", model="b/strong")
+    ]
+    assert ModelWatch(ctx).check_prices(parse_catalog({"data": CATALOG})) == []  # new baseline
+    told = ModelWatch(ctx).check_prices(parse_catalog({"data": pricier}))
+    assert told == ["b/strong"]
+    (msg,) = ctx.store.list_messages(factory.slug, status="pending")
+    assert "mais caro" in msg.title and msg.executive_audit() == []  # plain pt-BR, no stack trace
+
+
+async def test_a_model_that_left_the_air_is_reported_once(factory: Factory):
+    ctx = make_ctx(factory, dry_run=True)
+    watch = ModelWatch(ctx)
+    watch.model_gone("openrouter", "z-ai/gone-5")
+    watch.model_gone("openrouter", "z-ai/gone-5")  # every call fails; the founder hears once
+    (msg,) = ctx.store.list_messages(factory.slug, status="pending")
+    assert "não existe mais" in msg.title and "z-ai/gone-5" in msg.context
+    assert msg.executive_audit() == []
+
+    watch.forget("openrouter", "z-ai/gone-5")  # it answered again: a later outage is news again
+    watch.model_gone("openrouter", "z-ai/gone-5")
+    assert len(ctx.store.list_messages(factory.slug, status="pending")) == 2

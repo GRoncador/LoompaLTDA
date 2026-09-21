@@ -14,7 +14,14 @@ from dataclasses import asdict, dataclass, replace
 import httpx
 
 from loompa.config.schema import LoompaConfig, McpServerConfig
-from loompa.llm.providers import LLMError, Message, QuotaExhausted, build_provider, resolve_key
+from loompa.llm.providers import (
+    LLMError,
+    Message,
+    QuotaExhausted,
+    build_provider,
+    model_not_found,
+    resolve_key,
+)
 
 
 @dataclass
@@ -87,10 +94,10 @@ async def probe_provider(
         text = str(exc).lower()
         if status in (401, 403) or (status == 400 and "api key" in text or "api_key" in text):
             detail = "chave recusada pelo provedor"
-        elif status == 404:
+        elif model_not_found(exc):
             hint = re.search(r"use models/([\w.\-]+)", str(exc))
-            detail = f"modelo não encontrado neste provedor ({model})" + (
-                f"; o provedor sugere {hint.group(1)}" if hint else ""
+            detail = f"este provedor não tem o modelo {model}" + (
+                f"; ele sugere {hint.group(1)}" if hint else "; confira o nome na lista dele"
             )
         elif status and status >= 500:
             detail = "provedor indisponível no momento"

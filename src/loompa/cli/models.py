@@ -35,21 +35,15 @@ def models_sync(
     picks: int = typer.Option(
         Policy.picks, "--picks", help="Modelos por tier (um por fabricante)."
     ),
-    ids: str = typer.Option(
-        Policy.ids,
-        "--ids",
-        help="alias (~fabricante/modelo-latest) | pinned (versão fixa) | auto (o que a fábrica já usa).",
-    ),
 ) -> None:
     """Compara o catálogo da OpenRouter e propõe a lista de modelos ao Founder pelo inbox.
 
     Nada muda na configuração até a aprovação, e a troca só vale quando não há sprint em andamento.
+    A proposta usa só ids fixos: os três candidatos de cada tier já cobrem um modelo fora do ar,
+    e um apelido -latest mudaria de modelo (e de preço) sem ninguém decidir.
     """
     f = resolve_factory(factory)
-    if ids not in ("alias", "pinned", "auto"):
-        console.print("[red]✘[/red] --ids deve ser alias, pinned ou auto.")
-        raise typer.Exit(code=1)
-    policy = Policy(tier1_ceiling=tier1_ceiling, tier2_floor=tier2_floor, picks=picks, ids=ids)
+    policy = Policy(tier1_ceiling=tier1_ceiling, tier2_floor=tier2_floor, picks=picks)
     try:
         proposal = plan(f.config, policy)
     except CatalogError as exc:
@@ -58,7 +52,7 @@ def models_sync(
 
     console.print(
         f"Catálogo: {proposal.considered} modelos, {proposal.eligible} passaram nos critérios "
-        f"({'apelidos -latest' if proposal.mode == 'alias' else 'versões fixas'})."
+        "(sempre versões fixas: um apelido -latest troca de modelo sem ninguém aprovar)."
     )
     for reason, n in excluded_report(proposal):
         console.print(f"  [dim]{n:>4} fora: {reason}[/dim]")

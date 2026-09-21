@@ -10,12 +10,14 @@ from loompa.llm.providers import (
     QuotaExhausted,
     ToolCall,
     build_provider,
+    model_not_found,
 )
 from loompa.llm.router import ModelRouter, RoutedCall
 
 __all__ = [
     "AnthropicProvider",
     "LLMError",
+    "model_not_found",
     "LLMProvider",
     "LLMResponse",
     "Message",

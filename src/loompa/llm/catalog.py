@@ -40,8 +40,7 @@ CATALOG_CACHE_FILE = "openrouter_catalog.json"
 # Why a model is out of the ranking, in the order the checks run. `unrated` is last on purpose:
 # it counts only models that would otherwise have qualified.
 REASONS = {
-    "alias": "apelido (-latest); esta fábrica usa ids fixos",
-    "pinned": "id fixo; esta fábrica usa apelidos -latest",
+    "alias": "apelido (-latest): segue sozinho a versão nova do fabricante",
     "variant": "variante (lote, gratuita) que não entra no ranking",
     "no_tools": "não usa ferramentas",
     "not_text": "não é de texto",
@@ -309,16 +308,13 @@ def fetch_catalog(
 
 @dataclass(frozen=True)
 class Policy:
-    """The knobs of the ranking. Defaults follow the real catalogue: at a $5 ceiling the best
-    tier1 models are the ones the OpenRouter preset already uses, and at 80% of the best index
-    tier2 keeps GLM 5.3 Flash, the model validated live."""
+    """The knobs of the ranking."""
 
-    tier1_ceiling: float = 5.0  # blended USD per 1M tokens the reasoning tier may cost
+    tier1_ceiling: float = 1.25  # blended USD per 1M tokens the reasoning tier may cost
     tier2_floor: float = 0.80  # fraction of the best quality the execution tier must reach
     picks: int = 3  # candidates per tier (one per vendor, so a fallback is not the same outage)
     min_context: int = 128_000
     expiry_margin_days: int = 60
-    ids: str = "auto"  # alias | pinned | auto (follow what the factory already uses)
 
 
 def unavailable_reason(m: CatalogModel, policy: Policy, today: date) -> str | None:
@@ -334,11 +330,15 @@ def unavailable_reason(m: CatalogModel, policy: Policy, today: date) -> str | No
     return None
 
 
-def exclusion_reason(
-    m: CatalogModel, policy: Policy, today: date, mode: str = "pinned"
-) -> str | None:
-    if m.alias != (mode == "alias"):
-        return "pinned" if mode == "alias" else "alias"
+def exclusion_reason(m: CatalogModel, policy: Policy, today: date) -> str | None:
+    """Why a model is not ranked. An alias is always one of those reasons.
+
+    A `~vendor/x-latest` id follows whatever the vendor ships next: the model behind it can get
+    better, worse or more expensive without anyone approving it. Three pinned candidates per tier
+    are already the defence against one of them going down, so the recommendation never proposes
+    an alias. A founder who wants one adds it by hand from the full catalogue."""
+    if m.alias:
+        return "alias"
     if ":" in m.id:
         return "variant"
     if not m.tools:
@@ -374,13 +374,13 @@ def _one_per_vendor(ordered: list[CatalogModel], n: int) -> list[CatalogModel]:
     return picked
 
 
-def rank(models: list[CatalogModel], policy: Policy, today: date, mode: str = "pinned") -> Ranking:
+def rank(models: list[CatalogModel], policy: Policy, today: date) -> Ranking:
     """tier1 is "best quality under a price ceiling"; tier2 is "cheapest above a quality floor".
     A plain quality/price ratio would put the cheapest acceptable model first in both."""
     excluded: Counter[str] = Counter()
     eligible: list[CatalogModel] = []
     for m in models:
-        reason = exclusion_reason(m, policy, today, mode)
+        reason = exclusion_reason(m, policy, today)
         if reason:
             excluded[reason] += 1
         else:
@@ -419,7 +419,7 @@ class Proposal:
     considered: int = 0
     eligible: int = 0
     excluded: dict[str, int] = field(default_factory=dict)
-    mode: str = "pinned"  # alias | pinned: which kind of ids the ranking was made from
+    mode: str = "pinned"  # the ranking only ever proposes pinned ids (see `exclusion_reason`)
     repriced: list[str] = field(default_factory=list)  # in use, priced differently in the config
     targets: dict[str, str] = field(default_factory=dict)  # aliases in use -> model behind them now
     clusters: dict[str, dict[str, list[dict[str, Any]]]] = field(default_factory=dict)
@@ -474,6 +474,8 @@ def _model_summary(m: CatalogModel, score: float | None) -> dict[str, Any]:
         "quality": round(m.quality, 1) if m.quality is not None else None,
         "price": cost,
         "free": is_free(m.id) or cost == 0.0,
+        "alias": m.alias,
+        "alias_target": m.target or "",
         "context": m.context,
         "created": m.created.isoformat() if m.created else None,
         "coding": round(m.coding, 1) if m.coding is not None else None,
@@ -534,17 +536,6 @@ def rank_cluster(
     }
 
 
-def detect_mode(config: LoompaConfig) -> str:
-    """A factory whose OpenRouter candidates are `~vendor/x-latest` aliases keeps using aliases."""
-    aliased = any(
-        c.model.startswith("~")
-        for cands in config.models.tiers.values()
-        for c in cands
-        if c.provider == PROVIDER
-    )
-    return "alias" if aliased else "pinned"
-
-
 def _same_price(a: Price | None, b: Price) -> bool:
     return a is not None and all(
         abs(x - y) <= 1e-6
@@ -555,8 +546,7 @@ def _same_price(a: Price | None, b: Price) -> bool:
 def build_proposal(
     config: LoompaConfig, models: list[CatalogModel], policy: Policy, today: date
 ) -> Proposal:
-    mode = detect_mode(config) if policy.ids == "auto" else policy.ids
-    ranking = rank(models, policy, today, mode)
+    ranking = rank(models, policy, today)
     by_id = {m.id: m for m in models}
     configured = {
         c.model for cands in config.models.tiers.values() for c in cands if c.provider == PROVIDER
@@ -630,7 +620,7 @@ def build_proposal(
     all_models = []
     for m in sorted(models, key=lambda m: (-(m.quality or -1.0), m.id)):
         row = _model_summary(m, m.quality)
-        reason = exclusion_reason(m, policy, today, mode)
+        reason = exclusion_reason(m, policy, today)
         row["eligible"] = reason is None
         row["excluded"] = REASONS.get(reason, reason) if reason else ""
         all_models.append(row)
@@ -652,7 +642,7 @@ def build_proposal(
         considered=ranking.total,
         eligible=len(ranking.eligible),
         excluded=dict(ranking.excluded),
-        mode=mode,
+        mode="pinned",
         repriced=repriced,
         targets={
             m: by_id[m].target_id for m in sorted(configured) if m in by_id and by_id[m].alias

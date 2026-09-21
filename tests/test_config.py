@@ -17,7 +17,11 @@ def test_defaults_load_and_validate():
     assert cfg.budget.on_exceed == "pause"
     assert cfg.models.tier_for("master") == "tier1"
     assert cfg.models.tier_for("worker") == "tier2"
-    assert cfg.models.candidates_for("worker")[0].model == "~z-ai/glm-flash-latest"
+    # fixed ids, never `~...-latest`: an alias would change model and price without approval
+    assert cfg.models.candidates_for("worker")[0].model == "z-ai/glm-5.3-flash"
+    assert not any(
+        c.model.startswith("~") for t in cfg.models.matrix.values() for cs in t.values() for c in cs
+    )
     assert cfg.models.tier_for("analyst") == "tier2" and cfg.models.tier_for("novo") == "tier2"
     assert cfg.providers["openrouter"].kind == "openai_compatible"
     assert cfg.price_for("deepseek-chat").output == 1.10

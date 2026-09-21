@@ -34,6 +34,31 @@ class LLMError(RuntimeError):
         self.retryable = retryable
 
 
+# How each provider says "I do not have that model". A 404 is the documented answer, but the one
+# that matters in practice is OpenRouter's, which returns 400 with a sentence. Checked against
+# the real API: `{"error":{"message":"x/y is not a valid model ID","code":400}}`.
+_NO_SUCH_MODEL = (
+    "not a valid model",
+    "no endpoints found",
+    "model not found",
+    "unknown model",
+    "does not exist",
+    "no such model",
+    "invalid model",
+)
+
+
+def model_not_found(exc: LLMError) -> bool:
+    """Whether the provider answered that this model id is not one of its own.
+
+    Retrying cannot fix a name, so the router skips the candidate and the founder hears about it
+    once (`loompa.models_sync.ModelWatch`)."""
+    if exc.status == 404:
+        return True
+    text = str(exc).lower()
+    return exc.status == 400 and any(phrase in text for phrase in _NO_SUCH_MODEL)
+
+
 class QuotaExhausted(LLMError):
     """Rate limit / quota. `retry_after` (seconds) is the provider's own hint when it gave one."""
 

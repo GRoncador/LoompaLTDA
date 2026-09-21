@@ -462,6 +462,12 @@ class StackProfile(BaseModel):
     databases: list[str] = Field(default_factory=list)
 
 
+# Providers that were shipped once and are not offered any more. A factory keeps one only while
+# it is actually using it: a key it holds, or a model in some tier. Otherwise the list on the
+# settings screen would keep growing with names nobody chose.
+RETIRED_PROVIDERS: tuple[str, ...] = ("groq",)
+
+
 class LoompaConfig(BaseModel):
     factory: FactoryConfig = Field(default_factory=FactoryConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
@@ -475,6 +481,19 @@ class LoompaConfig(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     stack: StackProfile = Field(default_factory=StackProfile)
+
+    @model_validator(mode="after")
+    def _drop_unused_retired_providers(self) -> LoompaConfig:
+        in_use = {
+            c.provider
+            for tier_map in self.models.matrix.values()
+            for cands in tier_map.values()
+            for c in cands
+        } | {c.provider for cands in self.models.tiers.values() for c in cands}
+        for name in RETIRED_PROVIDERS:
+            if name in self.providers and name not in in_use:
+                del self.providers[name]
+        return self
 
     def price_for(self, model: str) -> Price:
         return self.pricing.get(model) or self.pricing.get("default") or Price()

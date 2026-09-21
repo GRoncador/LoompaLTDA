@@ -24,6 +24,7 @@ from loompa.llm.providers import (
     Message,
     QuotaExhausted,
     build_provider,
+    model_not_found,
 )
 
 log = logging.getLogger(__name__)
@@ -275,7 +276,7 @@ class ModelRouter:
                     break  # next candidate
                 except LLMError as exc:
                     errors.append(str(exc))
-                    if exc.status == 404 and self.on_model_gone:
+                    if model_not_found(exc) and self.on_model_gone:
                         # The provider does not have this id. Retrying cannot fix a name, so the
                         # founder hears about it once and the candidate is skipped meanwhile.
                         self.on_model_gone(cand, str(exc))

@@ -35,87 +35,93 @@ models:
   clusters_enabled: true    # false: every role shares one "general" cluster with the same 3 tiers
   tier1_ceiling: 1.25       # blended USD per 1M tokens ceiling for Tier 1 reasoning models
   tier2_floor: 0.80         # quality floor fraction for Tier 2 execution models
-  # Candidates are tried in order; a quota error or a 5xx falls through to the next one.
-  # `~vendor/x-latest` ids follow each maker's newest version, so a model that leaves the air
-  # does not stop the factory. Every id here has its own line under `pricing`.
+  # Candidates are tried in order; a quota error or a 5xx falls through to the next one. Three
+  # per tier, one per maker, so one model going down is not the tier going down.
+  #
+  # Fixed ids on purpose. A `~vendor/x-latest` alias follows whatever the maker ships next, which
+  # can cost more or answer worse without anyone approving it, so the recommendation never picks
+  # one; add an alias by hand from the full catalogue if you want that behaviour.
+  # Every id here has its own line under `pricing`.
   matrix:
     strategy:
       tier1:
         - provider: openrouter
-          model: "~z-ai/glm-latest"
+          model: z-ai/glm-5.3
         - provider: openrouter
-          model: "~x-ai/grok-latest"
-        - provider: openrouter
-          model: "~openai/gpt-sol-latest"
+          model: qwen/qwen3.8-max-0902
       tier2:
         - provider: openrouter
-          model: "~z-ai/glm-flash-latest"
+          model: z-ai/glm-5.3-flash
         - provider: openrouter
-          model: "~openai/gpt-luna-latest"
-        - provider: openrouter
-          model: "~google/gemini-flash-latest"
+          model: deepseek/deepseek-v4-flash-0731
       tier3:
+        - provider: openrouter
+          model: deepseek/deepseek-v4-flash-0731:free
         - provider: openrouter
           model: openrouter/free
     engineering:
       tier1:
         - provider: openrouter
-          model: "~openai/gpt-sol-latest"
+          model: z-ai/glm-5.3
         - provider: openrouter
-          model: "~z-ai/glm-latest"
-        - provider: openrouter
-          model: "~x-ai/grok-latest"
+          model: qwen/qwen3.8-max-0902
       tier2:
         - provider: openrouter
-          model: "~z-ai/glm-flash-latest"
+          model: z-ai/glm-5.3-flash
         - provider: openrouter
-          model: "~openai/gpt-luna-latest"
-        - provider: openrouter
-          model: "~google/gemini-flash-latest"
+          model: deepseek/deepseek-v4-flash-0731
       tier3:
+        - provider: openrouter
+          model: deepseek/deepseek-v4-flash-0731:free
         - provider: openrouter
           model: openrouter/free
     routine:
       tier1:
         - provider: openrouter
-          model: "~z-ai/glm-flash-latest"
+          model: z-ai/glm-5.3-flash
         - provider: openrouter
-          model: "~openai/gpt-luna-latest"
+          model: deepseek/deepseek-v4-flash-0731
       tier2:
         - provider: openrouter
-          model: "~google/gemini-flash-latest"
+          model: deepseek/deepseek-v4-flash-0731
         - provider: openrouter
-          model: openrouter/free
+          model: z-ai/glm-5.3-flash
       tier3:
+        - provider: openrouter
+          model: deepseek/deepseek-v4-flash-0731:free
         - provider: openrouter
           model: openrouter/free
     # Used only when `clusters_enabled` is off: one list for every role.
     general:
       tier1:
         - provider: openrouter
-          model: "~z-ai/glm-latest"
+          model: z-ai/glm-5.3
         - provider: openrouter
-          model: "~openai/gpt-sol-latest"
+          model: qwen/qwen3.8-max-0902
       tier2:
         - provider: openrouter
-          model: "~z-ai/glm-flash-latest"
+          model: z-ai/glm-5.3-flash
         - provider: openrouter
-          model: "~openai/gpt-luna-latest"
+          model: deepseek/deepseek-v4-flash-0731
       tier3:
+        - provider: openrouter
+          model: deepseek/deepseek-v4-flash-0731:free
         - provider: openrouter
           model: openrouter/free
   tiers:
     tier1:
       - provider: openrouter
-        model: "~z-ai/glm-latest"
+        model: z-ai/glm-5.3
       - provider: openrouter
-        model: "~openai/gpt-sol-latest"
+        model: qwen/qwen3.8-max-0902
     tier2:
       - provider: openrouter
-        model: "~z-ai/glm-flash-latest"
+        model: z-ai/glm-5.3-flash
       - provider: openrouter
-        model: "~openai/gpt-luna-latest"
+        model: deepseek/deepseek-v4-flash-0731
     tier3:
+      - provider: openrouter
+        model: deepseek/deepseek-v4-flash-0731:free
       - provider: openrouter
         model: openrouter/free
   roles:                     # any role not listed here uses tier2
@@ -149,7 +155,7 @@ providers:
     api_key_env: OPENROUTER_API_KEY
     console_url: https://openrouter.ai/keys
     models_url: https://openrouter.ai/models
-    probe_model: "~z-ai/glm-flash-latest"
+    probe_model: z-ai/glm-5.3-flash
   gemini:
     kind: openai_compatible
     label: Google Gemini
@@ -239,8 +245,9 @@ pricing:
   qwen/qwen3.8-max-0902:    { input: 2.00, output: 6.00, cached_input: 0.25 }
   deepseek/deepseek-v4-flash-0731: { input: 0.04, output: 0.08, cached_input: 0.016 }
   deepseek/deepseek-v4-flash-0731:free: { input: 0.0, output: 0.0, cached_input: 0.0 }
-  # OpenRouter `-latest` aliases (the preset's ids). The cost tracker bills the id that was asked
-  # for, so each alias needs its own entry; `loompa models sync` notices when the price moves.
+  # OpenRouter `-latest` aliases. The recommendation never proposes one, but a founder may add an
+  # alias by hand, and the cost tracker bills the id that was asked for — so each needs its own
+  # entry, and `AliasWatch` says when the model behind it changes.
   "~z-ai/glm-latest":         { input: 0.8442, output: 2.6532, cached_input: 0.15678 }
   "~x-ai/grok-latest":        { input: 2.0, output: 6.0, cached_input: 0.5 }
   "~openai/gpt-sol-latest":   { input: 2.0, output: 10.0, cached_input: 0.2 }
