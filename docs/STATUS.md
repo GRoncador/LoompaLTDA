@@ -256,9 +256,35 @@ Suggested next (not implemented):
   OpenRouter's catalogue, whose ids mirror Google's own (`gemini-3.5-flash-lite` is the same in both and
   passed live); **a Gemini key is needed to confirm the direct id and that it is on the free tier.** The
   `gemini-3.5-flash-lite` price was 3x/6x too low (copied from 2.5) and is now the catalogue's.
-  `loompa schedule` (`scheduling.py`) prints the recipe for the nightly `loompa run` and the **monthly**
-  `loompa models sync`, as launchd agents (`--write DIR` writes them; checked with `plutil -lint`, not
+  `loompa schedule` (`scheduling.py`) prints the recipe for the nightly `loompa run` (the monthly
+  `models sync` job was removed on 2026-09-21, see below), as launchd agents (`--write DIR` writes them; checked with `plutil -lint`, not
   loaded) or crontab lines. Nothing switches itself on.
+
+- **2026-09-21 — the founder owns the keys and the models; the budget is a week.** The four model
+  presets are deleted everywhere (`config/presets.py`, the onboarding selector, `loompa init
+  --preset`, `loompa providers preset`): they existed to arrange one key that reaches every model,
+  and a factory now ships that way — a matrix of fixed OpenRouter ids. Providers are OpenRouter
+  (recommended), Gemini, Anthropic, OpenAI, xAI, DeepSeek and Ollama, each with the page that lists
+  its models and a cheap id to test a key with; Groq is dropped from a config that holds no key for
+  it and names it in no tier. **The ranking never proposes a `~vendor/x-latest` alias** (ADR-0011
+  amendment): three fixed candidates per tier already cover a model going down, and an alias changes
+  model *and price* with nobody approving it. Aliases stay listed in the full catalogue the
+  dashboard reads (446 models, each with `alias`, `alias_target` and why it is out of the ranking)
+  with a filter, for a founder who adds one by hand. **The monthly `models sync` cron is gone**;
+  `ModelWatch` reports a price rise when the catalogue is next read and a missing model on the first
+  call that fails. That needed a fix: OpenRouter answers **400** `"x/y is not a valid model ID"`,
+  not 404, so the status check never fired — `model_not_found` reads both, confirmed live.
+  **Budget is a period** (`weekly`, US$ 5) and says what happens at the cap: pause the line, or put
+  every role on free models; old `monthly_cap_usd`/`hard_stop` configs keep their numbers.
+  `tier1_ceiling` moved next to the cap at **US$ 1.25** (a quarter of the week). Named calls get
+  their own tier (`ROLE_TASKS`) instead of a hard-coded `tier_override` in the agent, and
+  `models.clusters_enabled: false` collapses the three clusters into one `general`, ranked on the
+  plain mean. The settings screen was rebuilt around all of this: ordered provider rows with vendor
+  marks, a provider picker per matrix cell limited to providers that hold a key, a guided model list
+  ranked the way each tier is read plus an extended search over the whole catalogue, a connection
+  test per cell, alphabetical Loompa cards carrying their task tiers, and no more Safari-broken
+  title tooltip. Scores are rounded at the source (a raw mean reached the screen as
+  `63.800000000000004`). Suite green; catalogue, probe and the 400-vs-404 fix checked live.
 
 ## Known gaps / next steps
 

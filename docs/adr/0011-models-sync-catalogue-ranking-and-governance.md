@@ -120,3 +120,54 @@ the swap has already happened by then.
   preset's mutable objects.
 * Not done: a guard for an alias that moves (see §6), a dashboard screen for the proposal (the inbox card is enough to decide), and
   syncing providers other than OpenRouter.
+
+## Amendment, 2026-09-21: the founder decides, and nothing swaps itself
+
+Three things in this ADR quietly assumed that the *factory* should keep its model list fresh. A
+run through the real catalogue with a founder watching changed all three.
+
+### The ranking never proposes a `-latest` alias
+
+§6 made aliases a first-class mode, on the argument that an id retiring is a loud failure an alias
+avoids. The cost of that is a model — and a price — changing with nobody approving it, which is
+exactly what §5 says must not happen, and which the budget cannot see coming. The defence against a
+retired id is already in place and is cheaper: three fixed candidates per tier, one per maker, plus
+a router that falls through on the first error. So `exclusion_reason` now rejects every alias, the
+`--ids alias|pinned|auto` flag and `detect_mode` are gone, and the shipped matrix names fixed ids.
+
+Aliases stay *visible*: the full catalogue the dashboard reads lists all 446 models with `alias`,
+`alias_target` and the reason each one is out of the ranking, with a filter for them. A founder who
+wants that behaviour adds one by hand and `AliasWatch` (§6) still reports every move. Accepting a
+suggestion replaces it — a suggestion is a list of fixed ids by construction.
+
+### There is no monthly refresh
+
+The scheduled `loompa models sync` is removed (`loompa schedule` now writes one job, the nightly
+cycle). A swap disturbs prompts tuned for the model in use, so it happens when a person asks for
+it, on the settings screen or from the CLI. What genuinely needs watching needs no clock:
+
+* **a price that went up** is noticed when the catalogue is next read, by comparing the blended
+  price against what the factory is billing at (`ModelWatch.check_prices`, one note per model, a
+  rise under 10% is rounding, not news); and
+* **a model that is not there any more** announces itself on the first call that fails
+  (`ModelWatch.model_gone`, one note per id, cleared when it answers again).
+
+That second one needed a correction: a 404 is the documented answer, but OpenRouter returns **400**
+with `{"error":{"message":"x/y is not a valid model ID"}}` — verified against the live API on
+2026-09-21 — so the status check alone never fired. `model_not_found` (`llm/providers.py`) reads
+both shapes, the router skips the candidate without retrying a name that cannot improve, and the
+per-model connection test on the settings screen says which model the provider does not have.
+
+### The ceiling belongs to the budget, and the budget is a week
+
+`tier1_ceiling` defaults to **US$ 1.25** and lives next to the cap, because it only means anything
+against it: a quarter of a US$ 5 week, roughly 4M tokens. `BudgetConfig` is a period (weekly by
+default) and says what to do when the cap is reached — pause, or put every role on the free tier.
+
+### Also
+
+* Model presets are gone (`config/presets.py`, `loompa providers preset`, `loompa init --preset`).
+  They existed to arrange one key that reaches every model; a factory now ships that way.
+* A cluster's score is computed for all four clusters at once (`general` is the plain mean, used
+  when `models.clusters_enabled` is off) and rounded at the source — a raw mean reached the screen
+  as `63.800000000000004`.

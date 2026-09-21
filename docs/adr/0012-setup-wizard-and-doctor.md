@@ -24,7 +24,7 @@ never carries a key value. The wizard and the doctor both read it, so they canno
 
 ### 2. `loompa setup`: four steps, re-runnable, asks only for what is missing
 
-Models (numbered preset menu, then each key) → web search → who writes the code (built-in Worker or
+Models (the keys themselves — see the 2026-09-21 note) → web search → who writes the code (built-in Worker or
 OpenCode) → GitHub → the checklist. `loompa init` ends in it. For every key: what it is for, where it
 is created (and an offer to open the page), a hidden prompt, and a connection test right away. A key
 the provider refuses is wiped and asked again (three tries); a failure that is not the key's fault
@@ -54,3 +54,12 @@ commands and should not hold keys it has no use for.
   OpenCode Worker on a Gemini model still needs the key exported in the shell.
 * The wizard prompts through `typer`; scripted use stays `loompa init --yes` plus
   `loompa providers set-key`.
+
+## Amendment, 2026-09-21: no preset menu
+
+Model presets are gone (ADR-0011 amendment), so step 1 no longer offers a numbered menu. It asks for
+the OpenRouter key — one key reaches every model — and then, once, whether to configure any other
+provider; only then does it walk the rest. Asking for six keys in a row helps nobody, and which
+models a factory uses is decided afterwards, on the settings screen or with `loompa models sync`.
+`loompa setup --preset` and `loompa providers preset` are removed; `loompa providers keys` re-runs
+just that step.
