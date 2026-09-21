@@ -40,6 +40,20 @@ class ProbeResult:
         return asdict(self)
 
 
+# The smallest real call that still proves the whole path: the key is accepted, the model exists
+# on this provider, and an answer comes back. Measured against the live catalogue on 2026-09-21:
+# one token of output instead of eight cuts the cost of a test by 40-60% and returns sooner.
+#
+# What it deliberately does not do is read the answer. At this budget a model often stops on
+# `length` with no text at all (it already did at eight tokens), so success is "the provider
+# produced something" — a finish reason, a token count or text — not "it said ok". Two things seen
+# in that same run and worth remembering: some models arrive with a large provider-side system
+# prompt, so the input is not ours to shrink, and some ignore a ceiling this low and answer
+# anyway. Neither breaks the test; both mean the saving is real but not guaranteed per model.
+PROBE_PROMPT = "hi"
+PROBE_MAX_TOKENS = 1
+
+
 def _first_model(config: LoompaConfig, provider: str) -> str:
     """Which model to test a key with: one this factory actually uses, else the provider's own
     cheap default. A provider that is in no tier yet still has a key worth testing."""
@@ -81,9 +95,9 @@ async def probe_provider(
     try:
         resp = await prov.complete(
             model,
-            [Message("user", "Responda apenas: ok")],
+            [Message("user", PROBE_PROMPT)],
             temperature=0.0,
-            max_tokens=8,
+            max_tokens=PROBE_MAX_TOKENS,
         )
     except QuotaExhausted:
         return ProbeResult(
