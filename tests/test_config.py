@@ -127,3 +127,25 @@ def test_a_legacy_monthly_budget_keeps_its_numbers():
     cfg = LoompaConfig.model_validate({"budget": {"monthly_cap_usd": 30.0, "hard_stop": False}})
     assert (cfg.budget.period, cfg.budget.cap_usd) == ("monthly", 30.0)
     assert cfg.budget.on_exceed == "tier3"
+
+
+def test_turning_clusters_off_points_the_flat_tiers_at_the_general_list():
+    """`models.tiers` is the fallback the doctor and the probe read. With the split off it must
+    mirror the list every role actually uses, not the per-cluster ones nobody reads."""
+    from pathlib import Path
+    from tempfile import mkdtemp
+
+    from loompa.config.schema import ModelCandidate
+    from loompa.config.settings import SettingsPatch, apply_settings
+
+    cfg = default_config()
+    cfg.models.matrix["general"]["tier1"] = [
+        ModelCandidate(provider="openrouter", model="so/geral")
+    ]
+    apply_settings(
+        Path(mkdtemp()),
+        cfg,
+        SettingsPatch(matrix=cfg.models.matrix, clusters_enabled=False),
+    )
+    assert [c.model for c in cfg.models.tiers["tier1"]] == ["so/geral"]
+    assert cfg.models.cluster_for_role("worker") == "general"

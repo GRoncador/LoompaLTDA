@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from loompa.config.schema import (
+    GENERAL_CLUSTER,
     ROLE_TASKS,
     ROLE_TASKS_BY_KEY,
     ROLES,
@@ -224,14 +225,24 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
             }
             for cluster, tier_map in patch.matrix.items()
         }
-        # Keep fallback tiers in sync
-        config.models.tiers = {
-            "tier1": [c.model_copy() for c in config.models.matrix.get("engineering", {}).get("tier1", [])]
-            or [c.model_copy() for c in config.models.matrix.get("strategy", {}).get("tier1", [])],
-            "tier2": [c.model_copy() for c in config.models.matrix.get("engineering", {}).get("tier2", [])]
-            or [c.model_copy() for c in config.models.matrix.get("strategy", {}).get("tier2", [])],
-            "tier3": [c.model_copy() for c in config.models.matrix.get("routine", {}).get("tier3", [])],
-        }
+        # Keep the flat fallback tiers in sync. With the cluster split off, `general` is the list
+        # every role actually uses, so it is what the fallback must mirror.
+        m = config.models.matrix
+        prefer = (
+            [GENERAL_CLUSTER, "engineering", "strategy", "routine"]
+            if patch.clusters_enabled is False
+            or (patch.clusters_enabled is None and not config.models.clusters_enabled)
+            else ["engineering", "strategy", "routine"]
+        )
+
+        def _first(tier: str) -> list[ModelCandidate]:
+            for cluster in prefer:
+                cands = m.get(cluster, {}).get(tier, [])
+                if cands:
+                    return [c.model_copy() for c in cands]
+            return []
+
+        config.models.tiers = {t: _first(t) for t in TIERS}
         notes.append("matriz de modelos atualizada")
     if patch.tiers is not None:
         unknown = {c.provider for cs in patch.tiers.values() for c in cs} - set(config.providers)
