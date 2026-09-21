@@ -30,6 +30,8 @@ Status as of 2026-09-19 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 4 (ferramentas para todos os papéis, MCP, Analyst) | ✅ perfis de permissão por papel (`Toolbox`), loop de ferramentas genérico em `LoompaAgent`, arquivos protegidos, cliente MCP (`loompa/mcp/`, SDK oficial) com Tavily, `AnalystAgent` e rota `research` (fontes conferidas em código, limitação declarada em código, revisão do PO, entrega ao Founder). ADR-0009 | `agents/toolbox.py`, `agents/base.py`, `mcp/client.py`, `agents/analyst.py`, `engine/graph.py`, `engine/phases.py`, `config/schema.py`, `docs/adr/0009-*` |
 | Plano set/2026 · Fase 5 (conversas) | ✅ sessões de chat persistidas com rascunho de backlog e de sprint (só a Master/Analyst propõem operações, o código valida), Sprint Meeting (Master), Brainstorm (Analyst → Product Owner admite), `loompa meeting` como sessão de um turno, `loompa chat`, API e modal no dashboard. ADR-0010 | `conversations.py`, `agents/conversation.py`, `agents/master.py`, `agents/analyst.py`, `agents/product_owner.py`, `cli/chat.py`, `dashboard/app.py`, `ChatModal.tsx`, `docs/adr/0010-*` |
 | Plano set/2026 · Fase 6 (parcial: `models sync`) | ✅ catálogo da OpenRouter ranqueado por custo-benefício (tier1: melhor nota sob teto de preço; tier2: mais barato acima de um piso), proposta na Caixa de Entrada, aplicada só com aprovação e fora de sprint. ADR-0011 | `llm/catalog.py`, `models_sync.py`, `cli/models.py`, `engine/scheduler.py`, `tests/test_models_sync.py`, `docs/adr/0011-*` |
+| Plano set/2026 · Fase 7 (Specs, QA Gates e Raciocínio de Agentes) | ⚪ planejado (ver `docs/PLANO-2026-09.md`): templates SpecKit com NFRs/rastreabilidade, rubricas de QA, loop de auto-cura CodeRabbit, reproducer-first, fast linter no ACI, especialização de executores | `speckit/`, `agents/inspector.py`, `agents/worker.py`, `agents/product_owner.py`, `aci/` |
+
 
 ## Deliberate divergences from the brief
 
@@ -298,5 +300,6 @@ Suggested next (not implemented):
 - CodeRabbit webhook mode; PR review comments feeding back into the Worker.
 - Dashboard: drag-and-drop priority, story diff viewer, finance charts.
 - Packaging: publish to PyPI; `uvx loompa` verified locally via `uv run loompa` only.
+- Plano set/2026 · Fase 7 (Excelência de Specs, Quality Gates e Raciocínio de Agentes): detalhado em `docs/PLANO-2026-09.md` (absorção dos padrões do AIOX-Core e das CLIs de referência: templates de spec enriquecidos com NFRs e rastreabilidade, rubricas taxativas de QA, self-healing do CodeRabbit, reproducer-first para bugfixes, fast linter no ACI, trade-offs no Arquiteto, diff hygiene e especialização de executores).
 - The full test suite intermittently hangs after reaching 100% on some machines (a thread-join flake at
   teardown, pre-existing). It runs to completion on the Founder's machine.
