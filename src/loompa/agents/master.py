@@ -50,12 +50,18 @@ Rules:
   the sprint or save it to the backlog.
 """
 
+DEFAULT_BLOCK_OPTIONS = [
+    "Tentar novamente com outra abordagem",
+    "Deixar para depois (volta ao backlog)",
+    "Cancelar esta entrega",
+]
+
 EXEC_SYSTEM = """<!-- role:master -->
 Rewrite the technical problem below for a non-technical founder in {language}. Output JSON:
 {{"title": str (one sentence), "context": str (2-3 plain sentences: what we were doing, what happened),
-"impact": str (what it means for the product/business and what continues normally),
-"options": [{{"key": str, "label": str, "description": str, "recommended": bool}}]}} with 2-3 options.
-Absolutely no file names, code, error names or stack traces.
+"impact": str (what it means for the product/business and what continues normally)}}
+The founder will answer by choosing one of the listed options; do not invent other options or
+promise actions outside them. Absolutely no file names, code, error names or stack traces.
 """
 
 
@@ -400,21 +406,11 @@ class MasterAgent(LoompaAgent):
             try:
                 data = await self.ask_json(
                     EXEC_SYSTEM.format(language=self.language),
-                    f"Story: {state.title}\n\nProblem:\n{technical_reason[:3000]}\n\nSuggested options: {options or 'none'}",
+                    f"Story: {state.title}\n\nProblem:\n{technical_reason[:3000]}\n\nOptions: {options or DEFAULT_BLOCK_OPTIONS}",
                     story=state,
                     task="master.exec_options",
                     max_tokens=800,
                 )
-                llm_opts = [
-                    Option(
-                        key=str(o.get("key") or f"opt{i + 1}")[:20],
-                        label=str(o.get("label") or "")[:120],
-                        description=str(o.get("description") or "")[:300],
-                        recommended=bool(o.get("recommended")),
-                    )
-                    for i, o in enumerate(data.get("options") or [])
-                    if isinstance(o, dict) and o.get("label")
-                ]
                 title, context, impact = (
                     str(data.get("title") or ""),
                     str(data.get("context") or ""),
@@ -427,7 +423,9 @@ class MasterAgent(LoompaAgent):
                         story_title=state.title,
                         reason=context,
                         impact=impact,
-                        options=llm_opts or opts or None,
+                        # The engine acts on option keys (retry/skip/drop, or the caller's own):
+                        # a key the model invents, like "later", would be read as a retry.
+                        options=opts or None,
                         technical_ref=technical_ref,
                     )
                     msg.title = title[:200]

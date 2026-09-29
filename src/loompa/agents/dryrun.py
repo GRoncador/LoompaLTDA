@@ -76,34 +76,13 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                 }
             )
         user = messages[-1].content
-        problem = user.split("Problem:\n", 1)[-1].split("\n\nSuggested options:", 1)[0].strip()
-        suggested = (
-            user.rsplit("Suggested options: ", 1)[-1].strip()
-            if "Suggested options: " in user
-            else "none"
-        )
-        options = [
-            {"key": "retry", "label": "Tentar de novo", "recommended": True},
-            {"key": "skip", "label": "Deixar para depois"},
-        ]
-        if suggested not in ("none", "None", "[]"):
-            try:
-                import ast
-
-                labels = ast.literal_eval(suggested)
-                options = [
-                    {"key": f"opt{i + 1}", "label": str(o), "recommended": i == 0}
-                    for i, o in enumerate(labels)
-                ]
-            except (ValueError, SyntaxError):
-                pass
+        problem = user.split("Problem:\n", 1)[-1].split("\n\nOptions:", 1)[0].strip()
         first = problem.splitlines()[0] if problem else "precisamos de uma decisão"
         return json.dumps(
             {
                 "title": f"Precisamos da sua orientação em “{title}”: {first[:120]}",
                 "context": problem[:600] or "A equipe tentou algumas abordagens sem sucesso.",
                 "impact": "As outras entregas seguem normalmente.",
-                "options": options,
             }
         )
     if role == "product":

@@ -516,6 +516,36 @@ async def test_the_same_block_twice_stops_recommending_try_again(factory: Factor
     await ctx.aclose()
 
 
+async def test_a_rewritten_block_keeps_the_option_keys_the_engine_acts_on(factory: Factory):
+    """`contas`: the Master's rewrite offered "Deixar para depois" under the key `later`,
+    which the engine does not know and would have treated as a retry."""
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role == "architect":
+            raise LLMError("resposta cortada: mock/x (resposta cortada no limite)")
+        if role == "master" and "Problem:" in messages[-1].content:
+            return json.dumps(
+                {
+                    "title": "Uma etapa parou",
+                    "context": "Estávamos planejando a entrega e a etapa parou.",
+                    "impact": "As outras entregas seguem.",
+                    "options": [{"key": "later", "label": "Deixar para depois"}],
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Listar gastos")
+    await Scheduler(ctx).run()
+    msg = ctx.store.get_message(load_state(ctx, sid).blocked_message_id)
+    assert msg.title == "Uma etapa parou"  # the rewrite is used for the words…
+    assert [o.key for o in msg.options] == ["retry", "skip", "drop"]  # …not for the keys
+    state = await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="skip"))
+    assert state.stage == Stage.BACKLOG
+    await ctx.aclose()
+
+
 async def test_budget_exhaustion_pauses_dispatch(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     ctx.config.budget.cap_usd = 0.000001
