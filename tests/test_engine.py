@@ -250,6 +250,46 @@ async def test_a_fix_merged_meanwhile_reaches_the_stories_going_back_to_work(fac
     await ctx.aclose()
 
 
+async def test_the_founders_changes_can_widen_the_plan_they_did_not_foresee(factory: Factory):
+    """`contas` S-005: the founder asked, on a delivery, for a file the plan never listed; the
+    Worker was fenced off it and could only ask again. The Architect now amends the plan (paths
+    and tasks) and the Worker does the new task alone, not the whole story again."""
+    worker_tasks: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        last = messages[-1].content
+        if role == "architect" and "## Founder's guidance" in last:
+            return json.dumps(
+                {"files": ["docs/"], "tasks": ["Escrever docs/NOTA.md"], "reason": "pedido"}
+            )
+        if role == "worker" and not tool_results(messages):
+            task = next(m.content for m in messages if m.role == "user")
+            worker_tasks.append(task)
+            if "docs/NOTA.md" in task:
+                return [ToolCall("w1", "write_file", {"path": "docs/NOTA.md", "content": "ok\n"})]
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Registrar")
+    await Scheduler(ctx).run()
+    delivery = ctx.store.get_message(load_state(ctx, sid).blocked_message_id)
+    assert delivery.kind == "delivery" and len(worker_tasks) == 1
+    await Scheduler(ctx).aanswer(
+        delivery.id, FounderAnswer(option_key="changes", text="quero também uma nota em docs")
+    )
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "delivery", state.failure_history
+    assert "docs/" in state.allowed_paths and state.tasks_total == 2 and state.tasks_done == [1, 2]
+    assert len(worker_tasks) == 2 and "docs/NOTA.md" in worker_tasks[1]  # only the new task
+    assert (Path(state.worktree) / "docs" / "NOTA.md").is_file()
+    tasks_md = (factory.paths.specs / sid / "tasks.md").read_text()
+    assert "[x] T2: Escrever docs/NOTA.md" in tasks_md
+    assert any(e["type"] == "plan.amended" for e in ctx.store.events_since(0, limit=10_000))
+    await ctx.aclose()
+
+
 async def test_persistent_failure_blocks_only_that_story(factory: Factory):
     def worker(model: str, messages: list[Message]) -> Any:
         if "história boa" in messages[0].content.lower():

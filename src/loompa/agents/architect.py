@@ -7,7 +7,7 @@ from datetime import date
 
 from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent
 from loompa.engine.state import StoryState
-from loompa.speckit import render_plan, render_tasks, story_dir
+from loompa.speckit import render_plan, render_tasks, story_dir, tasks_from_markdown
 
 SYSTEM = """<!-- role:architect -->
 You are the Architect Loompa of an autonomous software factory. Produce the technical plan and the
@@ -30,6 +30,17 @@ REPLAN_NOTE = (
     "cause in these failures before planning again: if it lies in a file the plan did not list, "
     "that file belongs in `files` now, and the tasks must fix the cause, not work around it.\n\n"
 )
+
+AMEND_SYSTEM = """<!-- role:architect -->
+The founder gave guidance on a story whose plan is already being executed. The Worker is
+physically limited to the plan's `files`. Decide what the plan needs so the Worker can follow the
+guidance: extra paths it must be allowed to create, edit or delete (relative to the repo root),
+and 0-3 extra atomic tasks (each one commit, with its check) that carry out the request. Add only
+what the guidance needs; do not repeat tasks already done. If the guidance needs nothing new
+(a plain clarification), return empty lists.
+Respond with JSON only: {{"files": [str], "tasks": [str], "reason": str}}
+Write in {language}.
+"""
 
 LESSON_SYSTEM = """<!-- role:architect -->
 You maintain the project constitution. Given a bug that needed escalation and how it was fixed,
@@ -113,6 +124,47 @@ class ArchitectAgent(LoompaAgent):
         return AgentResult(
             ok=True, summary=f"plano com {len(tasks)} tarefas e {len(files)} caminhos", data=data
         )
+
+    async def amend(self, state: StoryState, guidance: str) -> AgentResult:
+        """Widen the plan for the founder's guidance without re-planning the story: extra paths
+        for the Worker's fence and extra tasks appended after the ones already done."""
+        self.set_state("WORKING", state, detail="ajustando o plano ao pedido do Founder")
+        paths = story_dir(self.ctx.root, state.story_id)
+        plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
+        tasks_md = paths.tasks.read_text(encoding="utf-8") if paths.tasks.is_file() else ""
+        user = (
+            f"# Story {state.story_id}: {state.title}\n\n## Founder's guidance\n{guidance[:3000]}\n\n"
+            f"## Current plan\n{plan[:4000]}\n\n## Tasks\n{tasks_md[:3000]}\n\n"
+            f"## Paths the Worker may touch now\n" + "\n".join(state.allowed_paths)
+        )
+        data = await self.ask_json_with_tools(
+            AMEND_SYSTEM.format(language=self.language) + EXPLORE_HINT,
+            user,
+            self.explore_tools(),
+            story=state,
+            max_iterations=4,
+        )
+        files = [f for f in self._list(data, "files") if f not in state.allowed_paths]
+        tasks = self._list(data, "tasks")[:3]
+        state.allowed_paths = state.allowed_paths + files
+        if tasks:
+            numbers = [t.number for t in tasks_from_markdown(tasks_md)]
+            start = max(numbers, default=0) + 1
+            extra = "\n".join(f"- [ ] T{start + i}: {t}" for i, t in enumerate(tasks))
+            paths.tasks.write_text(tasks_md.rstrip("\n") + "\n" + extra + "\n", encoding="utf-8")
+            state.tasks_total = start - 1 + len(tasks)
+        if files or tasks:
+            with paths.plan.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    "\n## Ajuste pedido pelo Founder\n"
+                    + (str(data.get("reason") or "").strip() + "\n" if data.get("reason") else "")
+                    + "".join(f"- {f}\n" for f in files)
+                )
+        self.ctx.emit(
+            "plan.amended", story_id=state.story_id, agent=self.name, files=files, tasks=len(tasks)
+        )
+        self.set_state("IDLE")
+        return AgentResult(ok=True, summary=f"{len(files)} caminhos e {len(tasks)} tarefas a mais")
 
     def _repo_outline(self, max_entries: int = 80) -> str:
         skip = {".git", ".loompa", "node_modules", ".venv", "__pycache__", "dist", "build"}

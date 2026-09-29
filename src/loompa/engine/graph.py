@@ -39,6 +39,7 @@ from loompa.comms import (
 from loompa.engine.context import EngineContext
 from loompa.engine.phases import Phase, advance, build_route, goto, phase_stage, register
 from loompa.engine.state import BlockedReason, QAVerdict, Stage, StoryKind, StoryState
+from loompa.llm import LLMError
 from loompa.worktrees import GitError, Worktree
 
 Node = Callable[[EngineContext, StoryState], Awaitable[StoryState]]
@@ -114,6 +115,7 @@ async def block(
 _RETRYABLE_BLOCKS = (BlockedReason.PERSISTENT_FAILURE, BlockedReason.CONFLICT)
 LAST_BLOCK_KEY = "last_block"
 REPLANNED_KEY = "replanned"
+AMEND_KEY = "amend_plan"
 _VOLATILE = re.compile(r"[0-9a-f]{7,}|\d+")
 
 
@@ -265,6 +267,12 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
         # the base moved under a story going back to work: what "already failing" means moved too
         with ctx.worktrees.base_checkout(wt.base) as base_path:
             state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt, at=base_path)
+    guidance = state.extra.pop(AMEND_KEY, None)
+    if guidance:
+        try:
+            await ArchitectAgent(ctx).amend(state, guidance)
+        except LLMError as exc:  # the Worker still gets the guidance as a note
+            ctx.emit("plan.amend_failed", story_id=state.story_id, error=str(exc)[:200])
     tier = "tier1" if state.current_tier == "tier1" else None
     opencode = ctx.config.worker.backend == "opencode"
     worker_cls = OpenCodeWorker if opencode else WorkerAgent
@@ -548,8 +556,13 @@ def apply_founder_answer(
         else:
             state.note(guidance or "Founder pediu ajustes na entrega.")
             goto(state, "dev")
-            state.tasks_done = []
             state.failure_history.append("Founder pediu ajustes: " + (guidance or "(sem detalhes)"))
+            if guidance and "plan" in state.route:
+                # the request may need files the plan never listed: the Architect amends it and
+                # the Worker does the new tasks, not the whole story again
+                state.extra[AMEND_KEY] = guidance
+            else:
+                state.tasks_done = []
     elif reason == BlockedReason.WAIVER:
         if key == "waive":
             state.qa_verdict = QAVerdict.WAIVED
@@ -584,6 +597,9 @@ def apply_founder_answer(
         if guidance:
             state.note(guidance)
         goto(state, resume or "spec")
+        if guidance and state.phase == "dev" and "plan" in state.route:
+            # the Worker asked because its fence or its tasks did not cover something
+            state.extra[AMEND_KEY] = guidance
     state.blocked_reason = None
     state.resume_stage = None
     state.resume_phase = None

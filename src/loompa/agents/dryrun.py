@@ -100,6 +100,10 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
             }
         )
     if role == "architect":
+        if "## Founder's guidance" in messages[-1].content:
+            return json.dumps(
+                {"files": [], "tasks": ["Ajuste pedido pelo Founder (simulação)"], "reason": ""}
+            )
         if "Falha (filtrada)" in messages[-1].content:
             return json.dumps(
                 {
