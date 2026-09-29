@@ -1,3 +1,5 @@
+import shlex
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,10 +79,6 @@ async def test_run_command_bounded(tmp_path: Path):
     assert res.returncode == 3 and res.stdout.strip() == "hi" and not res.ok
     res = await run_command('python3 -c "import time; time.sleep(5)"', tmp_path, timeout=1)
     assert res.timed_out and not res.ok
-
-
-import shlex
-import sys
 
 
 @pytest.fixture
