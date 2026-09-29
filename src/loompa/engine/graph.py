@@ -113,6 +113,7 @@ async def block(
 # a third time helps nobody, so the founder is told it repeated and offered the ways out.
 _RETRYABLE_BLOCKS = (BlockedReason.PERSISTENT_FAILURE, BlockedReason.CONFLICT)
 LAST_BLOCK_KEY = "last_block"
+REPLANNED_KEY = "replanned"
 _VOLATILE = re.compile(r"[0-9a-f]{7,}|\d+")
 
 
@@ -351,6 +352,13 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
             to_tier="tier1",
             after_attempts=state.attempts_tier2,
         )
+        if "plan" in state.route and not state.extra.get(REPLANNED_KEY):
+            # Two failed attempts may mean the plan, not the code: its `files` fence the Worker
+            # away from the real cause (`contas` S-005 could not touch the module that broke the
+            # test). Once per story, the Architect re-plans with the failures in hand.
+            state.extra[REPLANNED_KEY] = True
+            ctx.emit("story.replanned", story_id=state.story_id)
+            return goto(state, "plan")
         return goto(state, "dev")
     state.attempts_tier1 += 1
     if state.attempts_tier1 < sched.tier1_max_attempts:

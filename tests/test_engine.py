@@ -197,6 +197,9 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     assert seen_models.count(tier2_model) == 4 and seen_models.count(tier1_model) == 2
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
     assert types.count("story.retry") == 1 and types.count("story.escalated") == 1
+    # escalating re-plans once: two failures may mean the plan fences the Worker off the cause
+    assert types.count("story.replanned") == 1
+    assert [c["node"] for c in ctx.store.checkpoints(sid)].count("node_plan") == 2
     assert len(state.failure_history) == 2 and "assert 1 == 2" in state.failure_history[0]
     assert (
         "[pytest] FAIL" in state.failure_history[0] and "Traceback" not in state.failure_history[0]

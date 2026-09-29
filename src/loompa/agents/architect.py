@@ -25,6 +25,12 @@ Respond with JSON only:
 Write in {language}.
 """
 
+REPLAN_NOTE = (
+    "The previous plan was executed and its checks still fail as shown above. Find the actual "
+    "cause in these failures before planning again: if it lies in a file the plan did not list, "
+    "that file belongs in `files` now, and the tasks must fix the cause, not work around it.\n\n"
+)
+
 LESSON_SYSTEM = """<!-- role:architect -->
 You maintain the project constitution. Given a bug that needed escalation and how it was fixed,
 write ONE concise, general, actionable rule (max 2 sentences, {language}) that would have prevented
@@ -58,6 +64,7 @@ class ArchitectAgent(LoompaAgent):
                 "## Falhas anteriores (contexto filtrado)\n"
                 + "\n".join(state.failure_history[-2:])
                 + "\n\n"
+                + REPLAN_NOTE
                 if state.failure_history
                 else ""
             )
