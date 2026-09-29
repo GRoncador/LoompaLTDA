@@ -304,7 +304,14 @@ Decided 2026-09-29:
   engine reads as a retry ("later"); the Python skeletons pass their own tests (no build system, and a
   one-command Typer app); a story going back to work is rebased onto fixes merged meanwhile and its
   baseline measured again; escalating to tier 1 re-plans once, because two failures may mean the plan
-  fenced the Worker off the cause (S-005 could not touch the module that broke the test). Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
+  fenced the Worker off the cause (S-005 could not touch the module that broke the test).
+  Running S-005 to delivery found five more, each fixed and tested: the founder's guidance (changes on a
+  delivery, or the answer to a Worker's question) amends the plan's paths and tasks through the Architect
+  instead of re-fencing the Worker; the Worker can delete a file (it emptied one instead); `pytest -q`
+  counts are read without the ===== banner (every green run reported 0 passed); Kaizen findings about the
+  same file are one card (one leftover file had become four); the Inspector's judge sees the plan's real
+  paths; the Worker's self-check counts what earlier tasks already committed. S-005 was approved and
+  merged: `contas` now passes its own tests and `uv run contas hello` works. Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
   (per day, role, model, tool), the CodeRabbit webhook (ADR-0013, not verified against GitHub itself),
   PyPI packaging (`mcp>=2.2,<3`, wheel checked in a clean venv, a tag-triggered Trusted Publishing
   workflow — nothing published). Test suite: leaked aiosqlite threads no longer hang pytest at exit.
