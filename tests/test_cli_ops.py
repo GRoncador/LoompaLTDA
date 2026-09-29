@@ -33,6 +33,7 @@ def test_meeting_run_inbox_dry_run(git_repo: Path, hub, monkeypatch):
     assert r.exit_code == 0 and "DONE" in r.stdout
     r = runner.invoke(app, ["status"])
     assert r.exit_code == 0 and "Kanban" in r.stdout
+    assert "Entregas para revisar: 1" in r.stdout  # S-002 is still waiting for a look
     r = runner.invoke(app, ["report"])
     assert r.exit_code == 0 and "Resumo do dia" in r.stdout
     r = runner.invoke(app, ["kaizen"])

@@ -12,7 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from loompa.cli.main import app, resolve_factory
-from loompa.comms import FounderAnswer
+from loompa.comms import FounderAnswer, MessageKind
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column
 from loompa.factory import Factory
 from loompa.llm import ModelRouter
@@ -54,10 +54,14 @@ def print_runtime_status(f: Factory, out: Console) -> None:
         table.add_column(label, justify="center")
     table.add_row(*[str(counts.get(key, 0)) for key, _ in KANBAN_COLUMNS])
     out.print(table)
-    pending = [m for m in store.list_messages(f.slug, status="pending") if m.requires_action]
+    inbox = store.list_messages(f.slug, status="pending")
+    pending = [m for m in inbox if m.requires_action]
+    deliveries = [m for m in inbox if m.kind == MessageKind.DELIVERY]
     totals = store.usage_totals(f.slug)
     out.print(
-        f"Decisões pendentes: [bold]{len(pending)}[/bold] · Gasto acumulado: US$ {totals['cost_usd']:.2f} em {totals['calls']} consultas"
+        f"Decisões pendentes: [bold]{len(pending)}[/bold] · Entregas para revisar: "
+        f"[bold]{len(deliveries)}[/bold] · Gasto acumulado: US$ {totals['cost_usd']:.2f} em "
+        f"{totals['calls']} consultas"
     )
     store.close()
 
