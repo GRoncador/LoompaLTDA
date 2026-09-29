@@ -13,6 +13,7 @@ findings with a prefix (SEC-/PERF-/TEST-/ARCH-) and a severity. Verdicts:
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 
 from loompa.aci import run_command, summarize_lint, summarize_tests, summarize_typecheck
 from loompa.agents.base import AgentResult, LoompaAgent
@@ -52,18 +53,20 @@ class InspectorAgent(LoompaAgent):
     role = "inspector"
     display = "Inspector Loompa"
 
-    async def baseline(self, state: StoryState, wt: Worktree) -> dict:
+    async def baseline(self, state: StoryState, wt: Worktree, *, at: Path | None = None) -> dict:
         """Run the Tier 3 checks on the untouched worktree so pre-existing failures are not
-        blamed on the story (brownfield repos are often red on main)."""
+        blamed on the story (brownfield repos are often red on main). `at` runs them on another
+        checkout of the base instead (the worktree already holds the story's changes)."""
         q = self.ctx.config.quality
+        where = at or wt.path
         base: dict = {"tests_ok": True, "failing": [], "lint_ok": True}
         if q.test_command:
-            res = await run_command(q.test_command, wt.path, timeout=900)
+            res = await run_command(q.test_command, where, timeout=900)
             summary = summarize_tests(res.output, res.returncode)
             base["tests_ok"] = summary.ok and not res.timed_out
             base["failing"] = sorted({f.name for f in summary.failures})
         if q.lint_command:
-            res = await run_command(q.lint_command, wt.path, timeout=300)
+            res = await run_command(q.lint_command, where, timeout=300)
             base["lint_ok"] = summarize_lint(res.output, res.returncode).ok
         if not base["tests_ok"] or not base["lint_ok"]:
             state.learnings.append(

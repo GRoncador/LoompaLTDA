@@ -119,9 +119,7 @@ _VOLATILE = re.compile(r"[0-9a-f]{7,}|\d+")
 def _count_repeat(state: StoryState, reason: BlockedReason, technical: str) -> int:
     """How many times in a row this story stopped for the same thing at the same phase. The
     fingerprint drops numbers and hashes, which change between attempts of the same failure."""
-    fp = "|".join(
-        (state.phase, reason.value, _VOLATILE.sub("#", (technical or "").lower())[:160])
-    )
+    fp = "|".join((state.phase, reason.value, _VOLATILE.sub("#", (technical or "").lower())[:160]))
     last = state.extra.get(LAST_BLOCK_KEY) or {}
     count = int(last.get("count", 0)) + 1 if last.get("fp") == fp else 1
     state.extra[LAST_BLOCK_KEY] = {"fp": fp, "count": count}
@@ -262,6 +260,10 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
         )
     if "baseline" not in state.extra:
         state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
+    elif DeployerAgent(ctx).sync_with_base(state, wt):
+        # the base moved under a story going back to work: what "already failing" means moved too
+        with ctx.worktrees.base_checkout(wt.base) as base_path:
+            state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt, at=base_path)
     tier = "tier1" if state.current_tier == "tier1" else None
     opencode = ctx.config.worker.backend == "opencode"
     worker_cls = OpenCodeWorker if opencode else WorkerAgent

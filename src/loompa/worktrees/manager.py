@@ -12,6 +12,9 @@ import shutil
 import subprocess
 import threading
 import unicodedata
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -198,7 +201,9 @@ class WorktreeManager:
     def status(self, wt: Worktree) -> list[str]:
         return [
             line
-            for line in self.git("status", "--porcelain", cwd=wt.path).splitlines()
+            for line in self.git(
+                "status", "--porcelain", "--", ".", *self.JUNK, cwd=wt.path
+            ).splitlines()
             if line.strip()
         ]
 
@@ -303,6 +308,26 @@ class WorktreeManager:
         return self.git(
             "log", "--oneline", f"-{limit}", f"{wt.base}..HEAD", cwd=wt.path, check=False
         ).splitlines()
+
+    def behind_base(self, wt: Worktree) -> bool:
+        """True when the base branch has commits the story branch does not (a merge landed)."""
+        try:
+            self.git("merge-base", "--is-ancestor", wt.base, "HEAD", cwd=wt.path)
+        except GitError:
+            return True
+        return False
+
+    @contextmanager
+    def base_checkout(self, ref: str) -> Iterator[Path]:
+        """A throw-away detached checkout of `ref`, to run the checks on the base alone."""
+        path = self.dir / f"_base-{uuid.uuid4().hex[:8]}"
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.git("worktree", "add", "--detach", "-q", str(path), ref)
+        try:
+            yield path
+        finally:
+            self.git("worktree", "remove", "--force", str(path), check=False)
+            self.git("worktree", "prune", check=False)
 
     def rebase_on_base(self, wt: Worktree) -> bool:
         """Try to rebase the story branch on its base; abort cleanly on conflict."""

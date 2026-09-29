@@ -210,6 +210,43 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     await ctx.aclose()
 
 
+async def test_a_fix_merged_meanwhile_reaches_the_stories_going_back_to_work(factory: Factory):
+    """`contas`: the skeleton could not import its own package, so every story's new tests
+    failed for a reason none of them caused. The fix lands on main while they are in flight;
+    a story going back to `dev` is rebased onto it and its baseline is measured again."""
+    root = factory.root
+    (root / "app" / "__init__.py").write_text("raise ImportError('pacote quebrado na base')\n")
+    git("add", ".", cwd=root)
+    git("commit", "-qm", "chore: base quebrada", cwd=root)
+    rounds: list[int] = []
+
+    def worker(model: str, messages: list[Message]) -> Any:
+        if not tool_results(messages):
+            rounds.append(1)
+            test = "from app.calc import add\n\n\ndef test_soma():\n    assert add(2, 2) == 4\n"
+            return [ToolCall("w1", "write_file", {"path": "tests/test_soma.py", "content": test})]
+        if len(rounds) == 1:  # meanwhile, the fix merges on main (S-005 in `contas`)
+            (root / "app" / "__init__.py").write_text("")
+            git("add", ".", cwd=root)
+            git("commit", "-qm", "fix: base volta a importar", cwd=root)
+        return [ToolCall("w2", "done", {"summary": "teste de soma"})]
+
+    ctx = make_ctx(factory, with_worker(worker))
+    sid = seed_story(ctx, "Somar")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "delivery", state.failure_history
+    assert len(rounds) == 2 and state.attempts_tier2 == 1  # failed once, then passed
+    rebased = [
+        e for e in ctx.store.events_since(0, limit=10_000) if e["type"] == "worktree.rebased"
+    ]
+    assert len(rebased) == 1 and rebased[0]["payload"]["ok"] is True
+    assert state.extra["baseline"]["tests_ok"] is True  # measured again, on the fixed base
+    assert "fix: base volta a importar" in git("log", "--oneline", cwd=Path(state.worktree))
+    assert not [p for p in ctx.worktrees.dir.iterdir() if p.name.startswith("_base-")]
+    await ctx.aclose()
+
+
 async def test_persistent_failure_blocks_only_that_story(factory: Factory):
     def worker(model: str, messages: list[Message]) -> Any:
         if "história boa" in messages[0].content.lower():

@@ -84,6 +84,17 @@ class DeployerAgent(LoompaAgent):
         )
         return True
 
+    def sync_with_base(self, state: StoryState, wt: Worktree) -> bool:
+        """Bring a story that is going back to work up to date with the base: a fix merged in
+        the meantime (the red suite that failed every story, say) must reach it before its
+        next test run. Only a clean worktree is rebased; a conflict is aborted and left for
+        the delivery, where it is handled as one. True when the branch moved."""
+        if self.git.status(wt) or not self.git.behind_base(wt):
+            return False
+        moved = self.git.rebase_on_base(wt)
+        self.ctx.emit("worktree.rebased", story_id=state.story_id, agent=self.name, ok=moved)
+        return moved
+
     def merge(self, state: StoryState, wt: Worktree) -> str:
         sha = self.git.merge_into_base(wt, message=f"feat({state.story_id.lower()}): {state.title}")
         state.merged_sha = sha
