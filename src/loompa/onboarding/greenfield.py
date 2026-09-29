@@ -24,6 +24,12 @@ def _py_gitignore() -> str:
     return "__pycache__/\n*.py[cod]\n.venv/\n.pytest_cache/\n.ruff_cache/\n.env\n.loompa/worktrees/\n.loompa/*.db*\n"
 
 
+def _py_build_system() -> str:
+    # Without a build system `uv run` treats the project as virtual and never installs `src/`,
+    # so the skeleton's own test fails to import the package on the very first run.
+    return '\n[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n\n[tool.hatch.build.targets.wheel]\npackages = ["src/{pkg}"]\n'
+
+
 def _node_gitignore() -> str:
     return "node_modules/\ndist/\n.env\n.loompa/worktrees/\n.loompa/*.db*\n"
 
@@ -59,7 +65,8 @@ STACK_PRESETS: dict[str, StackPreset] = {
         },
         files={
             ".gitignore": _py_gitignore(),
-            "pyproject.toml": '[project]\nname = "{slug}"\nversion = "0.1.0"\nrequires-python = ">=3.11"\ndependencies = ["fastapi", "uvicorn[standard]", "pydantic", "sqlalchemy", "alembic"]\n\n[dependency-groups]\ndev = ["pytest", "httpx", "ruff", "mypy"]\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+            "pyproject.toml": '[project]\nname = "{slug}"\nversion = "0.1.0"\nrequires-python = ">=3.11"\ndependencies = ["fastapi", "uvicorn[standard]", "pydantic", "sqlalchemy", "alembic"]\n\n[dependency-groups]\ndev = ["pytest", "httpx", "ruff", "mypy"]\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
+            + _py_build_system(),
             "src/{pkg}/__init__.py": "",
             "src/{pkg}/main.py": 'from fastapi import FastAPI\n\napp = FastAPI(title="{name}")\n\n\n@app.get("/health")\ndef health() -> dict[str, str]:\n    return {{"status": "ok"}}\n',
             "tests/test_health.py": 'from fastapi.testclient import TestClient\n\nfrom {pkg}.main import app\n\n\ndef test_health() -> None:\n    assert TestClient(app).get("/health").json() == {{"status": "ok"}}\n',
@@ -83,10 +90,13 @@ STACK_PRESETS: dict[str, StackPreset] = {
         },
         files={
             ".gitignore": _py_gitignore(),
-            "pyproject.toml": '[project]\nname = "{slug}"\nversion = "0.1.0"\nrequires-python = ">=3.11"\ndependencies = ["typer", "rich"]\n\n[project.scripts]\n{slug} = "{pkg}.cli:app"\n\n[dependency-groups]\ndev = ["pytest", "ruff"]\n',
+            "pyproject.toml": '[project]\nname = "{slug}"\nversion = "0.1.0"\nrequires-python = ">=3.11"\ndependencies = ["typer", "rich"]\n\n[project.scripts]\n{slug} = "{pkg}.cli:app"\n\n[dependency-groups]\ndev = ["pytest", "ruff"]\n'
+            + _py_build_system(),
             "src/{pkg}/__init__.py": "",
-            "src/{pkg}/cli.py": 'import typer\n\napp = typer.Typer(help="{name}")\n\n\n@app.command()\ndef hello(name: str = "world") -> None:\n    typer.echo(f"hello {{name}}")\n',
-            "tests/test_cli.py": 'from typer.testing import CliRunner\n\nfrom {pkg}.cli import app\n\n\ndef test_hello() -> None:\n    assert "hello world" in CliRunner().invoke(app, ["hello"]).stdout\n',
+            # The callback keeps Typer in subcommand mode: with a single command and no callback,
+            # `hello` would become the root command and `{slug} hello` an unexpected argument.
+            "src/{pkg}/cli.py": 'import typer\n\napp = typer.Typer(help="{name}", no_args_is_help=True)\n\n\n@app.callback()\ndef main() -> None:\n    """{name}"""\n\n\n@app.command()\ndef hello(name: str = "world") -> None:\n    typer.echo(f"hello {{name}}")\n',
+            "tests/test_cli.py": 'from typer.testing import CliRunner\n\nfrom {pkg}.cli import app\n\n\ndef test_hello() -> None:\n    result = CliRunner().invoke(app, ["hello"])\n    assert result.exit_code == 0 and "hello world" in result.stdout\n',
         },
     ),
     "node-react": StackPreset(

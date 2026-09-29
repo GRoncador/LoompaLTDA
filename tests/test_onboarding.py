@@ -1,5 +1,8 @@
+import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from loompa.factory import bootstrap_factory
 from loompa.onboarding import (
@@ -115,3 +118,31 @@ def test_bootstrap_brownfield_uses_audit(brownfield_repo: Path, hub):
     result.factory.paths.constitution.write_text("# edited\n")
     bootstrap_factory(brownfield_repo, store=hub)
     assert result.factory.constitution_text() == "# edited\n"
+
+
+@pytest.mark.parametrize("preset", ["python-cli", "python-fastapi"])
+def test_a_python_skeleton_passes_its_own_test(tmp_path: Path, preset: str):
+    """The skeleton is the base every story branches from: a red baseline on day one makes the
+    factory file "pre-existing failures" before anything was built. Two bugs did exactly that:
+    no build system (so `uv run` never installed `src/`) and a one-command Typer app (where
+    `hello` became the root command)."""
+    import sys
+    import tomllib
+
+    root = tmp_path / "novo"
+    root.mkdir()
+    GreenfieldInitializer(
+        root, name="Novo Produto", slug="novo-produto", preset=preset
+    ).write_skeleton()
+    meta = tomllib.loads((root / "pyproject.toml").read_text())
+    assert meta["build-system"]["build-backend"] == "hatchling.build"
+    assert meta["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/novo_produto"]
+    res = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+        cwd=root,
+        env={**os.environ, "PYTHONPATH": str(root / "src")},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert res.returncode == 0, res.stdout[-1500:]
