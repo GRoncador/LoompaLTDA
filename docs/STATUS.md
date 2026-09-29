@@ -58,11 +58,16 @@ Done (2026-09-17):
 - **Tool-history pruning** — after `schedule.worker_keep_tool_results` (default 6) tool results,
   older outputs collapse to a one-line stub, so long tasks stop re-paying for every file read.
 
-Suggested next (not implemented):
-1. Send only the constitution/spec sections relevant to the task (semantic selection) and let
-   the Worker fetch the rest on demand via `read_file`.
-2. Per-role output caps: Product/Architect/Inspector judge rarely need more than ~1,500 tokens.
-3. Finance Loompa: record input tokens per tool step to point at agents that read too much.
+Decided 2026-09-29:
+1. ~~Send only the constitution/spec sections relevant to the task~~ — **not done, on purpose.** A
+   per-task selection would change the Worker's system prefix every task and break the prefix cache
+   that already makes the constitution and spec cheap. The tool-token measure below shows where input
+   tokens actually go: in `contas` the Worker was at ~1M input tokens, mostly from reading files.
+2. **Output budget by complexity** instead of per-role caps (`models.output_scale`, ADR-less, see
+   commit 0c3bdb1): the cap is a ceiling, not a price, and a cut answer is now retried with twice the
+   room — a cut costs a whole call, a roomy cap costs nothing unless used.
+3. **Tool tokens per step** — every `tool.call` event carries the size of what it put in the context;
+   the Finance Loompa names the agent and tool behind most of it and the cost screen lists them.
 
 ## Plano set/2026 — progress
 
@@ -288,6 +293,21 @@ Suggested next (not implemented):
   title tooltip. Scores are rounded at the source (a raw mean reached the screen as
   `63.800000000000004`). Suite green; catalogue, probe and the 400-vs-404 fix checked live.
 
+- **2026-09-29 — the fixes the `contas` validation asked for, and the rest of Fase 6.** The throw-away
+  factory had been stuck for a week with no code delivered; each cause is now fixed in the code, not in
+  the factory: a repo with no commit gets its first one from the Deployer (and `init` makes it); an
+  answer cut at the output limit is retried with more room, and the budget grows with the story's
+  complexity; "tentar de novo" keeps what the founder wrote, and a block that comes back unchanged says
+  so and stops recommending a retry; the Master's rewrite of a block no longer invents option keys the
+  engine reads as a retry ("later"); the Python skeletons pass their own tests (no build system, and a
+  one-command Typer app); a story going back to work is rebased onto fixes merged meanwhile and its
+  baseline measured again; escalating to tier 1 re-plans once, because two failures may mean the plan
+  fenced the Worker off the cause (S-005 could not touch the module that broke the test). Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
+  (per day, role, model, tool), the CodeRabbit webhook (ADR-0013, not verified against GitHub itself),
+  PyPI packaging (`mcp>=2.2,<3`, wheel checked in a clean venv, a tag-triggered Trusted Publishing
+  workflow — nothing published). Test suite: leaked aiosqlite threads no longer hang pytest at exit.
+  Intra-story parallelism stays out: nothing in Fase 1 or since showed a need.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
@@ -297,9 +317,8 @@ Suggested next (not implemented):
 - OpenCode backend has no DoD self-check yet (ACI path has one); add it if OpenCode becomes
   the standard. Its `.opencode/agents/*.md` permission schema hasn't been run against a real
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
-- CodeRabbit webhook mode; PR review comments feeding back into the Worker.
-- Dashboard: drag-and-drop priority, story diff viewer, finance charts.
-- Packaging: publish to PyPI; `uvx loompa` verified locally via `uv run loompa` only.
+- CodeRabbit webhook: verify against GitHub (public URL for the dashboard, a repo with CodeRabbit).
+- PyPI: register the trusted publisher, then `git tag v0.1.0 && git push origin v0.1.0`.
 - Plano set/2026 · Fase 7 (Excelência de Specs, Quality Gates e Raciocínio de Agentes): detalhado em `docs/PLANO-2026-09.md` (absorção dos padrões do AIOX-Core e das CLIs de referência: templates de spec enriquecidos com NFRs e rastreabilidade, rubricas taxativas de QA, self-healing do CodeRabbit, reproducer-first para bugfixes, fast linter no ACI, trade-offs no Arquiteto, diff hygiene e especialização de executores).
-- The full test suite intermittently hangs after reaching 100% on some machines (a thread-join flake at
-  teardown, pre-existing). It runs to completion on the Founder's machine.
+- Some tests leak aiosqlite connections; `tests/conftest.py` exits with the verdict instead of hanging
+  on them and names the threads on stderr. Closing them at the source is still open.

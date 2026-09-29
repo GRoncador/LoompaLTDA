@@ -18,7 +18,7 @@ Factory A         Factory B          each: .loompa/{config.yaml, constitution.md
 ## Quick start
 
 ```bash
-uv tool install loompa-core            # or: pip install loompa-core
+uv tool install loompa-core            # once published; until then: uv tool install --editable <this repo>
 cd my-project
 loompa init                            # greenfield vs brownfield detection + calibration, ends in `loompa setup`
 loompa setup                           # wizard: models + keys (tested as you type them), web search, OpenCode, GitHub
@@ -39,19 +39,17 @@ loompa meeting "Tela de login; Exportar CSV" --dry-run && loompa sprint start --
 
 ## Models & cost
 
-Providers and the tiered model matrix live in `.loompa/config.yaml` (defaults in
-`src/loompa/config/defaults.yaml`). Set the keys you have; the router falls through in order and
-skips providers without keys or with exhausted quota:
+Providers and the model matrix (3 clusters × 3 tiers, three candidates per cell) live in
+`.loompa/config.yaml` (defaults in `src/loompa/config/defaults.yaml`) and in the dashboard's ⚙
+settings. OpenRouter is recommended (one key, a spending cap on their side); Gemini, Anthropic,
+OpenAI, xAI, DeepSeek and Ollama work too. Keys live in `~/.loompa/secrets.env` or
+`<repo>/.loompa/.env`, never in the config. The router falls through a cell's candidates in order.
 
-| Env var | Provider | Default use |
-| --- | --- | --- |
-| `DEEPSEEK_API_KEY` | DeepSeek (`deepseek-chat`, `deepseek-reasoner`) | Tier 2 executors / Tier 1 reasoning |
-| `GEMINI_API_KEY` | Google AI Studio (OpenAI-compatible endpoint) | Free-tier fallback for both tiers |
-| `ANTHROPIC_API_KEY` | Anthropic | Last-resort Tier 1 / Tier 2 |
-| `OPENROUTER_API_KEY`, Ollama | any OpenAI-compatible endpoint | add to `providers:` |
-
-Every call is metered (exact tokens × configured pricing). The Finance Loompa alerts the inbox at
-80 % of `budget.monthly_cap_usd` (default US$ 30) and the scheduler pauses at 100 %.
+Every call is metered (exact tokens × pricing). The budget is a period (`budget.period: weekly`,
+US$ 5 by default): the Finance Loompa warns at 80 %, and at 100 % the line pauses or every role
+moves to free models, as you choose. The output budget grows with a story's complexity and a cut
+answer is retried with more room. The 💰 chip in the dashboard opens the cost screen (per day,
+role, model and what each tool read into the context).
 
 ## How a story flows (LangGraph `StateGraph`, one thread per story)
 
@@ -73,6 +71,10 @@ BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → T
   `intake → research → research_review → you`: the Analyst reads the repo and, with a Tavily key
   (`loompa providers set-key tavily`, used through MCP), the web; every cited source is checked, a
   missing key is declared as a limitation, and the report comes back with follow-up cards.
+* **Automatic PR review** (optional, ADR-0013): with `quality.coderabbit.mode: webhook`, a
+  CodeRabbit review that asks for changes on a delivery's PR sends it back to the Worker before
+  you review it (at most `max_rounds` times), through a GitHub webhook signed with
+  `GITHUB_WEBHOOK_SECRET`.
 * **Kaizen**: out-of-scope findings become `learnings.md` entries + backlog cards; lessons from
   escalated fixes are appended to the constitution and indexed in local memory.
 * **Hybrid memory**: AST/ripgrep for code; local SQLite vector RAG (FastEmbed optional, $0) for
@@ -83,8 +85,8 @@ BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → T
 | Command | Purpose |
 | --- | --- |
 | `loompa init [path] [--stack python-fastapi\|python-cli\|node-react\|custom]` | Onboard a repo (Brownfield scanner / Greenfield initializer), then the setup wizard |
-| `loompa setup [--preset openrouter\|gratuito\|economico\|maximo]` | Re-runnable wizard: model preset, each key (opens the page where it is created, hides the input, tests it, asks again if it is refused), Tavily, Worker backend (built-in / OpenCode), GitHub |
-| `loompa schedule [--for launchd\|cron] [--write DIR]` | Prints (or writes) the recipe that runs `loompa run` every night and `loompa models sync` every month; nothing is switched on for you |
+| `loompa setup` | Re-runnable wizard: each key (opens the page where it is created, hides the input, tests it, asks again if it is refused), Tavily, Worker backend (built-in / OpenCode), GitHub |
+| `loompa schedule [--for launchd\|cron] [--write DIR]` | Prints (or writes) the recipe that runs `loompa run` every night; nothing is switched on for you |
 | `loompa doctor [--no-test]` | Checklist of every service the factory uses, with a connection test per key |
 | `loompa meeting "goals" [--run] [--file transcript.txt]` | Morning meeting (one chat turn) → backlog cards |
 | `loompa chat meeting\|brainstorm [text]`, `chat resume ID`, `chat list` | Conversations: Sprint Meeting with the Master, brainstorm with the Analyst; a draft of the backlog and sprint until `/sprint` or `/backlog` |
