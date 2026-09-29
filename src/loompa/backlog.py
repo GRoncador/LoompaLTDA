@@ -49,7 +49,14 @@ def normalize_title(title: str) -> str:
 # A file named in a finding: `debug.txt`, `src/app/cli.py`. The spec artifacts every story has
 # say nothing about which finding it is.
 _PATH_TOKEN = re.compile(r"[\w\-/]+\.[a-z]{1,5}\b", re.I)
-_GENERIC_PATHS = {"plan.md", "spec.md", "tasks.md", "research.md", "constitution.md", "learnings.md"}
+_GENERIC_PATHS = {
+    "plan.md",
+    "spec.md",
+    "tasks.md",
+    "research.md",
+    "constitution.md",
+    "learnings.md",
+}
 
 
 def file_tokens(text: str) -> set[str]:
