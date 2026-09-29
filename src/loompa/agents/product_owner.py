@@ -111,6 +111,9 @@ class ProductOwnerAgent(LoompaAgent):
     def set_status(self, story_id: str, status: Stage) -> None:
         self.backlog.set_status(story_id, status)
 
+    def reorder(self, story_ids: list[str]) -> list[str]:
+        return self.backlog.reorder(story_ids)
+
     def admit(self, story_id: str) -> bool:
         return self.backlog.admit(story_id)
 

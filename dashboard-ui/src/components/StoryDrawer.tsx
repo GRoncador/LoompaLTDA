@@ -2,20 +2,25 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Drawer, Row } from "./AgentDrawer";
 
-type Tab = "spec" | "plan" | "tasks" | "research" | "log";
+type Tab = "spec" | "plan" | "tasks" | "research" | "diff" | "log";
+type Diff = { source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string };
 
 export default function StoryDrawer({ slug, id, onClose }: { slug: string; id: string; onClose: () => void }) {
   const [data, setData] = useState<any>(null);
   const [tab, setTab] = useState<Tab>("tasks");
+  const [diff, setDiff] = useState<Diff | null>(null);
   useEffect(() => {
     api.story(slug, id)
       .then((d) => { setData(d); if (d?.state?.kind === "research") setTab("research"); })
       .catch(() => setData(null));
   }, [slug, id]);
+  useEffect(() => {
+    if (tab === "diff" && !diff) api.storyDiff(slug, id).then(setDiff).catch(() => setDiff({ source: "none", ref: "", stat: "", diff: "" }));
+  }, [tab, diff, slug, id]);
   if (!data) return <Drawer title={id} onClose={onClose}><p className="text-sm text-slate-400">carregando…</p></Drawer>;
   const s = data.story, st = data.state;
   // a research story ends in a report, not in code: no spec/plan/tasks to browse
-  const tabs: Tab[] = st.kind === "research" ? ["research", "log"] : ["tasks", "spec", "plan", "log"];
+  const tabs: Tab[] = st.kind === "research" ? ["research", "log"] : ["tasks", "spec", "plan", "diff", "log"];
   return (
     <Drawer title={`${s.id} · ${s.title}`} onClose={onClose}>
       <div className="space-y-2 text-sm">
@@ -29,11 +34,13 @@ export default function StoryDrawer({ slug, id, onClose }: { slug: string; id: s
       </div>
       <div className="mt-4 flex gap-1 border-b border-line text-xs">
         {tabs.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 ${tab === t ? "border-b-2 border-brand text-brand" : "text-slate-400"}`}>{t === "log" ? "histórico" : t + ".md"}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 ${tab === t ? "border-b-2 border-brand text-brand" : "text-slate-400"}`}>{t === "log" ? "histórico" : t === "diff" ? "mudanças" : t + ".md"}</button>
         ))}
       </div>
       <div className="scroll-thin mt-3 max-h-[50vh] overflow-y-auto">
-        {tab === "log" ? (
+        {tab === "diff" ? (
+          <DiffView diff={diff} />
+        ) : tab === "log" ? (
           <ul className="space-y-1 text-xs text-slate-300">
             {data.commits?.map((c: string, i: number) => <li key={`c${i}`}>✅ {c}</li>)}
             {data.checkpoints?.map((c: any) => <li key={c.id} className="text-slate-500">{c.created_at.slice(11, 19)} · {c.node} → {c.stage}</li>)}
@@ -43,5 +50,26 @@ export default function StoryDrawer({ slug, id, onClose }: { slug: string; id: s
         )}
       </div>
     </Drawer>
+  );
+}
+
+/** The story's changes, coloured like a terminal diff: what it adds, removes and where. */
+function DiffView({ diff }: { diff: Diff | null }) {
+  if (!diff) return <p className="text-xs text-slate-400">carregando…</p>;
+  if (diff.source === "none" || !diff.diff) return <p className="text-xs text-slate-400">Nenhuma mudança de código ainda.</p>;
+  const tone = (l: string) =>
+    l.startsWith("+++") || l.startsWith("---") || l.startsWith("diff --git") ? "text-slate-200 font-semibold"
+      : l.startsWith("+") ? "bg-emerald-950/60 text-emerald-200"
+      : l.startsWith("-") ? "bg-red-950/60 text-red-200"
+      : l.startsWith("@@") ? "text-sky-300"
+      : "text-slate-400";
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-slate-500">{diff.source === "merged" ? `integrada na versão principal (${diff.ref})` : `em andamento no branch ${diff.ref}`}</p>
+      {diff.stat && <pre className="whitespace-pre-wrap font-mono text-[11px] text-slate-400">{diff.stat}</pre>}
+      <pre className="overflow-x-auto font-mono text-[11px] leading-snug">
+        {diff.diff.split("\n").map((l, i) => <div key={i} className={`whitespace-pre px-1 ${tone(l)}`}>{l || " "}</div>)}
+      </pre>
+    </div>
   );
 }

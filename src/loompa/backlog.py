@@ -122,6 +122,20 @@ class Backlog:
             "backlog.priority", story_id=story_id, agent=self.agent, priority=self._clamp(priority)
         )
 
+    def reorder(self, story_ids: list[str]) -> list[str]:
+        """The founder dragged the backlog into this order: first is next. Only cards still in
+        the backlog move; the rest (already running or done) are skipped and not returned."""
+        moved: list[str] = []
+        for sid in story_ids:
+            row = self.ctx.store.get_story(sid)
+            if row is None or row["stage"] != Stage.BACKLOG or sid in moved:
+                continue
+            moved.append(sid)
+        step = max(1, (MAX_PRIORITY - MIN_PRIORITY) // max(len(moved) + 1, 10))
+        for i, sid in enumerate(moved):
+            self.set_priority(sid, MIN_PRIORITY + step * (i + 1))
+        return moved
+
     def set_status(self, story_id: str, status: Stage) -> None:
         """Back to the backlog (deferred) or cancelled. Every other stage belongs to the engine."""
         status = Stage(status)

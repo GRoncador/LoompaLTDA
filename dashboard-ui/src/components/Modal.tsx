@@ -14,7 +14,7 @@ export function Modal({
   const widthClass = className || (wide ? "max-w-5xl" : "max-w-2xl");
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className={`card w-full ${widthClass} p-5`} onClick={(e) => e.stopPropagation()}>
+      <div className={`card w-full !bg-panel ${widthClass} max-h-[90vh] overflow-y-auto p-5`} onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-base font-semibold">{title}</h3>
           <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>

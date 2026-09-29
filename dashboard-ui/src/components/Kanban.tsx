@@ -1,13 +1,36 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Column, SprintSummary, StoryCard } from "../types";
 
 const TONE: Record<string, string> = {
   BACKLOG: "border-slate-600", SPEC: "border-violet-500", DEV: "border-emerald-500", TEST: "border-sky-500", AWAITING_FOUNDER: "border-amber-500", DONE: "border-slate-500",
 };
 
-export default function Kanban({ columns, sprint, onStartSprint, onOpen, onPromote, onCreate }: { columns: Column[]; sprint: SprintSummary | null; onStartSprint: () => Promise<void>; onOpen: (id: string) => void; onPromote: (id: string) => void; onCreate: (title: string) => Promise<void> }) {
+export default function Kanban({ columns, sprint, onStartSprint, onOpen, onPromote, onCreate, onReorder }: { columns: Column[]; sprint: SprintSummary | null; onStartSprint: () => Promise<void>; onOpen: (id: string) => void; onPromote: (id: string) => void; onCreate: (title: string) => Promise<void>; onReorder: (ids: string[]) => Promise<void> }) {
   const [title, setTitle] = useState("");
   const [starting, setStarting] = useState(false);
+  // drag-and-drop priority, backlog only: the preview order while dragging, sent on drop
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string[] | null>(null);
+  const dropped = useRef(false); // dragend fires after drop: only a cancelled drag resets
+  const backlog = columns.find((c) => c.key === "BACKLOG")?.stories ?? [];
+  const ordered = (c: Column) => {
+    if (c.key !== "BACKLOG" || !preview) return c.stories;
+    const byId = new Map(c.stories.map((s) => [s.id, s]));
+    return preview.map((id) => byId.get(id)).filter((s): s is StoryCard => !!s);
+  };
+  const dragOver = (overId: string) => {
+    if (!dragId || dragId === overId) return;
+    const ids = (preview ?? backlog.map((s) => s.id)).filter((id) => id !== dragId);
+    ids.splice(ids.indexOf(overId), 0, dragId);
+    setPreview(ids);
+  };
+  const drop = async () => {
+    const ids = preview;
+    dropped.current = true;
+    setDragId(null);
+    if (ids && ids.join() !== backlog.map((s) => s.id).join()) await onReorder(ids);
+    setPreview(null);
+  };
   // the founder's own cards wait for a sprint; Kaizen findings wait for an explicit yes
   const waiting = (columns.find((c) => c.key === "BACKLOG")?.stories ?? []).filter((s) => s.origin !== "kaizen").length;
   return (
@@ -39,7 +62,24 @@ export default function Kanban({ columns, sprint, onStartSprint, onOpen, onPromo
               <span>{c.label}</span><span className="text-slate-500">{c.stories.length}</span>
             </div>
             <div className="scroll-thin flex-1 space-y-1.5 overflow-y-auto px-2 pb-2">
-              {c.stories.map((s) => <Card key={s.id} s={s} onOpen={onOpen} onPromote={onPromote} />)}
+              {ordered(c).map((s) =>
+                c.key === "BACKLOG" ? (
+                  <div
+                    key={s.id}
+                    draggable
+                    title="Arraste para mudar a prioridade"
+                    className={`cursor-grab ${dragId === s.id ? "opacity-40" : ""}`}
+                    onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; dropped.current = false; setDragId(s.id); }}
+                    onDragOver={(e) => { e.preventDefault(); dragOver(s.id); }}
+                    onDrop={(e) => { e.preventDefault(); drop(); }}
+                    onDragEnd={() => { if (!dropped.current) { setDragId(null); setPreview(null); } }}
+                  >
+                    <Card s={s} onOpen={onOpen} onPromote={onPromote} />
+                  </div>
+                ) : (
+                  <Card key={s.id} s={s} onOpen={onOpen} onPromote={onPromote} />
+                ),
+              )}
             </div>
           </div>
         ))}

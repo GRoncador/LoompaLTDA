@@ -12,6 +12,7 @@ import StoryDrawer from "./components/StoryDrawer";
 import NewFactoryModal from "./components/NewFactoryModal";
 import EventTicker from "./components/EventTicker";
 import SettingsModal from "./components/SettingsModal";
+import FinanceModal from "./components/FinanceModal";
 
 export default function App() {
   const [factories, setFactories] = useState<FactoryRef[]>([]);
@@ -21,6 +22,7 @@ export default function App() {
   const [chat, setChat] = useState<{ kind: ConversationKind; resumeId?: string } | null>(null);
   const [newFactoryOpen, setNewFactoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [financeOpen, setFinanceOpen] = useState(false);
   const [agentName, setAgentName] = useState<string | null>(null);
   const [storyId, setStoryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +75,7 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
-        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onChat={(kind, resumeId) => setChat({ kind, resumeId })} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)}
+        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onChat={(kind, resumeId) => setChat({ kind, resumeId })} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)}
       />
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
       <main className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
@@ -88,11 +90,12 @@ export default function App() {
           <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} />
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
-          <Kanban columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} onStartSprint={startSprint} onOpen={setStoryId} onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }} onCreate={async (title) => { if (slug) { await api.createStory(slug, title, ""); refresh(); } }} />
+          <Kanban columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} onStartSprint={startSprint} onOpen={setStoryId} onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }} onCreate={async (title) => { if (slug) { await api.createStory(slug, title, ""); refresh(); } }} onReorder={async (ids) => { if (slug) { try { await api.reorderBacklog(slug, ids); } catch (e) { setError(String(e)); } refresh(); } }} />
         </section>
       </main>
       <EventTicker events={events} />
       {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} onClose={() => { setChat(null); refresh(); }} />}
+      {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
       {settingsOpen && slug && <SettingsModal slug={slug} onClose={() => { setSettingsOpen(false); refresh(); }} />}
       {newFactoryOpen && <NewFactoryModal onClose={async (created) => { setNewFactoryOpen(false); await loadFactories(); if (created) setSlug(created); }} />}
       {agentName && slug && <AgentDrawer slug={slug} name={agentName} onClose={() => setAgentName(null)} onOpenStory={setStoryId} />}

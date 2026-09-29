@@ -50,6 +50,11 @@ export const api = {
   story: (slug: string, id: string) => req<any>(`/api/factories/${slug}/stories/${id}`),
   createStory: (slug: string, title: string, description: string) =>
     req<{ id: string }>(`/api/factories/${slug}/stories`, { method: "POST", body: JSON.stringify({ title, description }) }),
+  storyDiff: (slug: string, id: string) =>
+    req<{ source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string }>(`/api/factories/${slug}/stories/${id}/diff`),
+  /** The founder's drag-and-drop order for the backlog; applied by the Product Owner. */
+  reorderBacklog: (slug: string, story_ids: string[]) =>
+    req<{ order: string[] }>(`/api/factories/${slug}/backlog/order`, { method: "POST", body: JSON.stringify({ story_ids }) }),
   promote: (slug: string, id: string) => req(`/api/factories/${slug}/stories/${id}/promote`, { method: "POST" }),
   agent: (slug: string, name: string) => req<any>(`/api/factories/${slug}/agents/${encodeURIComponent(name)}`),
   finance: (slug: string) => req<any>(`/api/factories/${slug}/finance`),

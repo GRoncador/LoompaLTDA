@@ -468,6 +468,25 @@ class Store:
             tuple(params),
         )
 
+    def usage_by_day(
+        self, factory: str | None = None, since_iso: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Cost and calls per UTC day, oldest first, for the dashboard's cost chart."""
+        clauses, params = [], []
+        if factory:
+            clauses.append("factory = ?")
+            params.append(factory)
+        if since_iso:
+            clauses.append("created_at >= ?")
+            params.append(since_iso)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        return self._q(
+            f"SELECT substr(created_at, 1, 10) AS day, SUM(cost_usd) AS cost_usd, COUNT(*) AS calls, "
+            f"SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens "
+            f"FROM usage{where} GROUP BY day ORDER BY day",
+            tuple(params),
+        )
+
     # ------------------------------------------------------------------- agents
     def set_agent(
         self,

@@ -2,7 +2,7 @@ import type { ConversationKind, FactoryRef, Overview } from "../types";
 
 export default function Header(props: {
   factories: FactoryRef[]; slug: string | null; overview: Overview | null; connected: boolean; pending: number;
-  onSwitch: (slug: string) => void; onNewFactory: () => void; onChat: (kind: ConversationKind, resumeId?: string) => void; onToggleEngine: () => void; onSettings: () => void;
+  onSwitch: (slug: string) => void; onNewFactory: () => void; onChat: (kind: ConversationKind, resumeId?: string) => void; onToggleEngine: () => void; onSettings: () => void; onFinance: () => void;
 }) {
   const { factories, slug, overview, connected, pending } = props;
   const fin = overview?.finance;
@@ -26,9 +26,9 @@ export default function Header(props: {
           <span className="chip bg-slate-800 text-slate-300">{overview.factory.mode}</span>
           {overview.factory.dry_run && <span className="chip bg-amber-900/60 text-amber-200">simulação</span>}
           {fin && (
-            <span className={`text-sm ${fin.warn ? "text-amber-300" : "text-slate-300"}`} title="Custo hoje / mês / teto">
+            <button className={`rounded-md px-1.5 py-0.5 text-sm hover:bg-line ${fin.warn ? "text-amber-300" : "text-slate-300"}`} title="Custos por dia, papel e modelo" onClick={props.onFinance}>
               💰 US$ {fin.today_usd.toFixed(2)} hoje · {fin.period_usd.toFixed(2)}/{fin.cap_usd.toFixed(2)} {fin.period === "weekly" ? "na semana" : "no mês"}
-            </span>
+            </button>
           )}
           <span className="text-sm" title="Decisões aguardando você">📬 {pending}</span>
           <button className={overview.factory.engine ? "btn-ghost" : "btn-primary"} onClick={props.onToggleEngine}>

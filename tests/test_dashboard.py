@@ -90,11 +90,17 @@ def test_meeting_run_inbox_flow(client: TestClient):
         "node_intake",
         "node_spec",
     ]
+    diff = client.get("/api/factories/demo-hq/stories/S-001/diff").json()
+    assert diff["source"] == "branch" and "loompa_dryrun" in diff["stat"]
+    assert diff["diff"].startswith("diff --git")
     msg = next(m for m in inbox if m["story_id"] == "S-001")
     r = client.post(
         f"/api/factories/demo-hq/inbox/{msg['id']}/reply", json={"option_key": "approve"}
     )
     assert r.json()["stage"] == "DONE"
+    merged = client.get("/api/factories/demo-hq/stories/S-001/diff").json()
+    assert merged["source"] == "merged" and merged["diff"] == diff["diff"]
+    assert client.get("/api/factories/demo-hq/stories/S-404/diff").status_code == 404
     assert client.post("/api/factories/demo-hq/inbox/unknown/reply", json={}).status_code == 404
     events = client.get("/api/factories/demo-hq/events?after=0").json()
     assert {"story.created", "story.stage", "inbox.new", "story.merged"} <= {
@@ -102,6 +108,8 @@ def test_meeting_run_inbox_flow(client: TestClient):
     }
     fin = client.get("/api/factories/demo-hq/finance").json()
     assert fin["period"]["totals"]["calls"] > 0 and fin["period"]["name"] == "weekly"
+    assert len(fin["by_day"]) == 1 and fin["by_day"][0]["calls"] == fin["period"]["totals"]["calls"]
+    assert {r["key"] for r in fin["period"]["by_role"]} >= {"worker", "master"}
     agent = client.get("/api/factories/demo-hq/agents/Worker Loompa").json()
     assert agent["role"] == "worker" and agent["today"]["calls"] > 0
     rep = client.post("/api/factories/demo-hq/report").json()
@@ -118,6 +126,21 @@ def test_create_story_promote_and_memory(client: TestClient):
     ).json()
     assert hits and hits[0]["kind"] in ("constitution", "learning", "doc")
     assert client.get("/api/factories/demo-hq/kaizen").json() == []
+
+
+def test_dragging_the_backlog_reorders_it_through_the_product_owner(client: TestClient):
+    ids = [
+        client.post("/api/factories/demo-hq/stories", json={"title": t}).json()["id"]
+        for t in ("Primeira", "Segunda", "Terceira")
+    ]
+    wanted = [ids[2], ids[0], ids[1]]
+    r = client.post("/api/factories/demo-hq/backlog/order", json={"story_ids": [*wanted, "S-404"]})
+    assert r.json()["order"] == wanted  # unknown or non-backlog ids are skipped
+    ov = client.get("/api/factories/demo-hq/overview").json()
+    assert [s["id"] for s in ov["columns"][0]["stories"]] == wanted
+    events = client.get("/api/factories/demo-hq/events?after=0").json()
+    moves = [e for e in events if e["type"] == "backlog.priority"]
+    assert len(moves) == 3 and all(e["agent"] == "Product Owner Loompa" for e in moves)
 
 
 def test_websocket_hello_and_events(client: TestClient):
@@ -204,9 +227,7 @@ def test_models_sync_endpoints(client: TestClient, monkeypatch):
     assert "all_models" in cat_data
 
     # Test preview-sync with low tier1_ceiling
-    r_ceil = client.post(
-        "/api/factories/demo-hq/models/preview-sync", json={"tier1_ceiling": 1.0}
-    )
+    r_ceil = client.post("/api/factories/demo-hq/models/preview-sync", json={"tier1_ceiling": 1.0})
     assert r_ceil.status_code == 200
     for m in r_ceil.json()["summary"].get("tier1", []):
         assert m["price"] <= 1.0

@@ -12,7 +12,7 @@ import contextlib
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +111,10 @@ class StoryBody(BaseModel):
     title: str
     description: str = ""
     priority: int = 3
+
+
+class OrderBody(BaseModel):
+    story_ids: list[str]
 
 
 class FactoryBody(BaseModel):
@@ -415,6 +419,34 @@ def create_app(
             if ctx.worktrees.get(story_id)
             else [],
         }
+
+    @app.get("/api/factories/{slug}/stories/{story_id}/diff")
+    def story_diff(slug: str, story_id: str) -> dict[str, Any]:
+        """What the story changed: its branch against the base while it is open, the merge
+        commit once approved. Read-only git, available to anyone (ADR-0008)."""
+        ctx = hub.get(slug).ctx
+        if ctx.store.get_story(story_id) is None:
+            raise HTTPException(404, story_id)
+        state = load_state(ctx, story_id)
+        wm = ctx.worktrees
+        wt = wm.get(story_id)
+        if wt is not None:
+            diff = wm.diff(wt, max_chars=200_000) or wm.diff_working(wt, max_chars=200_000)
+            return {"source": "branch", "ref": wt.branch, "stat": wm.diff_stat(wt), "diff": diff}
+        if state.merged_sha:
+            sha = state.merged_sha
+            stat = wm.git("diff", "--stat", f"{sha}^1", sha, check=False)
+            diff = wm.git("diff", f"{sha}^1", sha, check=False)
+            return {"source": "merged", "ref": sha, "stat": stat, "diff": diff[:200_000]}
+        return {"source": "none", "ref": "", "stat": "", "diff": ""}
+
+    @app.post("/api/factories/{slug}/backlog/order")
+    def backlog_order(slug: str, body: OrderBody) -> dict[str, Any]:
+        """Drag-and-drop priority: the founder's order, applied by the Product Owner."""
+        ctx = hub.get(slug).ctx
+        from loompa.agents import ProductOwnerAgent
+
+        return {"order": ProductOwnerAgent(ctx).reorder(body.story_ids)}
 
     @app.post("/api/factories/{slug}/stories")
     def create_story(slug: str, body: StoryBody) -> dict[str, Any]:
@@ -787,7 +819,11 @@ def create_app(
         if to_inbox:
             msg = sync.propose(proposal)
             if msg is None:
-                return {"applied": False, "to_inbox": True, "message": "Nenhuma alteração necessária."}
+                return {
+                    "applied": False,
+                    "to_inbox": True,
+                    "message": "Nenhuma alteração necessária.",
+                }
             return {"applied": False, "to_inbox": True, "message_id": msg.id}
 
         if sync.busy():
@@ -829,7 +865,11 @@ def create_app(
                 "totals": ctx.store.usage_totals(slug, since_iso=_period_start(ctx)),
                 "by_model": ctx.store.usage_by("model", slug, _period_start(ctx)),
                 "by_agent": ctx.store.usage_by("agent", slug, _period_start(ctx)),
+                "by_role": ctx.store.usage_by("role", slug, _period_start(ctx)),
             },
+            "by_day": ctx.store.usage_by_day(
+                slug, (datetime.now(UTC) - timedelta(days=29)).strftime("%Y-%m-%d")
+            ),
             "suggestions": ctx.tracker.suggestions(),
         }
 
