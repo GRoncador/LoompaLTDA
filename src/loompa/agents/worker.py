@@ -35,6 +35,8 @@ DOD_SYSTEM = """<!-- role:dod -->
 You are the Worker Loompa doing a definition-of-done self-check right after finishing a task.
 Given the task, your own summary and the diff you produced, answer honestly whether the task is
 really complete: code AND tests present, nothing outside the task touched, no TODO left behind.
+What earlier tasks of the story already committed counts: if the task's result is already there,
+the task is complete.
 Respond with JSON only: {{"complete": bool, "missing": [str]}} — `missing` lists concrete things
 still to do (in {language}); empty when complete.
 """
@@ -231,13 +233,20 @@ class WorkerAgent(LoompaAgent):
         if self.ctx.dry_run:
             return []
         diff = self.ctx.worktrees.diff_working(wt, max_chars=8000)
-        if not diff.strip():
+        # A task whose result an earlier task already committed is done: judging only the
+        # uncommitted diff sent such tasks into a whole follow-up round (`contas` S-005).
+        committed = self.ctx.worktrees.diff(wt, max_chars=6000)
+        if not diff.strip() and not committed.strip():
             return ["nenhuma alteração de código foi feita para esta tarefa"]
         messages = [
             Message("system", DOD_SYSTEM.format(language=self.language)),
             Message(
                 "user",
-                f"# Task\n{task}\n\n# Worker summary\n{summary}\n\n# Diff\n```diff\n{diff}\n```",
+                f"# Task\n{task}\n\n# Worker summary\n{summary}\n\n"
+                f"# Diff of this task (not committed yet)\n```diff\n"
+                f"{diff or '(nenhuma mudança nova nesta tarefa)'}\n```\n\n"
+                f"# Already committed in this story by earlier tasks\n```diff\n"
+                f"{committed or '(nada)'}\n```",
             ),
         ]
         try:

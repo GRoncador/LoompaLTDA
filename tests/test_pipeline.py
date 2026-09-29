@@ -281,3 +281,47 @@ async def test_dod_check_reruns_an_incomplete_task(factory: Factory):
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
     assert types.count("worker.dod_incomplete") == 1
     await ctx.aclose()
+
+
+async def test_dod_counts_what_an_earlier_task_already_committed(factory: Factory):
+    """`contas` S-005: T5 deleted a file, T6 (remove it and commit) found nothing new to change
+    and the self-check, reading only uncommitted work, sent it into a whole follow-up round."""
+    seen: list[str] = []
+
+    def architect(model: str, messages: list[Message]) -> Any:
+        return json.dumps(
+            {
+                "approach": "duas tarefas",
+                "files": ["tests/"],
+                "contracts": "",
+                "risks": [],
+                "tasks": ["Criar tests/test_a.py", "Garantir que tests/test_a.py existe"],
+                "adr_proposal": "",
+            }
+        )
+
+    def worker(model: str, messages: list[Message]) -> Any:
+        task = next(m.content for m in messages if m.role == "user")
+        if not tool_results(messages) and "Criar" in task:
+            return [
+                ToolCall(
+                    "w1",
+                    "write_file",
+                    {"path": "tests/test_a.py", "content": "def test_a():\n    assert True\n"},
+                )
+            ]
+        return [ToolCall("w2", "done", {"summary": "feito"})]
+
+    def dod(model: str, messages: list[Message]) -> Any:
+        seen.append(messages[-1].content)
+        return json.dumps({"complete": True, "missing": []})
+
+    ctx = make_ctx(factory, scripted({"architect": architect, "worker": worker, "dod": dod}))
+    sid = seed_story(ctx, "Duas tarefas")
+    await Scheduler(ctx).run()
+    assert load_state(ctx, sid).blocked_reason == "delivery"
+    types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
+    assert types.count("worker.dod_incomplete") == 0
+    assert len(seen) == 2  # T2 was judged, not rejected unseen for an empty diff
+    assert "nenhuma mudança nova nesta tarefa" in seen[1] and "test_a.py" in seen[1]
+    await ctx.aclose()
