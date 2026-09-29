@@ -132,6 +132,38 @@ async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
     await ctx.aclose()
 
 
+async def test_a_repo_without_commits_gets_its_first_one_from_the_deployer(tmp_path: Path, hub):
+    """The `contas` factory: files on disk, `git init` done, nothing ever committed. Two stories
+    dispatched together must not bounce off 'faça o primeiro commit' — the Deployer makes it,
+    once, and the founder gets one calm note instead of a question."""
+    repo = tmp_path / "contas"
+    (repo / "app").mkdir(parents=True)
+    git("init", "-q", "-b", "main", cwd=repo)
+    (repo / "app" / "__init__.py").write_text("")
+    (repo / "app" / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    f = bootstrap_factory(repo, name="Contas", store=hub).factory
+    f.config.quality.test_command = ""
+    f.config.quality.lint_command = ""
+    f.config.quality.typecheck_command = ""
+    f.config.schedule.max_parallel = 2
+    f.save()
+    ctx = make_ctx(Factory.open(repo), dry_run=True)
+    assert not ctx.worktrees.head_is_valid()
+    a, b = seed_story(ctx, "Registrar gasto"), seed_story(ctx, "Listar gastos")
+    await Scheduler(ctx).run()
+    for sid in (a, b):
+        state = load_state(ctx, sid)
+        assert state.blocked_reason == "delivery", state.blocked_reason
+    events = [
+        e for e in ctx.store.events_since(0, limit=10_000) if e["type"] == "repo.bootstrapped"
+    ]
+    assert len(events) == 1
+    notes = [m for m in ctx.store.list_messages(f.slug) if m.title.startswith("Fiz o registro")]
+    assert len(notes) == 1 and notes[0].kind == "info" and notes[0].executive_audit() == []
+    assert "app/calc.py" in git("ls-files", cwd=repo)
+    await ctx.aclose()
+
+
 # ------------------------------------------------------------------------- escalation
 
 

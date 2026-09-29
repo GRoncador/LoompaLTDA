@@ -10,6 +10,7 @@ import copy
 import re
 import shutil
 import subprocess
+import threading
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,8 @@ DEPLOYER_ROLE = "deployer"
 DEPLOYER_ONLY = frozenset(
     {"merge", "rebase", "push", "pull", "checkout", "switch", "reset", "cherry-pick", "tag"}
 )
+# Stories are dispatched concurrently; only one of them may create the first commit.
+_BOOTSTRAP_LOCK = threading.Lock()
 _BRANCH_DELETE_FLAGS = frozenset({"-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force"})
 _GLOBAL_OPTS_WITH_VALUE = frozenset({"-c", "-C", "--git-dir", "--work-tree", "--namespace"})
 
@@ -248,6 +251,53 @@ class WorktreeManager:
         return CommitResult(
             sha=self.git("rev-parse", "--short", "HEAD", cwd=wt.path), files=len(staged)
         )
+
+    # Never part of a first commit, whatever the repo's .gitignore says.
+    SECRET_PATHS = tuple(
+        f":(exclude,glob)**/{pat}"  # glob magic: `**/` also matches the repo root
+        for pat in (".env", "*.env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*")
+    )
+    _SECRET_IN_TEXT = re.compile(
+        r"(?<![A-Za-z0-9])(sk-[A-Za-z0-9_\-]{20,}|AIza[0-9A-Za-z_\-]{30,}|tvly-[A-Za-z0-9_\-]{16,}"
+        r"|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"
+    )
+
+    def initial_commit(self, message: str = "chore: esqueleto inicial") -> CommitResult | None:
+        """Give a repo with no commits its first one, so story worktrees have a base to branch
+        from. Deployer only (it creates the base branch). Honours .gitignore, never stages
+        secret-shaped files, and unstages any file whose text carries something shaped like an
+        API key. Returns None when HEAD already existed (someone else got there first)."""
+        self._require_deployer("commit inicial")
+        with _BOOTSTRAP_LOCK:
+            if self.head_is_valid():
+                return None
+            self.git("add", "-A", "--", ".", *self.JUNK, *self.SECRET_PATHS)
+            staged = [
+                f for f in self.git("diff", "--cached", "--name-only").splitlines() if f.strip()
+            ]
+            for rel in list(staged):
+                path = self.repo_root / rel
+                try:
+                    if path.stat().st_size > 512_000:
+                        continue
+                    text = path.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                if self._SECRET_IN_TEXT.search(text):
+                    self.git("rm", "-q", "--cached", "--", rel)
+                    staged.remove(rel)
+            self.git(
+                "-c",
+                "user.name=Loompa",
+                "-c",
+                "user.email=loompa@localhost",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                message,
+            )
+            return CommitResult(sha=self.git("rev-parse", "--short", "HEAD"), files=len(staged))
 
     def log(self, wt: Worktree, limit: int = 20) -> list[str]:
         return self.git(

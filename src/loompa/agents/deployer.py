@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.agents.kaizen import KaizenAgent
-from loompa.comms import compose_delivery_message, sanitize_for_founder
+from loompa.comms import (
+    FounderMessage,
+    MessageKind,
+    compose_delivery_message,
+    sanitize_for_founder,
+)
 from loompa.engine.state import StoryState
 from loompa.worktrees import Worktree
 
@@ -56,6 +61,27 @@ class DeployerAgent(LoompaAgent):
             commits=len(state.commits),
         )
         return AgentResult(ok=True, summary=state.delivery_summary, data={"message_id": msg.id})
+
+    def bootstrap_repo(self) -> bool:
+        """A repo with no commits cannot host story worktrees. Make the first commit here
+        instead of asking the founder to do it from a terminal. True when a commit was made."""
+        commit = self.git.initial_commit()
+        if commit is None:
+            return False
+        self.ctx.emit("repo.bootstrapped", agent=self.name, sha=commit.sha, files=commit.files)
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                kind=MessageKind.INFO,
+                sender=self.name,
+                title="Fiz o registro inicial do projeto",
+                context="O projeto ainda não tinha nenhuma versão salva, e as entregas precisam de "
+                "um ponto de partida. Salvei a estrutura inicial como primeira versão.",
+                impact="Nenhuma ação necessária da sua parte; as entregas seguem normalmente.",
+                allow_free_text=False,
+            )
+        )
+        return True
 
     def merge(self, state: StoryState, wt: Worktree) -> str:
         sha = self.git.merge_into_base(wt, message=f"feat({state.story_id.lower()}): {state.title}")

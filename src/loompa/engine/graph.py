@@ -188,6 +188,8 @@ async def node_plan(ctx: EngineContext, state: StoryState) -> StoryState:
 
 
 def _ensure_worktree(ctx: EngineContext, state: StoryState) -> Worktree:
+    if not ctx.worktrees.get(state.story_id) and not ctx.worktrees.head_is_valid():
+        DeployerAgent(ctx).bootstrap_repo()
     wt = ctx.worktrees.get(state.story_id) or ctx.worktrees.create(
         state.story_id, title=state.title
     )

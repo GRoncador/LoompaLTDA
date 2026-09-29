@@ -111,6 +111,8 @@ def init(
         console.print(
             f"[green]✔[/green] {len(result.skeleton_files)} arquivos de esqueleto criados"
         )
+    if result.initial_commit:
+        console.print(f"[green]✔[/green] Primeira versão salva no git ({result.initial_commit})")
     if result.audit:
         a = result.audit
         table = Table(title="Auditoria Brownfield", show_header=False)

@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from loompa.factory import bootstrap_factory
@@ -90,6 +91,13 @@ def test_bootstrap_greenfield_creates_loompa_dir_and_registers(tmp_path: Path, h
     assert result.factory.config.stack.frameworks == ["Typer"]
     assert hub.load().get("novo-produto").path == root.resolve()
     assert ".loompa/worktrees/" in (root / ".gitignore").read_text()
+    # story worktrees branch from HEAD, so `init` leaves the new repo with a first commit
+    assert result.initial_commit
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.split()
+    assert "pyproject.toml" in tracked and ".loompa/config.yaml" in tracked
+    assert not any(t.endswith(".db") or t.endswith(".env") for t in tracked)
 
 
 def test_bootstrap_brownfield_uses_audit(brownfield_repo: Path, hub):

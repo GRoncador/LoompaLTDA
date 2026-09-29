@@ -129,3 +129,35 @@ async def test_agents_reach_git_through_their_role(factory):
     assert deployer.git.commit_all(wt, "feat: a") is not None
     assert deployer.git.merge_into_base(wt)
     ctx.close()
+
+
+def test_initial_commit_is_the_deployers_and_leaves_secrets_out(tmp_path: Path):
+    repo = tmp_path / "fresh"
+    repo.mkdir()
+    wm = WorktreeManager(repo)
+    wm.git("init", "-q", "-b", "main")
+    (repo / ".gitignore").write_text(".loompa/*.db\n")
+    (repo / "app.py").write_text("print('oi')\n")
+    (repo / ".env").write_text("OPENROUTER_API_KEY=whatever\n")
+    (repo / "notes.txt").write_text("minha chave: sk-or-v1-" + "a" * 40 + "\n")
+    (repo / ".loompa").mkdir()
+    (repo / ".loompa" / "state.db").write_text("x")
+    (repo / ".loompa" / "config.yaml").write_text("api_key_env: OPENROUTER_API_KEY\n")
+    with pytest.raises(GitAuthorityError):
+        wm.as_role("worker").initial_commit()
+    res = wm.as_role("deployer").initial_commit()
+    assert res is not None and wm.head_is_valid()
+    tracked = set(wm.git("ls-files").splitlines())
+    assert tracked == {".gitignore", "app.py", ".loompa/config.yaml"}
+    assert res.files == 3
+    assert wm.as_role("deployer").initial_commit() is None  # only ever the first
+    assert wm.create("S-1").branch.startswith("loompa/s-1")
+
+
+def test_initial_commit_of_an_empty_repo_still_gives_a_base(tmp_path: Path):
+    repo = tmp_path / "vazio"
+    repo.mkdir()
+    wm = WorktreeManager(repo)
+    wm.git("init", "-q", "-b", "main")
+    assert wm.as_role("deployer").initial_commit().files == 0
+    assert wm.create("S-1").path.is_dir()

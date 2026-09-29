@@ -22,6 +22,7 @@ from loompa.onboarding import (
     draft_constitution_from_audit,
     executive_onboarding_summary,
 )
+from loompa.worktrees import WorktreeManager
 
 LEARNINGS_HEADER = """# Learnings — Loop Kaizen
 
@@ -122,6 +123,7 @@ class BootstrapResult:
     created_git: bool
     skeleton_files: list[Path]
     report: str
+    initial_commit: str | None = None  # sha of the first commit `init` made, if any
 
 
 GITIGNORE_LINES = (
@@ -210,6 +212,11 @@ def bootstrap_factory(
     _ensure_gitignore(root)
 
     save_config(root, config)
+    initial_commit = None
+    if mode == "greenfield":
+        # Story worktrees branch from HEAD: a greenfield repo leaves `init` with a first commit.
+        commit = WorktreeManager(root).as_role("deployer").initial_commit()
+        initial_commit = commit.sha if commit else None
     factory = Factory(root=root, config=config)
     (store or ConfigStore()).register(root, config)
     return BootstrapResult(
@@ -218,5 +225,6 @@ def bootstrap_factory(
         audit=audit,
         created_git=created_git,
         skeleton_files=skeleton,
+        initial_commit=initial_commit,
         report=report,
     )
