@@ -57,7 +57,9 @@ PROVIDER_ORDER: tuple[str, ...] = (
 
 
 def _provider_rank(name: str) -> tuple[int, str]:
-    return (PROVIDER_ORDER.index(name), "") if name in PROVIDER_ORDER else (len(PROVIDER_ORDER), name)
+    return (
+        (PROVIDER_ORDER.index(name), "") if name in PROVIDER_ORDER else (len(PROVIDER_ORDER), name)
+    )
 
 
 def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
@@ -98,14 +100,12 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
             tier: [c.model_dump() for c in cands] for tier, cands in config.models.tiers.items()
         },
         "matrix": {
-            cluster: {
-                tier: [c.model_dump() for c in cands]
-                for tier, cands in tier_map.items()
-            }
+            cluster: {tier: [c.model_dump() for c in cands] for tier, cands in tier_map.items()}
             for cluster, tier_map in config.models.matrix.items()
         },
         "role_clusters": {
-            r: config.models.cluster_for_role(r) for r in sorted(set(ROLES) | set(config.models.roles))
+            r: config.models.cluster_for_role(r)
+            for r in sorted(set(ROLES) | set(config.models.roles))
         },
         "roles": {
             r: config.models.tier_for(r) for r in sorted(set(ROLES) | set(config.models.roles))
@@ -219,10 +219,7 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
         if unknown:
             raise ValueError("provedores desconhecidos na matriz: " + ", ".join(sorted(unknown)))
         config.models.matrix = {
-            cluster: {
-                t: [c for c in cs if c.model.strip()]
-                for t, cs in tier_map.items()
-            }
+            cluster: {t: [c for c in cs if c.model.strip()] for t, cs in tier_map.items()}
             for cluster, tier_map in patch.matrix.items()
         }
         # Keep the flat fallback tiers in sync. With the cluster split off, `general` is the list
@@ -273,7 +270,10 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
             raise ValueError("tiers inexistentes no mapa de tarefas: " + ", ".join(sorted(bad)))
         config.models.role_tasks.update(patch.role_tasks)
         notes.append("tiers por tarefa atualizados")
-    if patch.clusters_enabled is not None and patch.clusters_enabled != config.models.clusters_enabled:
+    if (
+        patch.clusters_enabled is not None
+        and patch.clusters_enabled != config.models.clusters_enabled
+    ):
         config.models.clusters_enabled = patch.clusters_enabled
         notes.append(
             "modelos separados por cluster de agentes"

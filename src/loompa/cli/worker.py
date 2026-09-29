@@ -14,9 +14,7 @@ app.add_typer(worker_app, name="worker")
 
 @worker_app.command("backend")
 def worker_backend(
-    value: str = typer.Argument(
-        None, help="aci | opencode — omitido mostra o backend atual"
-    ),
+    value: str = typer.Argument(None, help="aci | opencode — omitido mostra o backend atual"),
     factory: str | None = typer.Option(None, "--factory", "-f"),
 ) -> None:
     """Mostra ou define `worker.backend`. `opencode` exige o binário `opencode` no PATH."""

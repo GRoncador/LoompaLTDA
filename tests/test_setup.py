@@ -177,9 +177,7 @@ def test_a_rejected_key_is_wiped_and_asked_again(demo: Path, probes):
 
 
 def test_skipping_a_key_leaves_it_missing_and_says_how_to_finish(demo: Path, probes):
-    result = runner.invoke(
-        app, ["setup", "--factory", "demo"], input="n\n\nn\nn\n\n1\n"
-    )
+    result = runner.invoke(app, ["setup", "--factory", "demo"], input="n\n\nn\nn\n\n1\n")
     assert result.exit_code == 0, result.stdout
     assert "OPENROUTER_API_KEY" not in read_dotenv(hub_secrets_path())
     assert "Falta:" in result.stdout and "loompa setup" in result.stdout
@@ -188,9 +186,7 @@ def test_skipping_a_key_leaves_it_missing_and_says_how_to_finish(demo: Path, pro
 def test_the_wizard_keeps_a_key_that_is_already_there(demo: Path, probes):
     hub_secrets_path().parent.mkdir(parents=True, exist_ok=True)
     hub_secrets_path().write_text(f"OPENROUTER_API_KEY={GOOD_KEY}\n")
-    result = runner.invoke(
-        app, ["setup", "--factory", "demo"], input="n\n\n\n1\n"
-    )
+    result = runner.invoke(app, ["setup", "--factory", "demo"], input="n\n\n\n1\n")
     assert result.exit_code == 0, result.stdout
     assert "chave já configurada" in result.stdout and probes.asked == []
 

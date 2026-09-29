@@ -465,7 +465,11 @@ def _model_summary(m: CatalogModel, score: float | None) -> dict[str, Any]:
     cost-benefit of every cluster, so a filter can change which number is shown without another
     round trip. Every number is rounded here — a raw mean reaches the screen as 63.800000000000004."""
     cost = round(m.blended or 0.0, 2)
-    s = round(score, 1) if score is not None else (round(m.quality, 1) if m.quality is not None else None)
+    s = (
+        round(score, 1)
+        if score is not None
+        else (round(m.quality, 1) if m.quality is not None else None)
+    )
     scores = {c: fn(m) for c, fn in CLUSTER_SCORES.items()}
     return {
         "id": m.id,
@@ -496,9 +500,7 @@ def rank_cluster(
 ) -> dict[str, list[dict[str, Any]]]:
     # Paid scored models (cost > 0)
     paid_scored = [
-        (m, score_fn(m) or 0.0)
-        for m in eligible
-        if not is_free(m.id) and (m.blended or 0.0) > 0.0
+        (m, score_fn(m) or 0.0) for m in eligible if not is_free(m.id) and (m.blended or 0.0) > 0.0
     ]
 
     # Tier 1: highest score under ceiling
@@ -597,7 +599,9 @@ def build_proposal(
     if free_eligible:
         summary["tier3_free"] = [
             _model_summary(m, m.score_routine())
-            for m in sorted(free_eligible, key=lambda m: (-(m.quality or 0.0), m.id))[: policy.picks]
+            for m in sorted(free_eligible, key=lambda m: (-(m.quality or 0.0), m.id))[
+                : policy.picks
+            ]
         ]
 
     used_after = {c.model for cands in tiers.values() for c in cands if c.provider == PROVIDER}

@@ -658,7 +658,9 @@ async def test_a_chat_turn_asks_for_low_reasoning_effort(factory: Factory):
     turn keeps a small one. Without this, GLM 5.3 spent all 1800 tokens thinking and returned
     an empty reply (live, 2026-09-19)."""
     provider = MockProvider("mock", script=dry_run_script)
-    router = ModelRouter(factory.config, providers=dict.fromkeys(factory.config.providers, provider))
+    router = ModelRouter(
+        factory.config, providers=dict.fromkeys(factory.config.providers, provider)
+    )
     ctx = EngineContext.build(factory, router=router, dry_run=True)
     try:
         conv = Conversations(ctx).open(ConversationKind.MEETING)

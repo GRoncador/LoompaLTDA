@@ -238,7 +238,9 @@ class ModelsConfig(BaseModel):
             for t, cands in tiers_dict.items():
                 self.matrix[cluster][t] = [c.model_copy() for c in cands]
 
-    def _sync_tiers_from_matrix(self, matrix_dict: dict[str, dict[str, list[ModelCandidate]]]) -> None:
+    def _sync_tiers_from_matrix(
+        self, matrix_dict: dict[str, dict[str, list[ModelCandidate]]]
+    ) -> None:
         if not matrix_dict:
             return
         general = matrix_dict.get(GENERAL_CLUSTER, {})

@@ -438,9 +438,7 @@ def test_cli_previews_then_proposes_through_the_inbox(hub, brownfield_repo, monk
     assert sent.exit_code == 0 and "loompa inbox reply" in sent.stdout
     (msg,) = Store(f.paths.state_db).list_messages(f.slug, status="pending")
     assert msg.title.startswith("Nova lista de modelos")
-    assert (
-        tier_ids(Factory.open(brownfield_repo).config, "tier1")[0] == "z-ai/glm-5.3"
-    )  # unchanged
+    assert tier_ids(Factory.open(brownfield_repo).config, "tier1")[0] == "z-ai/glm-5.3"  # unchanged
 
 
 # ------------------------------------------------------------------------- `-latest` aliases

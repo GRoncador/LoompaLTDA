@@ -255,9 +255,7 @@ def _cached_tokens(usage: Mapping[str, Any]) -> int:
     return int(cached or 0)
 
 
-def _parse_openai_response(
-    data: Any, model: str, provider: str, duration_ms: int
-) -> LLMResponse:
+def _parse_openai_response(data: Any, model: str, provider: str, duration_ms: int) -> LLMResponse:
     choice = (data.get("choices") or [{}])[0]
     msg = choice.get("message") or {}
     usage = data.get("usage") or {}
