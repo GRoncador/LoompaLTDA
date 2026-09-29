@@ -207,6 +207,15 @@ class ModelsConfig(BaseModel):
     role_tasks: dict[str, str] = Field(default_factory=dict)
     temperature: float = 0.2
     max_output_tokens: int = 4096
+    # Output budget by story complexity, as a multiplier on the call's base budget. The budget is
+    # a ceiling, not a price: a call pays for what it writes, so a complex story starts roomy
+    # instead of being cut and paid twice. A cut answer is retried with twice the room, up to
+    # `max_output_ceiling`, `truncation_retries` times per model.
+    output_scale: dict[str, float] = Field(
+        default_factory=lambda: {"SIMPLE": 1.0, "STANDARD": 1.5, "COMPLEX": 3.0}
+    )
+    max_output_ceiling: int = Field(32768, ge=256)
+    truncation_retries: int = Field(2, ge=0, le=5)
     # Off: every role shares the `general` cluster, one 3-tier list instead of three.
     clusters_enabled: bool = True
     tier1_ceiling: float = Field(1.25, ge=0.0)

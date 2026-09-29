@@ -143,6 +143,12 @@ class LLMResponse:
     def text(self) -> str:
         return self.content or ""
 
+    @property
+    def truncated(self) -> bool:
+        """The model ran out of output budget mid-answer (OpenAI `length`, Anthropic
+        `max_tokens`, Gemini `MAX_TOKENS`): the text or the tool call is incomplete."""
+        return self.finish_reason.lower() in ("length", "max_tokens")
+
 
 class LLMProvider:
     name: str = "base"
@@ -586,6 +592,7 @@ class MockProvider(LLMProvider):
                 "tools": tools,
                 "json_mode": json_mode,
                 "reasoning_effort": reasoning_effort,
+                "max_tokens": max_tokens,
             }
         )
         result = self.script(model, messages, tools) if self.script else "ok"

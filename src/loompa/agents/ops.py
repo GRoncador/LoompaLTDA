@@ -31,6 +31,11 @@ def triage(exc: BaseException) -> Triage:
     if isinstance(exc, LLMError):
         if "chave de api" in text or "não configurado" in text:
             return Triage(False, "falta configurar o acesso ao serviço de IA")
+        if "resposta cortada" in text:
+            return Triage(
+                False,
+                "a resposta da IA passou do tamanho máximo configurado, mesmo depois de eu ampliá-lo",
+            )
         if not exc.retryable:
             return Triage(False, "o serviço de IA devolveu uma resposta inesperada")
         if any(k in text for k in ("cooldown", "cota", "limite", "429")):

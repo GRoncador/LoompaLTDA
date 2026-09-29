@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from loompa.config.schema import LoompaConfig, ModelCandidate
+from loompa.config.schema import REASONING_EFFORTS, LoompaConfig, ModelCandidate
 from loompa.finance import CostTracker, UsageRecord
 from loompa.llm.providers import (
     LLMError,
@@ -28,6 +28,15 @@ from loompa.llm.providers import (
 )
 
 log = logging.getLogger(__name__)
+
+TRUNCATED_SUFFIX = " (resposta cortada no limite)"
+
+
+def _lower_effort(effort: str) -> str:
+    """One step less thinking; the provider default counts as `medium`."""
+    order = REASONING_EFFORTS
+    current = order.index(effort) if effort in order else order.index("medium")
+    return order[max(current - 1, 0)]
 
 
 @dataclass
@@ -152,7 +161,6 @@ class ModelRouter:
 
         return tier, list(cands)
 
-
     async def complete(
         self,
         role: str,
@@ -187,6 +195,7 @@ class ModelRouter:
                 tools,
                 json_mode,
                 max_tokens,
+                complexity,
                 temperature,
                 reasoning_effort,
                 errors,
@@ -211,9 +220,18 @@ class ModelRouter:
             log.warning("tier %s: todos os modelos em cooldown, aguardando %.0fs", tier, wait)
             await asyncio.sleep(wait)
             waited += wait
+        if errors and all(e.endswith(TRUNCATED_SUFFIX) for e in errors):
+            # Every model ran out of room even at the ceiling: waiting will not change that.
+            raise LLMError("resposta cortada: " + "; ".join(errors[-4:]), retryable=False)
         raise LLMError(
             "todos os modelos do tier falharam: " + "; ".join(errors[-4:]), retryable=True
         )
+
+    def _scaled(self, base: int, complexity: str | None) -> int:
+        """The call's base budget scaled by the story's complexity, within the ceiling."""
+        m = self.config.models
+        factor = m.output_scale.get(str(complexity or "STANDARD").upper(), 1.0)
+        return max(1, min(int(base * factor), m.max_output_ceiling))
 
     async def _one_pass(
         self,
@@ -226,6 +244,7 @@ class ModelRouter:
         tools: list[dict[str, Any]] | None,
         json_mode: bool,
         max_tokens: int | None,
+        complexity: str | None,
         temperature: float | None,
         reasoning_effort: str | None,
         errors: list[str],
@@ -247,7 +266,14 @@ class ModelRouter:
             if hasattr(prov, "available") and not prov.available():  # type: ignore[attr-defined]
                 errors.append(f"{key}: sem chave de API")
                 continue
-            for retry in range(self.max_retries + 1):
+            budget = self._scaled(
+                max_tokens or cand.max_output_tokens or self.config.models.max_output_tokens,
+                complexity,
+            )
+            effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
+            cuts = 0
+            retry = 0
+            while True:
                 attempts += 1
                 try:
                     resp = await prov.complete(
@@ -257,15 +283,9 @@ class ModelRouter:
                         temperature=temperature
                         if temperature is not None
                         else (cand.temperature or self.config.models.temperature),
-                        max_tokens=max_tokens
-                        or cand.max_output_tokens
-                        or self.config.models.max_output_tokens,
+                        max_tokens=budget,
                         json_mode=json_mode,
-                        reasoning_effort=(
-                            reasoning_effort
-                            if reasoning_effort is not None
-                            else cand.reasoning_effort
-                        ),
+                        reasoning_effort=effort,
                     )
                 except QuotaExhausted as exc:
                     errors.append(str(exc))
@@ -273,6 +293,7 @@ class ModelRouter:
                     # anything else (402 billing, 503 overloaded) deserves a longer pause.
                     pause = exc.retry_after or (60.0 if exc.status == 429 else 300.0)
                     self._cooldown[key] = loop.time() + pause
+                    resp = None
                     break  # next candidate
                 except LLMError as exc:
                     errors.append(str(exc))
@@ -282,24 +303,33 @@ class ModelRouter:
                         self.on_model_gone(cand, str(exc))
                     if exc.retryable and retry < self.max_retries:
                         await asyncio.sleep(0.5 * (2**retry))
+                        retry += 1
                         continue
+                    resp = None
                     break
-                cost = 0.0
-                if self.tracker:
-                    cost = self.tracker.record(
-                        UsageRecord(
-                            agent=agent or role,
-                            role=role,
-                            provider=cand.provider,
-                            model=cand.model,
-                            tier=tier,
-                            input_tokens=resp.input_tokens,
-                            output_tokens=resp.output_tokens,
-                            cached_tokens=resp.cached_tokens,
-                            duration_ms=resp.duration_ms,
-                            story_id=story_id,
-                        )
-                    )
+                cost = self._record(resp, cand, tier, role, agent, story_id)
+                if not resp.truncated:
+                    break
+                # Cut mid-answer: the text or tool call is unusable. More room first; at the
+                # ceiling, less thinking (on a reasoning model the budget pays for both).
+                bigger = min(budget * 2, self.config.models.max_output_ceiling)
+                lighter = _lower_effort(effort) if bigger == budget else effort
+                if cuts >= self.config.models.truncation_retries or (
+                    bigger == budget and lighter == effort
+                ):
+                    errors.append(f"{key}: {budget} tokens{TRUNCATED_SUFFIX}")
+                    resp = None
+                    break
+                log.warning(
+                    "%s cortou a resposta em %d tokens; nova tentativa com %d (esforço %r)",
+                    key,
+                    budget,
+                    bigger,
+                    lighter or "padrão",
+                )
+                cuts += 1
+                budget, effort = bigger, lighter
+            if resp is not None:
                 routed = RoutedCall(
                     response=resp, tier=tier, candidate=cand, cost_usd=cost, attempts=attempts
                 )
@@ -307,6 +337,33 @@ class ModelRouter:
                     self.on_call(role, agent or role, routed)
                 return routed
         return attempts
+
+    def _record(
+        self,
+        resp: LLMResponse,
+        cand: ModelCandidate,
+        tier: str,
+        role: str,
+        agent: str | None,
+        story_id: str | None,
+    ) -> float:
+        """Meter one answered call, cut or not: a truncated answer was still paid for."""
+        if not self.tracker:
+            return 0.0
+        return self.tracker.record(
+            UsageRecord(
+                agent=agent or role,
+                role=role,
+                provider=cand.provider,
+                model=cand.model,
+                tier=tier,
+                input_tokens=resp.input_tokens,
+                output_tokens=resp.output_tokens,
+                cached_tokens=resp.cached_tokens,
+                duration_ms=resp.duration_ms,
+                story_id=story_id,
+            )
+        )
 
     async def aclose(self) -> None:
         for p in self._providers.values():

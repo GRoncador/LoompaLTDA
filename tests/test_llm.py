@@ -18,7 +18,12 @@ from loompa.llm import (
     ToolCall,
     model_not_found,
 )
-from loompa.llm.providers import AnthropicProvider, _retry_after_seconds, extract_json
+from loompa.llm.providers import (
+    AnthropicProvider,
+    LLMResponse,
+    _retry_after_seconds,
+    extract_json,
+)
 from loompa.store import Store
 
 OPENAI_OK = {
@@ -229,8 +234,10 @@ async def test_a_gemini_rate_limit_becomes_quota_exhausted_not_a_crash(monkeypat
                         "status": "RESOURCE_EXHAUSTED",
                         "message": "Quota exceeded for quota metric 'Generate requests'.",
                         "details": [
-                            {"@type": "type.googleapis.com/google.rpc.RetryInfo",
-                             "retryDelay": "23s"},
+                            {
+                                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                                "retryDelay": "23s",
+                            },
                         ],
                     }
                 }
@@ -245,6 +252,7 @@ async def test_a_gemini_rate_limit_becomes_quota_exhausted_not_a_crash(monkeypat
 
 def test_retry_delay_survives_any_error_body():
     """`_retry_after_seconds` runs inside a `raise` expression: it must never raise itself."""
+
     def resp(body: Any) -> httpx.Response:
         return httpx.Response(429, json=body)
 
@@ -341,9 +349,9 @@ def two_provider_matrix():
 
 def single_provider_config():
     cfg = two_provider_matrix()
-    cfg.models.tiers["tier2"] = [
-        c for c in cfg.models.tiers["tier2"] if c.provider == "deepseek"
-    ][:1]
+    cfg.models.tiers["tier2"] = [c for c in cfg.models.tiers["tier2"] if c.provider == "deepseek"][
+        :1
+    ]
     return cfg
 
 
@@ -485,7 +493,8 @@ async def test_the_router_reports_a_missing_model_once_and_falls_through():
     cfg = two_provider_matrix()
     gone: list[tuple[str, str]] = []
     bad = MockProvider(
-        "gemini", script=lambda *a: LLMError("gemini-3.5-flash-lite is not a valid model ID", status=400)
+        "gemini",
+        script=lambda *a: LLMError("gemini-3.5-flash-lite is not a valid model ID", status=400),
     )
     router = ModelRouter(
         cfg,
@@ -497,3 +506,76 @@ async def test_the_router_reports_a_missing_model_once_and_falls_through():
     assert rc.candidate.provider == "deepseek"  # fell through to the next candidate
     assert gone == [("gemini", "gemini-3.5-flash-lite")]  # said once, not once per retry
     assert len(bad.calls) == 1  # and not retried: a name does not get better on the second try
+
+
+def _cut_until(budget_needed: int, provider: str = "deepseek"):
+    """A model that needs `budget_needed` output tokens: below that it stops at the limit."""
+
+    class Needy(MockProvider):
+        async def complete(self, model, messages, **kw):
+            await super().complete(model, messages, **kw)
+            done = kw["max_tokens"] >= budget_needed
+            return LLMResponse(
+                content='{"ok": true}' if done else '{"plan": "meio',
+                tool_calls=[],
+                model=model,
+                provider=provider,
+                input_tokens=100,
+                output_tokens=min(kw["max_tokens"], budget_needed),
+                finish_reason="stop" if done else "length",
+            )
+
+    return Needy(provider)
+
+
+async def test_the_output_budget_grows_with_the_storys_complexity():
+    cfg = single_provider_config()
+    cfg.models.max_output_tokens = 4000
+    prov = MockProvider("deepseek", script=scripted)
+    router = ModelRouter(cfg, providers={"deepseek": prov})
+    for complexity, expected in (("SIMPLE", 4000), ("STANDARD", 6000), ("COMPLEX", 12000)):
+        await router.complete("architect", [Message("user", "x")], complexity=complexity)
+        assert prov.calls[-1]["max_tokens"] == expected, complexity
+    await router.complete("deployer", [Message("user", "x")], max_tokens=400, complexity="COMPLEX")
+    assert prov.calls[-1]["max_tokens"] == 1200  # an explicit cap scales the same way
+    cfg.models.max_output_ceiling = 5000
+    await router.complete("architect", [Message("user", "x")], complexity="COMPLEX")
+    assert prov.calls[-1]["max_tokens"] == 5000  # never past the ceiling
+
+
+async def test_a_cut_answer_is_retried_with_more_room_and_every_call_is_metered():
+    """S-002 in `contas`: the Architect stopped at exactly 4096 tokens twice and the story
+    died as 'not valid JSON'. A cut answer is now retried with twice the room."""
+    cfg = single_provider_config()
+    cfg.models.max_output_tokens = 4096
+    store = Store(":memory:")
+    prov = _cut_until(9000)
+    router = ModelRouter(cfg, tracker=CostTracker(store, cfg, "f"), providers={"deepseek": prov})
+    rc = await router.complete(
+        "architect", [Message("user", "x")], story_id="S-2", complexity="SIMPLE"
+    )
+    assert rc.response.text == '{"ok": true}' and not rc.response.truncated
+    assert [c["max_tokens"] for c in prov.calls] == [4096, 8192, 16384]
+    assert store.usage_totals("f")["calls"] == 3  # the cut answers were paid for too
+
+
+async def test_at_the_ceiling_a_cut_answer_thinks_less_then_gives_up_plainly():
+    cfg = single_provider_config()
+    cfg.models.max_output_tokens = 1000
+    cfg.models.max_output_ceiling = 1000
+    prov = _cut_until(10**9)
+    router = ModelRouter(cfg, providers={"deepseek": prov})
+    with pytest.raises(LLMError, match="resposta cortada") as exc:
+        await router.complete("architect", [Message("user", "x")], complexity="SIMPLE")
+    assert exc.value.retryable is False  # waiting would not make the answer fit
+    assert [c["reasoning_effort"] for c in prov.calls] == ["", "low", "minimal"]
+    assert all(c["max_tokens"] == 1000 for c in prov.calls)
+
+
+def test_ops_does_not_wait_out_a_cut_answer_and_says_why_in_plain_words():
+    from loompa.agents.ops import triage
+    from loompa.comms import audit_executive_text
+
+    t = triage(LLMError("resposta cortada: deepseek/x: 32768 tokens (resposta cortada no limite)"))
+    assert not t.transient and "tamanho máximo" in t.cause
+    assert audit_executive_text(t.cause) == []
