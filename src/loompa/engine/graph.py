@@ -11,6 +11,7 @@ runner checkpoints after each one. Which phases a story visits is its `route`, b
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -31,7 +32,9 @@ from loompa.comms import (
     FounderMessage,
     MessageKind,
     Option,
+    compose_blocked_message,
     compose_research_message,
+    sanitize_for_founder,
 )
 from loompa.engine.context import EngineContext
 from loompa.engine.phases import Phase, advance, build_route, goto, phase_stage, register
@@ -67,6 +70,9 @@ async def block(
     `resume` is the phase to continue from after the founder answers (defaults to the current)."""
     ref = _write_tech_log(ctx, state, technical)
     master = MasterAgent(ctx)
+    repeats = _count_repeat(state, reason, technical)
+    if repeats > 1 and message is None and reason in _RETRYABLE_BLOCKS:
+        message = _repeated_block_message(ctx, state, master, executive or technical, repeats)
     if message is not None:
         message.technical_ref = message.technical_ref or ref
         msg = ctx.inbox(message)
@@ -101,6 +107,51 @@ async def block(
     state.stage = Stage.AWAITING_FOUNDER
     ctx.emit("story.blocked", story_id=state.story_id, reason=reason.value, message_id=msg.id)
     return state
+
+
+# Blocks whose default answer is "try again": when the same one comes back, saying "try again"
+# a third time helps nobody, so the founder is told it repeated and offered the ways out.
+_RETRYABLE_BLOCKS = (BlockedReason.PERSISTENT_FAILURE, BlockedReason.CONFLICT)
+LAST_BLOCK_KEY = "last_block"
+_VOLATILE = re.compile(r"[0-9a-f]{7,}|\d+")
+
+
+def _count_repeat(state: StoryState, reason: BlockedReason, technical: str) -> int:
+    """How many times in a row this story stopped for the same thing at the same phase. The
+    fingerprint drops numbers and hashes, which change between attempts of the same failure."""
+    fp = "|".join(
+        (state.phase, reason.value, _VOLATILE.sub("#", (technical or "").lower())[:160])
+    )
+    last = state.extra.get(LAST_BLOCK_KEY) or {}
+    count = int(last.get("count", 0)) + 1 if last.get("fp") == fp else 1
+    state.extra[LAST_BLOCK_KEY] = {"fp": fp, "count": count}
+    return count
+
+
+def _repeated_block_message(
+    ctx: EngineContext, state: StoryState, master: MasterAgent, cause: str, repeats: int
+) -> FounderMessage:
+    cause = sanitize_for_founder(cause).strip().rstrip(".")
+    msg = compose_blocked_message(
+        factory=ctx.slug,
+        story_id=state.story_id,
+        story_title=state.title,
+        reason=f"Tentei de novo e o mesmo problema voltou ({repeats}ª vez seguida). {cause}.",
+        impact="Insistir do mesmo jeito dificilmente resolve. As demais entregas seguem "
+        "normalmente enquanto você decide.",
+        options=[
+            Option(key="skip", label="Deixar para depois (volta ao backlog)", recommended=True),
+            Option(key="drop", label="Cancelar esta entrega"),
+            Option(
+                key="retry",
+                label="Tentar mais uma vez",
+                description="Se você escrever uma orientação, ela vai junto para quem tentar.",
+            ),
+        ],
+    )
+    msg.sender = master.name
+    msg.title = f"O mesmo problema voltou em “{state.title}”"
+    return msg
 
 
 _STAGE_OF_PHASE = {
@@ -509,8 +560,10 @@ def apply_founder_answer(
             )
             goto(state, "dev")
     elif reason == BlockedReason.PERSISTENT_FAILURE:
-        if guidance and key not in ("retry",):
-            state.note(guidance)
+        # "Try again" is not guidance by itself, but what the founder wrote alongside it is.
+        note = (answer.text or "").strip() if key == "retry" else guidance
+        if note:
+            state.note(note)
         state.attempts_tier2 = 0
         state.attempts_tier1 = 0
         state.current_tier = "tier2"

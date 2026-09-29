@@ -483,6 +483,39 @@ async def test_ops_loompa_escalates_in_plain_language_after_max_recoveries(facto
     await ctx.aclose()
 
 
+async def test_the_same_block_twice_stops_recommending_try_again(factory: Factory):
+    """`contas`: three "tentar de novo" in a row, three identical blocks, and the founder's
+    written guidance thrown away each time. Now the guidance reaches the agents, and a block
+    that comes back unchanged says so and recommends a way out instead of a fourth retry."""
+    seen: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect":
+            seen.append("\n".join(m.content for m in messages))
+            raise LLMError("resposta cortada: mock/x: 32768 tokens (resposta cortada no limite)")
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Listar gastos")
+    await Scheduler(ctx).run()
+    first = ctx.store.get_message(load_state(ctx, sid).blocked_message_id)
+    assert "mesmo problema" not in first.title
+    await Scheduler(ctx).aanswer(
+        first.id, FounderAnswer(option_key="retry", text="faça um plano mais curto")
+    )
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "persistent_failure"
+    assert "faça um plano mais curto" in seen[-1]  # the guidance went with the retry
+    again = ctx.store.get_message(state.blocked_message_id)
+    assert again.title.startswith("O mesmo problema voltou") and "2ª vez" in again.context
+    assert [o.key for o in again.options if o.recommended] == ["skip"]
+    assert again.executive_audit() == []
+    state = await Scheduler(ctx).aanswer(again.id, FounderAnswer(option_key="skip"))
+    assert state.stage == Stage.BACKLOG
+    await ctx.aclose()
+
+
 async def test_budget_exhaustion_pauses_dispatch(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     ctx.config.budget.cap_usd = 0.000001
