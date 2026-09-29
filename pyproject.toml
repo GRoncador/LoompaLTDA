@@ -7,6 +7,17 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Gustavo Roncador" }]
 keywords = ["agents", "llm", "software-factory", "orchestration", "spec-kit"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+]
 dependencies = [
     "typer>=0.12",
     "rich>=13.7",
@@ -19,7 +30,9 @@ dependencies = [
     "numpy>=1.26",
     "langgraph>=0.4",
     "langgraph-checkpoint-sqlite>=2.0",
-    "mcp>=1.12",
+    # The client is written against the 2.x API (`mcp.Client`, httpx2 transport); 1.x lacks both.
+    "mcp>=2.2,<3",
+    "httpx2>=2.13",
 ]
 
 [project.optional-dependencies]
