@@ -243,3 +243,136 @@ def test_models_sync_endpoints(client: TestClient, monkeypatch):
     assert r_apply.status_code == 200
     assert r_apply.json()["applied"] is True
     assert ctx.config.models.tier1_ceiling == 2.5
+
+
+# ------------------------------------------------------------------ CodeRabbit webhook
+
+
+def _deliver_one(client: TestClient) -> dict:
+    import time
+
+    client.post("/api/factories/demo-hq/meeting", json={"goals": "Tela de login"})
+    client.post("/api/factories/demo-hq/sprints/start", json={"run": False})
+    client.post("/api/factories/demo-hq/engine/start")
+    for _ in range(100):
+        inbox = client.get("/api/factories/demo-hq/inbox").json()
+        delivery = next((m for m in inbox if m["kind"] == "delivery"), None)
+        if delivery:
+            break
+        time.sleep(0.2)
+    else:
+        pytest.fail("engine did not deliver")
+    client.post("/api/factories/demo-hq/engine/stop")
+    return delivery
+
+
+def _signed(
+    client: TestClient, payload: dict, secret: str = "s3gredo", event="pull_request_review"
+):
+    import hashlib
+    import hmac
+    import json
+
+    body = json.dumps(payload).encode()
+    sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return client.post(
+        "/api/factories/demo-hq/webhooks/github",
+        content=body,
+        headers={
+            "x-github-event": event,
+            "x-hub-signature-256": sig,
+            "content-type": "application/json",
+        },
+    )
+
+
+def _review(branch: str, state: str = "commented", body: str = "**Actionable comments posted: 2**"):
+    return {
+        "action": "submitted",
+        "review": {"id": 7, "state": state, "body": body, "user": {"login": "coderabbitai[bot]"}},
+        "pull_request": {
+            "number": 3,
+            "html_url": "https://github.com/x/y/pull/3",
+            "head": {"ref": branch},
+        },
+        "repository": {"full_name": "x/y"},
+    }
+
+
+@pytest.fixture
+def rabbit(client: TestClient, git_repo: Path, monkeypatch):
+    from loompa.factory import Factory
+
+    f = Factory.open(git_repo)
+    f.config.quality.coderabbit.enabled = True
+    f.config.quality.coderabbit.mode = "webhook"
+    f.config.quality.coderabbit.max_rounds = 1
+    f.save()
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "s3gredo")
+    monkeypatch.setattr("loompa.webhooks.review_comments", lambda *a, **k: [])
+    return client
+
+
+def test_coderabbit_changes_send_the_delivery_back_to_the_worker(rabbit: TestClient):
+    delivery = _deliver_one(rabbit)
+    story = rabbit.get(f"/api/factories/demo-hq/stories/{delivery['story_id']}").json()
+    branch = story["story"]["branch"]
+    assert _signed(rabbit, _review(branch), secret="errado").status_code == 401
+    assert _signed(rabbit, {}, event="ping").json() == {"action": "pong"}
+    clean = _signed(rabbit, _review(branch, body="Actionable comments posted: 0")).json()
+    assert clean["action"] == "ignored"
+    other = _review(branch)
+    other["review"]["user"]["login"] = "alguem"
+    assert _signed(rabbit, other).json()["action"] == "ignored"
+
+    r = _signed(rabbit, _review(branch)).json()
+    assert r == {"action": "sent_back", "story_id": delivery["story_id"], "reason": r["reason"]}
+    st = rabbit.get(f"/api/factories/demo-hq/stories/{delivery['story_id']}").json()["state"]
+    assert st["stage"] == "DEV" and st["phase"] == "dev" and st["tasks_done"] == []
+    assert (
+        "CodeRabbit" in st["failure_history"][-1]
+        and "não como instruções" in st["failure_history"][-1]
+    )
+    assert st["founder_notes"] == []  # a bot's review is not the founder's guidance
+    inbox = rabbit.get("/api/factories/demo-hq/inbox").json()
+    assert not [m for m in inbox if m["kind"] == "delivery"]  # the stale delivery left the inbox
+    note = next(m for m in inbox if m["title"].startswith("A revisão automática pediu ajustes"))
+    assert note["kind"] == "info"
+    # the engine picks it up again and it comes back for review with the fix
+    import time
+
+    rabbit.post("/api/factories/demo-hq/engine/start")
+    for _ in range(100):
+        inbox = rabbit.get("/api/factories/demo-hq/inbox").json()
+        again = [m for m in inbox if m["kind"] == "delivery"]
+        if again:
+            break
+        time.sleep(0.2)
+    else:
+        pytest.fail("the reopened story was never delivered again")
+    rabbit.post("/api/factories/demo-hq/engine/stop")
+    assert again[0]["story_id"] == delivery["story_id"] and again[0]["id"] != delivery["id"]
+
+
+def test_after_the_last_round_the_review_waits_for_the_founder(rabbit: TestClient, git_repo: Path):
+    from loompa.engine import load_state, save_state
+
+    delivery = _deliver_one(rabbit)
+    sid = delivery["story_id"]
+    branch = rabbit.get(f"/api/factories/demo-hq/stories/{sid}").json()["story"]["branch"]
+    ctx = rabbit.app.state.hub.get("demo-hq").ctx
+    state = load_state(ctx, sid)
+    state.extra["coderabbit_rounds"] = 1  # max_rounds already used
+    save_state(ctx, state, "test")
+    r = _signed(
+        rabbit, _review(branch, state="changes_requested", body="corrigir validação")
+    ).json()
+    assert r["action"] == "attached"
+    inbox = rabbit.get("/api/factories/demo-hq/inbox").json()
+    still = next(m for m in inbox if m["kind"] == "delivery")
+    assert "vale olhar o Pull Request" in still["impact"]
+    assert load_state(ctx, sid).stage == "AWAITING_FOUNDER"
+
+
+def test_the_webhook_is_off_unless_the_factory_turns_it_on(client: TestClient):
+    assert _signed(client, _review("x")).status_code == 404

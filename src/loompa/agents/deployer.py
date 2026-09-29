@@ -36,7 +36,8 @@ class DeployerAgent(LoompaAgent):
                 blocked_reason="conflict",
                 summary="conflito ao integrar com a versão principal",
             )
-        state.pr_url = self._maybe_open_pr(state, wt)
+        # A PR already open for this branch just got the new push; `gh pr create` refuses it.
+        state.pr_url = self._maybe_open_pr(state, wt) or state.pr_url
         stat = self.git.diff_stat(wt)
         log = self.git.log(wt)
         state.delivery_summary = await self._summary(state, stat, log)

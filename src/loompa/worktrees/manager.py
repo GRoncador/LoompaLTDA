@@ -344,7 +344,17 @@ class WorktreeManager:
         if not shutil.which("gh") or not self.git("remote", "get-url", "origin", check=False):
             return None
         try:
-            self.git("push", "-u", "origin", wt.branch, cwd=wt.path, timeout=timeout)
+            # The story branch is the Deployer's own and is rebased before each delivery, so a
+            # second delivery (after review changes) must replace what the PR shows.
+            self.git(
+                "push",
+                "--force-with-lease",
+                "-u",
+                "origin",
+                wt.branch,
+                cwd=wt.path,
+                timeout=timeout,
+            )
             out = subprocess.run(
                 ["gh", "pr", "create", "--base", wt.base, "--head", wt.branch]
                 + ["--title", title, "--body", body],

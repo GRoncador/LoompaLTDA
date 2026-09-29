@@ -89,6 +89,13 @@ def test_coderabbit_and_extra_mcp_servers_appear_only_when_configured():
     assert "coderabbit" in by_id(
         collect_services(config, Secrets(), which=lambda n: None, gh_ok=lambda: True)
     )
+    config.quality.coderabbit.mode = "webhook"
+    services = by_id(collect_services(config, Secrets(), gh_ok=lambda: True))
+    assert "coderabbit" not in services  # no CLI needed in webhook mode…
+    hook = services["coderabbit_webhook"]  # …but the signing secret is
+    assert not hook.ok and hook.key_env == "GITHUB_WEBHOOK_SECRET"
+    signed = Secrets({"GITHUB_WEBHOOK_SECRET": "x" * 24}, {"GITHUB_WEBHOOK_SECRET": "hub"})
+    assert by_id(collect_services(config, signed, gh_ok=lambda: True))["coderabbit_webhook"].ok
 
 
 # --------------------------------------------------------------------------------- the wizard

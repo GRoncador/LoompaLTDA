@@ -274,6 +274,11 @@ quality:
   coderabbit:
     enabled: false
     mode: cli               # cli | webhook
+    # webhook: point a GitHub webhook (pull request reviews, JSON) at
+    # http://<host>/api/factories/<slug>/webhooks/github with this secret
+    webhook_secret_env: GITHUB_WEBHOOK_SECRET
+    bot_login: coderabbitai[bot]
+    max_rounds: 2           # review → fix rounds before the founder decides
   require_spec_before_code: true
 
 memory:

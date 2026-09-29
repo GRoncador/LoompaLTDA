@@ -167,4 +167,16 @@ def collect_services(
                 fix="" if found else "instale o CLI do CodeRabbit ou desligue quality.coderabbit",
             )
         )
+    if config.quality.coderabbit.enabled and config.quality.coderabbit.mode == "webhook":
+        out.append(
+            _key_service(
+                id="coderabbit_webhook",
+                label="CodeRabbit (webhook do GitHub)",
+                purpose="devolve para ajustes a entrega que o revisor automático reprovou no PR",
+                need="optional",
+                env=config.quality.coderabbit.webhook_secret_env,
+                url="https://docs.github.com/webhooks/using-webhooks/validating-webhook-deliveries",
+                secrets=secrets,
+            )
+        )
     return out

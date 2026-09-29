@@ -23,6 +23,7 @@ from loompa.comms import FounderAnswer, FounderMessage
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, block
 from loompa.engine.langgraph_engine import GraphRuntime
+from loompa.engine.phases import goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.finance import BudgetStatus
 from loompa.models_sync import ModelSync
@@ -310,6 +311,27 @@ class Scheduler:
         state = apply_founder_answer(self.ctx, state, msg, answer)
         save_state(self.ctx, state, "founder_answer")
         await runtime_for(self.ctx).inject_founder_answer(state)
+        return state
+
+    async def reopen_delivery(self, story_id: str, reason: str) -> StoryState | None:
+        """A reviewer other than the founder (CodeRabbit on the PR) asked for changes on a
+        delivery waiting for review: back to `dev` with the review as a finding, and the
+        delivery message leaves the inbox. The founder's own notes stay untouched."""
+        state = load_state(self.ctx, story_id)
+        if state.stage != Stage.AWAITING_FOUNDER or state.blocked_reason != BlockedReason.DELIVERY:
+            return None
+        if state.blocked_message_id:
+            self.ctx.store.archive_message(state.blocked_message_id)
+        state.failure_history.append(reason)
+        state.tasks_done = []
+        state.blocked_reason = None
+        state.blocked_message_id = None
+        state.resume_stage = None
+        state.resume_phase = None
+        goto(state, "dev")
+        save_state(self.ctx, state, "review_feedback")
+        await runtime_for(self.ctx).inject_founder_answer(state)
+        self.ctx.emit("story.reopened", story_id=story_id, stage=state.stage.value)
         return state
 
     def answer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:

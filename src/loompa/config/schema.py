@@ -438,6 +438,12 @@ class Price(BaseModel):
 class CodeRabbitConfig(BaseModel):
     enabled: bool = False
     mode: Literal["cli", "webhook"] = "cli"
+    # webhook mode: GitHub signs each call with this secret (the NAME of the variable; the value
+    # lives in the secrets files). Reviews from `bot_login` that ask for changes send the
+    # delivery back to the Worker, at most `max_rounds` times per story.
+    webhook_secret_env: str = "GITHUB_WEBHOOK_SECRET"
+    bot_login: str = "coderabbitai[bot]"
+    max_rounds: int = Field(2, ge=0, le=5)
 
 
 class QualityConfig(BaseModel):

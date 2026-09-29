@@ -16,7 +16,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -439,6 +447,29 @@ def create_app(
             diff = wm.git("diff", f"{sha}^1", sha, check=False)
             return {"source": "merged", "ref": sha, "stat": stat, "diff": diff[:200_000]}
         return {"source": "none", "ref": "", "stat": "", "diff": ""}
+
+    @app.post("/api/factories/{slug}/webhooks/github")
+    async def github_webhook(slug: str, request: Request) -> dict[str, Any]:
+        """CodeRabbit's PR reviews (ADR-0013). Signed by GitHub; anything unsigned is refused."""
+        from loompa.webhooks import handle_github_event, verify_signature
+
+        ctx = hub.get(slug).ctx
+        cfg = ctx.config.quality.coderabbit
+        if not (cfg.enabled and cfg.mode == "webhook"):
+            raise HTTPException(404, "webhook do CodeRabbit desligado nesta fábrica")
+        body = await request.body()
+        secret = ctx.secrets.get(cfg.webhook_secret_env, "")
+        if not verify_signature(secret, body, request.headers.get("x-hub-signature-256")):
+            raise HTTPException(401, "assinatura inválida")
+        event = request.headers.get("x-github-event", "")
+        if event == "ping":
+            return {"action": "pong"}
+        try:
+            payload = json.loads(body or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "corpo não é JSON") from exc
+        out = await handle_github_event(ctx, event, payload)
+        return {"action": out.action, "story_id": out.story_id, "reason": out.reason}
 
     @app.post("/api/factories/{slug}/backlog/order")
     def backlog_order(slug: str, body: OrderBody) -> dict[str, Any]:
