@@ -3,6 +3,8 @@ from __future__ import annotations
 import getpass
 import os
 import subprocess
+import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -140,6 +142,37 @@ def close_leaked_contexts(monkeypatch: pytest.MonkeyPatch):
                 ctx.close()
             except Exception:  # noqa: BLE001 - best effort at teardown
                 pass
+
+
+_EXIT_STATUS = 0
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    global _EXIT_STATUS
+    _EXIT_STATUS = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """The suite used to hang forever *after* printing its result: interpreter shutdown joins
+    non-daemon threads (aiosqlite's worker, Starlette's TestClient portal) that never got their
+    stop sentinel. The verdict is already out, so leave with it instead of waiting, and name
+    the threads so the leak stays visible."""
+    leftovers = [
+        t
+        for t in threading.enumerate()
+        if t is not threading.main_thread() and not t.daemon and t.is_alive()
+    ]
+    if not leftovers:
+        return
+    print(
+        f"\n[conftest] saindo sem esperar {len(leftovers)} thread(s) presas: "
+        + ", ".join(t.name for t in leftovers),
+        file=sys.stderr,
+    )
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_EXIT_STATUS)
 
 
 @pytest.fixture
