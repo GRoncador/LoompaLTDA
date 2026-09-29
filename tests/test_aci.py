@@ -180,3 +180,16 @@ ERROR tests/test_calc.py
     assert not s.ok and s.errors == 1
     assert s.failures[0].name == "tests/test_calc.py" and "ImportError" in s.failures[0].message
     assert "====" not in s.compact() and "saída não reconhecida" not in s.compact()
+
+
+def test_pytest_quiet_counts_are_read_without_the_banner():
+    """`uv run pytest -q` ends in a bare `1 passed in 0.02s`: the Inspector used to record 0
+    passed for every factory on the presets' test command (seen live in `contas`)."""
+    s = summarize_tests(".\n1 passed in 0.02s\n", 0)
+    assert (s.passed, s.failed, s.ok) == (1, 0, True)
+    s = summarize_tests(
+        ".F.\n___ test_b ___\nE   assert 1 == 2\nFAILED tests/t.py::test_b - assert 1 == 2\n"
+        "1 failed, 2 passed, 1 skipped in 0.31s\n",
+        1,
+    )
+    assert (s.passed, s.failed, s.skipped) == (2, 1, 1) and not s.ok

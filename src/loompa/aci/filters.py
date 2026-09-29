@@ -13,6 +13,8 @@ _PYTEST_SUMMARY = re.compile(r"^=+ (.*?) =+$")
 _PYTEST_FAIL_HEADER = re.compile(r"^_{3,} (?:ERROR collecting )?(.+?) _{3,}$")
 _PYTEST_SHORT = re.compile(r"^(FAILED|ERROR) (\S+)(?: - (.*))?$")
 _PYTEST_COUNTS = re.compile(r"(\d+) (passed|failed|error|errors|skipped|xfailed|xpassed|warnings?)")
+# `pytest -q` (the presets' test command) drops the ===== banner around the final counts.
+_PYTEST_BARE_COUNTS = re.compile(r"^\d+ (passed|failed|errors?|skipped)\b.* in [\d.]+s")
 _PY_FRAME = re.compile(r'^\s*File "(.+?)", line (\d+)')
 _PY_LOC = re.compile(r"^(\S+\.py):(\d+):")
 _ASSERT = re.compile(
@@ -140,6 +142,19 @@ def _summarize_pytest(text: str, returncode: int) -> CommandSummary:
         sm = _PYTEST_SHORT.match(line.strip())
         if sm and not any(f.name.endswith(sm.group(2).split("::")[-1]) for f in s.failures):
             s.failures.append(Failure(name=sm.group(2), message=(sm.group(3) or "")[:300]))
+    if not (s.passed or s.failed or s.errors or s.skipped):
+        bare = next(
+            (ln.strip() for ln in reversed(lines) if _PYTEST_BARE_COUNTS.match(ln.strip())), ""
+        )
+        for n, kind in _PYTEST_COUNTS.findall(bare):
+            if kind == "passed":
+                s.passed = int(n)
+            elif kind == "failed":
+                s.failed = int(n)
+            elif kind.startswith("error"):
+                s.errors = int(n)
+            elif kind == "skipped":
+                s.skipped = int(n)
     if returncode != 0 and not s.failures:
         tail = [line for line in lines if line.strip()][-10:]
         s.failures.append(
