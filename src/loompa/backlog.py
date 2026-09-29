@@ -46,6 +46,20 @@ def normalize_title(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
 
 
+# A file named in a finding: `debug.txt`, `src/app/cli.py`. The spec artifacts every story has
+# say nothing about which finding it is.
+_PATH_TOKEN = re.compile(r"[\w\-/]+\.[a-z]{1,5}\b", re.I)
+_GENERIC_PATHS = {"plan.md", "spec.md", "tasks.md", "research.md", "constitution.md", "learnings.md"}
+
+
+def file_tokens(text: str) -> set[str]:
+    return {
+        t.lower()
+        for t in _PATH_TOKEN.findall(text or "")
+        if t.lower().rsplit("/", 1)[-1] not in _GENERIC_PATHS and not t[0].isdigit()
+    }
+
+
 class Backlog:
     def __init__(self, ctx: EngineContext, *, owner: LoompaAgent):
         if getattr(owner, "role", None) != OWNER_ROLE:
@@ -54,13 +68,25 @@ class Backlog:
         self.agent = owner.name
 
     # ------------------------------------------------------------------ reads
-    def find_duplicate(self, title: str) -> str | None:
-        """Id of an open card with the same (normalized) title."""
+    def find_duplicate(self, title: str, *, origin: str = "", text: str = "") -> str | None:
+        """Id of an open card with the same (normalized) title. For Kaizen findings, also an
+        open Kaizen card about the same file: one leftover file once came back as four cards
+        worded by the Worker, the Kaizen loop and two Inspector findings (`contas` S-005)."""
         key = normalize_title(title)
         if not key:
             return None
+        files = file_tokens(f"{title} {text}") if origin == "kaizen" else set()
         for row in self.ctx.store.list_stories(self.ctx.slug):
-            if row["stage"] not in TERMINAL and normalize_title(row["title"]) == key:
+            if row["stage"] in TERMINAL:
+                continue
+            if normalize_title(row["title"]) == key:
+                return row["id"]
+            if (
+                files
+                and row["stage"] == Stage.BACKLOG
+                and row.get("origin") == "kaizen"
+                and files & file_tokens(f"{row['title']} {row.get('description', '')}")
+            ):
                 return row["id"]
         return None
 
@@ -85,7 +111,7 @@ class Backlog:
         title = title.strip()[:120]
         if not title:
             raise BacklogError("uma história precisa de título")
-        dup = self.find_duplicate(title)
+        dup = self.find_duplicate(title, origin=origin, text=description)
         if dup:
             self.ctx.emit("backlog.duplicate", story_id=dup, agent=self.agent, title=title)
             return Admission(dup, created=False, duplicate_of=dup)

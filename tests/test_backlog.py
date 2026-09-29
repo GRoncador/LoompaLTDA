@@ -46,6 +46,30 @@ def test_add_item_creates_a_card_and_refuses_duplicates(factory: Factory):
     ctx.close()
 
 
+def test_kaizen_findings_about_the_same_file_are_one_card(factory: Factory):
+    """`contas` S-005: one leftover `debug.txt` became four cards, worded by the Worker, the
+    Kaizen loop and two Inspector findings. Same file, open Kaizen card: same finding."""
+    ctx = make_ctx(factory)
+    po = ProductOwnerAgent(ctx)
+    first = po.add_item(
+        "[Débito técnico] Remover debug.txt — resíduo fora do escopo do plan.md de S-005",
+        origin="kaizen",
+    )
+    for title in (
+        "[Débito técnico] Resíduo debug.txt na raiz do repositório",
+        "[Oportunidade] SEC-1: O arquivo debug.txt contém caminhos absolutos do sistema",
+    ):
+        again = po.add_item(title, origin="kaizen")
+        assert not again.created and again.duplicate_of == first.story_id
+    # the spec artifacts every story has do not make two findings the same
+    assert po.add_item("[Oportunidade] TEST-1: evidências no plan.md", origin="kaizen").created
+    # a founder's card is never swallowed by a finding about the same file
+    assert po.add_item("Documentar o debug.txt", origin="founder").created
+    # a different file is a different finding
+    assert po.add_item("[Débito técnico] Remover notes.txt", origin="kaizen").created
+    ctx.close()
+
+
 def test_priority_is_clamped_and_status_is_limited_to_the_backlog(factory: Factory):
     ctx = make_ctx(factory)
     po = ProductOwnerAgent(ctx)
