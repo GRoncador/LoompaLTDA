@@ -61,8 +61,10 @@ Done (2026-09-17):
 Decided 2026-09-29:
 1. ~~Send only the constitution/spec sections relevant to the task~~ — **not done, on purpose.** A
    per-task selection would change the Worker's system prefix every task and break the prefix cache
-   that already makes the constitution and spec cheap. The tool-token measure below shows where input
-   tokens actually go: in `contas` the Worker was at ~1M input tokens, mostly from reading files.
+   that already makes the constitution and spec cheap. Measured in `contas` (2026-09-29): the Worker
+   sent 4.27M input tokens, 64% of them served from the provider's cache, while tool results added only
+   ~89k over 275 calls. Input cost is the prompt and history re-sent each turn, so the stable prefix is
+   what to protect; the next saving is fewer turns per task, not smaller reads.
 2. **Output budget by complexity** instead of per-role caps (`models.output_scale`, ADR-less, see
    commit 0c3bdb1): the cap is a ceiling, not a price, and a cut answer is now retried with twice the
    room — a cut costs a whole call, a roomy cap costs nothing unless used.
