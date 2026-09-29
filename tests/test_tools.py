@@ -272,3 +272,21 @@ async def test_search_never_shows_lines_from_protected_files(factory: Factory):
     assert res.ok and "settings.py" in res.output
     assert "do-not-leak-from-search" not in res.output and "prod.env" not in res.output
     await ctx.aclose()
+
+
+async def test_the_worker_can_delete_a_file_inside_its_plan_only(factory: Factory):
+    """`contas` S-005: asked to remove a leftover `debug.txt`, the Worker had no way to delete
+    a file and emptied it instead, so the file stayed in the delivery."""
+    ctx = make_ctx(factory)
+    (factory.root / "app" / "debug.txt").write_text("resíduo\n")
+    box = Toolbox.for_role(ctx, "worker", allowed_paths=["app/"])
+    assert "delete_file" in {t["name"] for t in box.spec()}
+    res = await box.call("delete_file", {"path": "app/debug.txt"})
+    assert res.ok and not (factory.root / "app" / "debug.txt").exists()
+    assert not (await box.call("delete_file", {"path": "README.md"})).ok  # outside the plan
+    assert (factory.root / "README.md").exists()
+    assert not (await box.call("delete_file", {"path": "app"})).ok  # never a folder
+    assert not (await box.call("delete_file", {"path": "app/nada.py"})).ok
+    reader = Toolbox.for_role(ctx, "inspector")
+    assert not (await reader.call("delete_file", {"path": "app/calc.py"})).ok
+    await ctx.aclose()

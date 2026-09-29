@@ -119,6 +119,15 @@ TOOL_SPECS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "delete_file",
+        "description": "Apaga um arquivo (resíduos, arquivos movidos numa refatoração). Não apaga pastas.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
         "name": "apply_patch",
         "description": "Aplica um unified diff (formato `git diff`) em um ou mais arquivos.",
         "parameters": {
@@ -289,6 +298,17 @@ class ACI:
         return (
             f"{'sobrescrito' if existed else 'criado'}: {path} ({len(content.splitlines())} linhas)"
         )
+
+    def tool_delete_file(self, path: str) -> str:
+        p = self._resolve(path, for_write=True)
+        if p.is_dir():
+            raise ToolError(f"{path} é uma pasta; apague os arquivos dela um a um")
+        if not p.is_file():
+            raise ToolError(f"arquivo não existe: {path}")
+        p.unlink()
+        self.touched.add(str(p.relative_to(self.root)))
+        self._symbols = None
+        return f"apagado: {path}"
 
     def tool_edit_file(self, path: str, old: str, new: str) -> str:
         p = self._resolve(path, for_write=True)
