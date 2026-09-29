@@ -255,10 +255,13 @@ async def test_the_founders_changes_can_widen_the_plan_they_did_not_foresee(fact
     Worker was fenced off it and could only ask again. The Architect now amends the plan (paths
     and tasks) and the Worker does the new task alone, not the whole story again."""
     worker_tasks: list[str] = []
+    judged: list[str] = []
 
     def script(model: str, messages: list[Message], tools: Any) -> Any:
         role = role_of(messages)
         last = messages[-1].content
+        if role == "inspector" and "## Diff" in last:
+            judged.append(last)
         if role == "architect" and "## Founder's guidance" in last:
             return json.dumps(
                 {"files": ["docs/"], "tasks": ["Escrever docs/NOTA.md"], "reason": "pedido"}
@@ -287,6 +290,8 @@ async def test_the_founders_changes_can_widen_the_plan_they_did_not_foresee(fact
     tasks_md = (factory.paths.specs / sid / "tasks.md").read_text()
     assert "[x] T2: Escrever docs/NOTA.md" in tasks_md
     assert any(e["type"] == "plan.amended" for e in ctx.store.events_since(0, limit=10_000))
+    # the Inspector judges scope against the amended fence, not a guess from the spec
+    assert "## Paths the plan allows" in judged[-1] and "- docs/" in judged[-1]
     await ctx.aclose()
 
 

@@ -203,7 +203,17 @@ class InspectorAgent(LoompaAgent):
         user = (
             "## Acceptance criteria\n"
             + "\n".join(f"- {c}" for c in state.acceptance)
-            + f"\n\n## Spec excerpt\n{spec}\n\n## Diff\n```diff\n{diff}\n```"
+            + f"\n\n## Spec excerpt\n{spec}\n\n"
+            # the plan's fence as it stands now (re-planned or amended at the founder's request):
+            # without it the judge guessed the scope from the spec and flagged allowed changes
+            + (
+                "## Paths the plan allows (changes inside them are in scope)\n"
+                + "\n".join(f"- {p}" for p in state.allowed_paths)
+                + "\n\n"
+                if state.allowed_paths
+                else ""
+            )
+            + f"## Diff\n```diff\n{diff}\n```"
         )
         try:
             data = await self.ask_json(
