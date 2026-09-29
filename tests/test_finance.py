@@ -97,3 +97,34 @@ def test_reports_and_suggestions():
     assert "Gasto de hoje" in summary and "S-1" in summary
     sug = t.suggestions()
     assert any("worker" in s for s in sug) and any("paginar" in s for s in sug)
+
+
+def test_finance_points_at_the_tool_that_fills_the_context():
+    """STATUS token suggestion 3: input tokens were metered per call, never per tool step, so
+    nothing said *what* made an agent read so much. Each tool result now records its size."""
+    store, t = make()
+    for _ in range(30):
+        store.emit(
+            "f", "tool.call", story_id="S-1", agent="Worker Loompa", tool="read_file", tokens=1000
+        )
+    store.emit("f", "tool.call", story_id="S-1", agent="Worker Loompa", tool="search", tokens=200)
+    store.emit(
+        "g", "tool.call", story_id="S-9", agent="Worker Loompa", tool="read_file", tokens=10**6
+    )
+    rows = store.tool_output_by("f")
+    assert (rows[0]["agent"], rows[0]["tool"], rows[0]["calls"], rows[0]["tokens"]) == (
+        "Worker Loompa",
+        "read_file",
+        30,
+        30_000,
+    )
+    (tip,) = [s for s in t.suggestions() if "trouxe" in s]
+    assert "'Worker Loompa'" in tip and "'read_file'" in tip and "~30 mil" in tip and "99%" in tip
+
+
+def test_no_tool_note_while_tools_read_little():
+    store, t = make()
+    store.emit(
+        "f", "tool.call", story_id="S-1", agent="Worker Loompa", tool="read_file", tokens=500
+    )
+    assert not [s for s in t.suggestions() if "trouxe" in s]

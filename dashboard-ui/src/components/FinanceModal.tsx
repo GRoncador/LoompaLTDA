@@ -7,6 +7,7 @@ type Day = { day: string; cost_usd: number; calls: number };
 type Finance = {
   period: { name: string; totals: { cost_usd: number; calls: number }; by_model: Row[]; by_agent: Row[]; by_role: Row[] };
   by_day: Day[];
+  by_tool: { agent: string; tool: string; calls: number; tokens: number }[];
   suggestions: string[];
 };
 
@@ -88,18 +89,18 @@ function DailyChart({ days }: { days: Day[] }) {
   );
 }
 
-function Bars({ rows, label }: { rows: Row[]; label: (k: string) => string }) {
+function Bars({ rows, label, fmt = usd }: { rows: Row[]; label: (k: string) => string; fmt?: (v: number) => string }) {
   const shown = rows.filter((r) => r.cost_usd > 0).slice(0, 8);
   const max = Math.max(...shown.map((r) => r.cost_usd), 0);
   if (!shown.length) return <p className="text-xs text-slate-500">Nada gasto neste período.</p>;
   return (
     <ul className="space-y-1.5">
       {shown.map((r) => (
-        <li key={r.key} className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-2 text-xs" title={`${label(r.key)}: ${usd(r.cost_usd)} em ${r.calls} consultas`}>
+        <li key={r.key} className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-2 text-xs" title={`${label(r.key)}: ${fmt(r.cost_usd)} em ${r.calls} chamadas`}>
           <span className="truncate text-slate-300">{label(r.key)}</span>
           <span className="flex items-center gap-2">
             <span className="h-3 rounded-r" style={{ width: `${Math.max(2, (r.cost_usd / max) * 75)}%`, background: BAR }} />
-            <span className="whitespace-nowrap text-slate-400">{usd(r.cost_usd)}</span>
+            <span className="whitespace-nowrap text-slate-400">{fmt(r.cost_usd)}</span>
           </span>
         </li>
       ))}
@@ -107,12 +108,12 @@ function Bars({ rows, label }: { rows: Row[]; label: (k: string) => string }) {
   );
 }
 
-function Table({ rows, head }: { rows: { k: string; cost: number; calls: number }[]; head: string }) {
+function Table({ rows, head, valueHead = "Custo", fmt = usd }: { rows: { k: string; cost: number; calls: number }[]; head: string; valueHead?: string; fmt?: (v: number) => string }) {
   return (
     <table className="w-full text-left text-xs">
-      <thead className="text-slate-500"><tr><th className="py-1">{head}</th><th>Custo</th><th>Consultas</th></tr></thead>
+      <thead className="text-slate-500"><tr><th className="py-1">{head}</th><th>{valueHead}</th><th>Chamadas</th></tr></thead>
       <tbody className="text-slate-300">
-        {rows.map((r) => <tr key={r.k} className="border-t border-line"><td className="py-1">{r.k}</td><td>{usd(r.cost)}</td><td>{r.calls}</td></tr>)}
+        {rows.map((r) => <tr key={r.k} className="border-t border-line"><td className="py-1">{r.k}</td><td>{fmt(r.cost)}</td><td>{r.calls}</td></tr>)}
       </tbody>
     </table>
   );
@@ -161,6 +162,15 @@ export default function FinanceModal({ slug, onClose }: { slug: string; onClose:
                 : <Bars rows={data.period.by_model} label={(k) => k.split("/").pop() ?? k} />}
             </section>
           </div>
+          {data.by_tool.length > 0 && (
+            <section>
+              <h4 className="mb-1 text-sm font-semibold text-slate-200">O que as ferramentas trouxeram para o contexto · {period}</h4>
+              <p className="mb-2 text-[11px] text-slate-500">Tokens de leitura por Loompa e ferramenta; é daqui que vem a maior parte do custo de entrada.</p>
+              {asTable
+                ? <Table head="Loompa · ferramenta" valueHead="Tokens" fmt={(v) => v.toLocaleString("pt-BR")} rows={data.by_tool.map((r) => ({ k: `${r.agent} · ${r.tool}`, cost: r.tokens, calls: r.calls }))} />
+                : <Bars rows={data.by_tool.map((r) => ({ key: `${r.agent} · ${r.tool}`, cost_usd: r.tokens, calls: r.calls }))} label={(k) => k.replace(" Loompa", "")} fmt={(v) => (v < 1000 ? `${v} tokens` : `${(v / 1000).toFixed(1)} mil tokens`)} />}
+            </section>
+          )}
           {data.suggestions.length > 0 && (
             <section>
               <h4 className="mb-1 text-sm font-semibold text-slate-200">Sugestões do Finance Loompa</h4>

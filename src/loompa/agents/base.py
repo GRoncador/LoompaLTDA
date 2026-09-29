@@ -168,21 +168,18 @@ class LoompaAgent:
                     return LoopResult(call.name, last_text, dict(call.arguments), calls)
                 result = await toolbox.call(call.name, call.arguments)
                 calls += 1
+                output = result.output[:MAX_TOOL_RESULT_CHARS]
                 self.ctx.emit(
                     "tool.call",
                     story_id=story_id,
                     agent=self.name,
                     tool=call.name,
                     ok=result.ok,
+                    # What this result adds to the context (chars/4): the Finance Loompa sums it
+                    # to point at the tools and agents that read too much.
+                    tokens=len(output) // 4,
                 )
-                messages.append(
-                    Message(
-                        "tool",
-                        result.output[:MAX_TOOL_RESULT_CHARS],
-                        tool_call_id=call.id,
-                        name=call.name,
-                    )
-                )
+                messages.append(Message("tool", output, tool_call_id=call.id, name=call.name))
             prune_tool_history(messages, keep_last=keep_tool_results)
         if final_prompt:
             messages.append(Message("user", final_prompt))

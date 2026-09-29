@@ -110,6 +110,7 @@ def test_meeting_run_inbox_flow(client: TestClient):
     assert fin["period"]["totals"]["calls"] > 0 and fin["period"]["name"] == "weekly"
     assert len(fin["by_day"]) == 1 and fin["by_day"][0]["calls"] == fin["period"]["totals"]["calls"]
     assert {r["key"] for r in fin["period"]["by_role"]} >= {"worker", "master"}
+    assert any(r["agent"] == "Worker Loompa" and r["tokens"] > 0 for r in fin["by_tool"])
     agent = client.get("/api/factories/demo-hq/agents/Worker Loompa").json()
     assert agent["role"] == "worker" and agent["today"]["calls"] > 0
     rep = client.post("/api/factories/demo-hq/report").json()

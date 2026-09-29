@@ -867,6 +867,7 @@ def create_app(
                 "by_agent": ctx.store.usage_by("agent", slug, _period_start(ctx)),
                 "by_role": ctx.store.usage_by("role", slug, _period_start(ctx)),
             },
+            "by_tool": ctx.store.tool_output_by(slug, _period_start(ctx))[:10],
             "by_day": ctx.store.usage_by_day(
                 slug, (datetime.now(UTC) - timedelta(days=29)).strftime("%Y-%m-%d")
             ),

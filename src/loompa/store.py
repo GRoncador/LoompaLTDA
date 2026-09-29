@@ -487,6 +487,24 @@ class Store:
             tuple(params),
         )
 
+    def tool_output_by(
+        self, factory: str | None = None, since_iso: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Tokens that tool results brought into agents' context, per agent and tool."""
+        clauses, params = ["type = 'tool.call'"], []
+        if factory:
+            clauses.append("factory = ?")
+            params.append(factory)
+        if since_iso:
+            clauses.append("created_at >= ?")
+            params.append(since_iso)
+        return self._q(
+            "SELECT agent, json_extract(payload_json, '$.tool') AS tool, COUNT(*) AS calls, "
+            "COALESCE(SUM(json_extract(payload_json, '$.tokens')), 0) AS tokens FROM events "
+            f"WHERE {' AND '.join(clauses)} GROUP BY agent, tool ORDER BY tokens DESC",
+            tuple(params),
+        )
+
     # ------------------------------------------------------------------- agents
     def set_agent(
         self,

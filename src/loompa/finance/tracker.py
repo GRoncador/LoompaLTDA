@@ -74,6 +74,10 @@ class BudgetStatus:
         return period_label(self.period)
 
 
+# Below this, what tools read is noise next to the prompts themselves.
+TOOL_TOKENS_WORTH_A_NOTE = 20_000
+
+
 class CostTracker:
     def __init__(self, store: Store, config: LoompaConfig, factory: str):
         self.store = store
@@ -237,7 +241,9 @@ class CostTracker:
     def suggestions(self) -> list[str]:
         """Cheap heuristics the Finance Loompa surfaces in the daily Kaizen summary."""
         out = []
-        by_role = self.store.usage_by("role", self.factory, period_start_iso(self.config.budget.period))
+        by_role = self.store.usage_by(
+            "role", self.factory, period_start_iso(self.config.budget.period)
+        )
         total = sum(r["cost_usd"] for r in by_role) or 0.0
         for row in by_role:
             if total and row["cost_usd"] / total > 0.5 and row["key"] in ("worker", "inspector"):
@@ -252,6 +258,16 @@ class CostTracker:
                 out.append(
                     f"'{row['key']}' lê muito mais do que escreve (razão {int(row['input_tokens'] / max(1, row['output_tokens']))}:1): paginar leituras e usar busca exata antes de abrir arquivos."
                 )
+        tools = self.store.tool_output_by(self.factory, period_start_iso(self.config.budget.period))
+        fed = sum(int(r["tokens"] or 0) for r in tools)
+        if tools and fed >= TOOL_TOKENS_WORTH_A_NOTE:
+            top = tools[0]
+            share = int(int(top["tokens"]) / fed * 100)
+            out.append(
+                f"'{top['agent']}' trouxe ~{int(top['tokens']) // 1000} mil tokens para o contexto com "
+                f"'{top['tool']}' ({top['calls']} chamadas, {share}% do que as ferramentas leram): "
+                "ler trechos em vez de arquivos inteiros e buscar antes de abrir."
+            )
         by_tier = self.store.usage_by(
             "tier", self.factory, period_start_iso(self.config.budget.period)
         )
