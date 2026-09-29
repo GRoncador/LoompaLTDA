@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from loompa.worktrees import GitAuthorityError, GitError, WorktreeManager
+from loompa.worktrees.manager import default_worktrees_dir
 from test_engine import factory  # noqa: F401
 
 
@@ -10,7 +11,8 @@ def test_worktree_lifecycle(git_repo: Path):
     wm = WorktreeManager(git_repo)
     assert wm.default_branch() == "main"
     wt = wm.create("S-001", title="Login page")
-    assert wt.path == git_repo / ".loompa" / "worktrees" / "S-001"
+    assert wt.path == default_worktrees_dir(git_repo) / "S-001"
+    assert git_repo.resolve() not in wt.path.parents  # outside the repo (see below)
     assert wt.branch == "loompa/s-001-login-page" and wt.path.is_dir()
     assert wm.create("S-001", title="Login page").branch == wt.branch  # idempotent
     (wt.path / "feature.py").write_text("x = 1\n")
@@ -161,3 +163,42 @@ def test_initial_commit_of_an_empty_repo_still_gives_a_base(tmp_path: Path):
     wm.git("init", "-q", "-b", "main")
     assert wm.as_role("deployer").initial_commit().files == 0
     assert wm.create("S-1").path.is_dir()
+
+
+def test_a_story_runs_its_own_tests_not_the_main_projects(git_repo: Path):
+    """`contas` S-003: the story's worktree had no pytest config; a fix merged on main then gave
+    the root `pyproject.toml` one. With the worktree nested in the repo, pytest walked up, took
+    the root as rootdir and its `pythonpath = ["src"]`, and imported the main checkout's package
+    instead of the story's code."""
+    import subprocess
+    import sys
+
+    wm = WorktreeManager(git_repo)
+    wt = wm.create("S-003")
+    (git_repo / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "0"\n\n[tool.pytest.ini_options]\npythonpath = ["src"]\n'
+    )
+    wm.git("add", "-A")
+    wm.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "fix merged on main")
+    (wt.path / "tests").mkdir()
+    (wt.path / "tests" / "test_ok.py").write_text("def test_ok():\n    assert True\n")
+    res = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider"],
+        cwd=wt.path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert f"rootdir: {wt.path}" in res.stdout, res.stdout[:600]
+
+
+def test_a_worktree_left_inside_the_repo_moves_out_with_its_work(git_repo: Path):
+    legacy = git_repo / ".loompa" / "worktrees"
+    old = WorktreeManager(git_repo, legacy)
+    wt = old.create("S-001", title="velha")
+    (wt.path / "wip.py").write_text("x = 1\n")  # uncommitted work travels with it
+    wm = WorktreeManager(git_repo)
+    moved = wm.get("S-001")
+    assert moved is not None and moved.path == wm.path_for("S-001") and moved.branch == wt.branch
+    assert (moved.path / "wip.py").read_text() == "x = 1\n" and not wt.path.exists()
+    assert [w.story_id for w in wm.list()] == ["S-001"]

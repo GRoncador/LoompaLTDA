@@ -121,6 +121,13 @@ def no_ambient_keys(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPa
 
 
 @pytest.fixture(autouse=True)
+def isolated_loompa_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Story worktrees live under the hub (`~/.loompa/worktrees`): no test may create them in
+    the real one. The `hub` fixture narrows this further to its own folder."""
+    monkeypatch.setenv("LOOMPA_HOME", str(tmp_path / "loompa-home"))
+
+
+@pytest.fixture(autouse=True)
 def close_leaked_contexts(monkeypatch: pytest.MonkeyPatch):
     """A test that fails before `await ctx.aclose()` would leave the aiosqlite checkpointer
     thread alive and pytest would never exit. Track every EngineContext and close it."""

@@ -1,4 +1,5 @@
-"""Git worktree isolation: one directory + branch per story under `.loompa/worktrees/`.
+"""Git worktree isolation: one directory + branch per story, outside the repo (see
+`default_worktrees_dir`).
 
 Several Loompas code simultaneously without touching the repo root. All git calls are
 Tier 3 (deterministic, $0). Output is trimmed so nothing noisy leaks into agent context.
@@ -7,6 +8,7 @@ Tier 3 (deterministic, $0). Output is trimmed so nothing noisy leaks into agent 
 from __future__ import annotations
 
 import copy
+import hashlib
 import re
 import shutil
 import subprocess
@@ -70,6 +72,18 @@ class CommitResult:
     files: int
 
 
+def default_worktrees_dir(repo_root: Path) -> Path:
+    """Where a repo's story worktrees live: outside the repo, under the hub. Inside it (the old
+    `.loompa/worktrees/`), every tool that walks up for its config found the main project's:
+    pytest took the root `pyproject.toml` as rootdir and imported the main checkout's package
+    instead of the story's own code (`contas` S-003); Node would resolve the root node_modules."""
+    from loompa.config.secrets import hub_home
+
+    root = Path(repo_root).resolve()
+    tag = hashlib.sha1(str(root).encode()).hexdigest()[:8]
+    return hub_home() / "worktrees" / f"{root.name}-{tag}"
+
+
 class WorktreeManager:
     def __init__(
         self,
@@ -80,7 +94,9 @@ class WorktreeManager:
         actor: str | None = None,
     ):
         self.repo_root = Path(repo_root).resolve()
-        self.dir = (worktrees_dir or self.repo_root / ".loompa" / "worktrees").resolve()
+        self.dir = (worktrees_dir or default_worktrees_dir(self.repo_root)).resolve()
+        # where worktrees lived before they moved out of the repo; moved on first use
+        self.legacy_dir = self.repo_root / ".loompa" / "worktrees"
         self.branch_prefix = branch_prefix
         self.actor = actor
 
@@ -169,10 +185,25 @@ class WorktreeManager:
 
     def get(self, story_id: str) -> Worktree | None:
         path = self.path_for(story_id)
-        if not (path / ".git").exists():
+        if not (path / ".git").exists() and not self._move_legacy(story_id):
             return None
         branch = self.git("rev-parse", "--abbrev-ref", "HEAD", cwd=path, check=False) or ""
         return Worktree(story_id=story_id, path=path, branch=branch, base=self.default_branch())
+
+    def _move_legacy(self, story_id: str) -> bool:
+        """A worktree still under the repo's `.loompa/worktrees/` moves out, keeping its branch
+        and any uncommitted work (`git worktree move`)."""
+        old = self.legacy_dir / story_id
+        if self.legacy_dir == self.dir or not (old / ".git").exists():
+            return False
+        self.dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.git("worktree", "move", str(old), str(self.path_for(story_id)))
+        except GitError:
+            return False
+        # a virtualenv's scripts carry their old absolute path; `uv` rebuilds it on next use
+        shutil.rmtree(self.path_for(story_id) / ".venv", ignore_errors=True)
+        return True
 
     def list(self) -> list[Worktree]:
         out: list[Worktree] = []

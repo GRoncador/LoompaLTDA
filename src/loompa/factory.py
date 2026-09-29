@@ -23,6 +23,7 @@ from loompa.onboarding import (
     executive_onboarding_summary,
 )
 from loompa.worktrees import WorktreeManager
+from loompa.worktrees.manager import default_worktrees_dir
 
 LEARNINGS_HEADER = """# Learnings — Loop Kaizen
 
@@ -62,7 +63,7 @@ class FactoryPaths:
 
     @property
     def worktrees(self) -> Path:
-        return self.loompa / "worktrees"
+        return default_worktrees_dir(self.root)
 
     @property
     def logs(self) -> Path:
