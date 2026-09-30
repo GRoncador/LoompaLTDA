@@ -141,6 +141,10 @@ async def test_a_criterion_the_product_cannot_meet_goes_back_to_the_product_owne
     assert delivery.executive_audit() == []
     types = [e["type"] for e in ctx.store.events_since(0, limit=5000) if e["story_id"] == sid]
     assert "spec.criteria_revised" in types and "story.escalated" not in types
+    # the judge reads a spec excerpt that stops before the revision: it is told separately
+    from loompa.agents.inspector import _criteria_revision
+
+    assert "withdrawn: A ajuda não mostra nenhuma borda" in _criteria_revision(state)
     await ctx.aclose()
 
 

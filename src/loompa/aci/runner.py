@@ -80,6 +80,7 @@ async def run_command(
         proc = await asyncio.create_subprocess_exec(
             *shlex.split(command),
             cwd=str(cwd),
+            stdin=asyncio.subprocess.DEVNULL,  # nothing a check runs may wait for input
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=merged_env,

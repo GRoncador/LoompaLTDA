@@ -76,6 +76,12 @@ _ROOT_CONFIG_PATTERN = re.compile(r"^(tsconfig|jsconfig)(\.[\w-]+)?\.json$")
 # Tool caches a test run leaves behind that .gitignore usually covers, and when it does not,
 # are not the story's work either.
 _RUN_JUNK = ("__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", "node_modules")
+# Reports a test runner writes by configuration (coverage, junit): the project asked for them,
+# so they are not a test writing into the repository by mistake.
+_RUN_REPORTS = re.compile(
+    r"^(\.coverage(\..*)?|coverage\.(xml|json|lcov)|lcov\.info|junit.*\.xml|nosetests\.xml"
+    r"|test-results?\.xml)$|^(htmlcov|coverage|test-results|\.hypothesis|\.tox|\.nox|\.benchmarks)/"
+)
 CODE_SUFFIXES = (".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".rs", ".rb")
 
 _MACHINE_PATH = re.compile(
@@ -183,6 +189,7 @@ def run_residue(before: set[str], after: set[str]) -> list[str]:
         p
         for p in after - before
         if not any(part in _FIXTURE_DIRS for part in PurePosixPath(p).parts[:-1])
+        and not _RUN_REPORTS.match(p)
     )
 
 

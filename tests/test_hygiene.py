@@ -173,6 +173,13 @@ async def test_run_tests_says_at_once_what_the_run_left_in_the_repository(factor
     assert aci.test_residue == {"gastos.json"}
 
 
+def test_reports_a_runner_writes_by_configuration_are_not_residue():
+    from loompa.hygiene import run_residue
+
+    after = {"gastos.json", ".coverage", "coverage.xml", "htmlcov/index.html", "junit.xml"}
+    assert run_residue(set(), after | {"tests/fixtures/saida.json"}) == ["gastos.json"]
+
+
 async def test_the_inspector_fails_a_suite_that_writes_into_the_repository(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     wt = ctx.worktrees.create("S-902", title="grava na raiz")

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from loompa.aci import run_command, summarize_lint, summarize_tests, summarize_typecheck
 from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance
+from loompa.agents.product_owner import CRITERIA_REVIEW_KEY
 from loompa.engine.state import StoryState
 from loompa.hygiene import (
     HygieneIssue,
@@ -309,6 +310,7 @@ class InspectorAgent(LoompaAgent):
             + "\n".join(f"- {c}" for c in state.acceptance)
             + f"\n\n## Spec excerpt\n{spec}\n\n"
             + founder_guidance(state)
+            + _criteria_revision(state)
             + (f"## Automated checks (already run; facts)\n{checks}\n\n" if checks else "")
             # the plan's fence as it stands now (re-planned or amended at the founder's request):
             # without it the judge guessed the scope from the spec and flagged allowed changes
@@ -361,6 +363,25 @@ class InspectorAgent(LoompaAgent):
                 "inspector.findings_dropped", story_id=state.story_id, agent=self.name, n=dropped
             )
         return {"criteria": criteria, "findings": findings, "summary": str(data.get("summary", ""))}
+
+
+def _criteria_revision(state: StoryState) -> str:
+    """Criteria the Product Owner withdrew or rewrote: the spec keeps them at its end, past the
+    excerpt the judge reads, and the list above is already the revised one."""
+    review = state.extra.get(CRITERIA_REVIEW_KEY)
+    changes = review.get("changes") if isinstance(review, dict) else None
+    if not changes:
+        return ""
+    lines = "\n".join(
+        f"- withdrawn: {c['criterion']}"
+        if c.get("action") == "withdraw"
+        else f"- rewritten: {c['criterion']} -> {c.get('new', '')}"
+        for c in changes
+    )
+    return (
+        "## Criteria the Product Owner revised (the list above is current; do not judge the old "
+        f"wording)\n{lines}\n\n"
+    )
 
 
 def test_origin(
