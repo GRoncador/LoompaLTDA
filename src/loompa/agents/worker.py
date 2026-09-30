@@ -143,6 +143,9 @@ class WorkerAgent(LoompaAgent):
         paths = story_dir(self.ctx.root, state.story_id)
         tasks_md = paths.tasks.read_text(encoding="utf-8") if paths.tasks.is_file() else ""
         tasks = tasks_from_markdown(tasks_md)
+        # tasks.md is written after every task, the checkpoint only when the node ends: a run
+        # stopped mid-`dev` resumed with tasks_done=[] and redid committed work (`contas` S-031)
+        state.tasks_done = sorted(set(state.tasks_done) | {t.number for t in tasks if t.done})
         pending = [t for t in tasks if t.number not in state.tasks_done]
         if not pending and state.failure_history:
             # every task is done but the Inspector failed the story: run a focused fix pass

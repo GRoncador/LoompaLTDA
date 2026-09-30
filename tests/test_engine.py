@@ -1030,3 +1030,39 @@ async def test_one_engine_per_factory(factory: Factory):
     await Scheduler(ctx).run()  # free again: runs, and releases when done
     assert EngineLock(lock.path).holder() is None
     await ctx.aclose()
+
+
+async def test_a_run_stopped_mid_dev_neither_redoes_tasks_nor_amends_twice(factory: Factory):
+    """`contas` S-031: the engine was stopped inside `dev`; LangGraph resumed the node from its
+    checkpoint with tasks_done=[] and the founder's guidance still pending, so committed tasks
+    ran again and the same two tasks were appended to the plan a second time."""
+    from loompa.agents.architect import ArchitectAgent
+    from loompa.agents.worker import WorkerAgent
+
+    amended: list[str] = []
+    worked: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect" and "## Founder's guidance" in messages[-1].content:
+            amended.append("x")
+            return json.dumps({"files": [], "tasks": ["T8: Cobrir NaN"], "reason": "pedido"})
+        if role_of(messages) == "worker" and not tool_results(messages):
+            worked.append(next(m.content for m in messages if m.role == "user"))
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Parar no meio")
+    await Scheduler(ctx).run()  # dry-run story: spec, plan, one task done
+    tasks_md = factory.paths.specs / sid / "tasks.md"
+    state = load_state(ctx, sid)
+    for _ in range(2):  # the node replayed from a checkpoint made before the amend
+        await ArchitectAgent(ctx).amend(state, "cubra o NaN")
+    text = tasks_md.read_text()
+    assert amended == ["x"] and text.count("Cobrir NaN") == 1 and "T8: T8" not in text
+    assert "T2: Cobrir NaN" in text
+    state.tasks_done = []  # what the checkpoint held when the run stopped
+    worked.clear()
+    await WorkerAgent(ctx).run(state, ctx.worktrees.get(sid))
+    assert worked and all("Cobrir NaN" in w for w in worked)  # T1 is [x]: not done again
+    assert state.tasks_done == [1, 2]
+    await ctx.aclose()

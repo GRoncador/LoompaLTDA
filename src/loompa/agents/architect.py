@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import date
 
@@ -97,6 +98,7 @@ Respond with JSON only: {{"files": [str], "tasks": [str], "reason": str}}
 Write `tasks` and `reason` in {language}; paths as they are.
 """
 
+TASK_PREFIX = re.compile(r"^\s*T\d+\s*[:.-]\s*")  # the model numbering its own tasks
 FILE_REF = re.compile(r"[\w.-]+/|\b[\w-]+\.[a-z]{1,5}\b")
 
 PREFLIGHT_SYSTEM = """<!-- role:architect -->
@@ -230,10 +232,15 @@ class ArchitectAgent(LoompaAgent):
     async def amend(self, state: StoryState, guidance: str) -> AgentResult:
         """Widen the plan for the founder's guidance without re-planning the story: extra paths
         for the Worker's fence and extra tasks appended after the ones already done."""
-        self.set_state("WORKING", state, detail="ajustando o plano ao pedido do Founder")
         paths = story_dir(self.ctx.root, state.story_id)
         plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
         tasks_md = paths.tasks.read_text(encoding="utf-8") if paths.tasks.is_file() else ""
+        # The same guidance is applied once: a run stopped mid-`dev` replays the node from its
+        # checkpoint, and `contas` S-031 got the same two tasks appended twice.
+        mark = f"<!-- amend:{hashlib.sha1(guidance.encode()).hexdigest()[:12]} -->"
+        if mark in tasks_md:
+            return AgentResult(ok=True, summary="orientação já aplicada ao plano")
+        self.set_state("WORKING", state, detail="ajustando o plano ao pedido do Founder")
         user = (
             f"# Story {state.story_id}: {state.title}\n\n## Founder's guidance\n{guidance[:3000]}\n\n"
             f"## Current plan\n{plan[:4000]}\n\n## Tasks\n{tasks_md[:3000]}\n\n"
@@ -247,14 +254,15 @@ class ArchitectAgent(LoompaAgent):
             max_iterations=4,
         )
         files = [f for f in self._list(data, "files") if f not in state.allowed_paths]
-        tasks = self._list(data, "tasks")[:3]
+        tasks = [TASK_PREFIX.sub("", t) for t in self._list(data, "tasks")[:3]]
         state.allowed_paths = state.allowed_paths + files
         if tasks:
             numbers = [t.number for t in tasks_from_markdown(tasks_md)]
             start = max(numbers, default=0) + 1
             extra = "\n".join(f"- [ ] T{start + i}: {t}" for i, t in enumerate(tasks))
-            paths.tasks.write_text(tasks_md.rstrip("\n") + "\n" + extra + "\n", encoding="utf-8")
+            tasks_md = tasks_md.rstrip("\n") + "\n" + extra + "\n"
             state.tasks_total = start - 1 + len(tasks)
+        paths.tasks.write_text(tasks_md.rstrip("\n") + "\n" + mark + "\n", encoding="utf-8")
         if files or tasks:
             with paths.plan.open("a", encoding="utf-8") as fh:
                 fh.write(
