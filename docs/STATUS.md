@@ -1,6 +1,6 @@
 # Brief → implementation map
 
-Status as of 2026-09-19 on branch `dev`. ✅ built & tested · 🟡 partial · ⚪ not started
+Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · ⚪ not started
 
 | Brief section | Status | Where |
 | --- | --- | --- |
@@ -373,6 +373,44 @@ Decided 2026-09-29:
   spec prompt; DoD `missing` items are English (model to model). Cost: +625 tokens over the 16 prompts,
   +78 on the Worker's cached prefix. Not verified live.
 
+- **2026-09-30 — `contas` Sprint 1 resumed on the Fase 7 build (first live test of Fase 7).** The four
+  open stories were started over with a new `loompa sprint restart` (spec, plan, code and branch
+  discarded; the LangGraph thread gets the new state) so they ran on the new templates and gates.
+  **Delivered and merged:** S-002 (`list`) at the first attempt — 74 calls and US$ 0.07 against 471
+  calls and US$ 0.27 without a delivery on the old build — and S-030 (help in pt-BR). SP-001 closed.
+  **Still open:** S-007 (export CSV: CONCERNS, then a conflict with S-002 being resolved) and S-031
+  (bugfix, reproducer task running). The run stopped because the Mac was asleep on 1% battery (see
+  below), not because of the factory. US$ 0.44 over 546 calls since the restart.
+  Seen working live: the new spec sections; the PO rejecting a spec that left an edge case open (fixed
+  in round 2); the BDD→test traceability and alternatives in the plan; a bugfix classified at intake
+  (no spec review, reproducer T1); a plan lifted to pre-flight because it touches `models.py`, with a
+  `risk.md` built on measured facts; the tier-1 re-plan; Kaizen reusing a card for a repeat finding;
+  the `FORCE_COLOR` fix (S-030's colour failures are gone).
+  **Fixed from what the run showed:** (1) the checkpointer's enum allowlist was hand-kept and missed
+  `Autonomy` — now derived from `engine/state.py`; (2) the Python skeletons now declare
+  `typer.Option`/`fastapi.Depends` immutable for ruff's default B008 (a `Path` option failed the lint
+  gate on correct code); (3) the router remembers the output budget that fitted after a cut, per model
+  and role (52 cut-and-retry calls in one hour, mostly a 900-token self-check fitting at 1800-3600);
+  (4) pre-flight mitigations that write no file ("run the suite, record the baseline") are dropped, and
+  a characterisation test pins only behaviour the plan keeps; (5) a founder's "retry" with text now
+  amends the plan, and the Inspector's judge and the Worker's self-check get the founder's guidance,
+  which wins over the spec (S-030: the founder withdrew a criterion and the self-check asked for it
+  again); (6) a wall-clock limit per model call (`models.call_timeout_s`, a guard: the stalls it was
+  written for were the Mac sleeping); a clock-dependent conversation test.
+  **Open, not fixed (next):** the PO's No-Invention gate let S-030's spec turn "no *new* tables" into
+  "no border character in any help", which Typer always draws — and nothing in escalation ever questions
+  the spec, only code and plan, so two tiers and a re-plan went into an impossible criterion; the
+  blocked message then told the founder "users can't see the help", when the failing test was the
+  factory's own. A Worker task cut by the tool-call limit is marked done and the rest of the checklist
+  is skipped, so the Inspector judges a half-built story and a tier-2 attempt is spent on it. A test
+  run left `gastos.json` at the repo root and `commit_all` committed it (hygiene does not flag new data
+  files). Merged story branches are never deleted. The factory's main checkout accumulates uncommitted
+  agent edits under `.loompa/`. Money is formatted three ways across `add`/`list`/`resumo` (product
+  card). Spec text from deepseek-v4-flash slips into Spanish. `llm.call` events carry no
+  `finish_reason`, `tool.call` no search query. No watchdog notices a running story with no event for
+  N minutes. Inbox INFO/FINANCE notes stay pending forever; US$ amounts use "0.33" and "0,07" side by
+  side.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
@@ -384,6 +422,12 @@ Decided 2026-09-29:
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
 - CodeRabbit webhook: verify against GitHub (public URL for the dashboard, a repo with CodeRabbit).
 - PyPI: register the trusted publisher, then `git tag v0.1.0 && git push origin v0.1.0`.
+- Finish `contas` Sprint 1: S-007 and S-031 are in DEV (run `loompa run` with the Mac on power; a
+  sleeping Mac pauses the engine and no timer inside it can tell).
+- From the 2026-09-30 run, in order of cost: a spec criterion that contradicts existing behaviour must
+  go back to the PO instead of up the tiers; a task cut by the tool-call limit must not count as done;
+  hygiene should catch data files a test run leaves in the tree; a stall watchdog; delete merged story
+  branches; `finish_reason` on `llm.call`.
 - Fase 7 follow-ups: specialised Workers (7.4) only if `worker.task`/failure history show a stack-context
   cause; the Inspector judge could prefer a different model from the one that wrote the code (separation
   at model level, not built); the dashboard does not show `risk.md` or the autonomy mode yet.
