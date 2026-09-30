@@ -559,6 +559,20 @@ async def test_a_cut_answer_is_retried_with_more_room_and_every_call_is_metered(
     assert store.usage_totals("f")["calls"] == 3  # the cut answers were paid for too
 
 
+async def test_the_budget_that_fitted_after_a_cut_is_where_the_next_call_starts():
+    """`contas`, 2026-09-30: the Worker's 900-token self-check was cut on every task and only
+    fitted at 1800-3600, paying for one or two discarded calls each time."""
+    cfg = single_provider_config()
+    prov = _cut_until(3000)
+    router = ModelRouter(cfg, providers={"deepseek": prov})
+    await router.complete("worker", [Message("user", "x")], max_tokens=900, complexity="SIMPLE")
+    assert [c["max_tokens"] for c in prov.calls] == [900, 1800, 3600]
+    await router.complete("worker", [Message("user", "y")], max_tokens=900, complexity="SIMPLE")
+    assert prov.calls[-1]["max_tokens"] == 3600 and len(prov.calls) == 4
+    await router.complete("architect", [Message("user", "z")], max_tokens=900, complexity="SIMPLE")
+    assert prov.calls[4]["max_tokens"] == 900  # another role learns on its own
+
+
 async def test_at_the_ceiling_a_cut_answer_thinks_less_then_gives_up_plainly():
     cfg = single_provider_config()
     cfg.models.max_output_tokens = 1000

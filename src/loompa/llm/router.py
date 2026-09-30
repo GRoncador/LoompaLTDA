@@ -71,6 +71,10 @@ class ModelRouter:
         self.on_model_gone = on_model_gone
         self.max_retries = max_retries
         self._budget_checked_at = 0.0
+        # (model key, role) -> output budget that last fitted after a cut. A reasoning model
+        # that needed 3600 tokens for a self-check will need them next time too: starting
+        # there saves a paid, discarded call (52 cuts in one hour of `contas`, 2026-09-30).
+        self._fitted: dict[tuple[str, str], int] = {}
         self._budget_downgrade = False
         # When every candidate of a tier is merely cooling down (typical with a single-model
         # tier on a free-tier rate limit), wait up to this long for the earliest one instead
@@ -270,6 +274,10 @@ class ModelRouter:
                 max_tokens or cand.max_output_tokens or self.config.models.max_output_tokens,
                 complexity,
             )
+            budget = min(
+                max(budget, self._fitted.get((key, role), 0)),
+                self.config.models.max_output_ceiling,
+            )
             effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
             cuts = 0
             retry = 0
@@ -309,6 +317,8 @@ class ModelRouter:
                     break
                 cost = self._record(resp, cand, tier, role, agent, story_id)
                 if not resp.truncated:
+                    if cuts:
+                        self._fitted[(key, role)] = budget
                     break
                 # Cut mid-answer: the text or tool call is unusable. More room first; at the
                 # ceiling, less thinking (on a reasoning model the budget pays for both).
