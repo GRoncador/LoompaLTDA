@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent
+from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent, repo_outline
 from loompa.engine.state import StoryState
 from loompa.speckit import render_plan, render_tasks, story_dir, tasks_from_markdown
 
@@ -167,32 +167,7 @@ class ArchitectAgent(LoompaAgent):
         return AgentResult(ok=True, summary=f"{len(files)} caminhos e {len(tasks)} tarefas a mais")
 
     def _repo_outline(self, max_entries: int = 80) -> str:
-        skip = {".git", ".loompa", "node_modules", ".venv", "__pycache__", "dist", "build"}
-        lines = []
-        for p in sorted(self.ctx.root.rglob("*")):
-            rel = p.relative_to(self.ctx.root)
-            if any(part in skip for part in rel.parts) or len(rel.parts) > 3:
-                continue
-            if p.is_dir():
-                lines.append(f"{rel}/")
-            elif p.suffix in (
-                ".py",
-                ".ts",
-                ".tsx",
-                ".js",
-                ".go",
-                ".rs",
-                ".md",
-                ".toml",
-                ".json",
-                ".yaml",
-                ".yml",
-            ):
-                lines.append(str(rel))
-            if len(lines) >= max_entries:
-                lines.append("…")
-                break
-        return "\n".join(lines)
+        return repo_outline(self.ctx.root, max_entries)
 
     # --------------------------------------------------------------- stewardship
     def write_adr(self, title: str, body: str, *, status: str = "accepted") -> str:

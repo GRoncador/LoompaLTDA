@@ -57,6 +57,10 @@ class ScheduleConfig(BaseModel):
     tier1_max_attempts: int = Field(1, ge=1)
     worker_max_iterations: int = Field(40, ge=1)
     worker_keep_tool_results: int = Field(6, ge=1)
+    # Older file reads kept verbatim (newest first, while still current), in characters, and the
+    # streak of reads without a change after which the Worker is told to stop exploring.
+    worker_keep_file_chars: int = Field(16000, ge=0)
+    worker_explore_nudge: int = Field(10, ge=0)  # 0 = never
     # Tool rounds a role may use before it must answer (ADR-0009); 0 = one-shot, no tools.
     agent_tool_iterations: int = Field(8, ge=0)  # Architect, Product
     research_max_iterations: int = Field(14, ge=0)  # Analyst: search, extract, read

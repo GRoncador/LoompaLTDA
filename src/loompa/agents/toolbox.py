@@ -67,8 +67,22 @@ def profile_for(role: str) -> ToolProfile:
     return PROFILES.get(role, READ_ONLY)
 
 
+REASON_PROP = {
+    "type": "string",
+    "description": "One or two sentences: the root cause you found and what this change does.",
+}
+DIAGNOSIS_MISSING = (
+    "error: before the first change of this task, state in `reason` (1-2 sentences) the root "
+    "cause you found and what you will change; then repeat the call."
+)
+
+
 class Toolbox:
-    """The tools one agent may use in one run: ACI tools filtered by its profile, plus MCP tools."""
+    """The tools one agent may use in one run: ACI tools filtered by its profile, plus MCP tools.
+
+    With `diagnosis=True` (a Worker fixing a failure or a bug, Fase 7 item 7.11), the write tools
+    take a `reason` and the first write of the run is refused without one: the root cause is
+    stated before the code changes, in the same call, costing no extra round when given."""
 
     def __init__(
         self,
@@ -77,6 +91,7 @@ class Toolbox:
         *,
         offered: Iterable[str] | None = None,
         mcp: McpSession | None = None,
+        diagnosis: bool = False,
     ):
         self.aci = aci
         self.profile = profile
@@ -84,6 +99,8 @@ class Toolbox:
         self.allowed = profile.tools & wanted  # the profile is the ceiling, `offered` narrows it
         self.mcp = mcp
         self.seen_urls: set[str] = set()  # URLs that came back from web tools (source check)
+        self.diagnosis_required = diagnosis
+        self.diagnosis = ""  # the `reason` of the first write, once given
 
     # ------------------------------------------------------------------ building
     @classmethod
@@ -112,6 +129,8 @@ class Toolbox:
     # -------------------------------------------------------------------- using
     def spec(self) -> list[dict[str, Any]]:
         specs = [t for t in TOOL_SPECS if t["name"] in self.allowed]
+        if self.diagnosis_required:
+            specs = [_with_reason(t) if t["name"] in WRITE_TOOLS else t for t in specs]
         if self.mcp is not None:
             specs += self.mcp.specs()
         return specs
@@ -134,6 +153,13 @@ class Toolbox:
                 False,
                 f"erro: a ferramenta {name} não está disponível para o papel {self.profile.role}",
             )
+        if name in WRITE_TOOLS:
+            args = dict(args)
+            reason = str(args.pop("reason", "") or "").strip()
+            if self.diagnosis_required and not self.diagnosis:
+                if len(reason) < 12:
+                    return ToolResult(False, DIAGNOSIS_MISSING)
+                self.diagnosis = reason
         return await self.aci.call(name, args)
 
     @property
@@ -142,6 +168,18 @@ class Toolbox:
 
 
 # ---------------------------------------------------------------------------- helpers
+
+
+def _with_reason(spec: dict[str, Any]) -> dict[str, Any]:
+    params = spec["parameters"]
+    return {
+        **spec,
+        "parameters": {
+            **params,
+            "properties": {**params.get("properties", {}), "reason": REASON_PROP},
+            "required": [*params.get("required", []), "reason"],
+        },
+    }
 
 
 def extract_urls(text: str) -> set[str]:
@@ -155,16 +193,49 @@ def normalize_url(url: str) -> str:
     return url.rstrip("/").lower()
 
 
-def prune_tool_history(messages: list[Message], *, keep_last: int = 6, max_chars: int = 300) -> int:
+def prune_tool_history(
+    messages: list[Message], *, keep_last: int = 6, max_chars: int = 300, keep_files_chars: int = 0
+) -> int:
     """Collapse old tool results into one-line stubs so long tasks stop re-paying for every file
-    read. The model keeps a trace of what it did; only the last `keep_last` results stay verbatim."""
+    read. The model keeps a trace of what it did; only the last `keep_last` results stay verbatim.
+
+    With `keep_files_chars`, older `read_file` results also stay verbatim, newest first and up to
+    that many characters, while they are still the latest read of their file and nothing wrote
+    to it since. Pruning those is what sent the Worker back to read the same file again (`contas`,
+    Fase 7 item 7.11): a re-read costs a whole round, which re-sends the full history."""
     tool_idx = [i for i, m in enumerate(messages) if m.role == "tool"]
+    older = tool_idx[:-keep_last] if keep_last else tool_idx
+    keep: set[int] = set()
+    if keep_files_chars and older:
+        calls = _calls_by_id(messages)
+        latest: set[str] = set()  # files whose latest read (or write) is newer than index i
+        budget = keep_files_chars
+        for i in reversed(tool_idx):
+            name, args = calls.get(messages[i].tool_call_id or "", ("", {}))
+            path = str(args.get("path") or "")
+            if name in WRITE_TOOLS and path:
+                latest.add(path)  # an earlier read of it is stale now
+            elif name == "read_file" and path:
+                fresh = path not in latest
+                latest.add(path)
+                if fresh and i in older and len(messages[i].content) <= budget:
+                    keep.add(i)
+                    budget -= len(messages[i].content)
     pruned = 0
-    for i in tool_idx[:-keep_last] if keep_last else tool_idx:
+    for i in older:
         m = messages[i]
-        if len(m.content) <= max_chars or m.content.startswith("[resumido]"):
+        if i in keep or len(m.content) <= max_chars or m.content.startswith("[resumido]"):
             continue
         first = m.content.strip().splitlines()[0][:120]
         m.content = f"[resumido] resultado anterior de {m.name or 'ferramenta'} ({len(m.content)} chars): {first} …"
         pruned += 1
     return pruned
+
+
+def _calls_by_id(messages: list[Message]) -> dict[str, tuple[str, dict[str, Any]]]:
+    return {
+        c.id: (c.name, c.arguments if isinstance(c.arguments, dict) else {})
+        for m in messages
+        if m.role == "assistant"
+        for c in m.tool_calls or []
+    }

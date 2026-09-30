@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 
 from loompa.aci import ACI
-from loompa.agents.base import AgentResult, LoompaAgent
+from loompa.agents.base import AgentResult, LoompaAgent, repo_outline
+from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
-from loompa.engine.state import StoryState
+from loompa.engine.state import StoryKind, StoryState
 from loompa.llm import Message
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.speckit.artifacts import mark_task_done
@@ -20,9 +21,14 @@ from loompa.worktrees import Worktree
 SYSTEM = """<!-- role:worker -->
 You are the Worker Loompa, a senior full-stack engineer executing ONE task from a checklist inside an
 isolated git worktree. You have no shell — only the tools provided. Work surgically:
-1. Read the relevant files first (paginated). Search before assuming names or signatures.
+1. Read before you write: read the file you will change and the tests that cover it (an edit to a
+   file you have not read in this task is refused). Use `find_symbol`/`search` to locate names and
+   the repository outline below instead of listing directories. Read each thing once: results stay
+   in your history, and a repeated read or test run with nothing changed is answered from it.
+   Then decide: a few reads are enough for most tasks.
 2. Implement exactly the task, with tests. Do not touch files outside the allowed paths; if you need
-   to, call `note_learning` describing why and finish what you can.
+   to, call `note_learning` describing why and finish what you can. When you are fixing a failure,
+   the first edit's `reason` states the root cause you found (not the symptom).
 3. Run `run_tests` (and `run_lint` when configured) and fix failures until they pass. For
    mechanical lint findings (import order, spacing, formatting) call `fix_lint` instead of editing
    by hand.
@@ -84,13 +90,24 @@ class WorkerAgent(LoompaAgent):
         spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
         plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
         aci = self.ctx.aci_for(wt.path, allowed_paths=state.allowed_paths or None)
+        outline = repo_outline(wt.path)  # once per run: the same text keeps the prefix cached
         summaries: list[str] = []
         tier_label = self.tier_override or "tier2"
         for task in pending:
             self.set_state(
                 "WORKING", state, model=tier_label, detail=f"T{task.number}: {task.text[:60]}"
             )
-            result = await self._run_task(state, aci, task.number, task.text, spec, plan, tasks_md)
+            result = await self._run_task(
+                state,
+                aci,
+                task.number,
+                task.text,
+                spec,
+                plan,
+                tasks_md,
+                outline=outline,
+                changed=self.ctx.worktrees.diff_stat(wt),
+            )
             if result.blocked_reason:
                 self.set_state("BLOCKED", state, detail="aguardando decisão")
                 self._flush_learnings(state, aci)
@@ -114,6 +131,8 @@ class WorkerAgent(LoompaAgent):
                     spec,
                     plan,
                     tasks_md,
+                    outline=outline,
+                    changed=self.ctx.worktrees.diff_stat(wt),
                 )
                 if followup.blocked_reason:
                     self.set_state("BLOCKED", state, detail="aguardando decisão")
@@ -162,6 +181,9 @@ class WorkerAgent(LoompaAgent):
             spec,
             plan,
             tasks_md,
+            outline=repo_outline(wt.path),
+            changed=self.ctx.worktrees.diff_stat(wt),
+            diagnosis=True,
         )
         self._flush_learnings(state, aci)
         if result.blocked_reason:
@@ -229,6 +251,10 @@ class WorkerAgent(LoompaAgent):
         spec: str,
         plan: str,
         tasks_md: str,
+        *,
+        outline: str = "",
+        changed: str = "",
+        diagnosis: bool = False,
     ) -> AgentResult:
         retry_ctx = ""
         if state.failure_history:
@@ -254,21 +280,49 @@ class WorkerAgent(LoompaAgent):
             SYSTEM.format(language=self.language)
             + f"\n## Story {state.story_id} — {state.title}\n\n## Allowed paths\n{json.dumps(state.allowed_paths, ensure_ascii=False)}\n\n"
             f"## Spec\n{spec[:4000]}\n\n## Plan\n{plan[:4000]}\n\n## Constitution (excerpt)\n{self.constitution(3000)}\n"
+            + (
+                f"\n## Repository outline (at the start of this run)\n{outline}\n"
+                if outline
+                else ""
+            )
         )
-        user = (
-            f"# Task T{number}\n\n**{text}**\n{retry_ctx}{notes}\n## Checklist\n{tasks_md[:2000]}\n"
+        done_before = (
+            f"\n## Already changed in this story (earlier commits)\n{changed.strip()[-1500:]}\n"
+            if changed.strip()
+            else ""
         )
+        user = f"# Task T{number}\n\n**{text}**\n{retry_ctx}{notes}{done_before}\n## Checklist\n{tasks_md[:2000]}\n"
         messages = [Message("system", stable, cache=True), Message("user", user)]
         sched = self.ctx.config.schedule
+        aci.begin_task()
+        aci.require_read = True
+        # a fix (the Inspector's findings, a bug) starts from a diagnosis, stated with the edit
+        toolbox = Toolbox(
+            aci, PROFILES["worker"], diagnosis=diagnosis or state.kind == StoryKind.BUGFIX
+        )
+        guard = LoopGuard(aci, explore_nudge=sched.worker_explore_nudge)
         loop = await self.tool_loop(
             messages,
-            Toolbox(aci, PROFILES["worker"]),
+            toolbox,
             story=state,
             max_iterations=sched.worker_max_iterations,
             tier_override=self.tier_override,
             terminal=("done", "blocked"),
             nudge="Continue com as ferramentas, ou chame `done` se a tarefa está completa e verde.",
             keep_tool_results=sched.worker_keep_tool_results,
+            keep_files_chars=sched.worker_keep_file_chars,
+            guard=guard,
+        )
+        self.ctx.emit(
+            "worker.task",
+            story_id=state.story_id,
+            agent=self.name,
+            task=number,
+            ended_by=loop.ended_by,
+            tool_calls=loop.tool_calls,
+            repeats=guard.repeats,
+            nudges=guard.nudges,
+            diagnosis=toolbox.diagnosis[:300],
         )
         if loop.ended_by == "done":
             return AgentResult(ok=True, summary=str(loop.args.get("summary", ""))[:300])

@@ -198,7 +198,12 @@ async def test_loop_nudges_once_and_reports_the_limit(factory: Factory):
 
 async def test_loop_prunes_old_tool_results(factory: Factory):
     (factory.root / "app" / "big.py").write_text("\n".join(f"x{i} = {i}" for i in range(150)))
-    script, _ = scripted_loop([[ToolCall("c", "read_file", {"path": "app/big.py", "lines": 150})]])
+    script, _ = scripted_loop(
+        [
+            [ToolCall(f"c{i}", "read_file", {"path": "app/big.py", "start": i, "lines": 140})]
+            for i in (1, 2, 3, 4)
+        ]
+    )
     ctx = make_ctx(factory, script)
     agent = Prober(ctx)
     messages = [Message("system", "s"), Message("user", "u")]

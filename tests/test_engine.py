@@ -175,13 +175,17 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     def worker(model: str, messages: list[Message]) -> Any:
         seen_models.append(model)
         results = tool_results(messages)
-        if not results:
+        if not results:  # read before write: a retry overwrites the file the first attempt made
+            return [ToolCall("r1", "read_file", {"path": "tests/test_new.py"})]
+        if len(results) == 1:
             content = (
                 "def test_new():\n    assert 1 == 1\n"
                 if model == tier1_model
                 else "def test_new():\n    assert 1 == 2\n"
             )
-            return [ToolCall("w1", "write_file", {"path": "tests/test_new.py", "content": content})]
+            args = {"path": "tests/test_new.py", "content": content}
+            args["reason"] = "the assertion compared two different numbers"  # a retry: diagnosis
+            return [ToolCall("w1", "write_file", args)]
         return [ToolCall("w2", "done", {"summary": f"escrevi teste com {model}"})]
 
     ctx = make_ctx(factory, with_worker(worker))
@@ -194,7 +198,7 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     tiers = [r["key"] for r in ctx.store.usage_by("tier", factory.slug)]
     assert set(tiers) == {"tier1", "tier2"}
     tier2_model = factory.config.models.candidates_for("worker", "tier2")[0].model
-    assert seen_models.count(tier2_model) == 4 and seen_models.count(tier1_model) == 2
+    assert seen_models.count(tier2_model) == 6 and seen_models.count(tier1_model) == 3
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
     assert types.count("story.retry") == 1 and types.count("story.escalated") == 1
     # escalating re-plans once: two failures may mean the plan fences the Worker off the cause
@@ -322,6 +326,7 @@ async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Facto
             git("add", ".", cwd=root)
             git("commit", "-qm", "fix: main mexe na mesma linha", cwd=root)
             return [
+                ToolCall("r1", "read_file", {"path": "app/calc.py"}),  # read before write
                 ToolCall("w1", "write_file", {"path": "app/calc.py", "content": story}),
                 ToolCall("w2", "write_file", {"path": "uv.lock", "content": "story\n"}),
                 ToolCall(
@@ -334,7 +339,13 @@ async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Facto
                 ),
             ]
         fixed = "from app.calc import sub\n\n\ndef test_sub():\n    assert sub(3, 1) == 2\n"
-        return [ToolCall("w4", "write_file", {"path": "tests/test_sub.py", "content": fixed})]
+        why = "the test expected 3 - 1 to be 3"  # a fix pass states its diagnosis
+        return [
+            ToolCall("r4", "read_file", {"path": "tests/test_sub.py"}),
+            ToolCall(
+                "w4", "write_file", {"path": "tests/test_sub.py", "content": fixed, "reason": why}
+            ),
+        ]
 
     def script(model: str, messages: list[Message], tools: Any) -> Any:
         if role_of(messages) == "architect" and "## Founder's guidance" not in messages[-1].content:
@@ -390,7 +401,10 @@ async def test_a_conflict_found_at_delivery_is_reintegrated_before_asking(factor
             if "You resolve git merge conflicts" in messages[0].content:
                 return json.dumps({"files": {"app/calc.py": both}})
             if not tool_results(messages):
-                return [ToolCall("w", "write_file", {"path": "app/calc.py", "content": story})]
+                return [
+                    ToolCall("r", "read_file", {"path": "app/calc.py"}),
+                    ToolCall("w", "write_file", {"path": "app/calc.py", "content": story}),
+                ]
             return [ToolCall("d", "done", {"summary": "ok"})]
         if role == "architect" and "## Founder's guidance" not in messages[-1].content:
             return json.dumps(

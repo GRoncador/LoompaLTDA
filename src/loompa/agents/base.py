@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from loompa.agents.loopguard import REPEAT_PREFIX, LoopGuard
 from loompa.agents.toolbox import READ_TOOLS, Toolbox, prune_tool_history
 from loompa.engine.context import EngineContext
 from loompa.engine.state import StoryState
@@ -131,14 +132,18 @@ class LoompaAgent:
         nudge: str | None = None,
         final_prompt: str | None = None,
         keep_tool_results: int = 6,
+        keep_files_chars: int = 0,
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
+        guard: LoopGuard | None = None,
     ) -> LoopResult:
         """Call the model, run the tools it asks for, feed the results back, until it stops.
 
         `terminal` names end the loop without being executed (`done`, `blocked`). With `nudge`,
         a reply without tool calls is pushed once more before being accepted. When the rounds run
-        out, `final_prompt` (if given) gets one last answer; otherwise the result is `limit`."""
+        out, `final_prompt` (if given) gets one last answer; otherwise the result is `limit`.
+        Repeated reads and runs go through a `LoopGuard` (one is made when none is given)."""
+        guard = guard or LoopGuard(toolbox.aci)
         story_id = story.story_id if story else None
         complexity = str(story.complexity) if story else None
         last_text = ""
@@ -166,9 +171,18 @@ class LoompaAgent:
             for call in resp.tool_calls:
                 if call.name in terminal:
                     return LoopResult(call.name, last_text, dict(call.arguments), calls)
-                result = await toolbox.call(call.name, call.arguments)
+                args = call.arguments if isinstance(call.arguments, dict) else {}
+                result = guard.before(call.name, args) or await toolbox.call(call.name, args)
                 calls += 1
-                output = result.output[:MAX_TOOL_RESULT_CHARS]
+                msg = Message(
+                    "tool",
+                    result.output[:MAX_TOOL_RESULT_CHARS],
+                    tool_call_id=call.id,
+                    name=call.name,
+                )
+                note = guard.after(call.name, args, result, msg)
+                if note:
+                    msg.content += "\n\n" + note
                 self.ctx.emit(
                     "tool.call",
                     story_id=story_id,
@@ -177,10 +191,14 @@ class LoompaAgent:
                     ok=result.ok,
                     # What this result adds to the context (chars/4): the Finance Loompa sums it
                     # to point at the tools and agents that read too much.
-                    tokens=len(output) // 4,
+                    tokens=len(msg.content) // 4,
+                    repeat=result.output.startswith(REPEAT_PREFIX),
+                    **({"path": str(args["path"])[:200]} if args.get("path") else {}),
                 )
-                messages.append(Message("tool", output, tool_call_id=call.id, name=call.name))
-            prune_tool_history(messages, keep_last=keep_tool_results)
+                messages.append(msg)
+            prune_tool_history(
+                messages, keep_last=keep_tool_results, keep_files_chars=keep_files_chars
+            )
         if final_prompt:
             messages.append(Message("user", final_prompt))
             routed = await self.ctx.router.complete(
@@ -297,6 +315,42 @@ class LoompaAgent:
     @staticmethod
     def dumps(obj: Any) -> str:
         return json.dumps(obj, ensure_ascii=False, indent=2)
+
+
+OUTLINE_SKIP = {".git", ".loompa", "node_modules", ".venv", "__pycache__", "dist", "build"}
+OUTLINE_SUFFIXES = (
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".go",
+    ".rs",
+    ".md",
+    ".toml",
+    ".json",
+    ".yaml",
+    ".yml",
+)
+
+
+def repo_outline(root: Path, max_entries: int = 80) -> str:
+    """Directories and source files up to three levels deep: enough to name paths without a
+    round of `list_dir` calls (the Worker in `contas` spent hundreds of them)."""
+    lines = []
+    for p in sorted(root.rglob("*")):
+        rel = p.relative_to(root)
+        if any(part in OUTLINE_SKIP or part.endswith(".egg-info") for part in rel.parts):
+            continue
+        if len(rel.parts) > 3:
+            continue
+        if p.is_dir():
+            lines.append(f"{rel}/")
+        elif p.suffix in OUTLINE_SUFFIXES:
+            lines.append(str(rel))
+        if len(lines) >= max_entries:
+            lines.append("…")
+            break
+    return "\n".join(lines)
 
 
 def _as_dict(data: Any) -> dict[str, Any]:

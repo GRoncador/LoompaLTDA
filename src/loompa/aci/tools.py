@@ -224,6 +224,14 @@ class ACI:
         self._symbols: SymbolIndex | None = None
         self.learnings: list[dict[str, str]] = []
         self.touched: set[str] = set()
+        # Bumped by every change to the tree: a read or a test run repeated at the same version
+        # would return the same thing (`agents/loopguard.py` answers it from memory).
+        self.version = 0
+        # Read before write (Fase 7, 7.11): with `require_read`, an existing file can only be
+        # edited or overwritten once this task has read it. What the model "remembers" of a
+        # file from an earlier task or a pruned result is a guess, and so is an edit built on it.
+        self.require_read = False
+        self._known: set[str] = set()  # files read or written since `begin_task`
 
     # ------------------------------------------------------------------ helpers
     def _resolve(self, path: str, *, for_write: bool = False) -> Path:
@@ -245,6 +253,27 @@ class ACI:
 
     def spec(self) -> list[dict[str, Any]]:
         return TOOL_SPECS
+
+    def begin_task(self) -> None:
+        """A new task is a new conversation: nothing read before it is in the model's context."""
+        self._known.clear()
+
+    def _rel(self, p: Path) -> str:
+        return str(p.relative_to(self.root))
+
+    def _check_read(self, p: Path, path: str) -> None:
+        if self.require_read and p.is_file() and self._rel(p) not in self._known:
+            raise ToolError(
+                f"read {path} with read_file before changing it: its current content may not be "
+                "what you expect. Read the tests that cover it too."
+            )
+
+    def _wrote(self, p: Path) -> None:
+        rel = self._rel(p)
+        self.touched.add(rel)
+        self._known.add(rel)
+        self._symbols = None
+        self.version += 1
 
     async def call(self, name: str, args: dict[str, Any]) -> ToolResult:
         handler = getattr(self, f"tool_{name}", None)
@@ -268,6 +297,7 @@ class ACI:
         lines = max(1, min(int(lines), self.max_read_lines))
         start = max(1, int(start))
         content = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        self._known.add(self._rel(p))
         total = len(content)
         chunk = content[start - 1 : start - 1 + lines]
         body = "\n".join(f"{start + i:5d}| {line}" for i, line in enumerate(chunk))
@@ -301,11 +331,11 @@ class ACI:
 
     def tool_write_file(self, path: str, content: str) -> str:
         p = self._resolve(path, for_write=True)
+        self._check_read(p, path)
         p.parent.mkdir(parents=True, exist_ok=True)
         existed = p.exists()
         p.write_text(content, encoding="utf-8")
-        self.touched.add(str(p.relative_to(self.root)))
-        self._symbols = None
+        self._wrote(p)
         return (
             f"{'sobrescrito' if existed else 'criado'}: {path} ({len(content.splitlines())} linhas)"
         )
@@ -317,14 +347,14 @@ class ACI:
         if not p.is_file():
             raise ToolError(f"arquivo não existe: {path}")
         p.unlink()
-        self.touched.add(str(p.relative_to(self.root)))
-        self._symbols = None
+        self._wrote(p)
         return f"apagado: {path}"
 
     def tool_edit_file(self, path: str, old: str, new: str) -> str:
         p = self._resolve(path, for_write=True)
         if not p.is_file():
             raise ToolError(f"arquivo não existe: {path}")
+        self._check_read(p, path)
         text = p.read_text(encoding="utf-8")
         count = text.count(old)
         if count == 0:
@@ -335,8 +365,7 @@ class ACI:
             )
         updated = text.replace(old, new, 1)
         p.write_text(updated, encoding="utf-8")
-        self.touched.add(str(p.relative_to(self.root)))
-        self._symbols = None
+        self._wrote(p)
         diff = difflib.unified_diff(text.splitlines(), updated.splitlines(), lineterm="", n=1)
         return "\n".join(list(diff)[2:20])
 
@@ -345,15 +374,16 @@ class ACI:
         if not files:
             raise ToolError("patch vazio ou em formato não reconhecido (use unified diff)")
         applied = []
+        for rel in files:
+            self._check_read(self._resolve(rel, for_write=True), rel)
         for rel, hunks in files.items():
             p = self._resolve(rel, for_write=True)
             original = p.read_text(encoding="utf-8").splitlines() if p.is_file() else []
             updated = _apply_hunks(original, hunks)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("\n".join(updated) + ("\n" if updated else ""), encoding="utf-8")
-            self.touched.add(rel)
+            self._wrote(p)
             applied.append(rel)
-        self._symbols = None
         return "patch aplicado em: " + ", ".join(applied)
 
     async def tool_run_tests(self, selector: str | None = None) -> str:
@@ -402,6 +432,7 @@ class ACI:
             await run_command(shlex.join(scoped), self.root, timeout=300)
             ran.append(parts[-1] if parts else cmd)
         self._symbols = None
+        self.version += 1
         head = (
             "[fix] correções automáticas aplicadas"
             if ran
