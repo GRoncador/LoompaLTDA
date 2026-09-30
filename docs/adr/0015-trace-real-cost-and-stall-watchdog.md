@@ -135,6 +135,24 @@ last one and when the story last said anything; live events advance it between r
 reads "há 12 s · T5 · 23 passos · lendo cli.py", turns amber after five quiet minutes and red when
 the watchdog declared the story stalled.
 
+### 9. Addendum — the live smoke run (same day)
+
+A throw-away factory (two small stories, US$0.12) ran this build against OpenRouter before
+Sprint 2. Three things changed from what it showed:
+
+- **An answer cut while the model is still thinking gets less thinking, not more room.** The
+  Architect's plan for a SIMPLE story was cut at 4k, 8k and 16k tokens on glm-5.3-flash and again on
+  deepseek-v4-flash (12 minutes, US$0.05, story blocked); every token was reasoning. A cut whose
+  output is at least 90% reasoning now retries in the same room one effort step lower; the effort
+  that answered is remembered per model and role, like the budget that fitted after a cut. A cut
+  with visible output still doubles the room first. This is not a
+  model change (ADR-0011): the model stays, it is asked to think less.
+- **A cut attempt keeps the tail of what it was writing** (text or half-written tool call, and the
+  reasoning when the provider returns it) and its reasoning tokens; a call that never answered
+  carries the attempts' cost, and `loompa trace` shows the models it tried.
+- **The checkpoint connection is opened once.** Two stories dispatched in the same tick each opened
+  one; the leaked one kept `loompa run` alive after the cycle ended.
+
 ## Consequences
 
 - The next `contas` sprint (Sprint 2) is the validation: every call and tool is in the trace, the

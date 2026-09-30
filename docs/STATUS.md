@@ -33,7 +33,7 @@ Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 7 (Specs, QA Gates e Raciocínio de Agentes) | ✅ ler antes de escrever + `LoopGuard` (7.11), higiene do diff (7.10), juiz com rubrica, evidência de teste e auto-cura (7.2), reproducer-first (7.7), alternativas (7.9), checagem rápida pós-escrita (7.8), spec/plan enriquecidos (7.1), revisão de spec mais funda (7.3), modos de autonomia e pre-flight de risco (7.5/7.6), `owner != reviewer` (7.4; Workers especializados adiados sem evidência). ADR-0014 | `agents/loopguard.py`, `hygiene.py`, `risk.py`, `aci/tools.py`, `agents/inspector.py`, `agents/worker.py`, `agents/architect.py`, `engine/graph.py`, `speckit/templates/` |
 
 | Plano set/2026 · Fase 8a (telemetria, rastro e velocidade) | ✅ rastro por história em `.loompa/traces/` (nó → tarefa → rodada → chamada ao modelo/ferramenta, mensagens por hash, redação de segredos, retenção), `loompa trace` e `--stats`, custo real pelo `usage.cost`, `finish_reason`/cortes/fall-through em eventos, origem e tempo de cada tarefa, vigia `story.stalled` que separa sono de travamento, tarefa cortada ou em círculos não conta como feita, aviso de preço pela mediana dos provedores, critério que só o teste da história reprova volta ao PO, higiene de arquivos deixados por testes, branches mescladas apagadas, atividade ao vivo no card. ADR-0015 | `trace.py`, `cli/trace.py`, `llm/router.py`, `finance/tracker.py`, `engine/scheduler.py`, `agents/loopguard.py`, `agents/worker.py`, `engine/graph.py`, `models_sync.py`, `hygiene.py`, `dashboard/` |
-| Plano set/2026 · Fase 8b (relatório de sprint e autodiagnóstico da fábrica) | ⚪ depois de uma sprint inteira com rastro (a Sprint 2 do `contas`): relatório de sprint (previsto × surgido, tempo, chamadas e custo por história), detector de sinais da fábrica com evidência, `loompa factory-health`, aba Fábrica separada do Kaizen do produto, export OTLP para o Phoenix | `docs/PLANO-2026-09.md` Fase 8 |
+| Plano set/2026 · Fase 8b (relatório de sprint e autodiagnóstico da fábrica) | ⚪ antes da Sprint 2 do `contas` (ordem revista em 30/09: 8b, 10 e 11 são construídas primeiro e a Sprint 2 valida todas juntas; os limiares dos sinais do rastro são provisórios até ela): relatório de sprint (previsto × surgido, tempo, chamadas e custo por história), detector de sinais da fábrica com evidência, `loompa factory-health`, aba Fábrica separada do Kaizen do produto, export OTLP para o Phoenix | `docs/PLANO-2026-09.md` Fase 8 |
 | Plano set/2026 · Fase 10 (reuniões como porta única do backlog) | ⚪ planejada em 30/09 a pedido do Founder: Kaizen passa a ser revisado pelo PO antes de virar card, Sprint Meeting reestruturada (parecer do Master + seleção do PO), sprint sempre nasce da reunião (botão de despacho direto sai do painel), Brainstorm multidisciplinar e não linear com dois OKs do Founder, PO encaixa só o card novo e repriorização completa só no fechamento das reuniões (ordem arrastada pelo Founder fica fixa), cabeçalho do Kanban com os dois botões de reunião e a história rápida revisada pelo PO (recusa abre conversa com ele), modelo de dependência entre stories com gate no scheduler sem envolver o Founder (precisa de ADR), marcador de sprint calculado no card e aba Sprints com histórico, gráficos e relatório de cada sprint, specs da cadeia de dependência antes de qualquer código e plano da história dependente só depois da dependência entregue | `docs/PLANO-2026-09.md` Fase 10 |
 | Plano set/2026 · Fase 11 (Kanban profissional) | ⚪ planejada em 30/09 a pedido do Founder: taxonomia visual do card (ícone de tipo, progresso isolado, sprint, alertas separados de classificação), avatar do Loompa no card quando está executando, ordem das abas do drawer igual à ordem do Spec Kit (spec→plan→tasks), corrige o teto de altura duplicado do drawer, barra de rolagem sempre visível, histórico com resumo por etapa, ids pelo maior número usado em vez da contagem | `docs/PLANO-2026-09.md` Fase 11 |
 
@@ -487,9 +487,18 @@ Decided 2026-09-29:
     run) and never committed. Found on the way: after the Inspector's `git add -N`, leftovers no longer
     showed as `??`, so the Deployer never dropped any in a real run; fixed. (5) A merged story's branch
     is deleted, and branches merged earlier are pruned.
-  **Not verified live:** everything except the cost fields and the endpoints median. The validation is
-  `contas` Sprint 2, run on this build: read `loompa trace` for the slowest task, `loompa trace --stats`
-  for the Worker and the judge, and count `story.task_unfinished`, `llm.cut` and `story.stalled`.
+  **Live smoke run (2026-09-30, throw-away factory `smoke8a`, 2 stories, US$0.12):** both delivered,
+  approved and merged; the trace, reported cost (82/82 calls, five providers behind OpenRouter),
+  `llm.cut`/`llm.fallthrough`, task origin and time, branch deletion and founder texts worked on real
+  answers. Three defects found and fixed: (1) an answer cut while the model was still thinking got
+  twice the room and thought more (S-001's plan: 4k/8k/16k on two models, 12 min, US$0.05, every token
+  reasoning) — a cut that is >=90% reasoning now retries in the same room one effort step lower, and
+  the effort that answered is where that model and role start next time (92d89c0; the same pattern
+  showed on Worker, judge, Deployer and Master); (2) two stories dispatched in the same tick each
+  opened a checkpoint connection, one leaked and `loompa run` never exited (024104e); (3) the trace
+  showed the failed call as US$0 with no model, and a cut attempt kept nothing of what it wrote
+  (b2bd180, 53e27dd). Not exercised live: `story.stalled`, `engine.slept` and the price median note —
+  they wait for `contas` Sprint 2, which now comes after Fases 8b, 10 and 11 (see next steps).
   Suite: 427 passed, 4 live-skipped (386 before the phase); ruff clean.
 
 ## Known gaps / next steps
@@ -503,9 +512,13 @@ Decided 2026-09-29:
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
 - CodeRabbit webhook: verify against GitHub (public URL for the dashboard, a repo with CodeRabbit).
 - PyPI: register the trusted publisher, then `git tag v0.1.0 && git push origin v0.1.0`.
-- **Fase 8b** (see the plan's execution order): 8.2 sprint report → 8.3 factory self-diagnosis →
-  8.4 `loompa factory-health` + dashboard tab, then the OTLP export to Phoenix — after `contas`
-  Sprint 2 has run with the trace, so the detector's signals are calibrated on real data.
+- **Order revised 2026-09-30 (evening), see the plan's "Ordem de execução das Fases 8 a 11":** build
+  everything that does not need Sprint 2 first, then run `contas` Sprint 2 once to validate it all.
+  Next: 10.1–10.3/10.5/10.6 + 11.2/11.4 (the meeting and sprint start the founder will open Sprint 2
+  with) → 8.2 sprint report + 10.8 Sprints tab → 10.4 brainstorm → ADR + 10.7/10.9 dependencies →
+  8.3/8.4 self-diagnosis (thresholds from Sprint 1 data in `contas`' state.db; trace-based signals
+  provisional until Sprint 2) → 11.1/11.3 → OTLP export to Phoenix (off by default) → Sprint 2 →
+  Fase 9 (model changes before Sprint 2 would confound the Sprint 1 × 2 speed comparison).
 - Measure time and cost per role with other tier-2 models for the Worker and the judge with
   `loompa trace --stats` before touching presets (Sprint 2 gives the first sample). Run long local
   sessions under `caffeinate -i`: the watchdog now says when the Mac slept, it cannot keep it awake.
