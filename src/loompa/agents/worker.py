@@ -39,8 +39,11 @@ CONFLICT_SYSTEM = """<!-- role:worker -->
 You resolve git merge conflicts. The base branch was merged into a story branch. In each file,
 the part between `<<<<<<<` and `=======` is the story's version; between `=======` and `>>>>>>>`
 the base's, which holds work already approved (fixes, other features). Keep the intent of both
-sides: combine them, do not drop either unless they truly say the same thing. Return every file
-in full, with no conflict marker left.
+sides: combine them, do not drop either unless they truly say the same thing. Every function,
+class, constant and signature the base's version defines must still exist, unchanged, after the
+merge: code already merged into the base calls them (in `contas` a merged `storage.py` lost a
+function the base's CLI imported). Keep the story's additions next to them. Return every file in
+full, with no conflict marker left.
 Respond with JSON only: {{"files": {{"<path>": "<full resolved content>"}}}}
 Comments in {language}, if any.
 """
