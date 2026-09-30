@@ -40,7 +40,7 @@ from loompa.conversations import (
     ConversationNotFound,
     ConversationStatus,
 )
-from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, kanban_column, load_state
+from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column, load_state
 from loompa.engine.lock import EngineBusy, EngineLock
 from loompa.factory import Factory
 from loompa.finance import period_start_iso, today_start_iso
@@ -350,7 +350,10 @@ def create_app(
         stories = ctx.store.list_stories(slug)
         columns: dict[str, list[dict[str, Any]]] = {k: [] for k, _ in KANBAN_COLUMNS}
         for s in stories:
-            columns[kanban_column(s["stage"])].append(_story_card(s))
+            card = _story_card(s)
+            if s["stage"] in LIVE_STAGES:  # only a story at work has something to show
+                card["activity"] = ctx.store.story_activity(s["id"])
+            columns[kanban_column(s["stage"])].append(card)
         backend_services = {"ops", "finance", "kaizen"}
         agents = {
             a["name"]: a
@@ -1037,6 +1040,12 @@ def create_app(
         )
 
     return app
+
+
+# stages in which a story is being worked on (not waiting in the backlog, for the founder, or done)
+LIVE_STAGES = frozenset(
+    s.value for s in (Stage.SPEC, Stage.PLAN, Stage.DEV, Stage.TEST, Stage.REVIEW)
+)
 
 
 def _story_card(s: dict[str, Any]) -> dict[str, Any]:

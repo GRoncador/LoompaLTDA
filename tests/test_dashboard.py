@@ -391,3 +391,40 @@ def test_the_dashboard_will_not_start_a_second_engine(client: TestClient, git_re
         lock.release()
     assert client.post("/api/factories/demo-hq/engine/start").json()["engine"] is True
     client.post("/api/factories/demo-hq/engine/stop")
+
+
+def test_a_story_at_work_shows_what_it_is_doing_on_its_card(client: TestClient):
+    """Fase 8.5: the card said the same task text for 47 minutes (`contas` S-031), so a slow
+    story looked stuck and a stuck one looked slow. It now shows the task, its tool calls, the
+    last one and a stall the watchdog declared."""
+    from loompa.agents import ProductOwnerAgent
+    from loompa.engine import Stage
+
+    ctx = client.app.state.hub.get("demo-hq").ctx
+    po = ProductOwnerAgent(ctx)
+    sid = po.add_item("Somar números").story_id
+    po.admit(sid)
+    ctx.store.update_story(sid, stage=Stage.DEV.value)
+    ctx.emit(
+        "worker.task_started", story_id=sid, agent="Worker Loompa", task=2, origin="plan", text="T2"
+    )
+    ctx.emit("tool.call", story_id=sid, agent="Worker Loompa", tool="read_file", path="src/app.py")
+    ctx.emit("tool.call", story_id=sid, agent="Worker Loompa", tool="search", query="def add")
+
+    def card() -> dict:
+        ov = client.get("/api/factories/demo-hq/overview").json()
+        return next(s for c in ov["columns"] for s in c["stories"] if s["id"] == sid)
+
+    a = card()["activity"]
+    assert a["task"] == 2 and a["origin"] == "plan" and a["calls"] == 2
+    assert a["last_tool"] == "search" and a["last_target"] == "def add" and not a["stalled"]
+    ctx.emit("story.stalled", story_id=sid, agent="Ops Loompa", silent_min=21.0)
+    stalled = card()["activity"]
+    assert stalled["stalled"] and stalled["last_event"] == "tool.call"  # the stall is not activity
+    ctx.emit(
+        "worker.task_finished", story_id=sid, agent="Worker Loompa", task=2, outcome="finished"
+    )
+    done = card()["activity"]
+    assert "task" not in done and not done["stalled"]
+    ctx.store.update_story(sid, stage=Stage.AWAITING_FOUNDER.value)
+    assert card().get("activity") is None  # waiting for the founder: nothing live to show

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { useSocket } from "./useSocket";
-import type { ConversationKind, FactoryRef, LoompaEvent, Message, Overview } from "./types";
+import type { ConversationKind, FactoryRef, LoompaEvent, Message, Overview, StoryActivity } from "./types";
 import Header from "./components/Header";
 import Office from "./components/Office";
 import Inbox from "./components/Inbox";
@@ -26,6 +26,11 @@ export default function App() {
   const [agentName, setAgentName] = useState<string | null>(null);
   const [storyId, setStoryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // live activity per story, advanced by events between overview refreshes (Fase 8.5)
+  const [live, setLive] = useState<Record<string, StoryActivity>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const overviewRef = useRef<Overview | null>(null);
+  overviewRef.current = overview;
 
   const loadFactories = useCallback(async () => {
     try {
@@ -43,10 +48,17 @@ export default function App() {
   useEffect(() => { loadFactories(); }, [loadFactories]);
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { const t = setInterval(refresh, 15000); return () => clearInterval(t); }, [refresh]);
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(t); }, []);
+  useEffect(() => { setLive({}); }, [slug]);
 
   const onEvent = useCallback((e: LoompaEvent) => {
     setEvents((prev) => [...prev.slice(-199), e]);
-    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority"].includes(e.type)) {
+    const sid = e.story_id;
+    if (sid && e.type !== "scheduler.dispatch") {
+      setLive((prev) => ({ ...prev, [sid]: advance(prev[sid] ?? snapshot(overviewRef.current, sid), e) }));
+      setNow(Date.now());
+    }
+    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "story.stalled"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
@@ -90,7 +102,7 @@ export default function App() {
           <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} />
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
-          <Kanban columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} onStartSprint={startSprint} onOpen={setStoryId} onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }} onCreate={async (title) => { if (slug) { await api.createStory(slug, title, ""); refresh(); } }} onReorder={async (ids) => { if (slug) { try { await api.reorderBacklog(slug, ids); } catch (e) { setError(String(e)); } refresh(); } }} />
+          <Kanban columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} live={live} now={now} onStartSprint={startSprint} onOpen={setStoryId} onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }} onCreate={async (title) => { if (slug) { await api.createStory(slug, title, ""); refresh(); } }} onReorder={async (ids) => { if (slug) { try { await api.reorderBacklog(slug, ids); } catch (e) { setError(String(e)); } refresh(); } }} />
         </section>
       </main>
       <EventTicker events={events} />
@@ -102,4 +114,27 @@ export default function App() {
       {storyId && slug && <StoryDrawer slug={slug} id={storyId} onClose={() => setStoryId(null)} />}
     </div>
   );
+}
+
+function snapshot(ov: Overview | null, sid: string): StoryActivity | undefined {
+  for (const c of ov?.columns ?? []) {
+    const s = c.stories.find((x) => x.id === sid);
+    if (s) return s.activity ?? undefined;
+  }
+  return undefined;
+}
+
+/** One event moves a story's live line: a new task resets the count, a tool call adds one. */
+function advance(base: StoryActivity | undefined, e: LoompaEvent): StoryActivity {
+  const p = e.payload ?? {};
+  if (e.type === "story.stalled") return { ...(base ?? { last_event: e.type, last_agent: "", last_at: new Date().toISOString() }), stalled: true };
+  const next: StoryActivity = { ...(base ?? {}), last_event: e.type, last_agent: e.agent ?? "", last_at: new Date().toISOString(), stalled: false };
+  if (e.type === "worker.task_started") {
+    Object.assign(next, { task: Number(p.task), task_text: String(p.text ?? ""), origin: String(p.origin ?? ""), calls: 0, last_tool: null, last_target: null });
+  } else if (e.type === "worker.task_finished") {
+    Object.assign(next, { task: null, task_text: null, calls: null, last_tool: null, last_target: null });
+  } else if (e.type === "tool.call") {
+    Object.assign(next, { calls: (next.calls ?? 0) + 1, last_tool: String(p.tool ?? ""), last_target: String(p.path ?? p.query ?? "") || null });
+  }
+  return next;
 }

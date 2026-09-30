@@ -35,6 +35,21 @@ export interface StoryCard {
   branch: string;
   pr_url: string | null;
   updated_at: string;
+  activity?: StoryActivity | null;
+}
+
+/** What a story at work is doing now (server snapshot, then advanced by live events). */
+export interface StoryActivity {
+  last_event: string;
+  last_agent: string;
+  last_at: string;
+  stalled: boolean;
+  task?: number | null;
+  task_text?: string | null;
+  origin?: string | null;
+  calls?: number | null;
+  last_tool?: string | null;
+  last_target?: string | null;
 }
 
 export interface Column { key: string; label: string; stories: StoryCard[] }

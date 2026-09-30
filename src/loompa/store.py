@@ -559,6 +559,56 @@ class Store:
             )
         return sorted(out, key=lambda r: (r["role"], -r["cost_usd"]))
 
+    def story_activity(self, story_id: str) -> dict[str, Any] | None:
+        """What a running story is doing right now, from its latest events: the task it is on
+        (and who put it there), how many tool calls that task made, the last one, and when the
+        story last said anything. The dashboard's live line on the card (Fase 8.5)."""
+        last = self._q(
+            "SELECT id, type, agent, payload_json, created_at FROM events WHERE story_id = ? "
+            "AND type != 'story.stalled' ORDER BY id DESC LIMIT 1",
+            (story_id,),
+        )
+        if not last:
+            return None
+        out: dict[str, Any] = {
+            "last_event": last[0]["type"],
+            "last_agent": last[0]["agent"],
+            "last_at": last[0]["created_at"],
+        }
+        started = self._q(
+            "SELECT id, payload_json FROM events WHERE story_id = ? AND type = 'worker.task_started' "
+            "ORDER BY id DESC LIMIT 1",
+            (story_id,),
+        )
+        since = 0
+        if started:
+            p = json.loads(started[0]["payload_json"] or "{}")
+            finished = self._q(
+                "SELECT 1 FROM events WHERE story_id = ? AND type = 'worker.task_finished' "
+                "AND id > ? LIMIT 1",
+                (story_id, started[0]["id"]),
+            )
+            if not finished:
+                since = started[0]["id"]
+                out.update(task=p.get("task"), task_text=p.get("text"), origin=p.get("origin"))
+        tools = self._q(
+            "SELECT COUNT(*) AS n, MAX(id) AS last FROM events WHERE story_id = ? "
+            "AND type = 'tool.call' AND id > ?",
+            (story_id, since),
+        )
+        if since and tools and tools[0]["n"]:
+            out["calls"] = int(tools[0]["n"])
+            row = self._q("SELECT payload_json FROM events WHERE id = ?", (tools[0]["last"],))
+            p = json.loads(row[0]["payload_json"] or "{}") if row else {}
+            out.update(last_tool=p.get("tool"), last_target=p.get("path") or p.get("query"))
+        stalled = self._q(
+            "SELECT payload_json FROM events WHERE story_id = ? AND type = 'story.stalled' "
+            "AND id > ? ORDER BY id DESC LIMIT 1",
+            (story_id, last[0]["id"]),
+        )
+        out["stalled"] = bool(stalled)
+        return out
+
     def tool_output_by(
         self, factory: str | None = None, since_iso: str | None = None
     ) -> list[dict[str, Any]]:

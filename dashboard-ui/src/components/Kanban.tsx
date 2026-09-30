@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
-import type { Column, SprintSummary, StoryCard } from "../types";
+import type { Column, SprintSummary, StoryActivity, StoryCard } from "../types";
 
 const TONE: Record<string, string> = {
   BACKLOG: "border-slate-600", SPEC: "border-violet-500", DEV: "border-emerald-500", TEST: "border-sky-500", AWAITING_FOUNDER: "border-amber-500", DONE: "border-slate-500",
 };
 
-export default function Kanban({ columns, sprint, onStartSprint, onOpen, onPromote, onCreate, onReorder }: { columns: Column[]; sprint: SprintSummary | null; onStartSprint: () => Promise<void>; onOpen: (id: string) => void; onPromote: (id: string) => void; onCreate: (title: string) => Promise<void>; onReorder: (ids: string[]) => Promise<void> }) {
+export default function Kanban({ columns, sprint, live, now, onStartSprint, onOpen, onPromote, onCreate, onReorder }: { columns: Column[]; sprint: SprintSummary | null; live: Record<string, StoryActivity>; now: number; onStartSprint: () => Promise<void>; onOpen: (id: string) => void; onPromote: (id: string) => void; onCreate: (title: string) => Promise<void>; onReorder: (ids: string[]) => Promise<void> }) {
   const [title, setTitle] = useState("");
   const [starting, setStarting] = useState(false);
   // drag-and-drop priority, backlog only: the preview order while dragging, sent on drop
@@ -77,7 +77,7 @@ export default function Kanban({ columns, sprint, onStartSprint, onOpen, onPromo
                     <Card s={s} onOpen={onOpen} onPromote={onPromote} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} onOpen={onOpen} onPromote={onPromote} />
+                  <Card key={s.id} s={s} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} onPromote={onPromote} />
                 ),
               )}
             </div>
@@ -88,7 +88,7 @@ export default function Kanban({ columns, sprint, onStartSprint, onOpen, onPromo
   );
 }
 
-function Card({ s, onOpen, onPromote }: { s: StoryCard; onOpen: (id: string) => void; onPromote: (id: string) => void }) {
+function Card({ s, activity, now, onOpen, onPromote }: { s: StoryCard; activity?: StoryActivity | null; now?: number; onOpen: (id: string) => void; onPromote: (id: string) => void }) {
   const kaizen = s.origin === "kaizen" && s.stage === "BACKLOG";
   return (
     <div className="rounded-md border border-line bg-panel p-2 text-xs hover:border-slate-500">
@@ -108,8 +108,59 @@ function Card({ s, onOpen, onPromote }: { s: StoryCard; onOpen: (id: string) => 
           {s.blocked_reason && <span className="chip bg-amber-900/60 text-amber-200">{s.blocked_reason === "delivery" ? "revisar" : s.blocked_reason === "question" ? "dúvida" : s.blocked_reason === "waiver" ? "risco" : "bloqueada"}</span>}
           {s.tasks_total > 0 && <span className="chip bg-slate-800 text-slate-400">{s.tasks_done}/{s.tasks_total}</span>}
         </div>
+        {activity && now !== undefined && <Activity a={activity} now={now} />}
       </button>
       {kaizen && <button className="mt-1 w-full rounded bg-lime-900/50 py-0.5 text-[10px] text-lime-200 hover:bg-lime-800/60" onClick={() => onPromote(s.id)}>💡 executar agora (fora do sprint)</button>}
+    </div>
+  );
+}
+
+// stages in which a story is being worked on: only those show a live line
+const AT_WORK = new Set(["SPEC", "PLAN", "DEV", "TEST", "REVIEW"]);
+
+// What each tool means for someone who never opened a terminal.
+const DOING: Record<string, string> = {
+  read_file: "lendo", list_dir: "olhando pastas", search: "buscando", find_symbol: "procurando",
+  write_file: "escrevendo", edit_file: "editando", apply_patch: "editando", delete_file: "apagando",
+  run_tests: "rodando os testes", run_lint: "conferindo o estilo", fix_lint: "arrumando o estilo",
+};
+const HAPPENING: Record<string, string> = {
+  "llm.call": "pensando", "tool.call": "trabalhando", "agent.state": "trabalhando", "story.stage": "mudou de etapa",
+  "inspector.tests": "testou", "inspector.verdict": "revisou", "worktree.commit": "salvou uma versão",
+  "worker.task_started": "começou uma tarefa", "worker.task_finished": "terminou uma tarefa", "llm.cut": "resposta cortada, tentando de novo",
+  "llm.fallthrough": "trocando de modelo", "scheduler.dispatch": "começando",
+};
+
+/** The newer of the server's snapshot and what live events said since. */
+function latest(a?: StoryActivity | null, b?: StoryActivity): StoryActivity | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return Date.parse(b.last_at) >= Date.parse(a.last_at) ? b : a;
+}
+
+function ago(seconds: number): string {
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+  return `${Math.floor(seconds / 3600)} h ${Math.floor((seconds % 3600) / 60)} min`;
+}
+
+function Activity({ a, now }: { a: StoryActivity; now: number }) {
+  const silent = Math.max(0, (now - Date.parse(a.last_at)) / 1000);
+  const quiet = silent > 300; // five minutes without a word: worth a look, not yet an alarm
+  const target = a.last_target ? ` ${a.last_target.split("/").pop()}` : "";
+  const what = a.task
+    ? `T${a.task} · ${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}${a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`
+    : `${a.last_agent || "fábrica"} · ${HAPPENING[a.last_event] ?? "trabalhando"}`;
+  return (
+    <div className="mt-1 flex items-center gap-1 text-[10px]" title={a.task_text ? `T${a.task}: ${a.task_text}` : undefined}>
+      {a.stalled ? (
+        <span className="chip bg-red-900/60 text-red-200">parada há {ago(silent)}</span>
+      ) : quiet ? (
+        <span className="chip bg-amber-900/50 text-amber-200">sem atividade há {ago(silent)}</span>
+      ) : (
+        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
+      )}
+      <span className="truncate text-slate-400">{what}{!a.stalled && !quiet ? ` · há ${ago(silent)}` : ""}</span>
     </div>
   );
 }
