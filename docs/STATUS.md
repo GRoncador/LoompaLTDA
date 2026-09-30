@@ -32,7 +32,8 @@ Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 6 (parcial: `models sync`) | ✅ catálogo da OpenRouter ranqueado por custo-benefício (tier1: melhor nota sob teto de preço; tier2: mais barato acima de um piso), proposta na Caixa de Entrada, aplicada só com aprovação e fora de sprint. ADR-0011 | `llm/catalog.py`, `models_sync.py`, `cli/models.py`, `engine/scheduler.py`, `tests/test_models_sync.py`, `docs/adr/0011-*` |
 | Plano set/2026 · Fase 7 (Specs, QA Gates e Raciocínio de Agentes) | ✅ ler antes de escrever + `LoopGuard` (7.11), higiene do diff (7.10), juiz com rubrica, evidência de teste e auto-cura (7.2), reproducer-first (7.7), alternativas (7.9), checagem rápida pós-escrita (7.8), spec/plan enriquecidos (7.1), revisão de spec mais funda (7.3), modos de autonomia e pre-flight de risco (7.5/7.6), `owner != reviewer` (7.4; Workers especializados adiados sem evidência). ADR-0014 | `agents/loopguard.py`, `hygiene.py`, `risk.py`, `aci/tools.py`, `agents/inspector.py`, `agents/worker.py`, `agents/architect.py`, `engine/graph.py`, `speckit/templates/` |
 
-| Plano set/2026 · Fase 8 (relatório de sprint e autodiagnóstico da fábrica) | ⚪ planejada em 30/09 a pedido do Founder: telemetria que falta, relatório de sprint (previsto × surgido, tempo, chamadas e custo por história), detector de sinais da fábrica com evidência, `loompa factory-health` e aba Fábrica separada do Kaizen do produto | `docs/PLANO-2026-09.md` Fase 8 |
+| Plano set/2026 · Fase 8a (telemetria, rastro e velocidade) | ✅ rastro por história em `.loompa/traces/` (nó → tarefa → rodada → chamada ao modelo/ferramenta, mensagens por hash, redação de segredos, retenção), `loompa trace` e `--stats`, custo real pelo `usage.cost`, `finish_reason`/cortes/fall-through em eventos, origem e tempo de cada tarefa, vigia `story.stalled` que separa sono de travamento, tarefa cortada ou em círculos não conta como feita, aviso de preço pela mediana dos provedores, critério que só o teste da história reprova volta ao PO, higiene de arquivos deixados por testes, branches mescladas apagadas, atividade ao vivo no card. ADR-0015 | `trace.py`, `cli/trace.py`, `llm/router.py`, `finance/tracker.py`, `engine/scheduler.py`, `agents/loopguard.py`, `agents/worker.py`, `engine/graph.py`, `models_sync.py`, `hygiene.py`, `dashboard/` |
+| Plano set/2026 · Fase 8b (relatório de sprint e autodiagnóstico da fábrica) | ⚪ depois de uma sprint inteira com rastro (a Sprint 2 do `contas`): relatório de sprint (previsto × surgido, tempo, chamadas e custo por história), detector de sinais da fábrica com evidência, `loompa factory-health`, aba Fábrica separada do Kaizen do produto, export OTLP para o Phoenix | `docs/PLANO-2026-09.md` Fase 8 |
 | Plano set/2026 · Fase 10 (reuniões como porta única do backlog) | ⚪ planejada em 30/09 a pedido do Founder: Kaizen passa a ser revisado pelo PO antes de virar card, Sprint Meeting reestruturada (parecer do Master + seleção do PO), sprint sempre nasce da reunião (botão de despacho direto sai do painel), Brainstorm multidisciplinar e não linear com dois OKs do Founder, PO encaixa só o card novo e repriorização completa só no fechamento das reuniões (ordem arrastada pelo Founder fica fixa), cabeçalho do Kanban com os dois botões de reunião e a história rápida revisada pelo PO (recusa abre conversa com ele), modelo de dependência entre stories com gate no scheduler sem envolver o Founder (precisa de ADR), marcador de sprint calculado no card e aba Sprints com histórico, gráficos e relatório de cada sprint, specs da cadeia de dependência antes de qualquer código e plano da história dependente só depois da dependência entregue | `docs/PLANO-2026-09.md` Fase 10 |
 | Plano set/2026 · Fase 11 (Kanban profissional) | ⚪ planejada em 30/09 a pedido do Founder: taxonomia visual do card (ícone de tipo, progresso isolado, sprint, alertas separados de classificação), avatar do Loompa no card quando está executando, ordem das abas do drawer igual à ordem do Spec Kit (spec→plan→tasks), corrige o teto de altura duplicado do drawer, barra de rolagem sempre visível, histórico com resumo por etapa, ids pelo maior número usado em vez da contagem | `docs/PLANO-2026-09.md` Fase 11 |
 
@@ -446,6 +447,51 @@ Decided 2026-09-29:
   and a dashboard tab of its own. The Finance Loompa's cost suggestions (Worker 78% of cost, `read_file`
   69% of what tools read) move into it as signals.
 
+- **2026-09-30 (night) — Fase 8a (ADR-0015): the factory records what happened, and the speed and
+  correctness bugs of Sprint 1 are fixed.** Everything the `contas` run needed someone to read by hand
+  is now recorded:
+  - **Trace.** `.loompa/traces/<story>.jsonl`, a span tree per story (node → task with its origin →
+    round of the tool loop → model call / tool call), nested by context from one instrumentation
+    point per layer. A model call keeps the model asked and the one that answered, the provider that
+    served it, parameters, messages and answer (stored once per story, by hash), usage, cost,
+    `finish_reason`, latency and every attempt (cuts, candidates that failed first). Secret redaction
+    as in the logs plus any key-shaped token; a self-ignoring folder; 30-day retention. Read it with
+    `loompa trace S-031 [--task T5 | --span <id>]`; `loompa trace --stats` compares time and cost per
+    role and model.
+  - **Events.** `llm.call` carries the story, `finish_reason`, cuts, the provider that served it and
+    the span id; `llm.cut`/`llm.fallthrough` make retries visible; `tool.call` carries the span id and
+    the search query; `worker.task_started`/`worker.task_finished` give each task its wall-clock time
+    and origin (plan, replan, preflight, founder, inspector); `resolver.skipped` gives the reason.
+  - **Real cost.** `usage.cost` from OpenRouter (plus the upstream cost on BYOK) is what the tracker
+    records; the price table stays for providers that do not bill in the response. **Checked live:**
+    one call to DeepSeek V4 Flash came back served by "Sail Research" with `usage.cost` = 4.71e-06, and
+    the adapter read both.
+  - **Price notices** compare the median of the providers that serve a model with tools
+    (`/models/<id>/endpoints`, public; checked live: DeepSeek V4 Flash 0731 has 29 of them, median
+    US$ 0.175, the plan's ~0.17), never the catalogue's reference price, whose moves are only an event.
+  - **Stall watchdog** in the scheduler: a running story silent for `schedule.stall_minutes` (20) is
+    cancelled and restarted from its checkpoint by the Ops Loompa, then the founder is asked; silence
+    is measured on the monotonic clock, which stops in sleep, and a sleep of the machine is its own
+    event plus one inbox note. Commands now die with their whole process group.
+  - **Speed fixes (8.5).** A streak of `schedule.worker_repeat_limit` (6) repeated lookups ends the
+    task as a loop, with the repeated calls named; a task ended by the limit or by a loop is not done,
+    the run stops, the attempt climbs the ladder (`climb`) without an Inspector run on a half-built
+    story, and the next attempt reads the diagnosis. The card shows live activity ("há 12 s · T5 · 23
+    passos · lendo cli.py"), amber after five quiet minutes, red once stalled — seen in headless
+    Chrome against a dry-run dashboard.
+  - **Fase 7 leftovers.** (1) The same own tests failing twice while the product's pass sends the
+    criteria to the Product Owner (keep/rewrite/withdraw, never what the founder asked) before a
+    stronger model is paid; the founder's text says whether the factory's own test or the product
+    failed, and the Master's rewrite may not contradict those facts. (3) A new data file at the root
+    outside the plan, and anything a test run creates, is caught (Worker's `run_tests`, the Inspector's
+    run) and never committed. Found on the way: after the Inspector's `git add -N`, leftovers no longer
+    showed as `??`, so the Deployer never dropped any in a real run; fixed. (5) A merged story's branch
+    is deleted, and branches merged earlier are pruned.
+  **Not verified live:** everything except the cost fields and the endpoints median. The validation is
+  `contas` Sprint 2, run on this build: read `loompa trace` for the slowest task, `loompa trace --stats`
+  for the Worker and the judge, and count `story.task_unfinished`, `llm.cut` and `story.stalled`.
+  Suite: 427 passed, 4 live-skipped (386 before the phase); ruff clean.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
@@ -457,17 +503,15 @@ Decided 2026-09-29:
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
 - CodeRabbit webhook: verify against GitHub (public URL for the dashboard, a repo with CodeRabbit).
 - PyPI: register the trusted publisher, then `git tag v0.1.0 && git push origin v0.1.0`.
-- **Fase 8** (see the plan): 8.1 telemetry that is missing today → 8.2 sprint report → 8.3 factory
-  self-diagnosis → 8.4 `loompa factory-health` + dashboard tab → 8.5 speed fixes as its first consumers.
-- Speed (from the finished `contas` Sprint 1, part of Fase 8.5): a streak of repeats should end the task with a diagnosis
-  instead of running to the tool-call limit; a task cut by that limit must not count as done; measure
-  time and cost per role with other tier-2 models for the Worker and the judge before touching presets;
-  the dashboard should show live activity (last tool call, calls in this task) and flag a story with no
-  event for N minutes. Run long local sessions under `caffeinate -i`.
-- From the 2026-09-30 run, in order of cost: a spec criterion that contradicts existing behaviour must
-  go back to the PO instead of up the tiers; a task cut by the tool-call limit must not count as done;
-  hygiene should catch data files a test run leaves in the tree; a stall watchdog; delete merged story
-  branches; `finish_reason` on `llm.call`.
+- **Fase 8b** (see the plan's execution order): 8.2 sprint report → 8.3 factory self-diagnosis →
+  8.4 `loompa factory-health` + dashboard tab, then the OTLP export to Phoenix — after `contas`
+  Sprint 2 has run with the trace, so the detector's signals are calibrated on real data.
+- Measure time and cost per role with other tier-2 models for the Worker and the judge with
+  `loompa trace --stats` before touching presets (Sprint 2 gives the first sample). Run long local
+  sessions under `caffeinate -i`: the watchdog now says when the Mac slept, it cannot keep it awake.
+- Still open from the 2026-09-30 run: the factory's main checkout accumulates uncommitted agent edits
+  under `.loompa/` (a Fase 8.3 signal); inbox INFO/FINANCE notes stay pending forever; US$ amounts
+  use "0.33" and "0,07" side by side; spec text from deepseek-v4-flash slips into Spanish.
 - Fase 7 follow-ups: specialised Workers (7.4) only if `worker.task`/failure history show a stack-context
   cause; the Inspector judge could prefer a different model from the one that wrote the code (separation
   at model level, not built); the dashboard does not show `risk.md` or the autonomy mode yet.

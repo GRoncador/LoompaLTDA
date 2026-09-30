@@ -45,7 +45,9 @@ settings. OpenRouter is recommended (one key, a spending cap on their side); Gem
 OpenAI, xAI, DeepSeek and Ollama work too. Keys live in `~/.loompa/secrets.env` or
 `<repo>/.loompa/.env`, never in the config. The router falls through a cell's candidates in order.
 
-Every call is metered (exact tokens × pricing). The budget is a period (`budget.period: weekly`,
+Every call is metered: the cost the provider reports when it does (OpenRouter's `usage.cost`, the
+price of the provider that actually served the call), exact tokens × `pricing` otherwise. The budget
+is a period (`budget.period: weekly`,
 US$ 5 by default): the Finance Loompa warns at 80 %, and at 100 % the line pauses or every role
 moves to free models, as you choose. The output budget grows with a story's complexity and a cut
 answer is retried with more room. The 💰 chip in the dashboard opens the cost screen (per day,
@@ -106,6 +108,7 @@ BACKLOG → SPEC (Product) → PLAN (Architect) [→ PREFLIGHT (risk.md)] → DE
 | `loompa inbox list\|reply\|batch` | Founder inbox (batch decisions) |
 | `loompa models sync [--preview]` | Rank the OpenRouter catalogue by cost/benefit and propose a new model list in the inbox (applied on approval, never mid-sprint) |
 | `loompa status`, `loompa report`, `loompa kaizen` | Kanban, end-of-day executive report, learnings |
+| `loompa trace S-031 [--task T5\|--span ID] [--json]`, `loompa trace --stats` | Developer tool: a story's trace (every round, model call and tool call, `.loompa/traces/`), one call's full prompt, time and cost per role and model |
 | `loompa ask compliance\|metrics\|storyteller "…"` | On-demand support Loompas |
 | `loompa memory index\|search` | Organizational memory |
 | `loompa factories list\|use\|remove` | Multi-factory hub (`~/.loompa/factories.yaml`) |
