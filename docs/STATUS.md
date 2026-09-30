@@ -311,7 +311,13 @@ Decided 2026-09-29:
   counts are read without the ===== banner (every green run reported 0 passed); Kaizen findings about the
   same file are one card (one leftover file had become four); the Inspector's judge sees the plan's real
   paths; the Worker's self-check counts what earlier tasks already committed. S-005 was approved and
-  merged: `contas` now passes its own tests and `uv run contas hello` works. Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
+  merged: `contas` now passes its own tests and `uv run contas hello` works.
+  Two structural fixes followed, from S-001/S-003: story worktrees moved out of the repo (to
+  `~/.loompa/worktrees/<repo>-<hash>/`; nested, pytest took the root `pyproject.toml` as rootdir and
+  tested the main checkout's package instead of the story's code; old worktrees move out on first use),
+  and a conflict with the base is resolved instead of aborted forever: the base is merged into the story,
+  lockfiles take the base's copy, the Worker resolves the markers, the Deployer commits only when none is
+  left, and a conflict block's answer goes back through `dev`. Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
   (per day, role, model, tool), the CodeRabbit webhook (ADR-0013, not verified against GitHub itself),
   PyPI packaging (`mcp>=2.2,<3`, wheel checked in a clean venv, a tag-triggered Trusted Publishing
   workflow — nothing published). Test suite: leaked aiosqlite threads no longer hang pytest at exit.
