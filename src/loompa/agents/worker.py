@@ -445,7 +445,7 @@ class WorkerAgent(LoompaAgent):
         )
         # who asked for this pass: the founder's changes on a delivery, or the quality gate
         origin = "founder" if state.failure_history[-1].startswith(FOUNDER_CHANGES) else "inspector"
-        with self._task_span(state, 0, text, tier_label, origin=origin):
+        with self._task_span(state, 0, text, tier_label, origin=origin) as mark:
             result = await self._run_task(
                 state,
                 aci,
@@ -459,6 +459,7 @@ class WorkerAgent(LoompaAgent):
                 diagnosis=True,
                 label="fix",
             )
+            mark["outcome"] = _outcome(result)
         self._flush_learnings(state, aci)
         if result.blocked_reason:
             self.set_state("BLOCKED", state, detail="aguardando decisão")

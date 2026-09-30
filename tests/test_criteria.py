@@ -145,6 +145,15 @@ async def test_a_criterion_the_product_cannot_meet_goes_back_to_the_product_owne
     from loompa.agents.inspector import _criteria_revision
 
     assert "withdrawn: A ajuda não mostra nenhuma borda" in _criteria_revision(state)
+    fixes = [
+        e["payload"]
+        for e in ctx.store.events_since(0, limit=5000)
+        if e["type"] == "worker.task_finished"
+        and e["story_id"] == sid
+        and e["payload"]["task"] == 0
+    ]
+    assert fixes and {f["origin"] for f in fixes} == {"inspector"}
+    assert {f["outcome"] for f in fixes} == {"finished"}
     await ctx.aclose()
 
 
