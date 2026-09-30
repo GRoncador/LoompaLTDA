@@ -141,7 +141,7 @@ function latest(a?: StoryActivity | null, b?: StoryActivity): StoryActivity | nu
 function ago(seconds: number): string {
   if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
-  return `${Math.floor(seconds / 3600)} h ${Math.floor((seconds % 3600) / 60)} min`;
+  return `${Math.floor(seconds / 3600)}h${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}`;
 }
 
 function Activity({ a, now }: { a: StoryActivity; now: number }) {
@@ -154,13 +154,14 @@ function Activity({ a, now }: { a: StoryActivity; now: number }) {
   return (
     <div className="mt-1 flex items-center gap-1 text-[10px]" title={a.task_text ? `T${a.task}: ${a.task_text}` : undefined}>
       {a.stalled ? (
-        <span className="chip bg-red-900/60 text-red-200">parada há {ago(silent)}</span>
+        <span className="chip shrink-0 whitespace-nowrap bg-red-900/60 text-red-200">parada há {ago(silent)}</span>
       ) : quiet ? (
-        <span className="chip bg-amber-900/50 text-amber-200">sem atividade há {ago(silent)}</span>
+        <span className="chip shrink-0 whitespace-nowrap bg-amber-900/50 text-amber-200">quieta há {ago(silent)}</span>
       ) : (
         <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
       )}
-      <span className="truncate text-slate-400">{what}{!a.stalled && !quiet ? ` · há ${ago(silent)}` : ""}</span>
+      {/* how long ago comes first: it is what tells a slow story from a stuck one */}
+      <span className="truncate text-slate-400">{!a.stalled && !quiet ? `há ${ago(silent)} · ` : ""}{what}</span>
     </div>
   );
 }
