@@ -323,7 +323,13 @@ Decided 2026-09-29:
   committed the merge. The resolver is one structured call with the files in the prompt (the first
   version, a tool loop, only re-read the files). Also from this run: ruff's current output format is
   read (a blocked story had green tests and a lint error nobody could see), uncommitted work is kept
-  as a commit before merging the base, and Loompa's own VIRTUAL_ENV no longer reaches factory commands. Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
+  as a commit before merging the base, and Loompa's own VIRTUAL_ENV no longer reaches factory commands.
+  Later in the same run: the Worker got `fix_lint` (the linter's own `--fix` and the formatter, narrowed
+  to the plan's paths; S-003 had made eleven hand edits without finding ruff's import order); a merge
+  interrupted halfway is started over instead of committed as work in progress; the conflict resolver
+  keeps every name the base defines (a merged `storage.py` had lost a function the base's CLI imported);
+  the first commit leaves out what agents keep rewriting in `.loompa/`; and one engine per factory is
+  enforced with a lock (a stray second `loompa run` had dispatched the same stories). Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
   (per day, role, model, tool), the CodeRabbit webhook (ADR-0013, not verified against GitHub itself),
   PyPI packaging (`mcp>=2.2,<3`, wheel checked in a clean venv, a tag-triggered Trusted Publishing
   workflow — nothing published). Test suite: leaked aiosqlite threads no longer hang pytest at exit.
