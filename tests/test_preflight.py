@@ -244,6 +244,25 @@ async def test_a_plan_touching_a_migration_gets_a_preflight(factory: Factory):
     await ctx.aclose()
 
 
+async def test_a_preflight_task_that_writes_no_file_is_left_out(factory: Factory):
+    """`contas` S-031: "run the full suite and record a green baseline before the first commit"
+    became a Worker task, twice. The engine measures the baseline and runs the suite itself."""
+    architect = _schema_plan(
+        {
+            "extra_tasks": [
+                "Rodar a suíte completa (pytest + ruff check) e registrar o baseline verde",
+                "Escrever teste de caracterização de app/calc.py",
+            ]
+        }
+    )
+    ctx = make_ctx(factory, _script({"architect": architect}))
+    sid = seed_story(ctx, "Nova coluna")
+    await Scheduler(ctx).run()
+    tasks = (factory.paths.specs / sid / "tasks.md").read_text()
+    assert "baseline" not in tasks and "T1: Escrever teste de caracterização" in tasks
+    await ctx.aclose()
+
+
 async def test_an_irreversible_change_asks_the_founder_first(factory: Factory):
     architect = _schema_plan(
         {
