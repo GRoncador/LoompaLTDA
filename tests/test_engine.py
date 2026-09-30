@@ -370,6 +370,53 @@ async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Facto
     await ctx.aclose()
 
 
+async def test_a_conflict_found_at_delivery_is_reintegrated_before_asking(factory: Factory):
+    """`contas` S-002: main moved (another story merged) while it was in test, so the
+    delivery's rebase conflicted and the founder was asked. Merging the base and resolving is
+    now automatic, once; the founder hears only if that fails."""
+    root = factory.root
+    moved: list[bool] = []
+    story = "def add(a, b):\n    return a + b  # story\n"
+    both = "def add(a, b):\n    return a + b  # story + main\n"
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role == "inspector" and "## Diff" in messages[-1].content and not moved:
+            moved.append(True)  # another delivery merges on main meanwhile
+            (root / "app" / "calc.py").write_text("def add(a, b):\n    return a + b  # main\n")
+            git("add", ".", cwd=root)
+            git("commit", "-qm", "feat: outra entrega", cwd=root)
+        if role == "worker":
+            if "You resolve git merge conflicts" in messages[0].content:
+                return json.dumps({"files": {"app/calc.py": both}})
+            if not tool_results(messages):
+                return [ToolCall("w", "write_file", {"path": "app/calc.py", "content": story})]
+            return [ToolCall("d", "done", {"summary": "ok"})]
+        if role == "architect" and "## Founder's guidance" not in messages[-1].content:
+            return json.dumps(
+                {
+                    "approach": "x",
+                    "files": ["app/"],
+                    "contracts": "",
+                    "risks": [],
+                    "tasks": ["Marcar add"],
+                    "adr_proposal": "",
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Registrar")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "delivery", state.failure_history
+    types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
+    assert types.count("story.reintegrating") == 1 and "worktree.merged_base" in types
+    assert not [m for m in ctx.store.list_messages(factory.slug) if "conflita" in m.title]
+    assert (Path(state.worktree) / "app" / "calc.py").read_text() == both
+    await ctx.aclose()
+
+
 async def test_persistent_failure_blocks_only_that_story(factory: Factory):
     def worker(model: str, messages: list[Message]) -> Any:
         if "história boa" in messages[0].content.lower():

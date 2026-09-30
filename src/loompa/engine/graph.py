@@ -116,6 +116,7 @@ _RETRYABLE_BLOCKS = (BlockedReason.PERSISTENT_FAILURE, BlockedReason.CONFLICT)
 LAST_BLOCK_KEY = "last_block"
 REPLANNED_KEY = "replanned"
 AMEND_KEY = "amend_plan"
+CONFLICT_RETRIES_KEY = "conflict_retries"
 _VOLATILE = re.compile(r"[0-9a-f]{7,}|\d+")
 
 
@@ -399,7 +400,14 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     KaizenAgent(ctx).capture(state)  # findings never get lost: sweep what no earlier phase filed
     res = await DeployerAgent(ctx).run(state, wt)
     if not res.ok:
+        if "dev" in state.route and state.extra.get(CONFLICT_RETRIES_KEY, 0) < 1:
+            # the base moved while the story was in test: `dev` merges it in and resolves the
+            # conflict, then the story is tested again. The founder hears only if that fails.
+            state.extra[CONFLICT_RETRIES_KEY] = state.extra.get(CONFLICT_RETRIES_KEY, 0) + 1
+            ctx.emit("story.reintegrating", story_id=state.story_id)
+            return goto(state, "dev")
         return await block(ctx, state, BlockedReason.CONFLICT, res.summary, resume="review")
+    state.extra.pop(CONFLICT_RETRIES_KEY, None)
     state.blocked_reason = BlockedReason.DELIVERY
     state.resume_stage = Stage.REVIEW
     state.resume_phase = "review"
