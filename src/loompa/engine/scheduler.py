@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -337,6 +338,37 @@ class Scheduler:
         save_state(self.ctx, state, "review_feedback")
         await runtime_for(self.ctx).inject_founder_answer(state)
         self.ctx.emit("story.reopened", story_id=story_id, stage=state.stage.value)
+        return state
+
+    async def restart_story(self, story_id: str, reason: str = "") -> StoryState:
+        """The founder starts a story over inside its sprint: spec, plan, code and branch are
+        discarded and it goes back to intake with only its request and the founder's notes.
+        Needed when the factory itself changed (new templates, gates) and a half-done story
+        would otherwise finish on artefacts the old version wrote."""
+        if story_id in self.running:
+            raise RuntimeError(f"{story_id} está rodando agora; pare a esteira antes")
+        old = load_state(self.ctx, story_id)
+        if old.stage in TERMINAL:
+            raise ValueError(f"{story_id} já está encerrada")
+        if old.blocked_message_id:
+            self.ctx.store.archive_message(old.blocked_message_id)
+        # A branch is only ever deleted by the Deployer (ADR-0008).
+        self.ctx.worktrees.as_role("deployer").remove(story_id, delete_branch=True)
+        specs = self.ctx.factory.paths.specs / story_id
+        if specs.is_dir():
+            shutil.rmtree(specs)
+        state = StoryState(
+            story_id=old.story_id,
+            title=old.title,
+            description=old.description,
+            epic=old.epic,
+            founder_notes=[*old.founder_notes, *([reason] if reason else [])],
+        )
+        goto(state, "intake")
+        state.stage = Stage.SPEC  # like an admitted card: out of the backlog, intake classifies
+        save_state(self.ctx, state, "restart")
+        await runtime_for(self.ctx).inject_founder_answer(state)
+        self.ctx.emit("story.restarted", story_id=story_id, from_stage=old.stage.value)
         return state
 
     def answer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:

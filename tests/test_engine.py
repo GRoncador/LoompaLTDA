@@ -132,6 +132,28 @@ async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
     await ctx.aclose()
 
 
+async def test_the_founder_restarts_a_story_from_scratch(factory: Factory):
+    ctx = make_ctx(factory, dry_run=True)
+    sid = seed_story(ctx, "Página de login")
+    await Scheduler(ctx).run()
+    old = load_state(ctx, sid)
+    assert old.stage == Stage.AWAITING_FOUNDER and old.commits
+    branch, delivery = old.branch, old.blocked_message_id
+    state = await Scheduler(ctx).restart_story(sid, "use os templates novos")
+    assert state.stage == Stage.SPEC and state.phase == "intake"
+    assert not state.spec_ready and not state.commits and not state.worktree
+    assert state.founder_notes == ["use os templates novos"]
+    assert ctx.worktrees.get(sid) is None and not (factory.paths.specs / sid).exists()
+    assert branch not in git("branch", "--list", branch, cwd=factory.root)
+    assert ctx.store.get_message(delivery).status != MessageStatus.PENDING
+    # the graph thread follows the new state, not the old checkpoint
+    assert await Scheduler(ctx).run() == [sid]
+    again = load_state(ctx, sid)
+    assert again.stage == Stage.AWAITING_FOUNDER and again.blocked_reason == "delivery"
+    assert again.spec_ready and again.plan_ready and len(again.commits) == 1
+    await ctx.aclose()
+
+
 async def test_a_repo_without_commits_gets_its_first_one_from_the_deployer(tmp_path: Path, hub):
     """The `contas` factory: files on disk, `git init` done, nothing ever committed. Two stories
     dispatched together must not bounce off 'faça o primeiro commit' — the Deployer makes it,

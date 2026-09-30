@@ -14,7 +14,7 @@ from rich.table import Table
 from loompa.cli.main import app, resolve_factory
 from loompa.comms import FounderAnswer, MessageKind
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column
-from loompa.engine.lock import EngineBusy
+from loompa.engine.lock import EngineBusy, EngineLock
 from loompa.factory import Factory
 from loompa.llm import ModelRouter
 from loompa.sprints import SprintBoard, SprintError, SprintStatus
@@ -241,6 +241,34 @@ def sprint_add(
         raise typer.Exit(code=1) from None
     console.print(f"[green]✔[/green] {sprint.id} (aberto): {', '.join(sprint.story_ids)}")
     store.close()
+
+
+@sprint_app.command("restart")
+def sprint_restart(
+    ids: list[str] = typer.Argument(..., help="Histórias a recomeçar do zero."),
+    reason: str = typer.Option("", "--reason", "-r", help="Orientação para a nova tentativa."),
+    factory: str | None = typer.Option(None, "--factory", "-f"),
+) -> None:
+    """Recomeça histórias em andamento: descarta spec, plano e código e volta ao início."""
+    f = resolve_factory(factory)
+    holder = EngineLock(f.paths.loompa / "engine.lock").holder()
+    if holder:
+        console.print(f"[red]✘[/red] a esteira está rodando (processo {holder}); pare-a antes.")
+        raise typer.Exit(1)
+    ctx = build_context(f)
+
+    async def go() -> None:
+        sched = Scheduler(ctx)
+        for sid in ids:
+            try:
+                await sched.restart_story(sid, reason)
+            except (KeyError, ValueError) as exc:
+                console.print(f"[red]✘[/red] {sid}: {exc}")
+                continue
+            console.print(f"[green]✔[/green] {sid} volta ao início (especificação)")
+        await ctx.aclose()
+
+    asyncio.run(go())
 
 
 @sprint_app.command("status")
