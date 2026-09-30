@@ -6,6 +6,7 @@ import asyncio
 import os
 import shlex
 import shutil
+import signal
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -34,6 +35,17 @@ class CommandResult:
 # value: `FORCE_COLOR=0` here put ANSI codes in every help text a factory's tests read (`contas`
 # S-030 failed on them). Output is captured, so NO_COLOR alone says what is meant.
 FORCES_COLOR = ("FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS")
+
+
+def _kill(proc: asyncio.subprocess.Process) -> None:
+    """The command and everything it started."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
 
 
 async def run_command(
@@ -71,6 +83,9 @@ async def run_command(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=merged_env,
+            # its own process group: `uv run pytest` is uv plus the python it starts, and killing
+            # only uv left the tests running and holding the pipes open
+            start_new_session=True,
         )
     except (FileNotFoundError, PermissionError, ValueError) as exc:
         shutil.rmtree(pyc_dir, ignore_errors=True)
@@ -84,9 +99,14 @@ async def run_command(
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         timed_out = False
     except TimeoutError:
-        proc.kill()
+        _kill(proc)
         out, err = await proc.communicate()
         timed_out = True
+    except asyncio.CancelledError:
+        # the story was cancelled mid-run (the stall watchdog, Ctrl-C): nothing may keep running
+        _kill(proc)
+        shutil.rmtree(pyc_dir, ignore_errors=True)
+        raise
     duration = int((loop.time() - start) * 1000)
     shutil.rmtree(pyc_dir, ignore_errors=True)
     return CommandResult(

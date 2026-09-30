@@ -7,6 +7,12 @@ A runner that crashes outside a node (checkpointer, projection, resume) is hande
 Loompa like any other incident: transient causes are retried after a backoff, anything else
 blocks the story with a plain-language inbox note. A story is never dispatched twice at once
 and never re-dispatched in a tight loop.
+
+A watchdog (Fase 8.1) covers what no timeout inside a story can: a running story that emits
+nothing for `schedule.stall_minutes` is cancelled and handed to the Ops the same way (it resumes
+from its last checkpoint). Silence is measured on the monotonic clock, which stops while the
+machine sleeps, so a sleeping Mac is never taken for a hang; the sleep itself is noticed by the
+wall clock running ahead of the monotonic one, and told once.
 """
 
 from __future__ import annotations
@@ -19,8 +25,8 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
-from loompa.agents.ops import INCIDENT_KEY, OpsAgent, triage
-from loompa.comms import FounderAnswer, FounderMessage
+from loompa.agents.ops import INCIDENT_KEY, OpsAgent, StoryStalled, triage
+from loompa.comms import FounderAnswer, FounderMessage, MessageKind
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, block
 from loompa.engine.langgraph_engine import GraphRuntime
@@ -31,6 +37,12 @@ from loompa.finance import BudgetStatus
 from loompa.models_sync import ModelSync
 
 log = logging.getLogger("loompa.scheduler")
+
+# The wall clock ran this far ahead of the monotonic one between two ticks: the machine slept.
+SLEPT_S = 60.0
+# ...and a sleep this long, with stories running, is worth one note to the founder.
+SLEEP_NOTE_S = 300.0
+_WATCHDOG_EVENTS = frozenset({"story.stalled"})  # never count as the story moving
 
 
 def load_state(ctx: EngineContext, story_id: str) -> StoryState:
@@ -84,6 +96,11 @@ class Scheduler:
     crashes: dict[str, int] = field(default_factory=dict)  # runner crashes per story (session)
     not_before: dict[str, float] = field(default_factory=dict)  # story -> monotonic retry time
     _downgraded: bool = False  # the budget put every role on free models, and it was said once
+    # the watchdog: each running story's last event (monotonic time, and what it was)
+    last_seen: dict[str, float] = field(default_factory=dict)
+    last_event: dict[str, str] = field(default_factory=dict)
+    stalled: dict[str, float] = field(default_factory=dict)  # cancelled story -> minutes silent
+    _tick: tuple[float, float] | None = None  # (wall, monotonic) at the last watch
 
     @property
     def slots(self) -> int:
@@ -163,6 +180,7 @@ class Scheduler:
                 StoryRunner(self.ctx, story["id"]).run(), name=f"story:{story['id']}"
             )
             self.running[story["id"]] = task
+            self.last_seen[story["id"]] = time.monotonic()
             self.ctx.emit("scheduler.dispatch", story_id=story["id"], running=len(self.running))
             n += 1
         return n
@@ -177,7 +195,12 @@ class Scheduler:
         for task in done:
             sid = task.get_name().split(":", 1)[1]
             self.running.pop(sid, None)
+            self.last_seen.pop(sid, None)
+            last = self.last_event.pop(sid, "")
             if task.cancelled():
+                minutes = self.stalled.pop(sid, None)
+                if minutes is not None:  # the watchdog's doing: an Ops incident like a crash
+                    await self._on_runner_crash(sid, StoryStalled(sid, minutes, last))
                 continue
             exc = task.exception()
             if exc is None:
@@ -187,6 +210,67 @@ class Scheduler:
                     self.completed.append(sid)
                 continue
             await self._on_runner_crash(sid, exc)
+
+    # --------------------------------------------------------------- watchdog
+    def _heard(self, event: dict[str, Any]) -> None:
+        """Listener on every event: a running story that emits one is alive."""
+        sid = event.get("story_id")
+        if sid in self.running and event.get("type") not in _WATCHDOG_EVENTS:
+            self.last_seen[sid] = time.monotonic()
+            self.last_event[sid] = " · ".join(
+                str(x) for x in (event.get("type"), event.get("agent")) if x
+            )
+
+    def _watch(self) -> None:
+        """One tick of the watchdog: a sleep of the machine, then stories silent for too long."""
+        now_wall, now_mono = time.time(), time.monotonic()
+        if self._tick is not None:
+            slept = (now_wall - self._tick[0]) - (now_mono - self._tick[1])
+            if slept >= SLEPT_S:
+                self._on_sleep(slept)
+        self._tick = (now_wall, now_mono)
+        limit = self.ctx.config.schedule.stall_minutes * 60
+        if limit <= 0:
+            return
+        for sid, task in list(self.running.items()):
+            silent = now_mono - self.last_seen.get(sid, now_mono)
+            if silent < limit or sid in self.stalled or task.done():
+                continue
+            self.stalled[sid] = silent / 60
+            self.ctx.emit(
+                "story.stalled",
+                story_id=sid,
+                agent=OpsAgent.display,
+                silent_min=round(silent / 60, 1),
+                last_event=self.last_event.get(sid, ""),
+            )
+            task.cancel()  # `_reap` hands it to the Ops: restart from the last checkpoint
+
+    def _on_sleep(self, slept: float) -> None:
+        """The machine slept: stories stopped with it (`contas`, 2026-09-30, twice). Told once per
+        sleep, and only when there was work in flight."""
+        running = sorted(self.running)
+        self.ctx.emit("engine.slept", minutes=round(slept / 60, 1), running=running)
+        if not running or slept < SLEEP_NOTE_S:
+            return
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                kind=MessageKind.INFO,
+                sender=OpsAgent.display,
+                title="A fábrica ficou parada enquanto o computador dormia",
+                context=(
+                    f"O computador entrou em repouso por cerca de {slept / 60:.0f} minutos e as "
+                    "entregas em andamento pararam nesse tempo. Elas retomaram sozinhas quando ele "
+                    "voltou."
+                ),
+                impact=(
+                    "Nada se perdeu. Para a fábrica trabalhar sem pausas, deixe o computador na "
+                    "tomada e sem repouso automático enquanto ela roda."
+                ),
+                allow_free_text=False,
+            )
+        )
 
     async def _on_runner_crash(self, sid: str, exc: BaseException) -> None:
         """Ops triage for a crash outside the nodes (checkpointer, projection, resume)."""
@@ -241,8 +325,10 @@ class Scheduler:
         cycles = 0
         lock = EngineLock(self.ctx.factory.paths.loompa / "engine.lock")
         lock.acquire()
+        self.ctx.listeners.append(self._heard)
         try:
             while True:
+                self._watch()
                 self._dispatch()
                 self.close_sprints()
                 if not self.running:
@@ -264,6 +350,8 @@ class Scheduler:
             if self.running:
                 await asyncio.gather(*self.running.values(), return_exceptions=True)
             self.running.clear()
+            if self._heard in self.ctx.listeners:
+                self.ctx.listeners.remove(self._heard)
             lock.release()
         return self.completed
 

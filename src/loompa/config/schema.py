@@ -70,6 +70,10 @@ class ScheduleConfig(BaseModel):
     work_hours: str = "09:00-17:30"
     ops_max_recoveries: int = Field(3, ge=0)  # transient crashes the Ops Loompa retries per story
     ops_retry_base_s: float = Field(60.0, ge=0)  # first wait; doubles each retry, capped at 10 min
+    # A running story with no event for this long is stalled (Fase 8.1): the Ops Loompa restarts
+    # it from its last checkpoint. Above the longest silent step (a 15-minute test run), and the
+    # Mac sleeping never counts: silence is measured on the clock that stops in sleep. 0 = off.
+    stall_minutes: float = Field(20.0, ge=0)
     # How much ceremony a story gets (Fase 7, 7.5). `auto`: SIMPLE runs yolo, COMPLEX (or a plan
     # touching schemas, migrations or contracts) runs preflight, the rest standard.
     autonomy: Literal["auto", "yolo", "standard", "preflight"] = "auto"

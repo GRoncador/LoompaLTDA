@@ -20,6 +20,18 @@ from loompa.llm import LLMError
 INCIDENT_KEY = "ops_incident"
 
 
+class StoryStalled(RuntimeError):
+    """A running story emitted nothing for `schedule.stall_minutes`: the watchdog cancelled it
+    and the Ops Loompa treats it like a crash (restart from the last checkpoint, then ask)."""
+
+    def __init__(self, story_id: str, minutes: float, last: str = ""):
+        super().__init__(
+            f"{story_id} ficou {minutes:.0f} min sem nenhum evento"
+            + (f" (último: {last})" if last else "")
+        )
+        self.minutes = minutes
+
+
 @dataclass
 class Triage:
     transient: bool
@@ -28,6 +40,8 @@ class Triage:
 
 def triage(exc: BaseException) -> Triage:
     text = str(exc).lower()
+    if isinstance(exc, StoryStalled):
+        return Triage(True, "uma etapa ficou parada, sem nenhum sinal de progresso, por muito tempo")
     if isinstance(exc, LLMError):
         if "chave de api" in text or "não configurado" in text:
             return Triage(False, "falta configurar o acesso ao serviço de IA")

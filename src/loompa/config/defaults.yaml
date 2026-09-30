@@ -19,6 +19,7 @@ schedule:
   work_hours: "09:00-17:30" # informational; `loompa run` executes whenever invoked
   ops_max_recoveries: 3     # transient crashes (rate limit, network) the Ops Loompa retries by itself
   ops_retry_base_s: 60      # wait before the first retry; doubles each time (max 10 min)
+  stall_minutes: 20         # a running story silent this long is restarted by the Ops Loompa (0 = off)
 
 worker:
   backend: aci               # aci (Loompa's own tool loop) | opencode (spike, see ADR-0007)
