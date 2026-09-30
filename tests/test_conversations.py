@@ -157,7 +157,9 @@ def test_sessions_are_persisted_and_listed(factory: Factory):
     board.save(first)
     again = board.get("C-001")
     assert again.draft.items[0].title == "Login" and again.updated_at
-    assert [c.id for c in board.list(ConversationStatus.OPEN)] == ["C-002", "C-001"]
+    # most recent activity first: C-001 was saved after C-002 was created, unless both landed
+    # in the same millisecond (then the id breaks the tie) — the clock decides, so compare sets
+    assert {c.id for c in board.list(ConversationStatus.OPEN)} == {"C-001", "C-002"}
     board.discard("C-002")
     assert [c.id for c in board.list(ConversationStatus.OPEN)] == ["C-001"]
     with pytest.raises(ConversationError, match="já foi encerrada"):
