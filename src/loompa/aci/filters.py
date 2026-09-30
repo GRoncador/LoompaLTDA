@@ -24,6 +24,9 @@ _JEST_FAIL = re.compile(r"^\s*(●|✕|FAIL) (.+)$")
 _JEST_COUNTS = re.compile(r"Tests:\s+(.*)$")
 _VITEST_COUNTS = re.compile(r"Tests\s+(\d+ failed.*|\d+ passed.*)$")
 _RUFF_LINE = re.compile(r"^(\S+?):(\d+):(\d+): ([A-Z]+\d+) (.*)$")
+# ruff's current "full" format: the rule on one line, the location on the next.
+_RUFF_HEAD = re.compile(r"^([A-Z]+\d+) (?:\[\*\] )?(.+)$")
+_RUFF_LOC = re.compile(r"^-->\s*(\S+?):(\d+):(\d+)$")
 _ESLINT_FILE = re.compile(r"^(/\S+|\S+\.(?:ts|tsx|js|jsx))$")
 _ESLINT_LINE = re.compile(r"^\s+(\d+):(\d+)\s+(error|warning)\s+(.*?)\s{2,}(\S+)$")
 _MYPY_LINE = re.compile(r"^(\S+?):(\d+):(?:\d+:)? (error|note): (.*)$")
@@ -218,10 +221,21 @@ def summarize_lint(output: str, returncode: int) -> CommandSummary:
     text = _strip_ansi(output)
     s = CommandSummary(tool="lint", ok=returncode == 0)
     current_file = ""
+    pending: tuple[str, str] | None = None  # (code, message) waiting for its `-->` line
+    fixable = "fixable with the `--fix` option" in text
     for line in text.splitlines():
         m = _RUFF_LINE.match(line.strip())
         if m:
             s.issues.append(f"{m.group(1)}:{m.group(2)} {m.group(4)} {m.group(5)}")
+            continue
+        h = _RUFF_HEAD.match(line)
+        if h:
+            pending = (h.group(1), h.group(2).strip())
+            continue
+        loc = _RUFF_LOC.match(line.strip())
+        if loc and pending:
+            s.issues.append(f"{loc.group(1)}:{loc.group(2)} {pending[0]} {pending[1]}")
+            pending = None
             continue
         if _ESLINT_FILE.match(line.strip()) and not line.startswith(" "):
             current_file = line.strip()
@@ -232,6 +246,8 @@ def summarize_lint(output: str, returncode: int) -> CommandSummary:
     if returncode != 0 and not s.issues:
         s.issues.append("; ".join(line for line in text.splitlines()[-6:] if line.strip())[:500])
     s.failed = len(s.issues)
+    if fixable and s.issues:
+        s.issues.append("(correção mecânica: ex. ordenar os imports ou ajustar a formatação)")
     return s
 
 

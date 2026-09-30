@@ -6,6 +6,7 @@ import asyncio
 import os
 import shlex
 import shutil
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +52,13 @@ async def run_command(
         "PYTHONPYCACHEPREFIX": pyc_dir,
         **(env or {}),
     }
+    if (
+        Path(merged_env.get("VIRTUAL_ENV") or "/nonexistent").resolve()
+        == Path(sys.prefix).resolve()
+    ):
+        # Loompa's own virtualenv is not the factory's: `uv run` warned about it on every
+        # command and the warning ended up in what agents read
+        merged_env.pop("VIRTUAL_ENV", None)
     try:
         proc = await asyncio.create_subprocess_exec(
             *shlex.split(command),

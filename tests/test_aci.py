@@ -193,3 +193,37 @@ def test_pytest_quiet_counts_are_read_without_the_banner():
         1,
     )
     assert (s.passed, s.failed, s.skipped) == (2, 1, 1) and not s.ok
+
+
+def test_ruff_current_output_names_the_file_and_the_rule():
+    """`contas` S-003 was blocked with green tests and one lint error the Worker never saw:
+    ruff's current format puts the rule and the location on separate lines, and the summary
+    kept only `-    |; Found 1 error.`."""
+    out = (
+        "I001 [*] Import block is un-sorted or un-formatted\n"
+        " --> src/contas/storage.py:1:1\n"
+        "  |\n1 | / import sys\n2 | | import os\n  | |_________^\n"
+        "F401 `os` imported but unused\n --> tests/test_x.py:3:8\n  |\n"
+        "Found 2 errors.\n[*] 1 fixable with the `--fix` option.\n"
+    )
+    s = summarize_lint(out, 1)
+    assert s.issues[:2] == [
+        "src/contas/storage.py:1 I001 Import block is un-sorted or un-formatted",
+        "tests/test_x.py:3 F401 `os` imported but unused",
+    ]
+    assert s.failed == 2 and "correção mecânica" in s.issues[2]
+
+
+async def test_loompas_own_virtualenv_does_not_reach_factory_commands(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("VIRTUAL_ENV", sys.prefix)
+    res = await run_command(
+        f"\"{sys.executable}\" -c \"import os; print(os.environ.get('VIRTUAL_ENV', '-'))\"",
+        tmp_path,
+    )
+    assert res.stdout.strip() == "-"
+    monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "their-venv"))  # the founder's own: kept
+    res = await run_command(
+        f"\"{sys.executable}\" -c \"import os; print(os.environ.get('VIRTUAL_ENV', '-'))\"",
+        tmp_path,
+    )
+    assert res.stdout.strip().endswith("their-venv")
