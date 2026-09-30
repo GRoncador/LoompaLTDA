@@ -411,6 +411,25 @@ Decided 2026-09-29:
   N minutes. Inbox INFO/FINANCE notes stay pending forever; US$ amounts use "0.33" and "0,07" side by
   side.
 
+- **2026-09-30 (afternoon) — `contas` Sprint 1 finished.** With the Mac on power (`caffeinate -i`)
+  S-007 and S-031 were delivered, reviewed by hand and merged; SP-001 and SP-002 are closed and the
+  factory's main has 115 tests green and a clean lint. US$ 1.58 over 861 calls since the morning restart
+  (S-002 0.07 · S-030 0.18 · S-007 0.53 · S-031 0.81). **Fixed on the way:** a conflicted file over
+  20k characters was skipped by the resolver without a word, the merge aborted and S-007 kept being
+  tested on its old base (59 tests instead of 77) — large files now go block by block, and blocks where
+  both sides only added lines (the usual case: tests appended to the same file) are settled without a
+  model through diff3 (S-007's merge, 17 model minutes and a failure before, settled at once); a run
+  stopped inside `dev` resumed with no task done and replayed the founder's amend (tasks marked `[x]`
+  now count, an amend is applied once, a model's own "T8:" numbering is stripped). **Verified live:** the
+  reproducer went red before the fix (S-031); the founder's guidance reached the self-check and the
+  judge (S-007's "para", S-031's Brazilian-format note became card S-040); diff hygiene reverted a
+  whitespace-only change; the call timeout cut a model hung for 600 s.
+  **Main cost now is speed, not correctness:** S-031 was a 4-line fix plus tests and took ~2.5 h —
+  a 47-minute process task left by the old pre-flight, a 35-minute task that looped (53 calls, 14
+  repeats) until the tool-call limit, tier-2 calls of 1-3 minutes with cut-and-retry, and a judge of
+  15-20 minutes per story. The dashboard showed the same task text for 47 minutes, so a slow story looked
+  stuck.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
@@ -422,8 +441,11 @@ Decided 2026-09-29:
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
 - CodeRabbit webhook: verify against GitHub (public URL for the dashboard, a repo with CodeRabbit).
 - PyPI: register the trusted publisher, then `git tag v0.1.0 && git push origin v0.1.0`.
-- Finish `contas` Sprint 1: S-007 and S-031 are in DEV (run `loompa run` with the Mac on power; a
-  sleeping Mac pauses the engine and no timer inside it can tell).
+- Speed (from the finished `contas` Sprint 1): a streak of repeats should end the task with a diagnosis
+  instead of running to the tool-call limit; a task cut by that limit must not count as done; measure
+  time and cost per role with other tier-2 models for the Worker and the judge before touching presets;
+  the dashboard should show live activity (last tool call, calls in this task) and flag a story with no
+  event for N minutes. Run long local sessions under `caffeinate -i`.
 - From the 2026-09-30 run, in order of cost: a spec criterion that contradicts existing behaviour must
   go back to the PO instead of up the tiers; a task cut by the tool-call limit must not count as done;
   hygiene should catch data files a test run leaves in the tree; a stall watchdog; delete merged story
