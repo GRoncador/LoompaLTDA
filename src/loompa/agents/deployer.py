@@ -84,16 +84,33 @@ class DeployerAgent(LoompaAgent):
         )
         return True
 
-    def sync_with_base(self, state: StoryState, wt: Worktree) -> bool:
+    def sync_with_base(self, state: StoryState, wt: Worktree) -> list[str] | None:
         """Bring a story that is going back to work up to date with the base: a fix merged in
         the meantime (the red suite that failed every story, say) must reach it before its
-        next test run. Only a clean worktree is rebased; a conflict is aborted and left for
-        the delivery, where it is handled as one. True when the branch moved."""
+        next test run. The base is merged into the (clean) story branch. None: nothing to do;
+        []: merged; a list: files in conflict, waiting for `finish_sync`."""
         if self.git.status(wt) or not self.git.behind_base(wt):
+            return None
+        conflicts = self.git.merge_base_into(wt)
+        self.ctx.emit(
+            "worktree.synced", story_id=state.story_id, agent=self.name, conflicts=conflicts
+        )
+        return conflicts
+
+    def finish_sync(self, state: StoryState, wt: Worktree, files: list[str]) -> bool:
+        """Commit the merge once the conflicts were resolved; abort it when markers remain,
+        leaving the story on its old base (the delivery then reports the conflict)."""
+        left = self.git.has_conflict_markers(wt, files)
+        if left:
+            self.git.abort_merge(wt)
+            self.ctx.emit(
+                "worktree.sync_failed", story_id=state.story_id, agent=self.name, files=left
+            )
             return False
-        moved = self.git.rebase_on_base(wt)
-        self.ctx.emit("worktree.rebased", story_id=state.story_id, agent=self.name, ok=moved)
-        return moved
+        sha = self.git.conclude_merge(wt)
+        state.commits.append(sha)
+        self.ctx.emit("worktree.merged_base", story_id=state.story_id, agent=self.name, sha=sha)
+        return True
 
     def merge(self, state: StoryState, wt: Worktree) -> str:
         sha = self.git.merge_into_base(wt, message=f"feat({state.story_id.lower()}): {state.title}")

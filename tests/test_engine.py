@@ -240,10 +240,8 @@ async def test_a_fix_merged_meanwhile_reaches_the_stories_going_back_to_work(fac
     state = load_state(ctx, sid)
     assert state.blocked_reason == "delivery", state.failure_history
     assert len(rounds) == 2 and state.attempts_tier2 == 1  # failed once, then passed
-    rebased = [
-        e for e in ctx.store.events_since(0, limit=10_000) if e["type"] == "worktree.rebased"
-    ]
-    assert len(rebased) == 1 and rebased[0]["payload"]["ok"] is True
+    synced = [e for e in ctx.store.events_since(0, limit=10_000) if e["type"] == "worktree.synced"]
+    assert len(synced) == 1 and synced[0]["payload"]["conflicts"] == []
     assert state.extra["baseline"]["tests_ok"] is True  # measured again, on the fixed base
     assert "fix: base volta a importar" in git("log", "--oneline", cwd=Path(state.worktree))
     assert not [p for p in ctx.worktrees.dir.iterdir() if p.name.startswith("_base-")]
@@ -292,6 +290,81 @@ async def test_the_founders_changes_can_widen_the_plan_they_did_not_foresee(fact
     assert any(e["type"] == "plan.amended" for e in ctx.store.events_since(0, limit=10_000))
     # the Inspector judges scope against the amended fence, not a guess from the spec
     assert "## Paths the plan allows" in judged[-1] and "- docs/" in judged[-1]
+    await ctx.aclose()
+
+
+async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Factory):
+    """`contas` S-001: every story had worked around the broken base its own way, so the fix
+    merged on main conflicted with each of them (pyproject, the test, uv.lock) and the rebase
+    was simply aborted, forever. Now the base is merged in, lockfiles take the base's copy and
+    the Worker resolves the rest; the Deployer commits only when no marker is left."""
+    root = factory.root
+    rounds: list[str] = []
+
+    def worker(model: str, messages: list[Message]) -> Any:
+        task = next(m.content for m in messages if m.role == "user")
+        if tool_results(messages):
+            return [ToolCall("d", "done", {"summary": "ok"})]
+        if "Resolver o conflito" in task:
+            rounds.append("resolve")
+            merged = (
+                "def add(a, b):\n    return b + a  # main\n\n\ndef sub(a, b):\n    return a - b\n"
+            )
+            return [ToolCall("r", "write_file", {"path": "app/calc.py", "content": merged})]
+        rounds.append("work")
+        if len(rounds) == 1:
+            story = (
+                "def add(a, b):\n    return a + b  # story\n\n\ndef sub(a, b):\n    return a - b\n"
+            )
+            (root / "app" / "calc.py").write_text("def add(a, b):\n    return b + a  # main\n")
+            (root / "uv.lock").write_text("main\n")
+            git("add", ".", cwd=root)
+            git("commit", "-qm", "fix: main mexe na mesma linha", cwd=root)
+            return [
+                ToolCall("w1", "write_file", {"path": "app/calc.py", "content": story}),
+                ToolCall("w2", "write_file", {"path": "uv.lock", "content": "story\n"}),
+                ToolCall(
+                    "w3",
+                    "write_file",
+                    {
+                        "path": "tests/test_sub.py",
+                        "content": "from app.calc import sub\n\n\ndef test_sub():\n    assert sub(3, 1) == 3\n",
+                    },
+                ),
+            ]
+        fixed = "from app.calc import sub\n\n\ndef test_sub():\n    assert sub(3, 1) == 2\n"
+        return [ToolCall("w4", "write_file", {"path": "tests/test_sub.py", "content": fixed})]
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect" and "## Founder's guidance" not in messages[-1].content:
+            return json.dumps(
+                {
+                    "approach": "sub",
+                    "files": ["app/", "tests/", "uv.lock"],
+                    "contracts": "",
+                    "risks": [],
+                    "tasks": ["Criar sub"],
+                    "adr_proposal": "",
+                }
+            )
+        if role_of(messages) == "worker":
+            return worker(model, messages)
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Subtrair")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "delivery", state.failure_history
+    assert rounds == ["work", "resolve", "work"]
+    events = ctx.store.events_since(0, limit=10_000)
+    synced = [e["payload"] for e in events if e["type"] == "worktree.synced"]
+    assert synced == [{"conflicts": ["app/calc.py"]}]  # uv.lock settled on the base's copy
+    assert any(e["type"] == "worktree.merged_base" for e in events)
+    wt = Path(state.worktree)
+    calc = (wt / "app" / "calc.py").read_text()
+    assert "# main" in calc and "def sub" in calc and "<<<<<<<" not in calc
+    assert (wt / "uv.lock").read_text() == "main\n"
     await ctx.aclose()
 
 

@@ -202,3 +202,26 @@ def test_a_worktree_left_inside_the_repo_moves_out_with_its_work(git_repo: Path)
     assert moved is not None and moved.path == wm.path_for("S-001") and moved.branch == wt.branch
     assert (moved.path / "wip.py").read_text() == "x = 1\n" and not wt.path.exists()
     assert [w.story_id for w in wm.list()] == ["S-001"]
+
+
+def test_an_unresolved_merge_of_the_base_is_aborted_cleanly(git_repo: Path):
+    wm = WorktreeManager(git_repo)
+    wt = wm.create("S-002")
+    (wt.path / "README.md").write_text("# história\n")
+    (wt.path / "uv.lock").write_text("story\n")
+    wm.commit_all(wt, "docs: story")
+    (git_repo / "README.md").write_text("# main\n")
+    (git_repo / "uv.lock").write_text("main\n")
+    wm.git("add", "-A")
+    wm.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "docs: main")
+    deployer = wm.as_role("deployer")
+    with pytest.raises(GitAuthorityError):
+        wm.as_role("worker").merge_base_into(wt)
+    assert wm.behind_base(wt)
+    conflicts = deployer.merge_base_into(wt)
+    assert conflicts == ["README.md"]  # the lockfile already took the base's copy
+    assert (wt.path / "uv.lock").read_text() == "main\n"
+    assert wm.has_conflict_markers(wt, conflicts) == ["README.md"]
+    deployer.abort_merge(wt)
+    assert wm.status(wt) == [] and (wt.path / "README.md").read_text() == "# história\n"
+    assert wm.behind_base(wt)  # still on the old base: the delivery will report the conflict

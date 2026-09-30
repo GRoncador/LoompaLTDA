@@ -163,6 +163,34 @@ class WorkerAgent(LoompaAgent):
         state.worker_summary = f"fix: {result.summary}"
         return AgentResult(ok=True, summary=state.worker_summary)
 
+    async def resolve_conflicts(
+        self, state: StoryState, wt: Worktree, files: list[str]
+    ) -> AgentResult:
+        """The base merged into the story left conflict markers in `files`. Resolve them in
+        place (fenced to those files); the Deployer checks for leftover markers and commits."""
+        paths = story_dir(self.ctx.root, state.story_id)
+        spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
+        plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
+        aci = self.ctx.aci_for(wt.path, allowed_paths=files)
+        self.set_state("WORKING", state, detail=f"resolvendo conflito em {len(files)} arquivo(s)")
+        result = await self._run_task(
+            state,
+            aci,
+            0,
+            "Resolver o conflito de integração com a versão principal nestes arquivos: "
+            + ", ".join(files)
+            + ". A versão principal (entre `=======` e `>>>>>>>`) traz trabalho já aprovado, como "
+            "correções; a história (entre `<<<<<<<` e `=======`) traz a funcionalidade dela. Leia "
+            "cada arquivo, reescreva-o mantendo a intenção dos dois lados e sem nenhum marcador "
+            "de conflito, depois rode os testes.",
+            spec,
+            plan,
+            "",
+        )
+        self._flush_learnings(state, aci)
+        self.set_state("IDLE")
+        return result
+
     async def _run_task(
         self,
         state: StoryState,

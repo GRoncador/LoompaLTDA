@@ -263,10 +263,18 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
         )
     if "baseline" not in state.extra:
         state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
-    elif DeployerAgent(ctx).sync_with_base(state, wt):
-        # the base moved under a story going back to work: what "already failing" means moved too
-        with ctx.worktrees.base_checkout(wt.base) as base_path:
-            state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt, at=base_path)
+    elif (conflicts := DeployerAgent(ctx).sync_with_base(state, wt)) is not None:
+        merged = not conflicts
+        if conflicts:
+            tier = "tier1" if state.current_tier == "tier1" else None
+            await WorkerAgent(ctx, tier_override=tier).resolve_conflicts(state, wt, conflicts)
+            merged = DeployerAgent(ctx).finish_sync(state, wt, conflicts)
+        if merged:
+            # the base moved under a story going back to work: "already failing" moved too
+            with ctx.worktrees.base_checkout(wt.base) as base_path:
+                state.extra["baseline"] = await InspectorAgent(ctx).baseline(
+                    state, wt, at=base_path
+                )
     guidance = state.extra.pop(AMEND_KEY, None)
     if guidance:
         try:
@@ -592,7 +600,9 @@ def apply_founder_answer(
         state.current_tier = "tier2"
         goto(state, resume or "dev")
     elif reason == BlockedReason.CONFLICT:
-        goto(state, "review")
+        # back through `dev`: the base is merged in there and conflicts go to the Worker;
+        # retrying the delivery's rebase alone only ever met the same conflict again
+        goto(state, "dev" if "dev" in state.route else "review")
     else:  # QUESTION
         if guidance:
             state.note(guidance)

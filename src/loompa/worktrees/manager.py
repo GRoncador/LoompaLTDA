@@ -34,6 +34,7 @@ DEPLOYER_ROLE = "deployer"
 DEPLOYER_ONLY = frozenset(
     {"merge", "rebase", "push", "pull", "checkout", "switch", "reset", "cherry-pick", "tag"}
 )
+_BOT = ("-c", "user.name=Loompa", "-c", "user.email=loompa@localhost")
 # Stories are dispatched concurrently; only one of them may create the first commit.
 _BOOTSTRAP_LOCK = threading.Lock()
 _BRANCH_DELETE_FLAGS = frozenset({"-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force"})
@@ -360,9 +361,59 @@ class WorktreeManager:
             self.git("worktree", "remove", "--force", str(path), check=False)
             self.git("worktree", "prune", check=False)
 
+    # Generated from the manifest: on a conflict the base's copy wins and the tool re-locks.
+    LOCKFILES = frozenset(
+        {"uv.lock", "poetry.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock"}
+    )
+
+    def merge_base_into(self, wt: Worktree) -> list[str]:
+        """Merge the base into the story branch (Deployer only). Returns the files still in
+        conflict (lockfiles already settled on the base's copy); [] means the merge is committed.
+        A merge, not a rebase: conflicts are resolved once, not once per story commit, and the
+        delivery's rebase is then a no-op because the base is already in the branch."""
+        self._require_deployer("git merge")
+        self.git(*_BOT, "merge", "--no-ff", "--no-commit", wt.base, cwd=wt.path, check=False)
+        conflicts = self.conflicted_files(wt)
+        for rel in [c for c in conflicts if c.rsplit("/", 1)[-1] in self.LOCKFILES]:
+            self.git("checkout", "--theirs", "--", rel, cwd=wt.path, check=False)
+            self.git("add", "--", rel, cwd=wt.path)
+            conflicts.remove(rel)
+        if not conflicts:
+            self.conclude_merge(wt)
+        return conflicts
+
+    def conflicted_files(self, wt: Worktree) -> list[str]:
+        out = self.git("diff", "--name-only", "--diff-filter=U", cwd=wt.path, check=False)
+        return [f for f in out.splitlines() if f.strip()]
+
+    def has_conflict_markers(self, wt: Worktree, files: list[str]) -> list[str]:
+        marked = []
+        for rel in files:
+            path = wt.path / rel
+            text = path.read_text(encoding="utf-8", errors="ignore") if path.is_file() else ""
+            if re.search(r"^(<{7}|>{7})( |$)", text, re.M):
+                marked.append(rel)
+        return marked
+
+    def conclude_merge(self, wt: Worktree) -> str:
+        self._require_deployer("git merge")
+        self.git("add", "-A", "--", ".", *self.JUNK, cwd=wt.path)
+        self.git(
+            *_BOT, "commit", "-q", "--no-edit", "-m", f"merge: {wt.base} na história", cwd=wt.path
+        )
+        return self.git("rev-parse", "--short", "HEAD", cwd=wt.path)
+
+    def abort_merge(self, wt: Worktree) -> None:
+        self._require_deployer("git merge")
+        self.git("merge", "--abort", cwd=wt.path, check=False)
+
     def rebase_on_base(self, wt: Worktree) -> bool:
-        """Try to rebase the story branch on its base; abort cleanly on conflict."""
+        """Try to rebase the story branch on its base; abort cleanly on conflict. A branch that
+        already contains the base (merged in by `merge_base_into`) is left alone: replaying its
+        commits over the merge would meet the conflicts the merge already resolved."""
         self._require_deployer("git rebase")
+        if not self.behind_base(wt):
+            return True
         out = subprocess.run(
             ["git", "rebase", wt.base], cwd=wt.path, capture_output=True, text=True
         )
