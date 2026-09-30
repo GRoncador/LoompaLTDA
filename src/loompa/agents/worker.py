@@ -31,6 +31,18 @@ Never rewrite unrelated code, never add dependencies, keep diffs minimal, follow
 """
 
 
+MAX_CONFLICT_CHARS = 20_000
+
+CONFLICT_SYSTEM = """<!-- role:worker -->
+You resolve git merge conflicts. The base branch was merged into a story branch. In each file,
+the part between `<<<<<<<` and `=======` is the story's version; between `=======` and `>>>>>>>`
+the base's, which holds work already approved (fixes, other features). Keep the intent of both
+sides: combine them, do not drop either unless they truly say the same thing. Return every file
+in full, with no conflict marker left.
+Respond with JSON only: {{"files": {{"<path>": "<full resolved content>"}}}}
+Comments in {language}, if any.
+"""
+
 DOD_SYSTEM = """<!-- role:dod -->
 You are the Worker Loompa doing a definition-of-done self-check right after finishing a task.
 Given the task, your own summary and the diff you produced, answer honestly whether the task is
@@ -166,30 +178,38 @@ class WorkerAgent(LoompaAgent):
     async def resolve_conflicts(
         self, state: StoryState, wt: Worktree, files: list[str]
     ) -> AgentResult:
-        """The base merged into the story left conflict markers in `files`. Resolve them in
-        place (fenced to those files); the Deployer checks for leftover markers and commits."""
-        paths = story_dir(self.ctx.root, state.story_id)
-        spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
-        plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
+        """The base merged into the story left conflict markers in `files`. One structured call
+        with every conflicted file in the prompt returns each file resolved; the ACI writes them
+        (fenced to those files) and the Deployer checks for leftover markers. A tool loop was
+        tried first: in `contas` S-001 it only kept re-reading the files and never wrote."""
         aci = self.ctx.aci_for(wt.path, allowed_paths=files)
         self.set_state("WORKING", state, detail=f"resolvendo conflito em {len(files)} arquivo(s)")
-        result = await self._run_task(
-            state,
-            aci,
-            0,
-            "Resolver o conflito de integração com a versão principal nestes arquivos: "
-            + ", ".join(files)
-            + ". A versão principal (entre `=======` e `>>>>>>>`) traz trabalho já aprovado, como "
-            "correções; a história (entre `<<<<<<<` e `=======`) traz a funcionalidade dela. Leia "
-            "cada arquivo, reescreva-o mantendo a intenção dos dois lados e sem nenhum marcador "
-            "de conflito, depois rode os testes.",
-            spec,
-            plan,
-            "",
+        blocks, skipped = [], []
+        for rel in files:
+            text = (wt.path / rel).read_text(encoding="utf-8", errors="replace")
+            if len(text) > MAX_CONFLICT_CHARS:
+                skipped.append(rel)
+                continue
+            blocks.append(f"## {rel}\n```\n{text}\n```")
+        if not blocks:
+            return AgentResult(ok=False, summary="arquivos grandes demais para resolver assim")
+        data = await self.ask_json(
+            CONFLICT_SYSTEM.format(language=self.language),
+            f"# Story {state.story_id}: {state.title}\n\n" + "\n\n".join(blocks),
+            story=state,
+            max_tokens=max(2000, sum(len(b) for b in blocks) // 2),
         )
-        self._flush_learnings(state, aci)
+        resolved = data.get("files") if isinstance(data.get("files"), dict) else {}
+        written = []
+        for rel, content in resolved.items():
+            if rel in files and rel not in skipped and isinstance(content, str):
+                res = await aci.call("write_file", {"path": rel, "content": content})
+                if res.ok:
+                    written.append(rel)
         self.set_state("IDLE")
-        return result
+        return AgentResult(
+            ok=bool(written), summary=f"resolvidos: {', '.join(written) or 'nenhum'}"
+        )
 
     async def _run_task(
         self,

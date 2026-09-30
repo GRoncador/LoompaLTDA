@@ -303,14 +303,15 @@ async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Facto
 
     def worker(model: str, messages: list[Message]) -> Any:
         task = next(m.content for m in messages if m.role == "user")
-        if tool_results(messages):
-            return [ToolCall("d", "done", {"summary": "ok"})]
-        if "Resolver o conflito" in task:
+        if "You resolve git merge conflicts" in messages[0].content:
             rounds.append("resolve")
+            assert "<<<<<<<" in task and "## app/calc.py" in task  # the conflict is in the prompt
             merged = (
                 "def add(a, b):\n    return b + a  # main\n\n\ndef sub(a, b):\n    return a - b\n"
             )
-            return [ToolCall("r", "write_file", {"path": "app/calc.py", "content": merged})]
+            return json.dumps({"files": {"app/calc.py": merged, "README.md": "nope"}})
+        if tool_results(messages):
+            return [ToolCall("d", "done", {"summary": "ok"})]
         rounds.append("work")
         if len(rounds) == 1:
             story = (
@@ -365,6 +366,7 @@ async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Facto
     calc = (wt / "app" / "calc.py").read_text()
     assert "# main" in calc and "def sub" in calc and "<<<<<<<" not in calc
     assert (wt / "uv.lock").read_text() == "main\n"
+    assert (wt / "README.md").read_text() == "# demo\n"  # outside the conflict: never written
     await ctx.aclose()
 
 
