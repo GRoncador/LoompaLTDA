@@ -50,7 +50,8 @@ class AgentResult:
 @dataclass
 class LoopResult:
     """How a tool loop ended: by a terminal tool (`done`, `blocked`, ...), by the model
-    answering in plain text (`text`) or by running out of rounds (`limit`)."""
+    answering in plain text (`text`), by running out of rounds (`limit`) or by the LoopGuard
+    seeing it repeat itself with nothing changed (`loop`)."""
 
     ended_by: str
     text: str = ""
@@ -219,6 +220,8 @@ class LoompaAgent:
                         **_call_facts(args),
                     )
                     messages.append(msg)
+                    if guard.stuck:  # going in circles: stop here, the caller reads the guard
+                        return LoopResult("loop", last_text, tool_calls=calls)
                 prune_tool_history(
                     messages, keep_last=keep_tool_results, keep_files_chars=keep_files_chars
                 )

@@ -61,6 +61,9 @@ class ScheduleConfig(BaseModel):
     # streak of reads without a change after which the Worker is told to stop exploring.
     worker_keep_file_chars: int = Field(16000, ge=0)
     worker_explore_nudge: int = Field(10, ge=0)  # 0 = never
+    # Lookups answered from memory (nothing changed since the same call) after which the task
+    # stops with a diagnosis instead of running to the tool-call limit (Fase 8.5); 0 = never.
+    worker_repeat_limit: int = Field(6, ge=0)
     # Tool rounds a role may use before it must answer (ADR-0009); 0 = one-shot, no tools.
     agent_tool_iterations: int = Field(8, ge=0)  # Architect, Product
     research_max_iterations: int = Field(14, ge=0)  # Analyst: search, extract, read

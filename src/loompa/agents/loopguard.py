@@ -10,7 +10,10 @@ the whole history). The guard answers those in code, never by asking the model t
   its previous result without running the command again;
 * a long streak of reads with no change gets a note appended to the tool result, asking for the
   diagnosis and the edit (or `blocked`) instead of more exploring;
-* a write tool that keeps failing gets a hint to switch to another way of editing.
+* a write tool that keeps failing gets a hint to switch to another way of editing;
+* with `repeat_limit`, the task stops once that many lookups were answered from memory since the
+  tree last changed (Fase 8.5): the model is going in circles, and `contas` S-031 T5 went on for
+  53 calls and 35 minutes until the tool-call limit. `summary()` is its diagnosis.
 
 Notes ride on the tool result instead of a new user turn: every provider accepts that shape.
 """
@@ -18,6 +21,7 @@ Notes ride on the tool result instead of a new user turn: every provider accepts
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -61,16 +65,26 @@ def call_key(name: str, args: dict[str, Any]) -> str:
     return name + json.dumps(args, sort_keys=True, ensure_ascii=False, default=str)
 
 
+def short_call(name: str, args: dict[str, Any]) -> str:
+    """`read_file path=src/app.py`: how a repeated call is named in a diagnosis."""
+    shown = " ".join(f"{k}={str(v)[:60]}" for k, v in args.items() if k not in ("content", "new"))
+    return f"{name} {shown}".strip()
+
+
 class LoopGuard:
-    def __init__(self, aci: ACI | None, *, explore_nudge: int = 0):
+    def __init__(self, aci: ACI | None, *, explore_nudge: int = 0, repeat_limit: int = 0):
         self.aci = aci
         self.explore_nudge = explore_nudge
+        self.repeat_limit = repeat_limit  # 0 = never stop the task
         self.calls = 0
         self.repeats = 0
         self.nudges = 0
         self.reads_in_a_row = 0
+        self.streak = 0  # lookups answered from memory since the tree last changed
+        self.repeated: Counter[str] = Counter()
         self._fails: dict[str, int] = {}
         self._seen: dict[str, _Seen] = {}
+        self._version_seen = self._version
 
     @property
     def _version(self) -> int:
@@ -85,7 +99,7 @@ class LoopGuard:
             return None
         ago = self.calls + 1 - prev.at
         if name in RUN_TOOLS:
-            self.repeats += 1
+            self._count_repeat(name, args)
             return ToolResult(
                 True,
                 f"{REPEAT_PREFIX} Nothing in the code changed since you ran this {ago} call(s) "
@@ -93,7 +107,7 @@ class LoopGuard:
                 "Change the code before running it again, or call `done`/`blocked`.",
             )
         if prev.message is not None and not prev.message.content.startswith(PRUNED):
-            self.repeats += 1
+            self._count_repeat(name, args)
             return ToolResult(
                 True,
                 f"{REPEAT_PREFIX} You made this exact lookup {ago} call(s) ago and nothing changed "
@@ -101,12 +115,29 @@ class LoopGuard:
             )
         return None  # the earlier result was pruned from the history: reading again is fair
 
+    def _count_repeat(self, name: str, args: dict[str, Any]) -> None:
+        self.repeats += 1
+        self.streak += 1
+        self.repeated[short_call(name, args)] += 1
+
+    @property
+    def stuck(self) -> bool:
+        """The task should stop: `repeat_limit` lookups answered from memory with no change."""
+        return bool(self.repeat_limit) and self.streak >= self.repeat_limit
+
+    def summary(self, limit: int = 4) -> str:
+        """The calls repeated most, for the diagnosis the next attempt reads."""
+        return ", ".join(f"{call} (x{n})" for call, n in self.repeated.most_common(limit))
+
     def after(
         self, name: str, args: dict[str, Any], result: ToolResult, message: Message | None
     ) -> str:
         """Record a call that ran (or was answered by `before`). Returns guidance to append to
         its result, or ""."""
         self.calls += 1
+        if self._version != self._version_seen:  # the call changed the tree: a fresh start
+            self._version_seen = self._version
+            self.streak = 0
         repeated = result.output.startswith(REPEAT_PREFIX)
         if (name in READ_TOOLS or name in RUN_TOOLS) and not repeated and result.ok:
             self._seen[call_key(name, args)] = _Seen(

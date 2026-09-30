@@ -134,6 +134,17 @@ exercises the failing behaviour the spec describes, and check with `run_tests` t
 _BROKEN_TEST = ("ImportError", "ModuleNotFoundError", "SyntaxError", "NameError", "fixture '")
 
 
+def unfinished(result: AgentResult) -> bool:
+    """A task pass that ended before `done` (tool-call limit, or a loop the guard stopped)."""
+    return not result.ok and not result.blocked_reason and "unfinished" in (result.data or {})
+
+
+def _outcome(result: AgentResult) -> str:
+    if result.blocked_reason:
+        return "blocked"
+    return "unfinished" if unfinished(result) else "finished"
+
+
 FOUNDER_CHANGES = "Founder asked for changes"  # how the engine files a delivery sent back
 
 
@@ -172,17 +183,24 @@ class WorkerAgent(LoompaAgent):
                 result = await self._one_task(
                     state, wt, aci, task.number, task.text, spec, plan, tasks_md, outline
                 )
-                mark["outcome"] = "blocked" if result.blocked_reason else "finished"
+                mark["outcome"] = _outcome(result)
             if result.blocked_reason:
                 self.set_state("BLOCKED", state, detail="aguardando decisão")
                 self._flush_learnings(state, aci)
+                return result
+            if unfinished(result):
+                # 8.5: a task cut by the tool-call limit, or stopped going in circles, is not
+                # done. It stays pending for the next attempt, which reads the diagnosis, and a
+                # half-built story never reaches the Inspector (`contas` S-031 spent a tier-2
+                # attempt that way). The run stops here: later tasks usually build on this one.
+                self._flush_learnings(state, aci)
+                self.set_state("IDLE")
+                state.worker_summary = "\n".join([*summaries, f"T{task.number}: não concluída"])
                 return result
             state.tasks_done.append(task.number)
             tasks_md = mark_task_done(tasks_md, task.number)
             paths.tasks.write_text(tasks_md, encoding="utf-8")
             summaries.append(f"T{task.number}: {result.summary}")
-            if not result.ok:
-                break
         self._flush_learnings(state, aci)
         self.set_state("IDLE")
         state.worker_summary = "\n".join(summaries)
@@ -266,12 +284,12 @@ class WorkerAgent(LoompaAgent):
             outline=outline,
             changed=self.ctx.worktrees.diff_stat(wt),
         )
-        if reproducer and not result.blocked_reason:
+        if reproducer and not result.blocked_reason and not unfinished(result):
             result = await self._prove_reproduced(
                 state, wt, task_aci, number, text, spec, plan, tasks_md, outline
             )
             self._flush_learnings(state, task_aci)
-        if result.blocked_reason:
+        if result.blocked_reason or unfinished(result):
             return result
         # deterministic hygiene first ($0, also in dry-run), then the model's self-check
         dirty = scan_diff(self.ctx.worktrees.diff_working(wt, max_chars=200_000))
@@ -309,7 +327,7 @@ class WorkerAgent(LoompaAgent):
                 changed=self.ctx.worktrees.diff_stat(wt),
                 label="self_check",
             )
-            if followup.blocked_reason:
+            if followup.blocked_reason or unfinished(followup):
                 return followup
             result.summary = f"{result.summary} / {followup.summary}"
         kind = "test" if reproducer else "feat"
@@ -433,6 +451,9 @@ class WorkerAgent(LoompaAgent):
         self._flush_learnings(state, aci)
         if result.blocked_reason:
             self.set_state("BLOCKED", state, detail="aguardando decisão")
+            return result
+        if unfinished(result):
+            self.set_state("IDLE")
             return result
         commit = self.ctx.worktrees.commit_all(
             wt, f"fix({state.story_id.lower()}): address inspector findings"
@@ -606,7 +627,11 @@ class WorkerAgent(LoompaAgent):
         toolbox = Toolbox(
             aci, PROFILES["worker"], diagnosis=diagnosis or state.kind == StoryKind.BUGFIX
         )
-        guard = LoopGuard(aci, explore_nudge=sched.worker_explore_nudge)
+        guard = LoopGuard(
+            aci,
+            explore_nudge=sched.worker_explore_nudge,
+            repeat_limit=sched.worker_repeat_limit,
+        )
         loop = await self.tool_loop(
             messages,
             toolbox,
@@ -644,7 +669,24 @@ class WorkerAgent(LoompaAgent):
             )
         if loop.ended_by == "text":  # the model stopped without `done`: accept what it said
             return AgentResult(ok=True, summary=loop.text[:200] or "tarefa encerrada")
-        return AgentResult(ok=False, summary="limite de iterações atingido", blocked_reason=None)
+        # `limit` or `loop`: the task did not get to `done`. What the next attempt needs to know
+        # goes in the summary, which becomes its "last failure" (model-facing, so English).
+        why = (
+            f"it made all {loop.tool_calls} tool calls a task may make"
+            if loop.ended_by == "limit"
+            else f"it repeated lookups {guard.streak} times with nothing changed in between"
+        )
+        repeated = guard.summary()
+        diagnosis = (
+            f"Task T{number} was stopped before `done`: {why}."
+            + (f" Calls it kept repeating: {repeated}." if repeated else "")
+            + (f" Cause it stated: {toolbox.diagnosis[:300]}." if toolbox.diagnosis else "")
+            + " Its partial changes are still in the files: read them, decide what blocks the "
+            "task and finish it; call `blocked` if only a person can decide."
+        )
+        return AgentResult(
+            ok=False, summary=diagnosis, data={"unfinished": number, "ended_by": loop.ended_by}
+        )
 
     async def _dod_check(
         self, state: StoryState, wt: Worktree, task: str, summary: str

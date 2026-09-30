@@ -28,7 +28,7 @@ from loompa.agents import (
     WorkerAgent,
 )
 from loompa.agents.architect import REPLANNED_KEY
-from loompa.agents.worker import FOUNDER_CHANGES
+from loompa.agents.worker import FOUNDER_CHANGES, unfinished
 from loompa.comms import (
     FounderAnswer,
     FounderMessage,
@@ -348,6 +348,14 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
             options=res.blocked_options,
             resume="dev",
         )
+    if unfinished(res):
+        ctx.emit(
+            "story.task_unfinished",
+            story_id=state.story_id,
+            task=(res.data or {}).get("unfinished"),
+            ended_by=(res.data or {}).get("ended_by"),
+        )
+        return await climb(ctx, state, res.summary, executive=UNFINISHED_EXECUTIVE)
     return advance(state)
 
 
@@ -413,7 +421,26 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
         )
         state.hand_off("Corrigir os apontamentos do Inspector: " + detail, phase="test")
         return await block(ctx, state, BlockedReason.WAIVER, res.summary, resume="dev", message=msg)
-    state.failure_history.append(res.summary)
+    executive = (
+        "As verificações automáticas continuam falhando após várias tentativas, inclusive com o especialista sênior. "
+        "O detalhe técnico ficou registrado para a equipe."
+    )
+    return await climb(ctx, state, res.summary, executive=executive)
+
+
+UNFINISHED_EXECUTIVE = (
+    "Uma das tarefas desta entrega não chegou ao fim dentro do limite de passos, nem com o "
+    "especialista sênior. O detalhe técnico ficou registrado para a equipe."
+)
+
+
+async def climb(
+    ctx: EngineContext, state: StoryState, failure: str, *, executive: str
+) -> StoryState:
+    """A failed attempt climbs the escalation ladder: tier 2 again, then tier 1 (re-planned once),
+    then the founder. Failed means the Inspector's FAIL, or a Worker that could not finish a task
+    (Fase 8.5) — which never costs an Inspector run on a half-built story."""
+    state.failure_history.append(failure)
     sched = ctx.config.schedule
     if state.current_tier == "tier2":
         state.attempts_tier2 += 1
@@ -441,15 +468,11 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
     if state.attempts_tier1 < sched.tier1_max_attempts:
         ctx.emit("story.retry", story_id=state.story_id, tier="tier1", attempt=state.attempts_tier1)
         return goto(state, "dev")
-    executive = (
-        "As verificações automáticas continuam falhando após várias tentativas, inclusive com o especialista sênior. "
-        "O detalhe técnico ficou registrado para a equipe."
-    )
     return await block(
         ctx,
         state,
         BlockedReason.PERSISTENT_FAILURE,
-        res.summary,
+        failure,
         resume="dev",
         executive=executive,
     )
