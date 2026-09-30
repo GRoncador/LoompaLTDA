@@ -317,7 +317,13 @@ Decided 2026-09-29:
   tested the main checkout's package instead of the story's code; old worktrees move out on first use),
   and a conflict with the base is resolved instead of aborted forever: the base is merged into the story,
   lockfiles take the base's copy, the Worker resolves the markers, the Deployer commits only when none is
-  left, and a conflict block's answer goes back through `dev`. Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
+  left, and a conflict block's answer goes back through `dev`.
+  Verified live on S-001: its merge of the base conflicted in `pyproject.toml` and `tests/test_cli.py`,
+  the resolver combined both sides (the story's `add` tests and main's `uv run` test) and the Deployer
+  committed the merge. The resolver is one structured call with the files in the prompt (the first
+  version, a tool loop, only re-read the files). Also from this run: ruff's current output format is
+  read (a blocked story had green tests and a lint error nobody could see), uncommitted work is kept
+  as a commit before merging the base, and Loompa's own VIRTUAL_ENV no longer reaches factory commands. Fase 6: backlog drag-and-drop through the PO, a story diff tab, a cost screen
   (per day, role, model, tool), the CodeRabbit webhook (ADR-0013, not verified against GitHub itself),
   PyPI packaging (`mcp>=2.2,<3`, wheel checked in a clean venv, a tag-triggered Trusted Publishing
   workflow — nothing published). Test suite: leaked aiosqlite threads no longer hang pytest at exit.
