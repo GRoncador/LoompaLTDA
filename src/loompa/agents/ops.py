@@ -41,7 +41,9 @@ class Triage:
 def triage(exc: BaseException) -> Triage:
     text = str(exc).lower()
     if isinstance(exc, StoryStalled):
-        return Triage(True, "uma etapa ficou parada, sem nenhum sinal de progresso, por muito tempo")
+        return Triage(
+            True, "uma etapa ficou parada, sem nenhum sinal de progresso, por muito tempo"
+        )
     if isinstance(exc, LLMError):
         if "chave de api" in text or "não configurado" in text:
             return Triage(False, "falta configurar o acesso ao serviço de IA")
