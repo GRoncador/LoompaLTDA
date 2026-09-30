@@ -262,21 +262,27 @@ class ModelRouter:
             span.set(attempts=calls.attempts)
             if not cands:
                 raise LLMError(f"nenhum modelo configurado para o tier {tier}")
-            routed = await self._route(
-                tier,
-                cands,
-                role,
-                messages,
-                agent,
-                story_id,
-                tools,
-                json_mode,
-                max_tokens,
-                complexity,
-                temperature,
-                reasoning_effort,
-                calls,
-            )
+            try:
+                routed = await self._route(
+                    tier,
+                    cands,
+                    role,
+                    messages,
+                    agent,
+                    story_id,
+                    tools,
+                    json_mode,
+                    max_tokens,
+                    complexity,
+                    temperature,
+                    reasoning_effort,
+                    calls,
+                )
+            except LLMError:
+                # a call that never answered was still paid for, attempt by attempt (smoke run:
+                # six cut attempts, US$0.05, shown as US$0 on the failed span)
+                span.set(cost_usd=round(calls.spent, 6) or None)
+                raise
             resp = routed.response
             answer = self.tracer.messages(
                 span.story_id, [Message("assistant", resp.text, tool_calls=resp.tool_calls)]

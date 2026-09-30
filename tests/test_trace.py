@@ -118,6 +118,37 @@ def _one_model_config(model: str = "m1") -> object:
     return cfg
 
 
+async def test_a_call_that_never_answered_still_shows_what_it_cost_and_what_it_tried(
+    tmp_path: Path,
+):
+    """Smoke run, 2026-09-30: six cut attempts on two models cost US$0.05, and `loompa trace`
+    showed the failed call as '? · out 0 · US$ 0.0000'."""
+    from loompa.cli.trace import _llm_line
+    from loompa.trace import TraceNode
+
+    cfg = _one_model_config()
+    cfg.models.truncation_retries = 1
+    router = ModelRouter(
+        cfg,
+        tracker=CostTracker(Store(":memory:"), cfg, "f"),
+        providers={
+            "p": MockProvider(
+                "p",
+                script=lambda *a: LLMResponse(
+                    "", [], "m1", "p", 100, 900, finish_reason="length", cost_usd=0.01
+                ),
+            )
+        },
+        tracer=Tracer(tmp_path),
+    )
+    with pytest.raises(LLMError):
+        await router.complete("architect", [Message("user", "go")], story_id="S-1", max_tokens=900)
+    (span,) = spans_of(tmp_path / "S-1.jsonl")
+    assert span["attrs"]["cost_usd"] == pytest.approx(0.02)
+    line = _llm_line(TraceNode(span))
+    assert "m1" in line and "out 1.8k" in line and "US$ 0.0200" in line and "2 corte(s)" in line
+
+
 async def test_a_cut_answer_and_its_retry_are_one_call_with_two_attempts(tmp_path: Path):
     cfg = _one_model_config()
     answers = iter(

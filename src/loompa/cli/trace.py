@@ -57,20 +57,29 @@ def _args(args: Any, limit: int = 90) -> str:
 
 def _llm_line(node: TraceNode) -> str:
     a = node.attrs
-    model = a.get("model") or "?"
+    attempts = a.get("attempts") or []
+    # a call that never answered has no model or tokens of its own: its attempts tell
+    tried = list(dict.fromkeys(str(x.get("model", "")).split("/", 1)[-1] for x in attempts))
+    model = a.get("model") or ", ".join(m for m in tried if m) or "?"
+    out = a.get("output_tokens") or sum(int(x.get("output_tokens") or 0) for x in attempts)
+    tokens_in = a.get("input_tokens") or max(
+        (int(x.get("input_tokens") or 0) for x in attempts), default=0
+    )
+    cost = a.get("cost_usd") or sum(float(x.get("cost_usd") or 0) for x in attempts)
     served = f" ({a['served_by']})" if a.get("served_by") else ""
     responded = f" → {a['responded']}" if a.get("responded") else ""
     cached = f" (cache {_k(a['cached_tokens'])})" if a.get("cached_tokens") else ""
-    cuts = f" · [yellow]{a['cuts']} corte(s)[/yellow]" if a.get("cuts") else ""
-    failed = len([x for x in a.get("attempts") or [] if x.get("outcome") not in ("ok", "cut")])
+    n_cuts = len([x for x in attempts if x.get("outcome") == "cut"]) or a.get("cuts")
+    cuts = f" · [yellow]{n_cuts} corte(s)[/yellow]" if n_cuts else ""
+    failed = len([x for x in attempts if x.get("outcome") not in ("ok", "cut")])
     fell = f" · [yellow]{failed} falha(s) antes[/yellow]" if failed else ""
     finish = a.get("finish_reason") or node.span.get("status")
     finish = f"[red]{finish}[/red]" if finish in ("length", "max_tokens", "error") else finish
     return (
         f"[cyan]{escape(str(a.get('agent') or node.span.get('name')))}[/cyan] · "
-        f"{escape(str(model))}{escape(served)}{escape(responded)} · in {_k(a.get('input_tokens'))}"
-        f"{cached} · out {_k(a.get('output_tokens'))} · {finish} · {_dur(node.span.get('ms'))} · "
-        f"US$ {float(a.get('cost_usd') or 0):.4f}{cuts}{fell}"
+        f"{escape(str(model))}{escape(served)}{escape(responded)} · in {_k(tokens_in)}"
+        f"{cached} · out {_k(out)} · {finish} · {_dur(node.span.get('ms'))} · "
+        f"US$ {float(cost):.4f}{cuts}{fell}"
     )
 
 
