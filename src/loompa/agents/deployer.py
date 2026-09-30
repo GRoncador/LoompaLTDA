@@ -89,6 +89,10 @@ class DeployerAgent(LoompaAgent):
         the meantime (the red suite that failed every story, say) must reach it before its
         next test run. The base is merged into the story branch. None: nothing to do;
         []: merged; a list: files in conflict, waiting for `finish_sync`."""
+        if self.git.merge_in_progress(wt):
+            # an interrupted run stopped mid-merge: start the integration over, never commit
+            # conflict markers as work in progress
+            self.git.abort_merge(wt)
         if not self.git.behind_base(wt):
             return None
         if self.git.status(wt):

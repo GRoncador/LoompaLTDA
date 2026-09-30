@@ -388,6 +388,9 @@ class WorktreeManager:
             self.conclude_merge(wt)
         return conflicts
 
+    def merge_in_progress(self, wt: Worktree) -> bool:
+        return bool(self.git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=wt.path, check=False))
+
     def conflicted_files(self, wt: Worktree) -> list[str]:
         out = self.git("diff", "--name-only", "--diff-filter=U", cwd=wt.path, check=False)
         return [f for f in out.splitlines() if f.strip()]

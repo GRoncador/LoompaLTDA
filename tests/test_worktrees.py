@@ -250,3 +250,25 @@ async def test_uncommitted_work_is_kept_as_a_commit_before_the_base_is_merged(fa
     assert "trabalho em andamento" in log and (wt.path / "novo.py").exists()
     assert (wt.path / "wip.py").read_text() == "x = 1\n" and not ctx.worktrees.behind_base(wt)
     await ctx.aclose()
+
+
+async def test_an_interrupted_merge_is_started_over_not_committed(factory):
+    from conftest import git
+    from loompa.agents import DeployerAgent
+    from loompa.engine import StoryState
+    from test_engine import make_ctx
+
+    ctx = make_ctx(factory)
+    wt = ctx.worktrees.create("S-010")
+    (wt.path / "README.md").write_text("# história\n")
+    ctx.worktrees.commit_all(wt, "docs: story")
+    (factory.root / "README.md").write_text("# main\n")
+    git("add", ".", cwd=factory.root)
+    git("commit", "-qm", "main", cwd=factory.root)
+    deployer = DeployerAgent(ctx)
+    state = StoryState(story_id="S-010", title="x")
+    assert deployer.sync_with_base(state, wt) == ["README.md"]  # stopped here, mid-merge
+    assert ctx.worktrees.merge_in_progress(wt)
+    again = deployer.sync_with_base(state, wt)  # the run restarts
+    assert again == ["README.md"] and "wip" not in git("log", "--oneline", "-3", cwd=wt.path)
+    await ctx.aclose()
