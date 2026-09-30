@@ -376,3 +376,18 @@ def test_after_the_last_round_the_review_waits_for_the_founder(rabbit: TestClien
 
 def test_the_webhook_is_off_unless_the_factory_turns_it_on(client: TestClient):
     assert _signed(client, _review("x")).status_code == 404
+
+
+def test_the_dashboard_will_not_start_a_second_engine(client: TestClient, git_repo: Path):
+    from loompa.engine.lock import EngineLock
+    from loompa.factory import Factory
+
+    lock = EngineLock(Factory.open(git_repo).paths.loompa / "engine.lock")
+    lock.acquire()  # a `loompa run` in a terminal
+    try:
+        r = client.post("/api/factories/demo-hq/engine/start")
+        assert r.status_code == 409 and "outra esteira" in r.json()["detail"]
+    finally:
+        lock.release()
+    assert client.post("/api/factories/demo-hq/engine/start").json()["engine"] is True
+    client.post("/api/factories/demo-hq/engine/stop")

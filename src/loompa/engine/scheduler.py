@@ -23,6 +23,7 @@ from loompa.comms import FounderAnswer, FounderMessage
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, block
 from loompa.engine.langgraph_engine import GraphRuntime
+from loompa.engine.lock import EngineLock
 from loompa.engine.phases import goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.finance import BudgetStatus
@@ -234,8 +235,11 @@ class Scheduler:
     async def run(
         self, *, until_idle: bool = True, poll_interval: float = 1.0, max_cycles: int | None = None
     ) -> list[str]:
-        """Dispatch and reap until nothing is runnable (or forever when until_idle=False)."""
+        """Dispatch and reap until nothing is runnable (or forever when until_idle=False).
+        Raises `EngineBusy` when another engine already runs this factory."""
         cycles = 0
+        lock = EngineLock(self.ctx.factory.paths.loompa / "engine.lock")
+        lock.acquire()
         try:
             while True:
                 self._dispatch()
@@ -259,6 +263,7 @@ class Scheduler:
             if self.running:
                 await asyncio.gather(*self.running.values(), return_exceptions=True)
             self.running.clear()
+            lock.release()
         return self.completed
 
     # --------------------------------------------------------------- founder

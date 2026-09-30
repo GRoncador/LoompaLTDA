@@ -41,6 +41,7 @@ from loompa.conversations import (
     ConversationStatus,
 )
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, kanban_column, load_state
+from loompa.engine.lock import EngineBusy, EngineLock
 from loompa.factory import Factory
 from loompa.finance import period_start_iso, today_start_iso
 from loompa.sprints import SprintBoard, SprintError, SprintStatus
@@ -197,6 +198,9 @@ class Hub:
         rt = self.get(slug)
         if rt.engine_task and not rt.engine_task.done():
             return
+        holder = EngineLock(rt.ctx.factory.paths.loompa / "engine.lock").holder()
+        if holder:
+            raise HTTPException(409, str(EngineBusy(holder)))
 
         async def loop() -> None:
             sched = Scheduler(rt.ctx)

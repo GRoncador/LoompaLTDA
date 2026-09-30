@@ -843,3 +843,23 @@ async def test_scheduler_escalates_persistent_runner_crash_to_inbox(
     assert msg is not None and msg.executive_audit() == []
     assert "KeyError" not in msg.context and "foo" not in msg.context
     await ctx.aclose()
+
+
+async def test_one_engine_per_factory(factory: Factory):
+    """While validating `contas` a `loompa run` stayed alive next to a new one: both dispatched
+    the same stories into the same worktrees. The second engine is now refused."""
+    import os
+
+    from loompa.engine.lock import EngineBusy, EngineLock
+
+    lock = EngineLock(factory.paths.loompa / "engine.lock")
+    lock.acquire()
+    assert EngineLock(lock.path).holder() == str(os.getpid())
+    ctx = make_ctx(factory, dry_run=True)
+    with pytest.raises(EngineBusy, match="outra esteira já está rodando"):
+        await Scheduler(ctx).run()
+    lock.release()
+    assert EngineLock(lock.path).holder() is None
+    await Scheduler(ctx).run()  # free again: runs, and releases when done
+    assert EngineLock(lock.path).holder() is None
+    await ctx.aclose()

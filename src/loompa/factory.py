@@ -133,6 +133,7 @@ GITIGNORE_LINES = (
     ".loompa/*.db-*",
     ".loompa/logs/",
     ".loompa/.env",  # per-factory API keys: never committed
+    ".loompa/engine.lock",
 )
 
 

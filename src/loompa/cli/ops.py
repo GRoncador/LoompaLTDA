@@ -14,6 +14,7 @@ from rich.table import Table
 from loompa.cli.main import app, resolve_factory
 from loompa.comms import FounderAnswer, MessageKind
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column
+from loompa.engine.lock import EngineBusy
 from loompa.factory import Factory
 from loompa.llm import ModelRouter
 from loompa.sprints import SprintBoard, SprintError, SprintStatus
@@ -177,7 +178,12 @@ def run(
         console.print(
             f"[dim]{waiting} histórias esperam no backlog; `loompa sprint start` as coloca para rodar.[/dim]"
         )
-    done = asyncio.run(_run(ctx, until_idle=not watch, max_parallel=parallel))
+    try:
+        done = asyncio.run(_run(ctx, until_idle=not watch, max_parallel=parallel))
+    except EngineBusy as busy:
+        console.print(f"[red]✘[/red] {busy}")
+        ctx.close()
+        raise typer.Exit(1) from None
     console.print(f"[green]✔[/green] ciclo encerrado · {len(done)} histórias processadas")
     print_runtime_status(f, console)
     ctx.close()
