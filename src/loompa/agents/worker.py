@@ -13,7 +13,7 @@ from loompa.agents.architect import REPRO_KEY, writable_tests
 from loompa.agents.base import AgentResult, LoompaAgent, repo_outline
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
-from loompa.engine.state import StoryKind, StoryState
+from loompa.engine.state import Autonomy, StoryKind, StoryState
 from loompa.hygiene import scan_diff
 from loompa.llm import Message
 from loompa.speckit import story_dir, tasks_from_markdown
@@ -151,7 +151,8 @@ class WorkerAgent(LoompaAgent):
                     issues=[i.line() for i in dirty[:8]],
                 )
             missing = [f"Diff hygiene: {i.line()}" for i in dirty[:5]]
-            if not reproducer:  # a red test is the reproducer's goal, not something missing
+            # a red test is the reproducer's goal; a yolo story trusts hygiene and the Inspector
+            if not reproducer and state.autonomy != Autonomy.YOLO:
                 missing += await self._dod_check(state, wt, task.text, result.summary)
             if missing:
                 self.ctx.emit(

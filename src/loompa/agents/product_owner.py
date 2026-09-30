@@ -23,6 +23,7 @@ from loompa.conversations import (
     render_backlog,
 )
 from loompa.engine.state import Stage, StoryState
+from loompa.risk import declared_dependencies
 from loompa.speckit import story_dir
 from loompa.sprints import SprintBoard, SprintError
 
@@ -33,6 +34,16 @@ engineering starts. Apply the "No Invention" gate:
   constitution or an existing spec. Anything else is invented scope and must be flagged.
 - The spec must be complete enough to build from (goal, in/out of scope, testable criteria) and
   must not contradict the constitution.
+- Feasibility: it must be deliverable as ONE story (a few hours of one engineer). A spec that
+  bundles several deliverables is missing its split: say which.
+- Dependencies: a criterion that needs a library neither declared by the project nor allowed by
+  the constitution cannot be built as specified.
+- Regression: when the story changes existing behaviour, the spec says what stays as it is.
+  Behaviour changed without saying so is missing.
+- Assumptions: a reasonable default the request left open is fine when it is listed under
+  assumptions; one that changes what the founder asked for is invented scope.
+- When the story handles user input, money, personal data or security, its non-functional
+  requirements and edge cases must be stated (and each edge case covered by a criterion).
 Respond with JSON only:
 {{"approved": bool, "unsupported": [str], "missing": [str], "notes": str}}
 `unsupported` lists criteria that cannot be traced (quote them); `missing` lists what a builder
@@ -224,7 +235,9 @@ class ProductOwnerAgent(LoompaAgent):
                 if state.founder_notes
                 else ""
             )
-            + f"## Spec under review\n{spec[:6000]}\n\n## Constitution (excerpt)\n{self.constitution(3000)}"
+            + f"## Spec under review\n{spec[:6000]}\n\n"
+            + f"## Declared dependencies\n{declared_dependencies(self.ctx.root) or '(none)'}\n\n"
+            + f"## Constitution (excerpt)\n{self.constitution(3000)}"
         )
         return await self._verdict(
             state,

@@ -8,7 +8,8 @@ from datetime import date
 from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent, repo_outline
 from loompa.engine.state import StoryKind, StoryState
 from loompa.hygiene import TEST_DIRS, is_test_path
-from loompa.speckit import render_plan, render_tasks, story_dir, tasks_from_markdown
+from loompa.risk import assess, render_matrix
+from loompa.speckit import render_plan, render_risk, render_tasks, story_dir, tasks_from_markdown
 
 SYSTEM = """<!-- role:architect -->
 You are the Architect Loompa of an autonomous software factory. Produce the technical plan and the
@@ -19,7 +20,21 @@ Rules:
 - `files` is the exhaustive list of paths (files or directories, relative to repo root) the Worker
   may create or edit. Include test paths. The Worker is physically blocked from touching anything else.
 - `tasks` are 2-8 atomic steps; each becomes one commit and must leave the test suite green.
-  Every task must include its tests. Order them so each builds on the previous one.
+  Every task must include its tests. Order them so each builds on the previous one. Each task is
+  {{"task": str, "verify": str}}: the task names the exact files it touches, and `verify` names
+  the check that proves it done (a test, a command).
+- `constitution_check`: the constitution rules this plan touches, each {{"rule": str, "ok": bool,
+  "note": str}}. A rule the plan breaks (ok=false) needs its justification in `note` and the
+  simpler alternative in `alternatives_considered`; without both, change the plan instead.
+- `traceability`: for EACH acceptance criterion, by its number in the spec, the test file and
+  test that will prove it: [{{"criterion": int, "test": str}}].
+- `impact`: when existing code changes, what else uses it and how compatibility is kept. Empty
+  when the story only adds new code.
+- `rollback`: only when persisted data, a schema or a public contract changes: how to migrate
+  and how to undo. Otherwise empty.
+- `blocker`: leave empty. Fill it only when the spec cannot be built as one story as written
+  (it needs a library the constitution does not allow, it bundles several deliverables, it
+  contradicts the code): say what the spec must change.
 - Consider the precedents from organizational memory; do not repeat past mistakes.
 - Before choosing the approach, weigh at least two: the quickest one and the one the
   architecture would want. `alternatives_considered` lists the ones you rejected, each with its
@@ -27,8 +42,10 @@ Rules:
   one line. The chosen approach goes in `approach`.
 Respond with JSON only:
 {{"approach": str, "alternatives_considered": [{{"option": str, "tradeoff": str,
-"rejected_because": str}}], "files": [str], "contracts": str, "risks": [str], "tasks": [str],
-"adr_proposal": str}}
+"rejected_because": str}}], "files": [str], "contracts": str, "impact": str, "rollback": str,
+"risks": [str], "traceability": [{{"criterion": int, "test": str}}],
+"constitution_check": [{{"rule": str, "ok": bool, "note": str}}],
+"tasks": [{{"task": str, "verify": str}}], "adr_proposal": str, "blocker": str}}
 Write in {language}.
 """
 
@@ -43,6 +60,8 @@ REPRODUCER_NOTE = (
 REPRODUCER_TASK = "Escrever um teste automatizado que reproduz o bug e falha no código atual (só arquivos de teste)"
 _REPRODUCER_WORDS = re.compile(r"\b(test|teste|reproduz|reproduce|reprodu)", re.I)
 REPRO_KEY = "reproducer"
+BOUNCED_KEY = "spec_bounced"  # the Architect sent the spec back once already
+NONE_WORDS = ("", "none", "nenhum", "nenhuma", "n/a", "null", "-")
 
 
 def ensure_reproducer(tasks: list[str], files: list[str]) -> tuple[list[str], list[str]]:
@@ -73,6 +92,24 @@ and 0-3 extra atomic tasks (each one commit, with its check) that carry out the 
 what the guidance needs; do not repeat tasks already done. If the guidance needs nothing new
 (a plain clarification), return empty lists.
 Respond with JSON only: {{"files": [str], "tasks": [str], "reason": str}}
+Write in {language}.
+"""
+
+PREFLIGHT_SYSTEM = """<!-- role:architect -->
+Pre-flight review. The plan below changes existing code that carries risk (a schema, a migration,
+a public contract, or modules many files depend on). Before the first commit, analyse what could
+regress. The facts table was measured in the repository: rely on it, and use the read-only tools
+to look at the code it names when a fact matters.
+- `risks`: what could break, each {{"area": str, "risk": str, "probability": "low"|"medium"|"high",
+  "impact": "low"|"medium"|"high", "mitigation": str}}. Concrete, about this plan, at most 5.
+- `regression_checks`: existing behaviour that must still work, as checks a test can make.
+- `extra_tasks`: 0-3 atomic tasks to run BEFORE the change that make it safe (a characterization
+  test for untested code about to change, a backup or reversible migration step). Each names
+  its files. Nothing already in the plan.
+- `irreversible`: true only when the plan can destroy or corrupt existing data with no way back.
+  Then `question` and 2-3 `options` ask the founder, in plain non-technical {language}.
+Respond with JSON only: {{"risks": [...], "regression_checks": [str], "extra_tasks": [str],
+"irreversible": bool, "question": str, "options": [str]}}
 Write in {language}.
 """
 
@@ -124,7 +161,15 @@ class ArchitectAgent(LoompaAgent):
             self.explore_tools(),
             story=state,
         )
-        tasks = self._list(data, "tasks") or [
+        blocker = str(data.get("blocker") or "").strip()
+        if blocker and blocker.lower() not in NONE_WORDS and not state.extra.get(BOUNCED_KEY):
+            # 7.3: the spec cannot be built as written; the Spec Loompa rewrites it once
+            state.extra[BOUNCED_KEY] = True
+            state.hand_off(blocker, phase="plan")
+            self.ctx.emit("plan.blocked_by_spec", story_id=state.story_id, reason=blocker[:300])
+            self.set_state("IDLE")
+            return AgentResult(ok=False, summary=blocker, data=data)
+        tasks = _tasks(data.get("tasks")) or [
             f"Implementar '{state.title}' com testes cobrindo os critérios de aceitação"
         ]
         files = self._list(data, "files")
@@ -143,9 +188,18 @@ class ArchitectAgent(LoompaAgent):
                 approach=str(data.get("approach") or ""),
                 files=files,
                 contracts=str(data.get("contracts") or ""),
-                risks=self._list(data, "risks"),
+                risks=self._list(data, "risks")
+                + [
+                    f"Viola a constituição: {line}"
+                    for line in _constitution_check(data.get("constitution_check"))
+                    if "**violada**" in line
+                ],
                 precedents=precedent_titles,
                 alternatives=_alternatives(data.get("alternatives_considered")),
+                impact=_text(data.get("impact")),
+                rollback=_text(data.get("rollback")),
+                traceability=_traceability(data.get("traceability"), state.acceptance),
+                constitution_check=_constitution_check(data.get("constitution_check")),
             ),
             encoding="utf-8",
         )
@@ -204,6 +258,73 @@ class ArchitectAgent(LoompaAgent):
         )
         self.set_state("IDLE")
         return AgentResult(ok=True, summary=f"{len(files)} caminhos e {len(tasks)} tarefas a mais")
+
+    async def preflight(self, state: StoryState) -> AgentResult:
+        """Risk analysis before the first commit (Fase 7, 7.5/7.6): facts measured in code,
+        the model's regression risks on top, mitigations added in front of the tasks, and the
+        founder asked only when the plan could destroy data irreversibly."""
+        self.set_state("WORKING", state, detail="analisando riscos antes de começar")
+        paths = story_dir(self.ctx.root, state.story_id)
+        facts = assess(self.ctx.root, state.allowed_paths)
+        matrix = render_matrix(facts)
+        plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
+        spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
+        data = await self.ask_json_with_tools(
+            PREFLIGHT_SYSTEM.format(language=self.language) + EXPLORE_HINT,
+            f"# Story {state.story_id}: {state.title}\n\n## Facts\n{matrix}\n\n"
+            f"## Plan\n{plan[:5000]}\n\n## Spec (excerpt)\n{spec[:2500]}",
+            self.explore_tools(),
+            story=state,
+            max_iterations=4,
+        )
+        risks = []
+        for r in data.get("risks") or []:
+            if isinstance(r, dict) and str(r.get("risk") or "").strip():
+                risks.append(
+                    f"[{r.get('probability', '?')}/{r.get('impact', '?')}] "
+                    f"{str(r.get('area') or '').strip()}: {str(r['risk']).strip()}"
+                    + (f" — mitigação: {r['mitigation']}" if r.get("mitigation") else "")
+                )
+        extra = self._list(data, "extra_tasks")[:3]
+        if extra:
+            tasks = [t.text for t in tasks_from_markdown(paths.tasks.read_text(encoding="utf-8"))]
+            at = 1 if (state.extra.get(REPRO_KEY) or {}).get("status") == "pending" else 0
+            tasks = [*tasks[:at], *extra, *tasks[at:]]
+            paths.tasks.write_text(
+                render_tasks(story_id=state.story_id, title=state.title, tasks=tasks),
+                encoding="utf-8",
+            )
+            state.tasks_total = len(tasks)
+            if not writable_tests(state.allowed_paths):
+                state.allowed_paths = [*state.allowed_paths, "tests/"]
+        paths.risk.write_text(
+            render_risk(
+                story_id=state.story_id,
+                title=state.title,
+                matrix=matrix,
+                risks=risks,
+                checks=self._list(data, "regression_checks"),
+                mitigations=extra,
+            ),
+            encoding="utf-8",
+        )
+        self.ctx.emit(
+            "story.preflight",
+            story_id=state.story_id,
+            agent=self.name,
+            high=[f.path for f in facts if f.level == "high"],
+            risks=len(risks),
+            extra_tasks=len(extra),
+        )
+        self.set_state("IDLE")
+        if data.get("irreversible") and not state.founder_notes:
+            return AgentResult(
+                ok=False,
+                blocked_reason=str(data.get("question") or "").strip()
+                or "Esta entrega pode apagar dados existentes sem volta. Posso seguir?",
+                blocked_options=self._list(data, "options")[:3] or None,
+            )
+        return AgentResult(ok=True, summary=f"{len(risks)} riscos, {len(extra)} mitigações")
 
     def _repo_outline(self, max_entries: int = 80) -> str:
         return repo_outline(self.ctx.root, max_entries)
@@ -277,3 +398,55 @@ def _alternatives(raw: object) -> list[str]:
         elif str(item).strip():
             lines.append(str(item).strip())
     return lines[:5]
+
+
+def _text(raw: object) -> str:
+    text = str(raw or "").strip()
+    return "" if text.lower() in NONE_WORDS else text
+
+
+def _tasks(raw: object) -> list[str]:
+    """Tasks as tasks.md lines: `{task, verify}` objects or plain strings."""
+    items = raw if isinstance(raw, list) else [raw] if raw else []
+    out = []
+    for item in items:
+        if isinstance(item, dict):
+            task = str(item.get("task") or item.get("text") or "").strip()
+            verify = str(item.get("verify") or "").strip()
+            if task:
+                out.append(f"{task} — verificação: {verify}" if verify else task)
+        elif str(item).strip():
+            out.append(str(item).strip())
+    return out
+
+
+def _traceability(raw: object, criteria: list[str]) -> list[str]:
+    """One line per acceptance criterion; a criterion with no planned test says so (7.1)."""
+    planned: dict[int, list[str]] = {}
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            n = int(item.get("criterion"))
+        except (TypeError, ValueError):
+            continue
+        test = str(item.get("test") or "").strip()
+        if test:
+            planned.setdefault(n, []).append(test)
+    lines = [
+        f"Critério {n} → " + ("; ".join(planned[n]) if n in planned else "**sem teste planejado**")
+        for n in range(1, len(criteria) + 1)
+    ]
+    return lines or [f"Critério {n} → {'; '.join(t)}" for n, t in sorted(planned.items())]
+
+
+def _constitution_check(raw: object) -> list[str]:
+    lines = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or not str(item.get("rule") or "").strip():
+            continue
+        ok = item.get("ok") is not False
+        note = str(item.get("note") or "").strip()
+        verdict = "respeitada" if ok else "**violada**"
+        lines.append(f"{str(item['rule']).strip()} — {verdict}" + (f": {note}" if note else ""))
+    return lines

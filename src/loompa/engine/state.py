@@ -56,6 +56,14 @@ class Complexity(StrEnum):
     COMPLEX = "COMPLEX"  # product/review roles lifted to tier1
 
 
+class Autonomy(StrEnum):
+    """Ceremony per story (Fase 7, 7.5)."""
+
+    YOLO = "yolo"  # simple, cosmetic: no spec review, no model self-check per task
+    STANDARD = "standard"
+    PREFLIGHT = "preflight"  # risk analysis and mitigations before the first commit
+
+
 class QAVerdict(StrEnum):
     PASS = "PASS"
     CONCERNS = "CONCERNS"  # medium/low findings: delivered, findings feed the Kaizen loop
@@ -73,6 +81,7 @@ class StoryState(BaseModel):
     # intake; `phase` is the phase to run next. `stage` stays the kanban projection.
     kind: StoryKind = StoryKind.FEATURE
     complexity: Complexity = Complexity.STANDARD
+    autonomy: Autonomy = Autonomy.STANDARD
     route: list[str] = Field(default_factory=list)
     phase: str = ""
     handoff: dict[str, str] = Field(default_factory=dict)  # phase -> notes for the next phase

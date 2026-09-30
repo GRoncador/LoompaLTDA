@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from loompa.engine.state import Complexity, Stage, StoryKind, StoryState
+from loompa.engine.state import Autonomy, Complexity, Stage, StoryKind, StoryState
 
 Node = Callable[..., Awaitable[StoryState]]
 
@@ -46,13 +46,35 @@ BASE_ROUTE = ["intake", "spec", "spec_review", "plan", "dev", "test", "review"]
 RESEARCH_ROUTE = ["intake", "research", "research_review"]
 
 
-def build_route(kind: StoryKind | str, complexity: Complexity | str) -> list[str]:
-    """Ordered phases for a story, from its kind and complexity."""
+def autonomy_for(complexity: Complexity | str, setting: str = "auto") -> Autonomy:
+    """The factory's setting wins; `auto` follows the complexity (a plan touching a schema, a
+    migration or a contract is lifted to preflight later, in `node_plan`)."""
+    if setting and setting != "auto":
+        return Autonomy(setting)
+    return {
+        Complexity.SIMPLE: Autonomy.YOLO,
+        Complexity.COMPLEX: Autonomy.PREFLIGHT,
+    }.get(Complexity(complexity), Autonomy.STANDARD)
+
+
+def with_preflight(route: list[str]) -> list[str]:
+    if "preflight" in route or "plan" not in route:
+        return route
+    i = route.index("plan") + 1
+    return [*route[:i], "preflight", *route[i:]]
+
+
+def build_route(
+    kind: StoryKind | str, complexity: Complexity | str, autonomy: Autonomy | str | None = None
+) -> list[str]:
+    """Ordered phases for a story, from its kind, complexity and autonomy."""
     kind = StoryKind(kind)
     complexity = Complexity(complexity)
     if kind == StoryKind.RESEARCH:
         return list(RESEARCH_ROUTE)
     route = list(BASE_ROUTE)
+    if autonomy is not None and Autonomy(autonomy) == Autonomy.PREFLIGHT:
+        route = with_preflight(route)
     if (
         complexity == Complexity.SIMPLE
         or kind == StoryKind.BUGFIX

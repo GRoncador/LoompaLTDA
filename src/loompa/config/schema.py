@@ -67,6 +67,9 @@ class ScheduleConfig(BaseModel):
     work_hours: str = "09:00-17:30"
     ops_max_recoveries: int = Field(3, ge=0)  # transient crashes the Ops Loompa retries per story
     ops_retry_base_s: float = Field(60.0, ge=0)  # first wait; doubles each retry, capped at 10 min
+    # How much ceremony a story gets (Fase 7, 7.5). `auto`: SIMPLE runs yolo, COMPLEX (or a plan
+    # touching schemas, migrations or contracts) runs preflight, the rest standard.
+    autonomy: Literal["auto", "yolo", "standard", "preflight"] = "auto"
 
 
 class WorkerConfig(BaseModel):

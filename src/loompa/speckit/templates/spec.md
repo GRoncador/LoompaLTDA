@@ -15,6 +15,18 @@
 ## Critérios de aceitação (BDD)
 {acceptance}
 
+## Requisitos não-funcionais
+{nfrs}
+
+## Casos de borda
+{edge_cases}
+
+## Entidades principais
+{entities}
+
+## Premissas
+{assumptions}
+
 ## Regras de negócio
 {rules}
 

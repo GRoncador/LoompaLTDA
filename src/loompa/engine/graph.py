@@ -37,9 +37,26 @@ from loompa.comms import (
     sanitize_for_founder,
 )
 from loompa.engine.context import EngineContext
-from loompa.engine.phases import Phase, advance, build_route, goto, phase_stage, register
-from loompa.engine.state import BlockedReason, QAVerdict, Stage, StoryKind, StoryState
+from loompa.engine.phases import (
+    Phase,
+    advance,
+    autonomy_for,
+    build_route,
+    goto,
+    phase_stage,
+    register,
+    with_preflight,
+)
+from loompa.engine.state import (
+    Autonomy,
+    BlockedReason,
+    QAVerdict,
+    Stage,
+    StoryKind,
+    StoryState,
+)
 from loompa.llm import LLMError
+from loompa.risk import needs_preflight
 from loompa.worktrees import GitError, Worktree
 
 Node = Callable[[EngineContext, StoryState], Awaitable[StoryState]]
@@ -162,6 +179,7 @@ _STAGE_OF_PHASE = {
     "spec": Stage.SPEC,
     "spec_review": Stage.SPEC,
     "plan": Stage.PLAN,
+    "preflight": Stage.PLAN,
     "dev": Stage.DEV,
     "test": Stage.TEST,
     "review": Stage.REVIEW,
@@ -189,12 +207,14 @@ async def node_intake(ctx: EngineContext, state: StoryState) -> StoryState:
         state.phase = ""
         ctx.emit("story.split", story_id=state.story_id, children=ids)
         return state
-    state.route = build_route(state.kind, state.complexity)
+    state.autonomy = autonomy_for(state.complexity, ctx.config.schedule.autonomy)
+    state.route = build_route(state.kind, state.complexity, state.autonomy)
     ctx.emit(
         "story.classified",
         story_id=state.story_id,
         kind=state.kind.value,
         complexity=state.complexity.value,
+        autonomy=state.autonomy.value,
         route=state.route,
     )
     return goto(state, state.next_phase("intake") or "spec")
@@ -237,7 +257,33 @@ async def node_spec_review(ctx: EngineContext, state: StoryState) -> StoryState:
 
 
 async def node_plan(ctx: EngineContext, state: StoryState) -> StoryState:
-    await ArchitectAgent(ctx).run(state)
+    res = await ArchitectAgent(ctx).run(state)
+    if not res.ok and state.handoff.get("plan"):
+        state.spec_review_rounds = 0  # the rewritten spec gets its own review
+        return goto(state, "spec")
+    if (
+        state.autonomy != Autonomy.PREFLIGHT
+        and ctx.config.schedule.autonomy == "auto"
+        and needs_preflight(state.allowed_paths)
+    ):
+        # a schema, a migration or a public contract: planned twice, whatever the complexity
+        state.autonomy = Autonomy.PREFLIGHT
+        state.route = with_preflight(state.route)
+        ctx.emit("story.autonomy", story_id=state.story_id, autonomy=state.autonomy.value)
+    return advance(state)
+
+
+async def node_preflight(ctx: EngineContext, state: StoryState) -> StoryState:
+    res = await ArchitectAgent(ctx).preflight(state)
+    if res.blocked_reason:
+        return await block(
+            ctx,
+            state,
+            BlockedReason.QUESTION,
+            res.blocked_reason,
+            options=res.blocked_options,
+            resume="dev",
+        )
     return advance(state)
 
 
@@ -503,6 +549,16 @@ register(
     )
 )
 register(Phase("plan", node_plan, Stage.PLAN, owner="architect", reviewer="product_owner"))
+register(
+    Phase(
+        "preflight",
+        node_preflight,
+        Stage.PLAN,
+        owner="architect",
+        reviewer="product_owner",
+        description="brownfield risk report and mitigations before the first commit",
+    )
+)
 register(Phase("dev", node_dev, Stage.DEV, owner="worker", description="DoD checklist per task"))
 register(Phase("test", node_test, Stage.TEST, owner="inspector", description="graded QA gate"))
 register(Phase("review", node_review, Stage.REVIEW, owner="deployer", reviewer="founder"))

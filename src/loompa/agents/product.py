@@ -12,14 +12,25 @@ Turn the user story into a precise, minimal specification following the GitHub S
 Rules:
 - Stay strictly within the story; list anything tempting but unrelated under out_of_scope.
 - Acceptance criteria are BDD sentences ("Dado ..., quando ..., então ..."), testable and binary.
+- `nfrs`: only the non-functional requirements this story really has (latency ceiling, query
+  limits / no N+1, security and authorization, data volume). A small change usually has none:
+  leave it empty rather than invent one.
+- `edge_cases`: invalid input, empty and limit values, failure or concurrency paths; every edge
+  case you list must also be covered by an acceptance criterion.
+- `entities`: only when the story involves data: each entity, what it represents and its key
+  attributes, without implementation details.
+- `assumptions`: every default you chose because the request did not say (a format, a limit,
+  who uses it). State them here instead of hiding them in criteria: the Product Owner checks
+  them against what the founder asked.
 - Respect the project constitution below. Never invent libraries or scope.
 - If a genuinely blocking product decision exists (two viable paths with business impact), set
   needs_decision=true and phrase `question`, `context` and 2-3 short `options` in plain,
   non-technical {language} for a founder. Otherwise needs_decision=false and leave questions
   as informational.
 Respond with JSON only:
-{{"goal": str, "in_scope": [str], "out_of_scope": [str], "acceptance": [str], "rules": [str],
-  "questions": [str], "needs_decision": bool, "question": str, "context": str, "options": [str]}}
+{{"goal": str, "in_scope": [str], "out_of_scope": [str], "acceptance": [str], "nfrs": [str],
+  "edge_cases": [str], "entities": [str], "assumptions": [str], "rules": [str], "questions": [str], "needs_decision": bool,
+  "question": str, "context": str, "options": [str]}}
 Write all strings in {language}.
 """
 
@@ -48,6 +59,13 @@ class ProductAgent(LoompaAgent):
                 + state.handoff["spec_review"]
                 + "\n\n"
                 if state.handoff.get("spec_review")
+                else ""
+            )
+            + (
+                "## The Architect could not plan this spec (fix this first)\n"
+                + state.handoff["plan"]
+                + "\n\n"
+                if state.handoff.get("plan")
                 else ""
             )
             + f"## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
@@ -90,6 +108,10 @@ class ProductAgent(LoompaAgent):
                 acceptance=artifacts.acceptance,
                 rules=artifacts.rules,
                 questions=artifacts.questions,
+                nfrs=self._list(data, "nfrs"),
+                edge_cases=self._list(data, "edge_cases"),
+                entities=self._list(data, "entities"),
+                assumptions=self._list(data, "assumptions"),
             ),
             encoding="utf-8",
         )

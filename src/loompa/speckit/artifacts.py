@@ -66,6 +66,10 @@ def render_spec(
     acceptance: list[str],
     rules: list[str],
     questions: list[str],
+    nfrs: list[str] | None = None,
+    edge_cases: list[str] | None = None,
+    entities: list[str] | None = None,
+    assumptions: list[str] | None = None,
 ) -> str:
     return _template("spec.md").format(
         story_id=story_id,
@@ -74,10 +78,19 @@ def render_spec(
         goal=goal.strip(),
         in_scope=_bullets(in_scope),
         out_of_scope=_bullets(out_of_scope),
-        acceptance=_bullets(acceptance, "_(a definir)_"),
+        acceptance=_numbered(acceptance, "_(a definir)_"),
+        nfrs=_bullets(nfrs or []),
+        edge_cases=_bullets(edge_cases or []),
+        entities=_bullets(entities or []),
+        assumptions=_bullets(assumptions or []),
         rules=_bullets(rules),
         questions=_bullets(questions),
     )
+
+
+def _numbered(items: list[str], empty: str) -> str:
+    """Criteria are numbered: the plan's traceability matrix points at them by number."""
+    return "\n".join(f"{i}. {c}" for i, c in enumerate(items, 1)) if items else empty
 
 
 def render_plan(
@@ -90,6 +103,10 @@ def render_plan(
     risks: list[str],
     precedents: list[str],
     alternatives: list[str] | None = None,
+    impact: str = "",
+    rollback: str = "",
+    traceability: list[str] | None = None,
+    constitution_check: list[str] | None = None,
 ) -> str:
     return _template("plan.md").format(
         story_id=story_id,
@@ -97,10 +114,35 @@ def render_plan(
         date=date.today().isoformat(),
         approach=approach.strip(),
         alternatives=_bullets(alternatives or []),
+        constitution_check=_bullets(constitution_check or []),
         files=_bullets(files),
         contracts=contracts.strip() or "_(nenhum contrato novo)_",
+        impact=impact.strip() or "_(só código novo)_",
+        rollback=rollback.strip() or "_(sem dados persistidos nem contratos públicos alterados)_",
+        traceability=_bullets(traceability or []),
         risks=_bullets(risks),
         precedents=_bullets(precedents),
+    )
+
+
+def render_risk(
+    *,
+    story_id: str,
+    title: str,
+    matrix: str,
+    risks: list[str],
+    checks: list[str],
+    mitigations: list[str],
+) -> str:
+    """The pre-flight risk report of a story (Fase 7, 7.6)."""
+    return _template("risk.md").format(
+        story_id=story_id,
+        title=title,
+        date=date.today().isoformat(),
+        matrix=matrix,
+        risks=_bullets(risks),
+        checks=_bullets(checks),
+        mitigations=_bullets(mitigations),
     )
 
 
@@ -177,6 +219,7 @@ class StorySpecPaths:
     plan: Path
     tasks: Path
     research: Path  # research stories (Analyst) end here instead of in code
+    risk: Path  # pre-flight risk report (Fase 7, 7.6)
 
     def all_present(self) -> bool:
         return self.spec.is_file() and self.plan.is_file() and self.tasks.is_file()
@@ -190,6 +233,7 @@ def story_dir(factory_root: Path, story_id: str) -> StorySpecPaths:
         plan=root / "plan.md",
         tasks=root / "tasks.md",
         research=root / "research.md",
+        risk=root / "risk.md",
     )
 
 
