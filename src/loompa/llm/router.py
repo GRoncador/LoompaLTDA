@@ -51,6 +51,25 @@ def _cut_tail(resp: LLMResponse) -> dict[str, str]:
     return tail
 
 
+# A cut answer that spent at least this share of its output thinking wrote nothing usable: more
+# room buys more thinking (smoke run 2026-09-30: an Architect plan cut at 4k, 8k and 16k tokens on
+# two models, every token reasoning; the same call at `low` answered in 1.8k).
+THINKING_SHARE = 0.9
+
+
+def _thought_only(resp: LLMResponse) -> bool:
+    return bool(resp.reasoning_tokens) and resp.reasoning_tokens >= THINKING_SHARE * max(
+        resp.output_tokens, 1
+    )
+
+
+def _lighter_of(a: str, b: str) -> str:
+    """The one that thinks less; the provider default counts as `medium`."""
+    order = REASONING_EFFORTS
+    rank = {e: order.index(e) if e in order else order.index("medium") for e in (a, b)}
+    return a if rank[a] <= rank[b] else b
+
+
 def _lower_effort(effort: str) -> str:
     """One step less thinking; the provider default counts as `medium`."""
     order = REASONING_EFFORTS
@@ -114,6 +133,9 @@ class ModelRouter:
         # that needed 3600 tokens for a self-check will need them next time too: starting
         # there saves a paid, discarded call (52 cuts in one hour of `contas`, 2026-09-30).
         self._fitted: dict[tuple[str, str], int] = {}
+        # (model key, role) -> the lower effort a call had to drop to after thinking through its
+        # whole budget: the next call of that role starts there instead of paying the cut again.
+        self._settled_effort: dict[tuple[str, str], str] = {}
         self._budget_downgrade = False
         # When every candidate of a tier is merely cooling down (typical with a single-model
         # tier on a free-tier rate limit), wait up to this long for the earliest one instead
@@ -395,6 +417,9 @@ class ModelRouter:
                 self.config.models.max_output_ceiling,
             )
             effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
+            if (key, role) in self._settled_effort:
+                effort = _lighter_of(self._settled_effort[(key, role)], effort)
+            lowered = False
             cuts = 0
             retry = 0
             while True:
@@ -499,11 +524,18 @@ class ModelRouter:
                 if not resp.truncated:
                     if cuts:
                         self._fitted[(key, role)] = budget
+                    if lowered:
+                        self._settled_effort[(key, role)] = effort
                     break
                 # Cut mid-answer: the text or tool call is unusable. More room first; at the
-                # ceiling, less thinking (on a reasoning model the budget pays for both).
-                bigger = min(budget * 2, self.config.models.max_output_ceiling)
-                lighter = _lower_effort(effort) if bigger == budget else effort
+                # ceiling, less thinking (on a reasoning model the budget pays for both). An
+                # answer that was all thinking gets less thinking at once, in the same room.
+                thinking = _thought_only(resp) and _lower_effort(effort) != effort
+                if thinking:
+                    bigger, lighter = budget, _lower_effort(effort)
+                else:
+                    bigger = min(budget * 2, self.config.models.max_output_ceiling)
+                    lighter = _lower_effort(effort) if bigger == budget else effort
                 if cuts >= self.config.models.truncation_retries or (
                     bigger == budget and lighter == effort
                 ):
@@ -535,9 +567,11 @@ class ModelRouter:
                     max_tokens=budget,
                     next_max_tokens=bigger,
                     effort=lighter or None,
+                    thinking=thinking or None,
                 )
                 cuts += 1
                 calls.cuts += 1
+                lowered = lowered or lighter != effort
                 budget, effort = bigger, lighter
             if resp is not None:
                 return RoutedCall(

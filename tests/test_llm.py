@@ -608,6 +608,78 @@ async def test_at_the_ceiling_a_cut_answer_thinks_less_then_gives_up_plainly():
     assert all(c["max_tokens"] == 1000 for c in prov.calls)
 
 
+class _Overthinker(MockProvider):
+    """Thinks through any budget at the default effort (smoke run, 2026-09-30: the Architect's
+    plan for a SIMPLE story, every token reasoning about Click's source); answers at `low`."""
+
+    async def complete(self, model, messages, **kw):  # type: ignore[override]
+        self.calls.append({"model": model, **kw})
+        low = kw.get("reasoning_effort") in ("low", "minimal")
+        return LLMResponse(
+            content='{"ok": true}' if low else "",
+            tool_calls=[],
+            model=model,
+            provider=self.name,
+            input_tokens=100,
+            output_tokens=400 if low else kw["max_tokens"],
+            reasoning_tokens=100 if low else kw["max_tokens"],
+            finish_reason="stop" if low else "length",
+        )
+
+
+async def test_an_answer_cut_while_still_thinking_thinks_less_instead_of_getting_more_room():
+    cfg = single_provider_config()
+    cfg.models.max_output_tokens = 4096
+    prov = _Overthinker("deepseek")
+    events: list[tuple[str, dict]] = []
+    router = ModelRouter(
+        cfg, providers={"deepseek": prov}, on_event=lambda t, **kw: events.append((t, kw))
+    )
+    rc = await router.complete("architect", [Message("user", "x")], complexity="SIMPLE")
+    assert rc.response.text == '{"ok": true}'
+    assert [(c["max_tokens"], c["reasoning_effort"]) for c in prov.calls] == [
+        (4096, ""),
+        (4096, "low"),  # same room, less thinking: doubling it bought only more thinking
+    ]
+    assert events == [
+        (
+            "llm.cut",
+            {
+                "story_id": None,
+                "agent": "architect",
+                "model": "deepseek/deepseek-chat",
+                "role": "architect",
+                "max_tokens": 4096,
+                "next_max_tokens": 4096,
+                "effort": "low",
+                "thinking": True,
+            },
+        )
+    ]
+    # the next call of that role starts at the effort that answered; another role does not
+    await router.complete("architect", [Message("user", "y")], complexity="SIMPLE")
+    assert prov.calls[-1]["reasoning_effort"] == "low" and len(prov.calls) == 3
+    await router.complete("product", [Message("user", "z")], complexity="SIMPLE")
+    assert prov.calls[3]["reasoning_effort"] == ""
+    # an explicit lower effort is kept, never raised back
+    await router.complete(
+        "architect", [Message("user", "w")], complexity="SIMPLE", reasoning_effort="minimal"
+    )
+    assert prov.calls[-1]["reasoning_effort"] == "minimal"
+
+
+async def test_a_cut_with_visible_output_still_gets_more_room():
+    cfg = single_provider_config()
+    cfg.models.max_output_tokens = 4096
+    prov = _cut_until(6000)  # reports no reasoning: the answer itself was long
+    router = ModelRouter(cfg, providers={"deepseek": prov})
+    await router.complete("architect", [Message("user", "x")], complexity="SIMPLE")
+    assert [(c["max_tokens"], c["reasoning_effort"]) for c in prov.calls] == [
+        (4096, ""),
+        (8192, ""),
+    ]
+
+
 def test_ops_does_not_wait_out_a_cut_answer_and_says_why_in_plain_words():
     from loompa.agents.ops import triage
     from loompa.comms import audit_executive_text
