@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -329,6 +330,52 @@ async def test_the_founders_changes_can_widen_the_plan_they_did_not_foresee(fact
     assert any(e["type"] == "plan.amended" for e in ctx.store.events_since(0, limit=10_000))
     # the Inspector judges scope against the amended fence, not a guess from the spec
     assert "## Paths the plan allows" in judged[-1] and "- docs/" in judged[-1]
+    await ctx.aclose()
+
+
+def test_conflict_blocks_are_found_by_line():
+    from loompa.agents.worker import conflict_hunks
+
+    text = "a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> main\nb\n<<<<<<< HEAD\nz\n"
+    assert conflict_hunks(text) == [(1, 5)]  # the unbalanced second block is left alone
+
+
+async def test_a_file_too_large_to_send_whole_is_resolved_block_by_block(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    """`contas` S-007: the conflicted test file had 22k characters, over the one-call limit, so
+    it was skipped every time; the merge was aborted and the story kept its old base."""
+    from loompa.agents import worker as worker_mod
+    from loompa.agents.worker import WorkerAgent
+
+    root = factory.root
+    filler = "".join(f"def test_f{i}():\n    assert {i} == {i}\n\n\n" for i in range(40))
+    (root / "tests" / "test_big.py").write_text(filler + "def test_tail():\n    assert 1\n")
+    git("add", ".", cwd=root)
+    git("commit", "-qm", "big", cwd=root)
+    asked: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if "one conflict block at a time" in messages[0].content:
+            asked.append(messages[-1].content)
+            return json.dumps({"hunks": {"1": "def test_tail():\n    assert 2\n    assert 3\n"}})
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    wt = ctx.worktrees.create("S-099", title="grande")
+    big = wt.path / "tests" / "test_big.py"
+    big.write_text(filler + "def test_tail():\n    assert 2\n")
+    git("commit", "-qam", "story", cwd=wt.path)
+    (root / "tests" / "test_big.py").write_text(filler + "def test_tail():\n    assert 3\n")
+    git("commit", "-qam", "base", cwd=root)
+    subprocess.run(["git", "merge", "main"], cwd=wt.path, capture_output=True)  # conflicts
+    state = load_state(ctx, seed_story(ctx, "grande"))
+    monkeypatch.setattr(worker_mod, "MAX_CONFLICT_CHARS", 500)
+    res = await WorkerAgent(ctx).resolve_conflicts(state, wt, ["tests/test_big.py"])
+    assert res.ok and len(asked) == 1
+    assert "def test_f39" in asked[0] and "def test_f0()" not in asked[0]  # context, not the file
+    text = big.read_text()
+    assert "<<<<<<<" not in text and "assert 2\n    assert 3" in text and "def test_f0()" in text
     await ctx.aclose()
 
 
