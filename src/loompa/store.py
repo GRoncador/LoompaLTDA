@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_events_id ON events(id);
+CREATE INDEX IF NOT EXISTS ix_events_story ON events(story_id, id);
 CREATE TABLE IF NOT EXISTS inbox (
     id TEXT PRIMARY KEY,
     factory TEXT NOT NULL,
@@ -83,7 +84,11 @@ CREATE TABLE IF NOT EXISTS usage (
     cached_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
     duration_ms INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    served_by TEXT NOT NULL DEFAULT '',
+    finish_reason TEXT NOT NULL DEFAULT '',
+    cost_source TEXT NOT NULL DEFAULT '',
+    span_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ix_usage_created ON usage(created_at);
 CREATE TABLE IF NOT EXISTS agents (
@@ -179,7 +184,28 @@ class Store:
         retry_locked(lambda: self._conn.execute("PRAGMA journal_mode=WAL"), what="state.db")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA busy_timeout=10000")
+        retry_locked(self._migrate, what="state.db migration")
         retry_locked(lambda: self._conn.executescript(SCHEMA), what="state.db schema")
+
+    # Columns added after a table first shipped: a factory's state.db from before gets them on
+    # open, with the defaults new rows would have. `CREATE TABLE IF NOT EXISTS` never adds any.
+    ADDED_COLUMNS = {
+        "usage": (
+            ("served_by", "TEXT NOT NULL DEFAULT ''"),
+            ("finish_reason", "TEXT NOT NULL DEFAULT ''"),
+            ("cost_source", "TEXT NOT NULL DEFAULT ''"),
+            ("span_id", "TEXT NOT NULL DEFAULT ''"),
+        ),
+    }
+
+    def _migrate(self) -> None:
+        for table, columns in self.ADDED_COLUMNS.items():
+            have = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if not have:
+                continue  # a new database: the schema below creates the table whole
+            for name, decl in columns:
+                if name not in have:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     def close(self) -> None:
         self._conn.close()
@@ -486,6 +512,52 @@ class Store:
             f"FROM usage{where} GROUP BY day ORDER BY day",
             tuple(params),
         )
+
+    def usage_stats(
+        self,
+        factory: str | None = None,
+        *,
+        story_id: str | None = None,
+        since_iso: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Time and cost of the model calls per role and model, with the 90th percentile of the
+        latency and how many answers were cut: two tier-2 models compared on the same role."""
+        clauses, params = [], []
+        for column, value in (("factory", factory), ("story_id", story_id)):
+            if value:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+        if since_iso:
+            clauses.append("created_at >= ?")
+            params.append(since_iso)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = self._q(
+            "SELECT role, model, duration_ms, cost_usd, input_tokens, output_tokens, "
+            f"finish_reason, cost_source FROM usage{where}",
+            tuple(params),
+        )
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for r in rows:
+            groups.setdefault((r["role"], r["model"]), []).append(r)
+        out = []
+        for (role, model), items in groups.items():
+            times = sorted(int(i["duration_ms"] or 0) for i in items)
+            out.append(
+                {
+                    "role": role,
+                    "model": model,
+                    "calls": len(items),
+                    "cost_usd": sum(float(i["cost_usd"] or 0) for i in items),
+                    "input_tokens": sum(int(i["input_tokens"] or 0) for i in items),
+                    "output_tokens": sum(int(i["output_tokens"] or 0) for i in items),
+                    "total_ms": sum(times),
+                    "avg_ms": sum(times) // len(times),
+                    "p90_ms": times[min(len(times) - 1, int(len(times) * 0.9))],
+                    "cuts": sum(1 for i in items if i["finish_reason"] in ("length", "max_tokens")),
+                    "reported": sum(1 for i in items if i["cost_source"] == "reported"),
+                }
+            )
+        return sorted(out, key=lambda r: (r["role"], -r["cost_usd"]))
 
     def tool_output_by(
         self, factory: str | None = None, since_iso: str | None = None

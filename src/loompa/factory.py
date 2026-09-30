@@ -70,6 +70,10 @@ class FactoryPaths:
         return self.loompa / "logs"
 
     @property
+    def traces(self) -> Path:
+        return self.loompa / "traces"
+
+    @property
     def state_db(self) -> Path:
         return self.loompa / "state.db"
 
@@ -132,6 +136,7 @@ GITIGNORE_LINES = (
     ".loompa/*.db",
     ".loompa/*.db-*",
     ".loompa/logs/",
+    ".loompa/traces/",  # prompts and product code, per story (`loompa trace`)
     ".loompa/.env",  # per-factory API keys: never committed
     ".loompa/engine.lock",
 )

@@ -210,6 +210,20 @@ def redact(text: str, values: Iterable[str]) -> str:
     return text
 
 
+# A token with the shape of a provider key, wherever it sits in a text (a file, a prompt, a tool
+# result): what `redact_secrets` masks even when the value is not one of this machine's keys.
+KEY_SHAPED = re.compile(
+    r"(?<![A-Za-z0-9])(sk-[A-Za-z0-9_\-]{20,}|AIza[0-9A-Za-z_\-]{30,}|tvly-[A-Za-z0-9_\-]{16,}"
+    r"|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}"
+    r"|hf_[A-Za-z0-9]{30,})"
+)
+
+
+def redact_secrets(text: str, values: Iterable[str]) -> str:
+    """The known values masked like the logs mask them, then anything shaped like a key."""
+    return KEY_SHAPED.sub(lambda m: "…" + m.group(0)[-4:], redact(text, values))
+
+
 class SecretRedactor(logging.Filter):
     """Logging filter that masks known secret values in every record it sees."""
 

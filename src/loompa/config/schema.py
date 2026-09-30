@@ -481,6 +481,13 @@ class DashboardConfig(BaseModel):
     port: int = Field(8765, ge=1, le=65535)
 
 
+class TraceConfig(BaseModel):
+    """The per-story trace (`loompa/trace.py`). Always on; only how long it is kept is a choice:
+    long enough to compare a sprint with the one before it."""
+
+    retention_days: int = Field(30, ge=1)
+
+
 class StackProfile(BaseModel):
     languages: list[str] = Field(default_factory=list)
     frameworks: list[str] = Field(default_factory=list)
@@ -509,6 +516,7 @@ class LoompaConfig(BaseModel):
     quality: QualityConfig = Field(default_factory=QualityConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
+    trace: TraceConfig = Field(default_factory=TraceConfig)
     stack: StackProfile = Field(default_factory=StackProfile)
 
     @model_validator(mode="after")

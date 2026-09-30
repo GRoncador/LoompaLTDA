@@ -27,6 +27,8 @@ from loompa.agents import (
     ProductOwnerAgent,
     WorkerAgent,
 )
+from loompa.agents.architect import REPLANNED_KEY
+from loompa.agents.worker import FOUNDER_CHANGES
 from loompa.comms import (
     FounderAnswer,
     FounderMessage,
@@ -131,7 +133,6 @@ async def block(
 # a third time helps nobody, so the founder is told it repeated and offered the ways out.
 _RETRYABLE_BLOCKS = (BlockedReason.PERSISTENT_FAILURE, BlockedReason.CONFLICT)
 LAST_BLOCK_KEY = "last_block"
-REPLANNED_KEY = "replanned"
 AMEND_KEY = "amend_plan"
 CONFLICT_RETRIES_KEY = "conflict_retries"
 SELFHEAL_KEY = "self_healed"  # a WAIVED verdict already got its Worker round
@@ -641,9 +642,7 @@ def apply_founder_answer(
         else:
             state.note(guidance or "Founder pediu ajustes na entrega.")
             goto(state, "dev")
-            state.failure_history.append(
-                "Founder asked for changes: " + (guidance or "(no details)")
-            )
+            state.failure_history.append(f"{FOUNDER_CHANGES}: " + (guidance or "(no details)"))
             if guidance and "plan" in state.route:
                 # the request may need files the plan never listed: the Architect amends it and
                 # the Worker does the new tasks, not the whole story again

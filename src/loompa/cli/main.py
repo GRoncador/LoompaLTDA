@@ -240,6 +240,7 @@ try:  # extended commands (meeting/run/inbox/dashboard) registered when the engi
     from loompa.cli import providers as _providers  # noqa: F401
     from loompa.cli import schedule as _schedule  # noqa: F401
     from loompa.cli import setup as _setup  # noqa: F401
+    from loompa.cli import trace as _trace  # noqa: F401
     from loompa.cli import worker as _worker  # noqa: F401
 except ImportError:  # pragma: no cover
     pass

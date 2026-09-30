@@ -7,9 +7,12 @@ semantic commit. The Worker never sees raw terminal output — only ACI-compacte
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Generator
+from contextlib import contextmanager
 
 from loompa.aci import ACI, run_command, summarize_tests
-from loompa.agents.architect import REPRO_KEY, writable_tests
+from loompa.agents.architect import REPRO_KEY, task_origin, writable_tests
 from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance, repo_outline
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
@@ -131,6 +134,9 @@ exercises the failing behaviour the spec describes, and check with `run_tests` t
 _BROKEN_TEST = ("ImportError", "ModuleNotFoundError", "SyntaxError", "NameError", "fixture '")
 
 
+FOUNDER_CHANGES = "Founder asked for changes"  # how the engine files a delivery sent back
+
+
 class WorkerAgent(LoompaAgent):
     role = "worker"
     display = "Worker Loompa"
@@ -158,90 +164,19 @@ class WorkerAgent(LoompaAgent):
         outline = repo_outline(wt.path)  # once per run: the same text keeps the prefix cached
         summaries: list[str] = []
         tier_label = self.tier_override or "tier2"
-        repro = state.extra.get(REPRO_KEY) or {}
         for task in pending:
             self.set_state(
                 "WORKING", state, model=tier_label, detail=f"T{task.number}: {task.text[:60]}"
             )
-            reproducer = repro.get("status") == "pending" and repro.get("task") == task.number
-            task_aci = aci
-            if reproducer:  # 7.7: tests only, and the code proves them red before the fix
-                fence = writable_tests(state.allowed_paths) or ["tests/"]
-                task_aci = self.ctx.aci_for(wt.path, allowed_paths=fence)
-            result = await self._run_task(
-                state,
-                task_aci,
-                task.number,
-                task.text + (REPRODUCER_TASK if reproducer else ""),
-                spec,
-                plan,
-                tasks_md,
-                outline=outline,
-                changed=self.ctx.worktrees.diff_stat(wt),
-            )
-            if reproducer and not result.blocked_reason:
-                result = await self._prove_reproduced(
-                    state, wt, task_aci, task.number, task.text, spec, plan, tasks_md, outline
+            with self._task_span(state, task.number, task.text, tier_label) as mark:
+                result = await self._one_task(
+                    state, wt, aci, task.number, task.text, spec, plan, tasks_md, outline
                 )
-                self._flush_learnings(state, task_aci)
+                mark["outcome"] = "blocked" if result.blocked_reason else "finished"
             if result.blocked_reason:
                 self.set_state("BLOCKED", state, detail="aguardando decisão")
                 self._flush_learnings(state, aci)
                 return result
-            # deterministic hygiene first ($0, also in dry-run), then the model's self-check
-            dirty = scan_diff(self.ctx.worktrees.diff_working(wt, max_chars=200_000))
-            if dirty:
-                self.ctx.emit(
-                    "worker.hygiene",
-                    story_id=state.story_id,
-                    agent=self.name,
-                    task=task.number,
-                    issues=[i.line() for i in dirty[:8]],
-                )
-            missing = [f"Diff hygiene: {i.line()}" for i in dirty[:5]]
-            # a red test is the reproducer's goal; a yolo story trusts hygiene and the Inspector
-            if not reproducer and state.autonomy != Autonomy.YOLO:
-                missing += await self._dod_check(state, wt, task.text, result.summary)
-            if missing:
-                self.ctx.emit(
-                    "worker.dod_incomplete",
-                    story_id=state.story_id,
-                    agent=self.name,
-                    task=task.number,
-                    missing=missing[:5],
-                )
-                followup = await self._run_task(
-                    state,
-                    aci,
-                    task.number,
-                    task.text
-                    + "\n\nSelf-check found these still missing; finish them:\n"
-                    + "\n".join(f"- {m}" for m in missing[:8]),
-                    spec,
-                    plan,
-                    tasks_md,
-                    outline=outline,
-                    changed=self.ctx.worktrees.diff_stat(wt),
-                )
-                if followup.blocked_reason:
-                    self.set_state("BLOCKED", state, detail="aguardando decisão")
-                    self._flush_learnings(state, aci)
-                    return followup
-                result.summary = f"{result.summary} / {followup.summary}"
-            kind = "test" if reproducer else "feat"
-            commit = self.ctx.worktrees.commit_all(
-                wt, f"{kind}({state.story_id.lower()}): {task.text[:60]}"
-            )
-            if commit:
-                state.commits.append(commit.sha)
-                self.ctx.emit(
-                    "worktree.commit",
-                    story_id=state.story_id,
-                    agent=self.name,
-                    sha=commit.sha,
-                    files=commit.files,
-                    task=task.number,
-                )
             state.tasks_done.append(task.number)
             tasks_md = mark_task_done(tasks_md, task.number)
             paths.tasks.write_text(tasks_md, encoding="utf-8")
@@ -252,6 +187,144 @@ class WorkerAgent(LoompaAgent):
         self.set_state("IDLE")
         state.worker_summary = "\n".join(summaries)
         return AgentResult(ok=True, summary=state.worker_summary)
+
+    @contextmanager
+    def _task_span(
+        self, state: StoryState, number: int, text: str, tier: str, origin: str | None = None
+    ) -> Generator[dict[str, str]]:
+        """A task's start and end as events with the wall-clock time between them, and its span
+        in the trace. The origin says who put it in the checklist (Fase 8.1). The caller sets
+        `outcome` on the dict it gets (finished, unfinished, blocked)."""
+        origin = origin or task_origin(state, number)
+        self.ctx.emit(
+            "worker.task_started",
+            story_id=state.story_id,
+            agent=self.name,
+            task=number,
+            origin=origin,
+            text=text[:160],
+            tier=tier,
+        )
+        started = time.monotonic()
+        mark = {"outcome": "error"}
+        try:
+            with self.ctx.tracer.span(
+                "task",
+                f"T{number}",
+                story_id=state.story_id,
+                task=number,
+                origin=origin,
+                text=text[:300],
+                tier=tier,
+            ) as span:
+                mark["outcome"] = "finished"
+                try:
+                    yield mark
+                except BaseException:
+                    mark["outcome"] = "error"
+                    raise
+                span.set(outcome=mark["outcome"])
+        finally:
+            self.ctx.emit(
+                "worker.task_finished",
+                story_id=state.story_id,
+                agent=self.name,
+                task=number,
+                origin=origin,
+                outcome=mark["outcome"],
+                duration_s=round(time.monotonic() - started, 1),
+            )
+
+    async def _one_task(
+        self,
+        state: StoryState,
+        wt: Worktree,
+        aci: ACI,
+        number: int,
+        text: str,
+        spec: str,
+        plan: str,
+        tasks_md: str,
+        outline: str,
+    ) -> AgentResult:
+        """One checklist task: its pass, the reproducer's proof, hygiene and self-check (with a
+        follow-up pass when something is missing) and its commit."""
+        repro = state.extra.get(REPRO_KEY) or {}
+        reproducer = repro.get("status") == "pending" and repro.get("task") == number
+        task_aci = aci
+        if reproducer:  # 7.7: tests only, and the code proves them red before the fix
+            fence = writable_tests(state.allowed_paths) or ["tests/"]
+            task_aci = self.ctx.aci_for(wt.path, allowed_paths=fence)
+        result = await self._run_task(
+            state,
+            task_aci,
+            number,
+            text + (REPRODUCER_TASK if reproducer else ""),
+            spec,
+            plan,
+            tasks_md,
+            outline=outline,
+            changed=self.ctx.worktrees.diff_stat(wt),
+        )
+        if reproducer and not result.blocked_reason:
+            result = await self._prove_reproduced(
+                state, wt, task_aci, number, text, spec, plan, tasks_md, outline
+            )
+            self._flush_learnings(state, task_aci)
+        if result.blocked_reason:
+            return result
+        # deterministic hygiene first ($0, also in dry-run), then the model's self-check
+        dirty = scan_diff(self.ctx.worktrees.diff_working(wt, max_chars=200_000))
+        if dirty:
+            self.ctx.emit(
+                "worker.hygiene",
+                story_id=state.story_id,
+                agent=self.name,
+                task=number,
+                issues=[i.line() for i in dirty[:8]],
+            )
+        missing = [f"Diff hygiene: {i.line()}" for i in dirty[:5]]
+        # a red test is the reproducer's goal; a yolo story trusts hygiene and the Inspector
+        if not reproducer and state.autonomy != Autonomy.YOLO:
+            missing += await self._dod_check(state, wt, text, result.summary)
+        if missing:
+            self.ctx.emit(
+                "worker.dod_incomplete",
+                story_id=state.story_id,
+                agent=self.name,
+                task=number,
+                missing=missing[:5],
+            )
+            followup = await self._run_task(
+                state,
+                aci,
+                number,
+                text
+                + "\n\nSelf-check found these still missing; finish them:\n"
+                + "\n".join(f"- {m}" for m in missing[:8]),
+                spec,
+                plan,
+                tasks_md,
+                outline=outline,
+                changed=self.ctx.worktrees.diff_stat(wt),
+                label="self_check",
+            )
+            if followup.blocked_reason:
+                return followup
+            result.summary = f"{result.summary} / {followup.summary}"
+        kind = "test" if reproducer else "feat"
+        commit = self.ctx.worktrees.commit_all(wt, f"{kind}({state.story_id.lower()}): {text[:60]}")
+        if commit:
+            state.commits.append(commit.sha)
+            self.ctx.emit(
+                "worktree.commit",
+                story_id=state.story_id,
+                agent=self.name,
+                sha=commit.sha,
+                files=commit.files,
+                task=number,
+            )
+        return result
 
     async def _prove_reproduced(
         self,
@@ -298,6 +371,7 @@ class WorkerAgent(LoompaAgent):
                 tasks_md,
                 outline=outline,
                 changed=self.ctx.worktrees.diff_stat(wt),
+                label="reproducer_retry",
             )
             if result.blocked_reason:
                 return result
@@ -336,18 +410,26 @@ class WorkerAgent(LoompaAgent):
         self.set_state(
             "WORKING", state, model=tier_label, detail="corrigindo falhas apontadas pelo Inspector"
         )
-        result = await self._run_task(
-            state,
-            aci,
-            0,
-            "Fix the failures the Inspector reported (below) without changing the scope, then run the tests until they are green.",
-            spec,
-            plan,
-            tasks_md,
-            outline=repo_outline(wt.path),
-            changed=self.ctx.worktrees.diff_stat(wt),
-            diagnosis=True,
+        text = (
+            "Fix the failures the Inspector reported (below) without changing the scope, then run "
+            "the tests until they are green."
         )
+        # who asked for this pass: the founder's changes on a delivery, or the quality gate
+        origin = "founder" if state.failure_history[-1].startswith(FOUNDER_CHANGES) else "inspector"
+        with self._task_span(state, 0, text, tier_label, origin=origin):
+            result = await self._run_task(
+                state,
+                aci,
+                0,
+                text,
+                spec,
+                plan,
+                tasks_md,
+                outline=repo_outline(wt.path),
+                changed=self.ctx.worktrees.diff_stat(wt),
+                diagnosis=True,
+                label="fix",
+            )
         self._flush_learnings(state, aci)
         if result.blocked_reason:
             self.set_state("BLOCKED", state, detail="aguardando decisão")
@@ -477,7 +559,9 @@ class WorkerAgent(LoompaAgent):
         outline: str = "",
         changed: str = "",
         diagnosis: bool = False,
+        label: str = "main",
     ) -> AgentResult:
+        started = time.monotonic()
         retry_ctx = ""
         if state.failure_history:
             retry_ctx = (
@@ -534,17 +618,20 @@ class WorkerAgent(LoompaAgent):
             keep_tool_results=sched.worker_keep_tool_results,
             keep_files_chars=sched.worker_keep_file_chars,
             guard=guard,
+            label=label,
         )
         self.ctx.emit(
             "worker.task",
             story_id=state.story_id,
             agent=self.name,
             task=number,
+            label=label,
             ended_by=loop.ended_by,
             tool_calls=loop.tool_calls,
             repeats=guard.repeats,
             nudges=guard.nudges,
             diagnosis=toolbox.diagnosis[:300],
+            duration_s=round(time.monotonic() - started, 1),
         )
         if loop.ended_by == "done":
             return AgentResult(ok=True, summary=str(loop.args.get("summary", ""))[:300])

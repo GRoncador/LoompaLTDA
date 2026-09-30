@@ -20,6 +20,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from loompa.config.secrets import KEY_SHAPED
+
 
 class GitError(RuntimeError):
     pass
@@ -338,10 +340,7 @@ class WorktreeManager:
         f":(exclude,glob).loompa/{p}"
         for p in ("specs/**", "decisions/**", "learnings.md", "onboarding_report.md", "audit.json")
     )
-    _SECRET_IN_TEXT = re.compile(
-        r"(?<![A-Za-z0-9])(sk-[A-Za-z0-9_\-]{20,}|AIza[0-9A-Za-z_\-]{30,}|tvly-[A-Za-z0-9_\-]{16,}"
-        r"|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"
-    )
+    _SECRET_IN_TEXT = KEY_SHAPED
 
     def initial_commit(self, message: str = "chore: esqueleto inicial") -> CommitResult | None:
         """Give a repo with no commits its first one, so story worktrees have a base to branch

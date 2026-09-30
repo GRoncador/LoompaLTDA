@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -26,6 +26,7 @@ from loompa.llm.providers import (
     build_provider,
     model_not_found,
 )
+from loompa.trace import Tracer
 
 log = logging.getLogger(__name__)
 
@@ -44,8 +45,22 @@ class RoutedCall:
     response: LLMResponse
     tier: str
     candidate: ModelCandidate
-    cost_usd: float
+    cost_usd: float  # every attempt of the call, cut ones included: each was paid for
     attempts: int
+    cuts: int = 0  # answers cut at the output limit and asked again with more room
+    span_id: str = ""  # the call's span in the story's trace
+    story_id: str | None = None
+
+
+@dataclass
+class _CallLog:
+    """What one logical call went through before it answered (or did not)."""
+
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    spent: float = 0.0
+    cuts: int = 0
+    count: int = 0
 
 
 class ModelRouter:
@@ -58,6 +73,8 @@ class ModelRouter:
         client: httpx.AsyncClient | None = None,
         on_call: Callable[[str, str, RoutedCall], None] | None = None,
         on_model_gone: Callable[[ModelCandidate, str], None] | None = None,
+        on_event: Callable[..., None] | None = None,
+        tracer: Tracer | None = None,
         max_retries: int = 2,
         max_cooldown_wait: float = 90.0,
         secrets: Mapping[str, str] | None = None,
@@ -69,6 +86,10 @@ class ModelRouter:
         # A candidate the provider says it does not have: a typo or a model that left the air.
         # The Ops Loompa turns it into one inbox note (loompa.models_sync.ModelWatch).
         self.on_model_gone = on_model_gone
+        # `(type, *, story_id, agent, **payload)`: cuts and fall-through become events, so a call
+        # that spends minutes retrying is not silence to the stall watchdog or to the dashboard.
+        self.on_event = on_event
+        self.tracer = tracer or Tracer()
         self.max_retries = max_retries
         self._budget_checked_at = 0.0
         # (model key, role) -> output budget that last fitted after a cut. A reasoning model
@@ -182,11 +203,81 @@ class ModelRouter:
         task: str | None = None,
     ) -> RoutedCall:
         tier, cands = self.candidates(role, tier_override, complexity, task)
-        if not cands:
-            raise LLMError(f"nenhum modelo configurado para o tier {tier}")
+        with self.tracer.span(
+            "llm",
+            agent or role,
+            story_id=story_id,
+            role=role,
+            tier=tier,
+            task=task,
+            complexity=complexity,
+            json_mode=json_mode or None,
+            tools=[str(t.get("name")) for t in tools] if tools else None,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+        ) as span:
+            span.set(messages=self.tracer.messages(span.story_id, messages))
+            calls = _CallLog()
+            span.set(attempts=calls.attempts)
+            if not cands:
+                raise LLMError(f"nenhum modelo configurado para o tier {tier}")
+            routed = await self._route(
+                tier,
+                cands,
+                role,
+                messages,
+                agent,
+                story_id,
+                tools,
+                json_mode,
+                max_tokens,
+                complexity,
+                temperature,
+                reasoning_effort,
+                calls,
+            )
+            resp = routed.response
+            answer = self.tracer.messages(
+                span.story_id, [Message("assistant", resp.text, tool_calls=resp.tool_calls)]
+            )
+            span.set(
+                provider=routed.candidate.provider,
+                model=routed.candidate.model,
+                responded=resp.model if resp.model != routed.candidate.model else None,
+                served_by=resp.served_by or None,
+                finish_reason=resp.finish_reason,
+                input_tokens=resp.input_tokens,
+                output_tokens=resp.output_tokens,
+                cached_tokens=resp.cached_tokens,
+                reasoning_tokens=resp.reasoning_tokens or None,
+                cost_usd=round(routed.cost_usd, 6),
+                cuts=routed.cuts or None,
+                response=answer[0] if answer else None,
+            )
+            routed.span_id = span.id
+            routed.story_id = story_id
+            if self.on_call:
+                self.on_call(role, agent or role, routed)
+            return routed
+
+    async def _route(
+        self,
+        tier: str,
+        cands: list[ModelCandidate],
+        role: str,
+        messages: list[Message],
+        agent: str | None,
+        story_id: str | None,
+        tools: list[dict[str, Any]] | None,
+        json_mode: bool,
+        max_tokens: int | None,
+        complexity: str | None,
+        temperature: float | None,
+        reasoning_effort: str | None,
+        calls: _CallLog,
+    ) -> RoutedCall:
         loop = asyncio.get_running_loop()
-        errors: list[str] = []
-        attempts = 0
         waited = 0.0
         while True:
             routed = await self._one_pass(
@@ -202,12 +293,10 @@ class ModelRouter:
                 complexity,
                 temperature,
                 reasoning_effort,
-                errors,
-                attempts,
+                calls,
             )
-            if isinstance(routed, RoutedCall):
+            if routed is not None:
                 return routed
-            attempts = routed
             # Nothing answered. If every candidate is only cooling down, wait for the first
             # one to come back rather than failing the story on the spot.
             cooling = [
@@ -219,11 +308,12 @@ class ModelRouter:
                 break
             wait = min(cooling) - loop.time() + 0.05
             if waited + wait > self.max_cooldown_wait:
-                errors.append(f"cooldown de {wait:.0f}s excede o limite de espera")
+                calls.errors.append(f"cooldown de {wait:.0f}s excede o limite de espera")
                 break
             log.warning("tier %s: todos os modelos em cooldown, aguardando %.0fs", tier, wait)
             await asyncio.sleep(wait)
             waited += wait
+        errors = calls.errors
         if errors and all(e.endswith(TRUNCATED_SUFFIX) for e in errors):
             # Every model ran out of room even at the ceiling: waiting will not change that.
             raise LLMError("resposta cortada: " + "; ".join(errors[-4:]), retryable=False)
@@ -236,6 +326,14 @@ class ModelRouter:
         m = self.config.models
         factor = m.output_scale.get(str(complexity or "STANDARD").upper(), 1.0)
         return max(1, min(int(base * factor), m.max_output_ceiling))
+
+    def _event(self, type_: str, story_id: str | None, agent: str, **payload: Any) -> None:
+        if self.on_event is None:
+            return
+        try:
+            self.on_event(type_, story_id=story_id, agent=agent, **payload)
+        except Exception:  # noqa: BLE001 - telling about a retry must never stop the retry
+            log.exception("could not emit %s", type_)
 
     async def _one_pass(
         self,
@@ -251,24 +349,24 @@ class ModelRouter:
         complexity: str | None,
         temperature: float | None,
         reasoning_effort: str | None,
-        errors: list[str],
-        attempts: int,
-    ) -> RoutedCall | int:
-        """Try each candidate once (with per-candidate retries). Returns the RoutedCall, or
-        the updated attempt count when none answered."""
+        calls: _CallLog,
+    ) -> RoutedCall | None:
+        """Try each candidate once (with per-candidate retries). Returns the RoutedCall, or None
+        when none answered; `calls` keeps every attempt for the trace."""
         loop = asyncio.get_running_loop()
+        who = agent or role
         for cand in cands:
             key = f"{cand.provider}/{cand.model}"
             if self._cooldown.get(key, 0) > loop.time():
-                errors.append(f"{key}: em cooldown")
+                calls.errors.append(f"{key}: em cooldown")
                 continue
             try:
                 prov = self.provider(cand.provider)
             except LLMError as exc:
-                errors.append(str(exc))
+                calls.errors.append(str(exc))
                 continue
             if hasattr(prov, "available") and not prov.available():  # type: ignore[attr-defined]
-                errors.append(f"{key}: sem chave de API")
+                calls.errors.append(f"{key}: sem chave de API")
                 continue
             budget = self._scaled(
                 max_tokens or cand.max_output_tokens or self.config.models.max_output_tokens,
@@ -282,7 +380,12 @@ class ModelRouter:
             cuts = 0
             retry = 0
             while True:
-                attempts += 1
+                calls.count += 1
+                attempt: dict[str, Any] = {"model": key, "max_tokens": budget}
+                if effort:
+                    attempt["effort"] = effort
+                calls.attempts.append(attempt)
+                started = loop.time()
                 try:
                     resp = await asyncio.wait_for(
                         prov.complete(
@@ -300,14 +403,33 @@ class ModelRouter:
                     )
                 except TimeoutError:
                     limit = self.config.models.call_timeout_s
-                    errors.append(f"{key}: sem resposta em {limit:.0f}s")
+                    calls.errors.append(f"{key}: sem resposta em {limit:.0f}s")
+                    attempt.update(outcome="timeout", ms=int((loop.time() - started) * 1000))
                     log.warning("%s não respondeu em %.0fs; próximo modelo", key, limit)
+                    self._event(
+                        "llm.fallthrough", story_id, who, model=key, role=role, reason="timeout"
+                    )
                     # a hung upstream tends to stay hung for a while: rest it like a 5xx
                     self._cooldown[key] = loop.time() + limit
                     resp = None
                     break  # next candidate
                 except QuotaExhausted as exc:
-                    errors.append(str(exc))
+                    calls.errors.append(str(exc))
+                    attempt.update(
+                        outcome="quota",
+                        status=exc.status,
+                        retry_after=exc.retry_after,
+                        ms=int((loop.time() - started) * 1000),
+                    )
+                    self._event(
+                        "llm.fallthrough",
+                        story_id,
+                        who,
+                        model=key,
+                        role=role,
+                        reason="quota",
+                        status=exc.status,
+                    )
                     # Honour the provider's hint; otherwise a 429 is a per-minute rate limit,
                     # anything else (402 billing, 503 overloaded) deserves a longer pause.
                     pause = exc.retry_after or (60.0 if exc.status == 429 else 300.0)
@@ -315,7 +437,13 @@ class ModelRouter:
                     resp = None
                     break  # next candidate
                 except LLMError as exc:
-                    errors.append(str(exc))
+                    calls.errors.append(str(exc))
+                    attempt.update(
+                        outcome="error",
+                        status=exc.status,
+                        error=str(exc)[:300],
+                        ms=int((loop.time() - started) * 1000),
+                    )
                     if model_not_found(exc) and self.on_model_gone:
                         # The provider does not have this id. Retrying cannot fix a name, so the
                         # founder hears about it once and the candidate is skipped meanwhile.
@@ -324,9 +452,28 @@ class ModelRouter:
                         await asyncio.sleep(0.5 * (2**retry))
                         retry += 1
                         continue
+                    self._event(
+                        "llm.fallthrough",
+                        story_id,
+                        who,
+                        model=key,
+                        role=role,
+                        reason="error",
+                        status=exc.status,
+                    )
                     resp = None
                     break
                 cost = self._record(resp, cand, tier, role, agent, story_id)
+                calls.spent += cost
+                attempt.update(
+                    outcome="cut" if resp.truncated else "ok",
+                    finish_reason=resp.finish_reason,
+                    input_tokens=resp.input_tokens,
+                    output_tokens=resp.output_tokens,
+                    cost_usd=round(cost, 6),
+                    ms=resp.duration_ms or int((loop.time() - started) * 1000),
+                    **({"served_by": resp.served_by} if resp.served_by else {}),
+                )
                 if not resp.truncated:
                     if cuts:
                         self._fitted[(key, role)] = budget
@@ -338,7 +485,16 @@ class ModelRouter:
                 if cuts >= self.config.models.truncation_retries or (
                     bigger == budget and lighter == effort
                 ):
-                    errors.append(f"{key}: {budget} tokens{TRUNCATED_SUFFIX}")
+                    calls.errors.append(f"{key}: {budget} tokens{TRUNCATED_SUFFIX}")
+                    self._event(
+                        "llm.fallthrough",
+                        story_id,
+                        who,
+                        model=key,
+                        role=role,
+                        reason="cut",
+                        max_tokens=budget,
+                    )
                     resp = None
                     break
                 log.warning(
@@ -348,16 +504,29 @@ class ModelRouter:
                     bigger,
                     lighter or "padrão",
                 )
+                self._event(
+                    "llm.cut",
+                    story_id,
+                    who,
+                    model=key,
+                    role=role,
+                    max_tokens=budget,
+                    next_max_tokens=bigger,
+                    effort=lighter or None,
+                )
                 cuts += 1
+                calls.cuts += 1
                 budget, effort = bigger, lighter
             if resp is not None:
-                routed = RoutedCall(
-                    response=resp, tier=tier, candidate=cand, cost_usd=cost, attempts=attempts
+                return RoutedCall(
+                    response=resp,
+                    tier=tier,
+                    candidate=cand,
+                    cost_usd=round(calls.spent, 6),
+                    attempts=calls.count,
+                    cuts=calls.cuts,
                 )
-                if self.on_call:
-                    self.on_call(role, agent or role, routed)
-                return routed
-        return attempts
+        return None
 
     def _record(
         self,
@@ -368,9 +537,11 @@ class ModelRouter:
         agent: str | None,
         story_id: str | None,
     ) -> float:
-        """Meter one answered call, cut or not: a truncated answer was still paid for."""
+        """Meter one answered call, cut or not: a truncated answer was still paid for. What the
+        provider says it charged wins over the price table (OpenRouter's `usage.cost`)."""
         if not self.tracker:
-            return 0.0
+            return resp.cost_usd or 0.0
+        span = self.tracer.current()
         return self.tracker.record(
             UsageRecord(
                 agent=agent or role,
@@ -383,6 +554,10 @@ class ModelRouter:
                 cached_tokens=resp.cached_tokens,
                 duration_ms=resp.duration_ms,
                 story_id=story_id,
+                reported_cost=resp.cost_usd,
+                served_by=resp.served_by,
+                finish_reason=resp.finish_reason,
+                span_id=span.id if span else "",
             )
         )
 

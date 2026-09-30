@@ -90,7 +90,18 @@ def build_graph(
             ensure_route(state)
             while True:
                 try:
-                    new_state = await fn(ctx, state)
+                    # one span per run of the node: the root of everything its agents call
+                    with ctx.tracer.span(
+                        "node",
+                        name,
+                        story_id=state.story_id,
+                        stage=state.stage.value,
+                        tier=state.current_tier,
+                        attempts_tier2=state.attempts_tier2 or None,
+                        attempts_tier1=state.attempts_tier1 or None,
+                    ) as span:
+                        new_state = await fn(ctx, state)
+                        span.set(next=new_state.phase or None, stage_after=new_state.stage.value)
                     ops.on_success(new_state)
                     break
                 except Exception as exc:  # noqa: BLE001 - a crash isolates this story only

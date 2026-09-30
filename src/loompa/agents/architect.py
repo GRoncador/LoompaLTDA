@@ -63,6 +63,26 @@ REPRODUCER_TASK = "Escrever um teste automatizado que reproduz o bug e falha no 
 _REPRODUCER_WORDS = re.compile(r"\b(test|teste|reproduz|reproduce|reprodu)", re.I)
 REPRO_KEY = "reproducer"
 BOUNCED_KEY = "spec_bounced"  # the Architect sent the spec back once already
+REPLANNED_KEY = "replanned"  # the story was re-planned after its tier-2 attempts failed
+# Who put each task in tasks.md (Fase 8.1): the plan, a re-plan, the pre-flight's mitigations or
+# the founder's guidance. The sprint report tells planned work from work that emerged with it.
+TASK_ORIGIN_KEY = "task_origin"
+
+
+def set_task_origins(state: StoryState, origins: list[str]) -> None:
+    """Origins of the tasks in tasks.md order (task N is `origins[N-1]`)."""
+    state.extra[TASK_ORIGIN_KEY] = {str(i + 1): o for i, o in enumerate(origins)}
+
+
+def task_origins(state: StoryState, count: int) -> list[str]:
+    known = state.extra.get(TASK_ORIGIN_KEY) or {}
+    return [str(known.get(str(i + 1), "plan")) for i in range(count)]
+
+
+def task_origin(state: StoryState, number: int) -> str:
+    return str((state.extra.get(TASK_ORIGIN_KEY) or {}).get(str(number), "plan"))
+
+
 NONE_WORDS = ("", "none", "nenhum", "nenhuma", "n/a", "null", "-")
 
 
@@ -223,6 +243,9 @@ class ArchitectAgent(LoompaAgent):
         state.allowed_paths = files + [f".loompa/specs/{state.story_id}/"]
         state.tasks_total = len(tasks)
         state.tasks_done = []
+        set_task_origins(
+            state, ["replan" if state.extra.get(REPLANNED_KEY) else "plan"] * len(tasks)
+        )
         state.plan_ready = True
         self.set_state("IDLE")
         return AgentResult(
@@ -262,6 +285,8 @@ class ArchitectAgent(LoompaAgent):
             extra = "\n".join(f"- [ ] T{start + i}: {t}" for i, t in enumerate(tasks))
             tasks_md = tasks_md.rstrip("\n") + "\n" + extra + "\n"
             state.tasks_total = start - 1 + len(tasks)
+            origins = state.extra.setdefault(TASK_ORIGIN_KEY, {})
+            origins.update({str(start + i): "founder" for i in range(len(tasks))})
         paths.tasks.write_text(tasks_md.rstrip("\n") + "\n" + mark + "\n", encoding="utf-8")
         if files or tasks:
             with paths.plan.open("a", encoding="utf-8") as fh:
@@ -308,6 +333,8 @@ class ArchitectAgent(LoompaAgent):
         if extra:
             tasks = [t.text for t in tasks_from_markdown(paths.tasks.read_text(encoding="utf-8"))]
             at = 1 if (state.extra.get(REPRO_KEY) or {}).get("status") == "pending" else 0
+            origins = task_origins(state, len(tasks))
+            set_task_origins(state, [*origins[:at], *["preflight"] * len(extra), *origins[at:]])
             tasks = [*tasks[:at], *extra, *tasks[at:]]
             paths.tasks.write_text(
                 render_tasks(story_id=state.story_id, title=state.title, tasks=tasks),

@@ -138,6 +138,11 @@ class LLMResponse:
     finish_reason: str = ""
     duration_ms: int = 0
     raw: dict[str, Any] | None = None
+    # What the provider says the call cost in USD, when it says it (OpenRouter's `usage.cost`);
+    # None means the factory's price table decides.
+    cost_usd: float | None = None
+    served_by: str = ""  # who actually ran it behind a router (OpenRouter's `provider`)
+    reasoning_tokens: int = 0  # part of `output_tokens` the model spent thinking
 
     @property
     def text(self) -> str:
@@ -255,10 +260,43 @@ def _cached_tokens(usage: Mapping[str, Any]) -> int:
     return int(cached or 0)
 
 
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def reported_cost(usage: Mapping[str, Any]) -> float | None:
+    """The call's cost as the provider billed it, or None when it does not say.
+
+    OpenRouter puts it in `usage.cost` (USD) on every answer; it is the price of the provider
+    that served the call, which the public catalogue does not tell (checked live on 2026-09-30:
+    one model is served by 29 providers between US$ 0.04 and 0.66). With the founder's own key
+    at the upstream provider (BYOK), `cost` is only OpenRouter's fee and the inference is billed
+    upstream: `cost_details.upstream_inference_cost` is added."""
+    cost = _number(usage.get("cost"))
+    if cost is None:
+        return None
+    if usage.get("is_byok"):
+        details = usage.get("cost_details")
+        upstream = (
+            _number(details.get("upstream_inference_cost")) if isinstance(details, dict) else None
+        )
+        cost += upstream or 0.0
+    return max(cost, 0.0)
+
+
+def _reasoning_tokens(usage: Mapping[str, Any]) -> int:
+    details = usage.get("completion_tokens_details")
+    value = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
 def _parse_openai_response(data: Any, model: str, provider: str, duration_ms: int) -> LLMResponse:
     choice = (data.get("choices") or [{}])[0]
     msg = choice.get("message") or {}
     usage = data.get("usage") or {}
+    served_by = data.get("provider")
     tool_calls = [
         ToolCall(
             tc.get("id") or f"call_{i}",
@@ -280,6 +318,9 @@ def _parse_openai_response(data: Any, model: str, provider: str, duration_ms: in
         finish_reason=choice.get("finish_reason") or "",
         duration_ms=duration_ms,
         raw=data,
+        cost_usd=reported_cost(usage),
+        served_by=served_by if isinstance(served_by, str) else "",
+        reasoning_tokens=_reasoning_tokens(usage),
     )
 
 

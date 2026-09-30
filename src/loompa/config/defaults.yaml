@@ -292,6 +292,9 @@ dashboard:
   host: 127.0.0.1
   port: 8765
 
+trace:                      # per-story record of every model and tool call (.loompa/traces/)
+  retention_days: 30        # files untouched this long are removed; read with `loompa trace`
+
 stack:                      # filled by the onboarding scanner
   languages: []
   frameworks: []

@@ -11,13 +11,14 @@ from typing import Any
 from loompa.aci import ACI
 from loompa.comms import FounderMessage
 from loompa.config import LoompaConfig, Secrets
-from loompa.config.secrets import install_log_redaction
+from loompa.config.secrets import install_log_redaction, redact_secrets
 from loompa.factory import Factory
 from loompa.finance import CostTracker
 from loompa.llm import ModelRouter
 from loompa.mcp import McpHub
 from loompa.memory import MemoryStore, get_embedder
 from loompa.store import Store
+from loompa.trace import Tracer
 from loompa.worktrees import WorktreeManager
 
 log = logging.getLogger("loompa.engine")
@@ -36,6 +37,7 @@ class EngineContext:
     dry_run: bool = False
     listeners: list[Listener] = field(default_factory=list)
     secrets: Secrets = field(default_factory=Secrets)
+    tracer: Tracer = field(default_factory=Tracer)
     closed: bool = False
     _mcp: McpHub | None = field(default=None, repr=False)
 
@@ -93,35 +95,58 @@ class EngineContext:
             worktrees=WorktreeManager(factory.root, factory.paths.worktrees),
             dry_run=dry_run,
             secrets=secrets,
+            tracer=Tracer(factory.paths.traces),
         )
+        ctx._redact_traces()
+        ctx.tracer.prune(factory.config.trace.retention_days)
+        if not ctx.router.tracer.enabled:
+            ctx.router.tracer = ctx.tracer
         if router is not None and router.tracker is None:
             router.tracker = tracker
         if ctx.router.on_call is None:
             ctx.router.on_call = ctx._on_llm_call
         if ctx.router.on_model_gone is None:
             ctx.router.on_model_gone = ctx._on_model_gone
+        if ctx.router.on_event is None:
+            ctx.router.on_event = ctx.emit
         return ctx
 
     def reload_secrets(self) -> Secrets:
         """Re-read the secrets files and rebuild provider adapters (settings changed)."""
         self.secrets = Secrets.load(self.factory.root)
         install_log_redaction(self.secrets.values_for_redaction())
+        self._redact_traces()
         self.router.reset_providers(self.secrets)
         if self._mcp is not None:
             self._mcp.secrets = self.secrets
         return self.secrets
 
+    def _redact_traces(self) -> None:
+        """The trace passes through the same redaction as the logs: this machine's keys, and
+        anything shaped like one that a file or a tool result carried in."""
+        values = self.secrets.values_for_redaction()
+        self.tracer.set_redaction(lambda text: redact_secrets(text, values))
+
     def _on_llm_call(self, role: str, agent: str, routed: Any) -> None:
         self._watch_aliases(role, agent, routed)
+        resp = routed.response
         self.emit(
             "llm.call",
+            story_id=routed.story_id,
             agent=agent,
             role=role,
             model=routed.candidate.model,
             tier=routed.tier,
             cost_usd=routed.cost_usd,
-            input_tokens=routed.response.input_tokens,
-            output_tokens=routed.response.output_tokens,
+            input_tokens=resp.input_tokens,
+            output_tokens=resp.output_tokens,
+            cached_tokens=resp.cached_tokens,
+            # why the answer ended: `length`/`max_tokens` is a cut (only the log said so before)
+            finish_reason=resp.finish_reason,
+            duration_ms=resp.duration_ms,
+            span_id=routed.span_id,
+            **({"cuts": routed.cuts} if routed.cuts else {}),
+            **({"served_by": resp.served_by} if resp.served_by else {}),
         )
 
     def _on_model_gone(self, candidate: Any, detail: str) -> None:

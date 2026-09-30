@@ -49,6 +49,11 @@ class UsageRecord:
     duration_ms: int = 0
     story_id: str | None = None
     cost_usd: float = 0.0
+    reported_cost: float | None = None  # what the provider billed, when it says (OpenRouter)
+    served_by: str = ""  # the provider behind a router that ran the call
+    finish_reason: str = ""
+    span_id: str = ""  # the call's span in the story's trace
+    cost_source: str = ""  # reported | table
 
 
 @dataclass
@@ -110,9 +115,16 @@ class CostTracker:
         )
 
     def record(self, rec: UsageRecord) -> float:
-        rec.cost_usd = self.cost_of(
-            rec.model, rec.input_tokens, rec.output_tokens, rec.cached_tokens
-        )
+        """Meter one call. The provider's own bill wins over the price table: OpenRouter's
+        catalogue shows one of the providers that serve a model, and the one that served the
+        call may charge 20x less or more. The table stays for providers that do not say."""
+        if rec.reported_cost is not None:
+            rec.cost_usd, rec.cost_source = round(rec.reported_cost, 6), "reported"
+        else:
+            rec.cost_usd = self.cost_of(
+                rec.model, rec.input_tokens, rec.output_tokens, rec.cached_tokens
+            )
+            rec.cost_source = "table"
         self.store.record_usage(
             factory=self.factory,
             story_id=rec.story_id,
@@ -126,6 +138,10 @@ class CostTracker:
             cached_tokens=rec.cached_tokens,
             cost_usd=rec.cost_usd,
             duration_ms=rec.duration_ms,
+            served_by=rec.served_by,
+            finish_reason=rec.finish_reason,
+            cost_source=rec.cost_source,
+            span_id=rec.span_id,
         )
         if rec.story_id:
             story = self.store.get_story(rec.story_id)

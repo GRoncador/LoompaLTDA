@@ -138,82 +138,106 @@ class LoompaAgent:
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
         guard: LoopGuard | None = None,
+        label: str = "",
     ) -> LoopResult:
         """Call the model, run the tools it asks for, feed the results back, until it stops.
 
         `terminal` names end the loop without being executed (`done`, `blocked`). With `nudge`,
         a reply without tool calls is pushed once more before being accepted. When the rounds run
         out, `final_prompt` (if given) gets one last answer; otherwise the result is `limit`.
-        Repeated reads and runs go through a `LoopGuard` (one is made when none is given)."""
+        Repeated reads and runs go through a `LoopGuard` (one is made when none is given).
+        Each round is a span of the story's trace (`label` says which pass it belongs to)."""
         guard = guard or LoopGuard(toolbox.aci)
         story_id = story.story_id if story else None
         complexity = str(story.complexity) if story else None
+        tracer = self.ctx.tracer
         last_text = ""
         calls = 0
         for i in range(max_iterations):
-            routed = await self.ctx.router.complete(
-                self.role,
-                messages,
-                agent=self.name,
-                story_id=story_id,
-                tools=toolbox.spec() or None,
-                tier_override=tier_override,
-                max_tokens=max_tokens,
-                complexity=complexity,
-                reasoning_effort=reasoning_effort,
-            )
-            resp = routed.response
-            last_text = resp.text or last_text
-            if not resp.tool_calls:
-                if nudge and i < max_iterations - 1 and "done" not in (resp.text or "").lower():
-                    messages += [Message("assistant", resp.text), Message("user", nudge)]
-                    continue
-                return LoopResult("text", last_text, tool_calls=calls)
-            messages.append(Message("assistant", resp.text, tool_calls=resp.tool_calls))
-            for call in resp.tool_calls:
-                if call.name in terminal:
-                    return LoopResult(call.name, last_text, dict(call.arguments), calls)
-                args = call.arguments if isinstance(call.arguments, dict) else {}
-                result = guard.before(call.name, args) or await toolbox.call(call.name, args)
-                calls += 1
-                msg = Message(
-                    "tool",
-                    result.output[:MAX_TOOL_RESULT_CHARS],
-                    tool_call_id=call.id,
-                    name=call.name,
-                )
-                note = guard.after(call.name, args, result, msg)
-                if note:
-                    msg.content += "\n\n" + note
-                self.ctx.emit(
-                    "tool.call",
-                    story_id=story_id,
+            with tracer.span(
+                "round", str(i + 1), story_id=story_id, agent=self.name, label=label or None
+            ) as round_span:
+                routed = await self.ctx.router.complete(
+                    self.role,
+                    messages,
                     agent=self.name,
-                    tool=call.name,
-                    ok=result.ok,
-                    # What this result adds to the context (chars/4): the Finance Loompa sums it
-                    # to point at the tools and agents that read too much.
-                    tokens=len(msg.content) // 4,
-                    repeat=result.output.startswith(REPEAT_PREFIX),
-                    **({"path": str(args["path"])[:200]} if args.get("path") else {}),
+                    story_id=story_id,
+                    tools=toolbox.spec() or None,
+                    tier_override=tier_override,
+                    max_tokens=max_tokens,
+                    complexity=complexity,
+                    reasoning_effort=reasoning_effort,
                 )
-                messages.append(msg)
-            prune_tool_history(
-                messages, keep_last=keep_tool_results, keep_files_chars=keep_files_chars
-            )
+                resp = routed.response
+                last_text = resp.text or last_text
+                round_span.set(tool_calls=len(resp.tool_calls))
+                if not resp.tool_calls:
+                    if nudge and i < max_iterations - 1 and "done" not in (resp.text or "").lower():
+                        messages += [Message("assistant", resp.text), Message("user", nudge)]
+                        continue
+                    return LoopResult("text", last_text, tool_calls=calls)
+                messages.append(Message("assistant", resp.text, tool_calls=resp.tool_calls))
+                for call in resp.tool_calls:
+                    if call.name in terminal:
+                        return LoopResult(call.name, last_text, dict(call.arguments), calls)
+                    args = call.arguments if isinstance(call.arguments, dict) else {}
+                    with tracer.span("tool", call.name, agent=self.name, args=args) as tool_span:
+                        result = guard.before(call.name, args) or await toolbox.call(
+                            call.name, args
+                        )
+                        calls += 1
+                        msg = Message(
+                            "tool",
+                            result.output[:MAX_TOOL_RESULT_CHARS],
+                            tool_call_id=call.id,
+                            name=call.name,
+                        )
+                        note = guard.after(call.name, args, result, msg)
+                        if note:
+                            msg.content += "\n\n" + note
+                        repeat = result.output.startswith(REPEAT_PREFIX)
+                        stored = tracer.messages(story_id, [msg])
+                        tool_span.set(
+                            ok=result.ok,
+                            chars=len(msg.content),
+                            repeat=repeat or None,
+                            note=note or None,
+                            error=result.output.splitlines()[0][:300] if not result.ok else None,
+                            result=stored[0] if stored else None,
+                        )
+                    self.ctx.emit(
+                        "tool.call",
+                        story_id=story_id,
+                        agent=self.name,
+                        tool=call.name,
+                        ok=result.ok,
+                        # What this result adds to the context (chars/4): the Finance Loompa sums it
+                        # to point at the tools and agents that read too much.
+                        tokens=len(msg.content) // 4,
+                        repeat=repeat,
+                        span_id=tool_span.id,
+                        **_call_facts(args),
+                    )
+                    messages.append(msg)
+                prune_tool_history(
+                    messages, keep_last=keep_tool_results, keep_files_chars=keep_files_chars
+                )
         if final_prompt:
             messages.append(Message("user", final_prompt))
-            routed = await self.ctx.router.complete(
-                self.role,
-                messages,
-                agent=self.name,
-                story_id=story_id,
-                tools=toolbox.spec() or None,  # providers want the tools while tool turns exist
-                tier_override=tier_override,
-                max_tokens=max_tokens,
-                complexity=complexity,
-                reasoning_effort=reasoning_effort,
-            )
+            with tracer.span(
+                "round", "final", story_id=story_id, agent=self.name, label=label or None
+            ):
+                routed = await self.ctx.router.complete(
+                    self.role,
+                    messages,
+                    agent=self.name,
+                    story_id=story_id,
+                    tools=toolbox.spec() or None,  # providers want the tools while tool turns exist
+                    tier_override=tier_override,
+                    max_tokens=max_tokens,
+                    complexity=complexity,
+                    reasoning_effort=reasoning_effort,
+                )
             return LoopResult("text", routed.response.text or last_text, tool_calls=calls)
         return LoopResult("limit", last_text, tool_calls=calls)
 
@@ -364,6 +388,24 @@ def repo_outline(root: Path, max_entries: int = 80) -> str:
             lines.append("…")
             break
     return "\n".join(lines)
+
+
+# The argument that says what a lookup looked for: the dashboard shows it and the factory's
+# self-diagnosis (Fase 8.3) groups repeated lookups by it.
+_QUERY_ARGS = ("pattern", "query", "selector", "url")
+
+
+def _call_facts(args: dict[str, Any]) -> dict[str, str]:
+    """The path and the query of a tool call, short, for its `tool.call` event."""
+    facts: dict[str, str] = {}
+    if args.get("path"):
+        facts["path"] = str(args["path"])[:200]
+    query = next((args[k] for k in _QUERY_ARGS if args.get(k)), None)
+    if query is None and args.get("name") and not args.get("path"):
+        query = args["name"]  # find_symbol
+    if query is not None:
+        facts["query"] = str(query)[:200]
+    return facts
 
 
 def _as_dict(data: Any) -> dict[str, Any]:
