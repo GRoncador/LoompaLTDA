@@ -78,7 +78,7 @@ async def run_command(
             command=command,
             returncode=127,
             stdout="",
-            stderr=f"não foi possível executar `{command}`: {exc}",
+            stderr=f"could not run `{command}`: {exc}",
         )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)

@@ -514,7 +514,7 @@ async def test_persistent_failure_blocks_only_that_story(factory: Factory):
 
 async def test_worker_question_pauses_and_resumes_with_guidance(factory: Factory):
     def worker(model: str, messages: list[Message]) -> Any:
-        notes = "Orientações do Founder" in messages[1].content
+        notes = "Guidance from the founder" in messages[1].content
         if not notes:
             return [
                 ToolCall(
@@ -596,7 +596,10 @@ async def test_worker_question_pauses_and_resumes_with_guidance(factory: Factory
 
 async def test_product_decision_blocks_at_spec(factory: Factory):
     def script(model: str, messages: list[Message], tools: Any) -> Any:
-        if role_of(messages) == "product" and "Orientações do Founder" not in messages[1].content:
+        if (
+            role_of(messages) == "product"
+            and "Guidance from the founder" not in messages[1].content
+        ):
             return json.dumps(
                 {
                     "needs_decision": True,

@@ -57,26 +57,32 @@ DEFAULT_BLOCK_OPTIONS = [
 ]
 
 EXEC_SYSTEM = """<!-- role:master -->
-Rewrite the technical problem below for a non-technical founder in {language}. Output JSON:
-{{"title": str (one sentence), "context": str (2-3 plain sentences: what we were doing, what happened),
-"impact": str (what it means for the product/business and what continues normally)}}
-The founder will answer by choosing one of the listed options; do not invent other options or
-promise actions outside them. Absolutely no file names, code, error names or stack traces.
+You are the Master Loompa, the factory's COO. Rewrite the technical problem below for the founder,
+who is not technical, in {language}. They read it in the inbox and answer by choosing one of the
+listed options, so describe the situation, never a remedy: do not invent options or promise actions
+outside them. No file names, code, error names or stack traces: the message is audited and rejected
+when it has any.
+Respond with JSON only: {{"title": str, "context": str, "impact": str}}
+- title: one sentence;
+- context: 2-3 plain sentences: what we were doing and what happened;
+- impact: what it means for the product and what keeps going normally.
 """
 
 
 CLASSIFY_SYSTEM = """<!-- role:master -->
-Classify the story below for the factory pipeline. Respond with JSON only:
+You are the Master Loompa. Classify the story below for the factory pipeline: the classification
+decides which phases it goes through and how strong the models working on it are.
+- kind: `bugfix` repairs behaviour that already exists; `research` produces knowledge (a report, a
+  comparison, a recommendation) instead of code; everything else is `feature`.
+- complexity: SIMPLE = one obvious change, one or two files, no design decision; COMPLEX = touches
+  several modules, needs architecture or product judgement, or has security or data-migration
+  risk; otherwise STANDARD. When unsure between two levels, choose STANDARD.
+- children: ONLY when the request clearly bundles several independent deliverables that should be
+  built and reviewed separately; then 2-6 child stories, each buildable alone. Otherwise [].
+Respond with JSON only:
 {{"kind": "feature"|"bugfix"|"research", "complexity": "SIMPLE"|"STANDARD"|"COMPLEX",
   "children": [{{"title": str, "description": str}}], "reason": str}}
-- kind: `bugfix` repairs behaviour that already exists; `research` produces knowledge (a report,
-  a comparison, a recommendation) instead of code; everything else is `feature`.
-- complexity: SIMPLE = one obvious change, one or two files, no design decision; COMPLEX = touches
-  several modules, needs architecture or product judgement, or has security/data-migration risk;
-  otherwise STANDARD.
-- children: ONLY when the request clearly bundles several independent deliverables that should
-  be built and reviewed separately; then list 2-6 child stories, each buildable alone. Otherwise [].
-Write titles and descriptions in {language}; keep `reason` to one sentence.
+Write titles and descriptions in {language}; `reason` is one sentence.
 """
 
 
@@ -98,7 +104,7 @@ class MasterAgent(LoompaAgent):
         moving when the model is unavailable: STANDARD feature, no split."""
         self.set_state("WORKING", state, detail="classificando a história")
         user = (
-            f"# Story {state.story_id}: {state.title}\n\n{state.description or '(sem descrição)'}\n\n"
+            f"# Story {state.story_id}: {state.title}\n\n{state.description or '(no description)'}\n\n"
             + (
                 "## Founder's notes\n" + "\n".join(f"- {n}" for n in state.founder_notes) + "\n\n"
                 if state.founder_notes

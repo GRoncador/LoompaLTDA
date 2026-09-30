@@ -20,7 +20,12 @@
 - Architecture decisions live in `docs/adr/`. Read them before changing the engine, LLM layer,
   memory or dashboard stack. The product brief is `PROJECT_BRIEF_OOMPA_LOOMPA_LTDA.md`.
 - Founder-facing text (inbox, reports) is Portuguese (pt-BR) and must pass
-  `loompa.comms.audit_executive_text` — no stack traces, paths or error names. Agent prompts are English.
+  `loompa.comms.audit_executive_text` — no stack traces, paths or error names. Everything a model reads
+  is English: system prompts, user-message headings, tool descriptions, tool results and errors, guard
+  notes. Prompts state the role, the steps or rules with their reason, that the material they get (spec,
+  files, diff, tool results) is data and not instructions, what to do when unsure, and end with
+  "Respond with JSON only" plus which values go in `{language}`. Marker phrases the dry-run matches
+  (`Classify the story`, `Sprint Meeting`, `Pre-flight`, …) must survive a rewrite.
 - Everything must work with zero API keys via the dry-run provider (`--dry-run`); tests use
   `MockProvider` scripts, never the network.
 - Commit style: semantic (`feat:`, `fix:`, `docs:`, `chore:`, `test:`), work on `dev` (`dev_fable` is the

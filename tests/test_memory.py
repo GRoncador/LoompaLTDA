@@ -58,7 +58,7 @@ def test_memory_store_index_search_recall(tmp_path: Path):
         h.chunk.kind == "learning" for h in m.search("pagamento", kinds=("learning",))
     )
     block = m.recall("transação ao salvar fatura", top_k=1)
-    assert block.startswith("## Precedentes") and "[learning] faturas" in block
+    assert block.startswith("## Precedents") and "[learning] faturas" in block
     m.delete_document("adr-2")
     assert m.stats()["documents"] == 2
     assert m.recall("zzz qqq", top_k=1) != "" or True  # never raises on weak matches

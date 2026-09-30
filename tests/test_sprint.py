@@ -69,7 +69,7 @@ async def test_a_blocked_story_waits_alone_and_does_not_hold_the_batch(factory: 
         if (
             role_of(messages) == "product"
             and "Cobrança" in messages[1].content
-            and "Orientações do Founder" not in messages[1].content
+            and "Guidance from the founder" not in messages[1].content
         ):
             return json.dumps(
                 {

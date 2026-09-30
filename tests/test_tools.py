@@ -49,12 +49,12 @@ async def test_profile_is_enforced_when_the_tool_is_called(factory: Factory):
     assert {t["name"] for t in box.spec()} == set(profile_for("analyst").tools)
     # a tool outside the profile is refused even though the model "made it up"
     res = await box.call("run_tests", {})
-    assert not res.ok and "não está disponível para o papel analyst" in res.output
+    assert not res.ok and "not available to the analyst role" in res.output
     # reads work anywhere in the repository
     assert (await box.call("read_file", {"path": "app/calc.py"})).ok
     # writes only land in the story artifacts
     outside = await box.call("write_file", {"path": "app/calc.py", "content": "x = 1\n"})
-    assert not outside.ok and "fora do escopo" in outside.output
+    assert not outside.ok and "outside the plan's paths" in outside.output
     assert (factory.root / "app" / "calc.py").read_text().startswith("def add")
     inside = await box.call(
         "write_file", {"path": ".loompa/specs/S-009/notes.md", "content": "# notas\n"}
@@ -68,7 +68,7 @@ async def test_offered_narrows_the_profile_and_never_widens_it(factory: Factory)
     reader = Toolbox.for_role(ctx, "analyst", offered=READ_TOOLS)
     assert {t["name"] for t in reader.spec()} == set(READ_TOOLS)
     refused = await reader.call("write_file", {"path": ".loompa/specs/S-009/x.md", "content": "x"})
-    assert not refused.ok and "não está disponível" in refused.output
+    assert not refused.ok and "not available" in refused.output
     wide = Toolbox.for_role(ctx, "analyst", offered=READ_TOOLS | {"run_tests", "done"})
     assert "run_tests" not in {t["name"] for t in wide.spec()}  # the profile is the ceiling
     await ctx.aclose()
@@ -123,12 +123,12 @@ async def test_no_role_can_read_or_write_credentials(factory: Factory, role: str
     box = Toolbox.for_role(ctx, role, allowed_paths=[""] if role == "worker" else None)
     for path in (".env", ".loompa/.env", ".loompa/state.db", ".git/config"):
         res = await box.call("read_file", {"path": path})
-        assert not res.ok and "protegido" in res.output, path
+        assert not res.ok and "protected file" in res.output, path
         assert "do-not-leak" not in res.output
     assert (await box.call("read_file", {"path": ".env.example"})).ok
     if role == "worker":
         res = await box.call("write_file", {"path": ".env", "content": "X=1\n"})
-        assert not res.ok and "protegido" in res.output
+        assert not res.ok and "protected file" in res.output
     await ctx.aclose()
 
 
@@ -210,7 +210,7 @@ async def test_loop_prunes_old_tool_results(factory: Factory):
     await agent.tool_loop(messages, agent.explore_tools(), max_iterations=4, keep_tool_results=1)
     tools = [m for m in messages if m.role == "tool"]
     assert tools[-1].content.startswith("app/big.py [")
-    assert all(t.content.startswith("[resumido]") for t in tools[:-1])
+    assert all(t.content.startswith("[pruned]") for t in tools[:-1])
     await ctx.aclose()
 
 

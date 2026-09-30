@@ -55,7 +55,7 @@ Respond with JSON only:
   "recommendation": str, "limitations": [str],
   "follow_ups": [{{"title": str, "description": str}}],
   "needs_decision": bool, "clarification": str, "options": [str]}}
-Write all strings in {language}.
+Write the text values in {language}; keep URLs and repository paths exactly as they are.
 """
 
 BRAINSTORM_SYSTEM = """<!-- role:analyst -->

@@ -38,7 +38,7 @@ def _script(worker, *, alternatives: list[Any] | None = None):
         if role == "master" and "Classify the story" in messages[0].content:
             return json.dumps({"kind": "bugfix", "complexity": "STANDARD", "children": []})
         if role == "architect" and "## Founder's guidance" not in messages[-1].content:
-            if "Falha (filtrada)" in messages[-1].content:
+            if "## Failure (filtered)" in messages[-1].content:
                 return dry_run_script(model, messages, tools)
             return json.dumps(
                 {
@@ -101,7 +101,7 @@ async def test_the_fix_starts_from_a_test_that_fails_on_the_old_code(factory: Fa
     await Scheduler(ctx).run()
     state = load_state(ctx, sid)
     assert state.blocked_reason == "delivery", state.failure_history
-    assert seen[0] == "repro" and "edição fora do escopo" in seen[1] and seen[2] == "fix"
+    assert seen[0] == "repro" and "outside the plan's paths" in seen[1] and seen[2] == "fix"
     repro = state.extra["reproducer"]
     assert repro["status"] == "red" and any("test_soma" in f for f in repro["failing"])
     tasks_md = (factory.paths.specs / sid / "tasks.md").read_text()

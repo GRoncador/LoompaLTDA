@@ -15,9 +15,11 @@ from loompa.hygiene import is_debris
 from loompa.worktrees import Worktree
 
 SUMMARY_SYSTEM = """<!-- role:deployer -->
-Summarize this delivery for a non-technical founder in {language}: 2-4 short sentences about what the
-product can now do and anything they should try. No file names, no jargon, no code.
-Respond with JSON: {{"summary": str}}
+You are the Deployer Loompa. Summarize this delivery for the founder, who is not technical, in
+{language}: 2-4 short sentences on what the product can do now and anything worth trying. Base it
+only on the Worker notes, commits and changed files below, and do not promise what they do not
+show. No file names, jargon or code.
+Respond with JSON only: {{"summary": str}}
 """
 
 

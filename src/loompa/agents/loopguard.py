@@ -23,7 +23,7 @@ from typing import Any
 
 from loompa.aci import ACI
 from loompa.aci.tools import ToolResult
-from loompa.agents.toolbox import READ_TOOLS, RUN_TOOLS, WRITE_TOOLS
+from loompa.agents.toolbox import PRUNED, READ_TOOLS, RUN_TOOLS, WRITE_TOOLS
 from loompa.llm import Message
 
 REPEAT_PREFIX = "[repeated]"
@@ -92,7 +92,7 @@ class LoopGuard:
                 f"ago, so the result is the same:\n{prev.output[:2000]}\n"
                 "Change the code before running it again, or call `done`/`blocked`.",
             )
-        if prev.message is not None and not prev.message.content.startswith("[resumido]"):
+        if prev.message is not None and not prev.message.content.startswith(PRUNED):
             self.repeats += 1
             return ToolResult(
                 True,

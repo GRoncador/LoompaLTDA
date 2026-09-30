@@ -349,7 +349,7 @@ async def test_architect_checks_the_repository_before_planning(factory: Factory)
     seen: list[list[Message]] = []
 
     def architect(model: str, messages: list[Message]) -> Any:
-        if "Falha (filtrada)" in messages[-1].content:
+        if "## Failure (filtered)" in messages[-1].content:
             return dry_run_script(model, messages, None)
         seen.append(list(messages))
         if not tool_results(messages):

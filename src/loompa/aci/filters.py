@@ -74,7 +74,7 @@ class CommandSummary:
             for fr in f.frames[-max_frames:]:
                 lines.append(f"    {fr}")
         if len(self.failures) > max_failures:
-            lines.append(f"… +{len(self.failures) - max_failures} falhas")
+            lines.append(f"… +{len(self.failures) - max_failures} more failures")
         for issue in self.issues[:40]:
             lines.append(f"- {issue}")
         if len(self.issues) > 40:
@@ -97,7 +97,7 @@ def summarize_tests(output: str, returncode: int, *, cwd_prefix: str = "") -> Co
     if returncode != 0:
         tail = [line for line in text.splitlines() if line.strip()][-15:]
         summary.failures.append(
-            Failure(name="(saída não reconhecida)", message="; ".join(tail)[:600])
+            Failure(name="(unrecognised output)", message="; ".join(tail)[:600])
         )
     return summary
 
@@ -161,7 +161,7 @@ def _summarize_pytest(text: str, returncode: int) -> CommandSummary:
     if returncode != 0 and not s.failures:
         tail = [line for line in lines if line.strip()][-10:]
         s.failures.append(
-            Failure(name="(falha sem teste identificado)", message="; ".join(tail)[:600])
+            Failure(name="(failure with no test identified)", message="; ".join(tail)[:600])
         )
     if s.failed == 0 and s.errors == 0 and returncode != 0 and s.failures:
         s.failed = len(s.failures)
@@ -210,7 +210,7 @@ def _summarize_js(text: str, returncode: int) -> CommandSummary:
     if returncode != 0 and not s.failures:
         s.failures.append(
             Failure(
-                name="(falha sem teste identificado)",
+                name="(failure with no test identified)",
                 message="; ".join(text.splitlines()[-8:])[:600],
             )
         )
@@ -247,7 +247,7 @@ def summarize_lint(output: str, returncode: int) -> CommandSummary:
         s.issues.append("; ".join(line for line in text.splitlines()[-6:] if line.strip())[:500])
     s.failed = len(s.issues)
     if fixable and s.issues:
-        s.issues.append("(correção mecânica: ex. ordenar os imports ou ajustar a formatação)")
+        s.issues.append("(mechanical fix: e.g. sort the imports or reformat; `fix_lint` does it)")
     return s
 
 

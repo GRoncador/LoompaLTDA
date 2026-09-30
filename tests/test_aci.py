@@ -98,7 +98,7 @@ def aci(tmp_path: Path) -> ACI:
 async def test_aci_read_list_search_symbol(aci: ACI):
     out = (await aci.call("read_file", {"path": "src/calc.py", "lines": 2})).output
     assert (
-        out.startswith("src/calc.py [1-2 de 6]")
+        out.startswith("src/calc.py [1-2 of 6]")
         and "    1| def add" in out
         and "use start=3" in out
     )
@@ -106,7 +106,7 @@ async def test_aci_read_list_search_symbol(aci: ACI):
     assert "src/calc.py:5" in (await aci.call("search", {"pattern": "def sub"})).output
     assert "function sub — src/calc.py:5" in (await aci.call("find_symbol", {"name": "sub"})).output
     res = await aci.call("read_file", {"path": "../etc/passwd"})
-    assert not res.ok and "fora do repositório" in res.output
+    assert not res.ok and "outside the repository" in res.output
     assert not (await aci.call("nope", {})).ok
 
 
@@ -116,9 +116,9 @@ async def test_aci_edits_respect_scope(aci: ACI):
     )
     assert res.ok and "+    return a - b  # sub" in res.output
     res = await aci.call("edit_file", {"path": "src/calc.py", "old": "return a", "new": "x"})
-    assert not res.ok and "2 vezes" in res.output
+    assert not res.ok and "2 times" in res.output
     res = await aci.call("write_file", {"path": "README.md", "content": "x"})
-    assert not res.ok and "fora do escopo" in res.output
+    assert not res.ok and "outside the plan's paths" in res.output
     res = await aci.call(
         "write_file",
         {
@@ -141,7 +141,7 @@ async def test_aci_apply_patch(aci: ACI):
     assert res.ok and "# sum" in (aci.root / "src" / "calc.py").read_text()
     bad = "--- a/src/calc.py\n+++ b/src/calc.py\n@@ -1,1 +1,1 @@\n-nonexistent line\n+x\n"
     res = await aci.call("apply_patch", {"patch": bad})
-    assert not res.ok and "não casa" in res.output
+    assert not res.ok and "does not match" in res.output
     new = "--- /dev/null\n+++ b/src/new.py\n@@ -0,0 +1,2 @@\n+A = 1\n+B = 2\n"
     assert (await aci.call("apply_patch", {"patch": new})).ok and (
         aci.root / "src" / "new.py"
@@ -160,7 +160,7 @@ async def test_aci_tests_and_signals(aci: ACI):
     )
     await aci.call("note_learning", {"title": "bug em X", "kind": "bug"})
     assert aci.learnings == [{"title": "bug em X", "detail": "", "kind": "bug"}]
-    assert "[lint] nenhum comando" in (await aci.call("run_lint", {})).output
+    assert "[lint] no command" in (await aci.call("run_lint", {})).output
 
 
 def test_pytest_collection_error_is_parsed():
@@ -179,7 +179,7 @@ ERROR tests/test_calc.py
     s = summarize_tests(out, 2)
     assert not s.ok and s.errors == 1
     assert s.failures[0].name == "tests/test_calc.py" and "ImportError" in s.failures[0].message
-    assert "====" not in s.compact() and "saída não reconhecida" not in s.compact()
+    assert "====" not in s.compact() and "unrecognised output" not in s.compact()
 
 
 def test_pytest_quiet_counts_are_read_without_the_banner():
@@ -211,7 +211,7 @@ def test_ruff_current_output_names_the_file_and_the_rule():
         "src/contas/storage.py:1 I001 Import block is un-sorted or un-formatted",
         "tests/test_x.py:3 F401 `os` imported but unused",
     ]
-    assert s.failed == 2 and "correção mecânica" in s.issues[2]
+    assert s.failed == 2 and "mechanical fix" in s.issues[2]
 
 
 async def test_loompas_own_virtualenv_does_not_reach_factory_commands(tmp_path: Path, monkeypatch):
@@ -243,12 +243,12 @@ async def test_fix_lint_applies_the_linters_own_fixes_inside_the_plan_only(tmp_p
         allowed_paths=["app/"],
     )
     out = await aci.call("fix_lint", {})
-    assert out.ok and "correções automáticas aplicadas" in out.output
+    assert out.ok and "automatic fixes applied" in out.output
     assert (tmp_path / "app" / "a.py").read_text().startswith("import os\nimport sys\n")
     assert (tmp_path / "other.py").read_text() == unsorted  # outside the plan: untouched
     assert "other.py:1 I001" in out.output  # and still reported, for the Worker to see
     unscopable = ACI(tmp_path, lint_command="npm run lint", allowed_paths=["app/"])
-    assert "nenhum comando" in (await unscopable.call("fix_lint", {})).output
+    assert "no automatic-fix command" in (await unscopable.call("fix_lint", {})).output
 
 
 # ------------------------------------------------------------ quick check (Fase 7, 7.8)

@@ -57,7 +57,7 @@ async def test_a_repeated_read_points_back_to_the_history_until_something_change
     again = guard.before("read_file", args)
     assert again is not None and again.output.startswith(REPEAT_PREFIX)
     assert "still above in your history" in again.output and guard.repeats == 1
-    msg.content = "[resumido] resultado anterior de read_file ..."  # pruned: reading is fair
+    msg.content = "[pruned] earlier read_file result ..."  # pruned: reading is fair
     assert guard.before("read_file", args) is None
     msg.content = first.output
     await aci.call("write_file", {"path": "app/other.py", "content": "z = 1\n"})
@@ -137,6 +137,6 @@ def test_pruning_keeps_the_latest_read_of_each_file_while_it_is_current():
     messages += call(5, "read_file", "c.py")
     prune_tool_history(messages, keep_last=1, keep_files_chars=10_000)
     tools = [m for m in messages if m.role == "tool"]
-    assert [t.content.startswith("[resumido]") for t in tools] == [True, True, False, True, False]
+    assert [t.content.startswith("[pruned]") for t in tools] == [True, True, False, True, False]
     prune_tool_history(messages, keep_last=1, keep_files_chars=0)
-    assert tools[2].content.startswith("[resumido]")  # without the budget: as before
+    assert tools[2].content.startswith("[pruned]")  # without the budget: as before

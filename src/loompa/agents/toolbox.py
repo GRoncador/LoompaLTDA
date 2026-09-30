@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from loompa.engine.context import EngineContext
     from loompa.mcp import McpSession
 
+PRUNED = "[pruned]"
 READ_TOOLS = frozenset({"read_file", "list_dir", "search", "find_symbol"})
 WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file", "fix_lint"})
 RUN_TOOLS = frozenset({"run_tests", "run_lint"})
@@ -151,7 +152,7 @@ class Toolbox:
         if name not in self.allowed:
             return ToolResult(
                 False,
-                f"erro: a ferramenta {name} não está disponível para o papel {self.profile.role}",
+                f"error: the tool {name} is not available to the {self.profile.role} role",
             )
         if name in WRITE_TOOLS:
             args = dict(args)
@@ -224,10 +225,10 @@ def prune_tool_history(
     pruned = 0
     for i in older:
         m = messages[i]
-        if i in keep or len(m.content) <= max_chars or m.content.startswith("[resumido]"):
+        if i in keep or len(m.content) <= max_chars or m.content.startswith(PRUNED):
             continue
         first = m.content.strip().splitlines()[0][:120]
-        m.content = f"[resumido] resultado anterior de {m.name or 'ferramenta'} ({len(m.content)} chars): {first} …"
+        m.content = f"{PRUNED} earlier {m.name or 'tool'} result ({len(m.content)} chars), removed to save context; call again if you need it: {first} …"
         pruned += 1
     return pruned
 

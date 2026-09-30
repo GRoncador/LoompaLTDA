@@ -62,7 +62,7 @@ class ToolResult:
 TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "read_file",
-        "description": "Lê um arquivo paginado por linhas (máx 200 por chamada).",
+        "description": "Read a file by line range (at most 200 lines per call). Line numbers are shown; continue with `start`.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -75,7 +75,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "list_dir",
-        "description": "Lista arquivos e pastas (não recursivo, ignora node_modules/.venv).",
+        "description": "List files and folders in one directory (not recursive; skips node_modules, .venv, build output).",
         "parameters": {
             "type": "object",
             "properties": {"path": {"type": "string", "default": "."}},
@@ -83,7 +83,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "search",
-        "description": "Busca exata (regex) no código; retorna arquivo:linha e trecho.",
+        "description": "Search the code with a regular expression; returns file:line and the matching line. `glob` narrows the files (e.g. `*.py`).",
         "parameters": {
             "type": "object",
             "properties": {"pattern": {"type": "string"}, "glob": {"type": "string"}},
@@ -92,7 +92,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "find_symbol",
-        "description": "Localiza definição exata de função/classe/símbolo (AST).",
+        "description": "Find where a function, class or symbol is defined (from the syntax tree), with its signature.",
         "parameters": {
             "type": "object",
             "properties": {"name": {"type": "string"}},
@@ -101,7 +101,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "write_file",
-        "description": "Cria ou sobrescreve um arquivo inteiro (use só para arquivos novos ou pequenos).",
+        "description": "Create a file, or replace a whole file. Use it for new or small files; prefer edit_file for changes to an existing one.",
         "parameters": {
             "type": "object",
             "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
@@ -110,7 +110,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "edit_file",
-        "description": "Substitui um trecho exato (old) por outro (new) em um arquivo. `old` deve ser único.",
+        "description": "Replace one exact snippet (`old`) with `new` in a file. `old` must appear exactly once: copy it from read_file, with enough context to be unique.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -123,7 +123,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "delete_file",
-        "description": "Apaga um arquivo (resíduos, arquivos movidos numa refatoração). Não apaga pastas.",
+        "description": "Delete one file (leftovers, a file moved in a refactor). Does not delete folders.",
         "parameters": {
             "type": "object",
             "properties": {"path": {"type": "string"}},
@@ -132,7 +132,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "apply_patch",
-        "description": "Aplica um unified diff (formato `git diff`) em um ou mais arquivos.",
+        "description": "Apply a unified diff (`git diff` format) to one or more files. Context lines must match the current file.",
         "parameters": {
             "type": "object",
             "properties": {"patch": {"type": "string"}},
@@ -141,30 +141,30 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "run_tests",
-        "description": "Roda a suíte de testes do projeto; retorna apenas as falhas relevantes.",
+        "description": "Run the project's test suite; returns the counts and only the relevant failures.",
         "parameters": {
             "type": "object",
             "properties": {
                 "selector": {
                     "type": "string",
-                    "description": "argumento extra opcional (ex.: tests/test_x.py)",
+                    "description": "optional extra argument, e.g. tests/test_x.py to run one file",
                 }
             },
         },
     },
     {
         "name": "run_lint",
-        "description": "Roda o linter/type-checker configurado; retorna apenas os apontamentos.",
+        "description": "Run the configured linter and type checker; returns only their findings.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "fix_lint",
-        "description": "Aplica as correções automáticas do linter e o formatador só nos caminhos que o plano permite (ordem de imports, espaços, formatação) e devolve o que ainda sobrar.",
+        "description": "Apply the linter's automatic fixes and the formatter, only inside the paths the plan allows (import order, spacing, formatting), and return what is left.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "done",
-        "description": "Sinaliza que a tarefa atual foi concluída, com um resumo de uma frase.",
+        "description": "Signal that the current task is complete and its checks are green, with a one-sentence summary.",
         "parameters": {
             "type": "object",
             "properties": {"summary": {"type": "string"}},
@@ -173,7 +173,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "blocked",
-        "description": "Sinaliza que não é possível prosseguir sem uma decisão humana; explique em linguagem simples.",
+        "description": "Signal that you cannot continue without a human decision. `reason` is plain, non-technical language for the founder; `options` are 2-3 choices.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -185,7 +185,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "note_learning",
-        "description": "Registra um bug colateral, débito técnico ou oportunidade fora do escopo (não corrija!).",
+        "description": "Record a side bug, technical debt or opportunity outside this task's scope, for the backlog. Do not fix it now.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -239,9 +239,9 @@ class ACI:
     def _resolve(self, path: str, *, for_write: bool = False) -> Path:
         p = (self.root / path).resolve()
         if self.root not in (p, *p.parents):
-            raise ToolError(f"caminho fora do repositório: {path}")
+            raise ToolError(f"path outside the repository: {path}")
         if is_protected(p.relative_to(self.root)):
-            raise ToolError(f"arquivo protegido (credenciais ou estado interno): {path}")
+            raise ToolError(f"protected file (credentials or factory state): {path}")
         if for_write and self.allowed_paths is not None:
             rel = str(p.relative_to(self.root))
             if not any(
@@ -249,7 +249,7 @@ class ACI:
                 for a in self.allowed_paths
             ):
                 raise ToolError(
-                    f"edição fora do escopo do plano: {rel}. Use note_learning para registrar a necessidade."
+                    f"outside the plan's paths: {rel}. If the task needs it, record why with note_learning."
                 )
         return p
 
@@ -281,7 +281,7 @@ class ACI:
     async def call(self, name: str, args: dict[str, Any]) -> ToolResult:
         handler = getattr(self, f"tool_{name}", None)
         if handler is None:
-            return ToolResult(False, f"ferramenta desconhecida: {name}")
+            return ToolResult(False, f"unknown tool: {name}")
         self._just_written = []
         try:
             out = handler(**args)
@@ -293,15 +293,15 @@ class ACI:
                     out = f"{out}\n\n[quick check] problems in what you just wrote:\n{problems}"
             return ToolResult(True, out)
         except ToolError as exc:
-            return ToolResult(False, f"erro: {exc}")
+            return ToolResult(False, f"error: {exc}")
         except TypeError as exc:
-            return ToolResult(False, f"argumentos inválidos para {name}: {exc}")
+            return ToolResult(False, f"invalid arguments for {name}: {exc}")
 
     # -------------------------------------------------------------------- tools
     def tool_read_file(self, path: str, start: int = 1, lines: int = 120) -> str:
         p = self._resolve(path)
         if not p.is_file():
-            raise ToolError(f"arquivo não existe: {path}")
+            raise ToolError(f"no such file: {path}")
         lines = max(1, min(int(lines), self.max_read_lines))
         start = max(1, int(start))
         content = p.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -310,21 +310,21 @@ class ACI:
         chunk = content[start - 1 : start - 1 + lines]
         body = "\n".join(f"{start + i:5d}| {line}" for i, line in enumerate(chunk))
         end = start + len(chunk) - 1
-        more = f"\n… ({total - end} linhas restantes; use start={end + 1})" if end < total else ""
-        return f"{path} [{start}-{end} de {total}]\n{body}{more}"
+        more = f"\n… ({total - end} more lines; use start={end + 1})" if end < total else ""
+        return f"{path} [{start}-{end} of {total}]\n{body}{more}"
 
     def tool_list_dir(self, path: str = ".") -> str:
         p = self._resolve(path)
         if not p.is_dir():
-            raise ToolError(f"pasta não existe: {path}")
+            raise ToolError(f"no such folder: {path}")
         skip = {"node_modules", ".venv", "__pycache__", ".git", ".loompa", "dist", "build"}
         entries = sorted(e for e in p.iterdir() if e.name not in skip)
-        return "\n".join(f"{e.name}/" if e.is_dir() else e.name for e in entries[:300]) or "(vazio)"
+        return "\n".join(f"{e.name}/" if e.is_dir() else e.name for e in entries[:300]) or "(empty)"
 
     def tool_search(self, pattern: str, glob: str | None = None) -> str:
         hits = [h for h in self._search.grep(pattern, glob=glob) if not is_protected(h.path)]
         if not hits:
-            return "nenhuma ocorrência"
+            return "no matches"
         return "\n".join(f"{h.path}:{h.line}: {h.text}" for h in hits[:60])
 
     def tool_find_symbol(self, name: str) -> str:
@@ -332,7 +332,7 @@ class ACI:
             self._symbols = SymbolIndex.build(self.root)
         syms = self._symbols.find(name) or self._symbols.find(name, exact=False)
         if not syms:
-            return f"símbolo não encontrado: {name}"
+            return f"symbol not found: {name}"
         return "\n".join(
             f"{s.kind} {s.name} — {s.path}:{s.line}\n    {s.signature}" for s in syms[:20]
         )
@@ -345,32 +345,30 @@ class ACI:
         p.write_text(content, encoding="utf-8")
         self._wrote(p)
         return (
-            f"{'sobrescrito' if existed else 'criado'}: {path} ({len(content.splitlines())} linhas)"
+            f"{'overwritten' if existed else 'created'}: {path} ({len(content.splitlines())} lines)"
         )
 
     def tool_delete_file(self, path: str) -> str:
         p = self._resolve(path, for_write=True)
         if p.is_dir():
-            raise ToolError(f"{path} é uma pasta; apague os arquivos dela um a um")
+            raise ToolError(f"{path} is a folder; delete its files one by one")
         if not p.is_file():
-            raise ToolError(f"arquivo não existe: {path}")
+            raise ToolError(f"no such file: {path}")
         p.unlink()
         self._wrote(p)
-        return f"apagado: {path}"
+        return f"deleted: {path}"
 
     def tool_edit_file(self, path: str, old: str, new: str) -> str:
         p = self._resolve(path, for_write=True)
         if not p.is_file():
-            raise ToolError(f"arquivo não existe: {path}")
+            raise ToolError(f"no such file: {path}")
         self._check_read(p, path)
         text = p.read_text(encoding="utf-8")
         count = text.count(old)
         if count == 0:
-            raise ToolError("trecho `old` não encontrado; leia o arquivo e copie o trecho exato")
+            raise ToolError("`old` not found; read the file and copy the exact snippet")
         if count > 1:
-            raise ToolError(
-                f"trecho `old` aparece {count} vezes; inclua mais contexto para ser único"
-            )
+            raise ToolError(f"`old` appears {count} times; include more context so it is unique")
         updated = text.replace(old, new, 1)
         p.write_text(updated, encoding="utf-8")
         self._wrote(p)
@@ -380,7 +378,7 @@ class ACI:
     def tool_apply_patch(self, patch: str) -> str:
         files = _parse_unified_diff(patch)
         if not files:
-            raise ToolError("patch vazio ou em formato não reconhecido (use unified diff)")
+            raise ToolError("empty patch or unknown format (use a unified diff)")
         applied = []
         for rel in files:
             self._check_read(self._resolve(rel, for_write=True), rel)
@@ -392,15 +390,15 @@ class ACI:
             p.write_text("\n".join(updated) + ("\n" if updated else ""), encoding="utf-8")
             self._wrote(p)
             applied.append(rel)
-        return "patch aplicado em: " + ", ".join(applied)
+        return "patch applied to: " + ", ".join(applied)
 
     async def tool_run_tests(self, selector: str | None = None) -> str:
         if not self.test_command:
-            return "[tests] nenhum comando de teste configurado (quality.test_command)"
+            return "[tests] no test command configured (quality.test_command)"
         cmd = f"{self.test_command} {selector}".strip() if selector else self.test_command
         res = await run_command(cmd, self.root, timeout=900)
         if res.timed_out:
-            return "[tests] FAIL: tempo esgotado (900s)"
+            return "[tests] FAIL: timed out (900s)"
         return summarize_tests(res.output, res.returncode).compact()
 
     async def tool_run_lint(self) -> str:
@@ -411,7 +409,7 @@ class ACI:
         if self.typecheck_command:
             res = await run_command(self.typecheck_command, self.root, timeout=600)
             parts.append(summarize_typecheck(res.output, res.returncode).compact())
-        return "\n".join(parts) or "[lint] nenhum comando configurado"
+        return "\n".join(parts) or "[lint] no command configured"
 
     async def tool_fix_lint(self) -> str:
         """Mechanical fixes a model gets wrong by hand: in `contas` S-003 the Worker made eleven
@@ -423,7 +421,7 @@ class ACI:
             else [p for p in self.allowed_paths if (self.root / p).exists() and not is_protected(p)]
         )
         if not targets:
-            return "[fix] nenhum caminho do plano existe ainda"
+            return "[fix] none of the plan's paths exists yet"
         commands = []
         if "ruff check" in self.lint_command:
             commands.append(self.lint_command + " --fix")
@@ -442,12 +440,10 @@ class ACI:
         self._symbols = None
         self.version += 1
         head = (
-            "[fix] correções automáticas aplicadas"
-            if ran
-            else "[fix] nenhum comando de correção automática configurado"
+            "[fix] automatic fixes applied" if ran else "[fix] no automatic-fix command configured"
         )
         if skipped:
-            head += f" (não aplicável só ao plano: {', '.join(skipped)})"
+            head += f" (cannot be narrowed to the plan: {', '.join(skipped)})"
         return head + "\n" + await self.tool_run_lint()
 
     async def quick_check(self, paths: list[str]) -> str:
@@ -499,7 +495,7 @@ class ACI:
 
     def tool_note_learning(self, title: str, detail: str = "", kind: str = "opportunity") -> str:
         self.learnings.append({"title": title, "detail": detail, "kind": kind})
-        return f"registrado para o backlog: {title}"
+        return f"recorded for the backlog: {title}"
 
 
 QUICK_CHECKED = frozenset({"write_file", "edit_file", "apply_patch"})
@@ -559,7 +555,7 @@ def _apply_hunks(original: list[str], hunks: list[tuple[int, list[str]]]) -> lis
         if result[idx : idx + len(before)] != before:
             found = _locate(result, before, idx)
             if found is None:
-                raise ToolError(f"hunk @@ -{start} não casa com o arquivo atual; releia o arquivo")
+                raise ToolError(f"hunk @@ -{start} does not match the current file; read it again")
             idx = found
         result[idx : idx + len(before)] = after
         offset += len(after) - len(before)

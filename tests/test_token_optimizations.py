@@ -23,9 +23,7 @@ def test_prune_collapses_old_tool_results_only():
     pruned = prune_tool_history(msgs, keep_last=3)
     assert pruned == 7
     tools = [m for m in msgs if m.role == "tool"]
-    assert all(
-        t.content.startswith("[resumido] resultado anterior de read_file") for t in tools[:7]
-    )
+    assert all(t.content.startswith("[pruned] earlier read_file result") for t in tools[:7])
     assert all(len(t.content) > 2000 for t in tools[-3:])
     assert "line one of 0" in tools[0].content
     assert prune_tool_history(msgs, keep_last=3) == 0  # idempotent

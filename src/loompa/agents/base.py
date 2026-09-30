@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 MAX_TOOL_RESULT_CHARS = 12000
-JSON_ONLY = "Responda APENAS com um objeto JSON válido, sem texto ao redor."
+JSON_ONLY = (
+    "Answer again with ONLY the JSON object the instructions ask for: no prose, no code fences."
+)
 FINAL_JSON = (
     "You have used your tool budget. Do not call any more tools: answer now with the JSON "
     "object only, based on what you have gathered."

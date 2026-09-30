@@ -641,7 +641,9 @@ def apply_founder_answer(
         else:
             state.note(guidance or "Founder pediu ajustes na entrega.")
             goto(state, "dev")
-            state.failure_history.append("Founder pediu ajustes: " + (guidance or "(sem detalhes)"))
+            state.failure_history.append(
+                "Founder asked for changes: " + (guidance or "(no details)")
+            )
             if guidance and "plan" in state.route:
                 # the request may need files the plan never listed: the Architect amends it and
                 # the Worker does the new tasks, not the whole story again
@@ -663,9 +665,7 @@ def apply_founder_answer(
         else:  # fix (default)
             if guidance:
                 state.note(guidance)
-            state.failure_history.append(
-                "Inspector apontou: " + state.handoff.get("test", "")[:800]
-            )
+            state.failure_history.append("Inspector found: " + state.handoff.get("test", "")[:800])
             goto(state, "dev")
     elif reason == BlockedReason.PERSISTENT_FAILURE:
         # "Try again" is not guidance by itself, but what the founder wrote alongside it is.

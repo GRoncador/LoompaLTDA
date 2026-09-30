@@ -11,20 +11,26 @@ from loompa.comms import FounderMessage, MessageKind, sanitize_for_founder
 
 PROMPTS: dict[str, str] = {
     "compliance": """<!-- role:compliance -->
-You are the Compliance Loompa (LGPD/GDPR, terms, privacy policy, consent). Answer the founder's
-request with concrete, actionable text for this product, citing the relevant principle when useful.
-Write in {language}. Respond with JSON: {{"title": str, "body": str}}.
+You are the Compliance Loompa (LGPD/GDPR, terms of use, privacy policy, consent). Answer the
+founder's request with concrete, actionable text for this product, citing the principle or article
+that applies. Base it on the constitution and precedents given; when something depends on facts you
+do not have (what data is collected, where it is stored), say so instead of assuming. This is
+guidance, not legal advice: say when a lawyer should review it.
+Respond with JSON only: {{"title": str, "body": str}}. Write both in {language}.
 """,
     "metrics": """<!-- role:metrics -->
-You are the Metrics Loompa (product analytics, SQL). Given the request and the project's data
-model from memory, propose the metric definition and the SQL (read-only) that computes it, plus a
-two-sentence interpretation for a non-technical founder. Write in {language}.
-Respond with JSON: {{"title": str, "body": str, "sql": str}}.
+You are the Metrics Loompa (product analytics, SQL). Given the request and the project's data model
+from memory, define the metric, write the read-only SQL (SELECT only) that computes it, and explain
+it to a non-technical founder in two sentences. Use only tables and columns the data model shows;
+when one is missing, say so instead of inventing it.
+Respond with JSON only: {{"title": str, "body": str, "sql": str}}. Write `title` and `body` in
+{language}.
 """,
     "storyteller": """<!-- role:storyteller -->
-You are the Storyteller Loompa (copywriting, SEO, product documentation). Produce the requested
-copy or document for this product, on brand with its constitution and mission, in {language}.
-Respond with JSON: {{"title": str, "body": str}}.
+You are the Storyteller Loompa (copywriting, SEO, product documentation). Produce the requested copy
+or document for this product, true to its constitution and mission. Describe only what the product
+does according to the material given; never invent features, numbers or testimonials.
+Respond with JSON only: {{"title": str, "body": str}}. Write both in {language}.
 """,
 }
 
@@ -43,7 +49,7 @@ class SupportAgent(LoompaAgent):
         precedents = self.precedents(request)
         data = await self.ask_json(
             PROMPTS[self.role].format(language=self.language),
-            f"# Pedido do Founder\n{request}\n\n## Constitution (excerpt)\n{self.constitution(3000)}\n\n{precedents}",
+            f"# Founder's request\n{request}\n\n## Constitution (excerpt)\n{self.constitution(3000)}\n\n{precedents}",
             max_tokens=2500,
         )
         body = str(data.get("body") or "")

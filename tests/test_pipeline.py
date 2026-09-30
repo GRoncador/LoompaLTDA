@@ -216,7 +216,7 @@ async def test_waived_verdict_asks_the_founder(factory: Factory, answer: str):
     state = await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key=answer))
     if answer == "fix":
         assert state.stage == Stage.DEV and state.phase == "dev"
-        assert "Inspector apontou" in state.failure_history[-1]
+        assert "Inspector found" in state.failure_history[-1]
         await Scheduler(ctx).run()
         final = load_state(ctx, sid)
         assert final.blocked_reason == "delivery" and final.qa_verdict == "PASS"
@@ -355,7 +355,7 @@ async def test_dod_counts_what_an_earlier_task_already_committed(factory: Factor
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
     assert types.count("worker.dod_incomplete") == 0
     assert len(seen) == 2  # T2 was judged, not rejected unseen for an empty diff
-    assert "nenhuma mudança nova nesta tarefa" in seen[1] and "test_a.py" in seen[1]
+    assert "no new change in this task" in seen[1] and "test_a.py" in seen[1]
     await ctx.aclose()
 
 
