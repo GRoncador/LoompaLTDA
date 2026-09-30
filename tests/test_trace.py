@@ -122,7 +122,33 @@ async def test_a_cut_answer_and_its_retry_are_one_call_with_two_attempts(tmp_pat
     cfg = _one_model_config()
     answers = iter(
         [
-            LLMResponse("", [], "m1", "p", 100, 900, finish_reason="length"),
+            LLMResponse(
+                "",
+                [],
+                "m1",
+                "p",
+                100,
+                900,
+                finish_reason="length",
+                reasoning_tokens=700,
+                raw={  # the half-written tool call only exists in the raw message
+                    "choices": [
+                        {
+                            "message": {
+                                "reasoning": "x" * 2000 + "and again, the plan",
+                                "tool_calls": [
+                                    {
+                                        "function": {
+                                            "name": "plan",
+                                            "arguments": '{"tasks": [1, 1, 1',
+                                        }
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                },
+            ),
             LLMResponse("done", [], "m1", "p", 100, 50, finish_reason="stop"),
         ]
     )
@@ -139,6 +165,10 @@ async def test_a_cut_answer_and_its_retry_are_one_call_with_two_attempts(tmp_pat
     (span,) = spans_of(tmp_path / "S-1.jsonl")
     attempts = span["attrs"]["attempts"]
     assert [a["outcome"] for a in attempts] == ["cut", "ok"]
+    # what the cut attempt was writing, so a runaway plan can be told from a long thought
+    assert attempts[0]["tail"] == '{"tasks": [1, 1, 1' and attempts[0]["reasoning_tokens"] == 700
+    assert attempts[0]["reasoning_tail"].endswith("and again, the plan")
+    assert len(attempts[0]["reasoning_tail"]) == 600 and "tail" not in attempts[1]
     first = attempts[0]["max_tokens"]
     assert attempts[1]["max_tokens"] == 2 * first  # more room after the cut
     assert [t for t, _ in events] == ["llm.cut"] and events[0][1]["next_max_tokens"] == 2 * first

@@ -33,6 +33,24 @@ log = logging.getLogger(__name__)
 TRUNCATED_SUFFIX = " (resposta cortada no limite)"
 
 
+CUT_TAIL_CHARS = 600
+
+
+def _cut_tail(resp: LLMResponse) -> dict[str, str]:
+    """The end of what a cut answer was writing, for the trace: a plan that runs past 16k
+    tokens is either thinking in circles or repeating itself in the output, and only the tail
+    tells which. The half-written tool call is read from the raw message: it never parses."""
+    msg = ((resp.raw or {}).get("choices") or [{}])[0].get("message") or {}
+    calls = msg.get("tool_calls") or []
+    args = (calls[-1].get("function") or {}).get("arguments") if calls else None
+    text = resp.content or (args if isinstance(args, str) else "")
+    reasoning = msg.get("reasoning")
+    tail = {"tail": text[-CUT_TAIL_CHARS:]} if text else {}
+    if isinstance(reasoning, str) and reasoning:
+        tail["reasoning_tail"] = reasoning[-CUT_TAIL_CHARS:]
+    return tail
+
+
 def _lower_effort(effort: str) -> str:
     """One step less thinking; the provider default counts as `medium`."""
     order = REASONING_EFFORTS
@@ -473,6 +491,10 @@ class ModelRouter:
                     cost_usd=round(cost, 6),
                     ms=resp.duration_ms or int((loop.time() - started) * 1000),
                     **({"served_by": resp.served_by} if resp.served_by else {}),
+                    **(
+                        {"reasoning_tokens": resp.reasoning_tokens} if resp.reasoning_tokens else {}
+                    ),
+                    **(_cut_tail(resp) if resp.truncated else {}),
                 )
                 if not resp.truncated:
                     if cuts:
