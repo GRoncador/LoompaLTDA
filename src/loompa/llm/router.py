@@ -284,17 +284,28 @@ class ModelRouter:
             while True:
                 attempts += 1
                 try:
-                    resp = await prov.complete(
-                        cand.model,
-                        messages,
-                        tools=tools,
-                        temperature=temperature
-                        if temperature is not None
-                        else (cand.temperature or self.config.models.temperature),
-                        max_tokens=budget,
-                        json_mode=json_mode,
-                        reasoning_effort=effort,
+                    resp = await asyncio.wait_for(
+                        prov.complete(
+                            cand.model,
+                            messages,
+                            tools=tools,
+                            temperature=temperature
+                            if temperature is not None
+                            else (cand.temperature or self.config.models.temperature),
+                            max_tokens=budget,
+                            json_mode=json_mode,
+                            reasoning_effort=effort,
+                        ),
+                        timeout=self.config.models.call_timeout_s,
                     )
+                except TimeoutError:
+                    limit = self.config.models.call_timeout_s
+                    errors.append(f"{key}: sem resposta em {limit:.0f}s")
+                    log.warning("%s não respondeu em %.0fs; próximo modelo", key, limit)
+                    # a hung upstream tends to stay hung for a while: rest it like a 5xx
+                    self._cooldown[key] = loop.time() + limit
+                    resp = None
+                    break  # next candidate
                 except QuotaExhausted as exc:
                     errors.append(str(exc))
                     # Honour the provider's hint; otherwise a 429 is a per-minute rate limit,

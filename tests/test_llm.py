@@ -488,6 +488,28 @@ def test_a_model_the_provider_does_not_have_is_told_apart_from_other_errors():
     assert not model_not_found(LLMError("overloaded", status=503))
 
 
+async def test_a_call_that_never_ends_gives_way_to_the_next_model():
+    """`contas`, 2026-09-30: two stories sat for 50 minutes on OpenRouter connections kept alive
+    by keep-alive comments, under the per-read HTTP timeout. A call now has a wall-clock limit."""
+    import asyncio
+
+    class Hung(MockProvider):
+        async def complete(self, model, messages, **kw):
+            await super().complete(model, messages, **kw)
+            await asyncio.sleep(3600)
+
+    cfg = two_provider_matrix()
+    cfg.models.call_timeout_s = 0.05
+    hung = Hung("gemini")
+    router = ModelRouter(
+        cfg, providers={"gemini": hung, "deepseek": MockProvider("deepseek", script=scripted)}
+    )
+    rc = await router.complete("worker", [Message("user", "x")])
+    assert rc.candidate.provider == "deepseek" and len(hung.calls) == 1
+    await router.complete("worker", [Message("user", "y")])
+    assert len(hung.calls) == 1  # rested, not asked again right away
+
+
 async def test_the_router_reports_a_missing_model_once_and_falls_through():
     """A wrong name cannot be fixed by retrying: the candidate is skipped and said out loud."""
     cfg = two_provider_matrix()

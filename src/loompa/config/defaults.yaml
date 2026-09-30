@@ -152,6 +152,8 @@ models:
     COMPLEX: 3.0
   max_output_ceiling: 32768
   truncation_retries: 2
+  # Wall-clock limit per model call (s); past it the next model is tried.
+  call_timeout_s: 600
 
 # Providers. `api_key_env` is the NAME of a variable; its value lives in ~/.loompa/secrets.env
 # (all factories) or <repo>/.loompa/.env (this factory) - never here, never in git.
