@@ -87,10 +87,18 @@ class DeployerAgent(LoompaAgent):
     def sync_with_base(self, state: StoryState, wt: Worktree) -> list[str] | None:
         """Bring a story that is going back to work up to date with the base: a fix merged in
         the meantime (the red suite that failed every story, say) must reach it before its
-        next test run. The base is merged into the (clean) story branch. None: nothing to do;
+        next test run. The base is merged into the story branch. None: nothing to do;
         []: merged; a list: files in conflict, waiting for `finish_sync`."""
-        if self.git.status(wt) or not self.git.behind_base(wt):
+        if not self.git.behind_base(wt):
             return None
+        if self.git.status(wt):
+            # work left uncommitted (an interrupted run, a task cut short) is kept as a commit:
+            # skipping the sync instead left the story testing on the old base
+            commit = self.git.commit_all(
+                wt, f"wip({state.story_id.lower()}): trabalho em andamento antes de integrar a base"
+            )
+            if commit:
+                state.commits.append(commit.sha)
         conflicts = self.git.merge_base_into(wt)
         self.ctx.emit(
             "worktree.synced", story_id=state.story_id, agent=self.name, conflicts=conflicts

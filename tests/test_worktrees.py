@@ -225,3 +225,25 @@ def test_an_unresolved_merge_of_the_base_is_aborted_cleanly(git_repo: Path):
     deployer.abort_merge(wt)
     assert wm.status(wt) == [] and (wt.path / "README.md").read_text() == "# história\n"
     assert wm.behind_base(wt)  # still on the old base: the delivery will report the conflict
+
+
+async def test_uncommitted_work_is_kept_as_a_commit_before_the_base_is_merged(factory):
+    """An interrupted run leaves a task's work uncommitted; the sync used to skip such a
+    worktree, leaving the story testing on the old base."""
+    from conftest import git
+    from loompa.agents import DeployerAgent
+    from loompa.engine import StoryState
+    from test_engine import make_ctx
+
+    ctx = make_ctx(factory)
+    wt = ctx.worktrees.create("S-009")
+    (wt.path / "wip.py").write_text("x = 1\n")
+    (factory.root / "novo.py").write_text("y = 2\n")
+    git("add", ".", cwd=factory.root)
+    git("commit", "-qm", "main anda", cwd=factory.root)
+    state = StoryState(story_id="S-009", title="wip")
+    assert DeployerAgent(ctx).sync_with_base(state, wt) == []
+    log = git("log", "--oneline", "-3", cwd=wt.path)
+    assert "trabalho em andamento" in log and (wt.path / "novo.py").exists()
+    assert (wt.path / "wip.py").read_text() == "x = 1\n" and not ctx.worktrees.behind_base(wt)
+    await ctx.aclose()
