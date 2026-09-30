@@ -20,11 +20,14 @@ from loompa.factory import Factory
 from loompa.llm import LLMResponse, Message
 from loompa.llm.catalog import (
     CatalogError,
+    EndpointPrices,
     Policy,
     apply_proposal,
     build_proposal,
     fetch_catalog,
+    fetch_endpoint_prices,
     parse_catalog,
+    parse_endpoints,
     rank,
 )
 from loompa.models_sync import ModelSync, ModelWatch, excluded_report, plan
@@ -694,36 +697,116 @@ def test_clusters_tier1_score_tier2_cost_benefit_tier3_free():
 # --------------------------------------------------------------------- the model watch
 
 
-async def test_a_model_that_got_more_expensive_becomes_one_inbox_note(factory: Factory):
+async def test_a_model_is_dearer_only_when_the_median_of_its_providers_rose(factory: Factory):
     """No schedule watches prices: the comparison happens when the founder refreshes the
-    catalogue, against what the factory is billing at today."""
+    catalogue. The catalogue's own price is one provider among many and OpenRouter changes which
+    one, so it never makes a note on its own (every note of Sprint 1 was that, Fase 8.1)."""
     pin_openrouter(factory.config)
+    factory.config.models.matrix["engineering"]["tier1"] = [
+        ModelCandidate(provider="openrouter", model="b/strong")
+    ]
     ctx = make_ctx(factory, dry_run=True)
+    events: list[dict[str, Any]] = []
+    ctx.listeners.append(events.append)
+    medians = {"b/strong": EndpointPrices("b/strong", 12, 1.0)}
+    asked: list[list[str]] = []
+
+    def fetch(ids: list[str]) -> dict[str, EndpointPrices]:
+        asked.append(ids)
+        return {i: medians[i] for i in ids if i in medians}
+
     watch = ModelWatch(ctx)
-    models = parse_catalog({"data": CATALOG})
-
-    assert watch.check_prices(models) == []  # the first sight is the baseline, not news
-    assert ctx.store.list_messages(factory.slug) == []
-
-    dearer = [dict(r) for r in CATALOG]
-    for row in dearer:
-        if row["id"] == "z-ai/glm-5.3":
-            row["pricing"] = {"prompt": str(4 / 1e6), "completion": str(12 / 1e6)}
-    told = watch.check_prices(parse_catalog({"data": dearer}))
-    assert told == []  # z-ai/glm-5.3 is not one of this factory's models
+    assert watch.check_prices(parse_catalog({"data": CATALOG}), fetch=fetch) == []  # baseline
+    assert "b/strong" in asked[0] and "z-ai/glm-5.3" not in asked[0]  # only the models in use
 
     pricier = [dict(r) for r in CATALOG]
     for row in pricier:
         if row["id"] == "b/strong":
             row["pricing"] = {"prompt": str(6 / 1e6), "completion": str(18 / 1e6)}
-    factory.config.models.matrix["engineering"]["tier1"] = [
-        ModelCandidate(provider="openrouter", model="b/strong")
-    ]
-    assert ModelWatch(ctx).check_prices(parse_catalog({"data": CATALOG})) == []  # new baseline
-    told = ModelWatch(ctx).check_prices(parse_catalog({"data": pricier}))
+    assert watch.check_prices(parse_catalog({"data": pricier}), fetch=fetch) == []
+    assert ctx.store.list_messages(factory.slug) == []  # the reference provider moved: no note
+    assert [
+        e["payload"]["model"] for e in events if e["type"] == "models.price.reference_moved"
+    ] == ["b/strong"]
+
+    medians["b/strong"] = EndpointPrices("b/strong", 10, 1.3)  # the providers' median rose 30%
+    told = watch.check_prices(parse_catalog({"data": pricier}), fetch=fetch)
     assert told == ["b/strong"]
     (msg,) = ctx.store.list_messages(factory.slug, status="pending")
-    assert "mais caro" in msg.title and msg.executive_audit() == []  # plain pt-BR, no stack trace
+    assert "30% mais caro" in msg.title and msg.executive_audit() == []  # plain pt-BR
+    assert "mediana entre os 10 provedores" in msg.context and "antes eram 12" in msg.context
+    # the old note claimed the cost control used the new price, which it did not
+    assert "já usa o preço novo" not in msg.impact and "cobra de fato" in msg.impact
+    # told once: the same median again is not news
+    assert watch.check_prices(parse_catalog({"data": pricier}), fetch=fetch) == []
+
+
+def test_the_providers_median_ignores_providers_without_tools_and_bad_prices():
+    payload = {
+        "data": {
+            "id": "deepseek/deepseek-v4-flash-0731",
+            "endpoints": [
+                {
+                    "provider_name": "OpenInference",
+                    "pricing": {"prompt": "0.00000000396", "completion": "0.000000155509"},
+                    "supported_parameters": ["tools", "reasoning"],
+                },
+                {
+                    "provider_name": "Relace",
+                    "pricing": {"prompt": "0.000000004", "completion": "0.00000128"},
+                    "supported_parameters": ["tools"],
+                },
+                {
+                    "provider_name": "StreamLake",
+                    "pricing": {"prompt": "0.00000007854", "completion": "0.00000015708"},
+                    "supported_parameters": ["tools"],
+                },
+                {  # no tools: a tool loop never lands here
+                    "provider_name": "Cheap",
+                    "pricing": {"prompt": "0", "completion": "0"},
+                    "supported_parameters": ["max_tokens"],
+                },
+                {
+                    "provider_name": "Broken",
+                    "pricing": {"prompt": "n/a"},
+                    "supported_parameters": ["tools"],
+                },
+            ],
+        }
+    }
+    prices = parse_endpoints("deepseek/deepseek-v4-flash-0731", payload)
+    assert prices.providers == 3
+    assert prices.median == pytest.approx((3 * 0.07854 + 0.15708) / 4)
+    assert parse_endpoints("x", {"data": {"endpoints": []}}).median is None
+    assert parse_endpoints("x", ["garbage"]).providers == 0
+
+
+def test_endpoint_prices_are_one_public_request_per_model_and_a_failure_is_skipped():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if "broken" in request.url.path:
+            return httpx.Response(500)
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "endpoints": [
+                        {
+                            "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+                            "supported_parameters": ["tools"],
+                        }
+                    ]
+                }
+            },
+        )
+
+    cfg = default_config()
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        out = fetch_endpoint_prices(cfg, ["a/one", "b/broken"], client=client)
+    assert seen == ["/api/v1/models/a/one/endpoints", "/api/v1/models/b/broken/endpoints"]
+    assert list(out) == ["a/one"] and out["a/one"].median == pytest.approx(1.25)
 
 
 async def test_a_model_that_left_the_air_is_reported_once(factory: Factory):

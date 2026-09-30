@@ -10,6 +10,7 @@ configuration edited since the proposal is never overwritten.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import date
 from typing import Any
@@ -23,11 +24,13 @@ from loompa.engine.state import TERMINAL, Stage
 from loompa.llm.catalog import (
     PROVIDER,
     REASONS,
+    EndpointPrices,
     Policy,
     Proposal,
     apply_proposal,
     build_proposal,
     fetch_catalog,
+    fetch_endpoint_prices,
 )
 from loompa.sprints import SprintBoard, SprintStatus
 
@@ -261,7 +264,8 @@ class AliasWatch:
         )
 
 
-PRICE_SEEN = "price_seen:"  # kv: `price_seen:<model>` = the blended USD/1M last told to the founder
+PRICE_SEEN = "price_seen:"  # kv: the catalogue's reference price (one provider), for the event
+PRICE_MEDIAN = "price_median:"  # kv: `{"median", "providers"}` last told to the founder
 MODEL_GONE = "model_gone:"  # kv: `model_gone:<provider>/<model>` = already reported once
 PRICE_JUMP = 0.10  # a rise under 10% is noise from rounding, not news
 
@@ -274,20 +278,28 @@ def _blended(price: Price) -> float:
 class ModelWatch:
     """Two things the founder should hear about between catalogue refreshes (ADR-0011 §5).
 
-    A model that got more expensive: caught when the catalogue is read, by comparing the blended
-    price against the one this factory is billing at. And a model the provider says it does not
-    have: caught on the call itself, because a name that is wrong today was right yesterday.
+    A model that got more expensive: caught when the catalogue is read, by comparing the median
+    price of the providers that serve it (with tools) against the median seen last time. Not the
+    catalogue's own price: that is one provider among many, and OpenRouter changes which, so every
+    earlier "X% mais caro" note was a switch of reference provider, not a price change (Fase 8.1).
+    A switch like that is only an event. And a model the provider says it does not have: caught on
+    the call itself, because a name that is wrong today was right yesterday.
 
-    Both are told once per model. There is no schedule behind either: the founder refreshes the
+    Both are told once per change. There is no schedule behind either: the founder refreshes the
     catalogue when they want to, and a bad id announces itself the first time it is used."""
 
     def __init__(self, ctx: EngineContext):
         self.ctx = ctx
 
     # ------------------------------------------------------------------ prices
-    def check_prices(self, models: list[Any]) -> list[str]:
-        """Compare a freshly read catalogue against the prices in use. Returns the models a note
-        went out for, so a caller can say what happened."""
+    def check_prices(
+        self,
+        models: list[Any],
+        *,
+        fetch: Callable[[list[str]], dict[str, EndpointPrices]] | None = None,
+    ) -> list[str]:
+        """Compare a freshly read catalogue against the prices seen before. Returns the models a
+        note went out for, so a caller can say what happened."""
         in_use = {
             c.model
             for cands in self.ctx.config.models.matrix.values()
@@ -295,36 +307,70 @@ class ModelWatch:
             for c in cs
             if c.provider == PROVIDER
         }
+        # an alias has no endpoints of its own: the model it points to today has them
+        wanted = {
+            m.id: (m.target_id if m.alias and m.target_id else m.id)
+            for m in models
+            if m.id in in_use and (m.blended or 0) > 0
+        }
+        if not wanted:
+            return []
+        fetch = fetch or (lambda ids: fetch_endpoint_prices(self.ctx.config, ids))
+        prices = fetch(sorted(set(wanted.values())))
         told: list[str] = []
         for m in models:
-            if m.id not in in_use:
+            if m.id not in wanted:
                 continue
-            now = m.blended
-            if now is None or now <= 0:
+            self._reference(m.id, float(m.blended))
+            now = prices.get(wanted[m.id])
+            if now is None or not now.median:
                 continue
             before = self._remembered(m.id)
-            self.ctx.store.set(PRICE_SEEN + m.id, f"{now:.6f}")
-            if before is None or before <= 0:
+            self.ctx.store.set(
+                PRICE_MEDIAN + m.id, json.dumps({"median": now.median, "providers": now.providers})
+            )
+            if before is None:
                 continue  # the first sight is the baseline, not news
-            if now <= before * (1 + PRICE_JUMP):
+            if now.median <= before["median"] * (1 + PRICE_JUMP):
                 continue
             self._tell_price(m.id, m.label or m.id, before, now)
             told.append(m.id)
         return told
 
-    def _remembered(self, model_id: str) -> float | None:
+    def _reference(self, model_id: str, price: float) -> None:
+        """The catalogue's reference provider moved: said in the event log, never in the inbox."""
         raw = self.ctx.store.get(PRICE_SEEN + model_id)
-        if raw:
-            try:
-                return float(raw)
-            except ValueError:
-                return None
-        configured = self.ctx.config.pricing.get(model_id)
-        return _blended(configured) if configured else None
+        self.ctx.store.set(PRICE_SEEN + model_id, f"{price:.6f}")
+        try:
+            before = float(raw) if raw else None
+        except ValueError:
+            before = None
+        if before and abs(price - before) > before * PRICE_JUMP:
+            self.ctx.emit("models.price.reference_moved", model=model_id, before=before, now=price)
 
-    def _tell_price(self, model_id: str, label: str, before: float, now: float) -> None:
-        pct = int(round((now / before - 1) * 100))
-        self.ctx.emit("models.price.raised", model=model_id, before=before, now=now)
+    def _remembered(self, model_id: str) -> dict[str, Any] | None:
+        raw = self.ctx.store.get(PRICE_MEDIAN + model_id)
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+            return data if float(data.get("median") or 0) > 0 else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    def _tell_price(
+        self, model_id: str, label: str, before: dict[str, Any], now: EndpointPrices
+    ) -> None:
+        was, median = float(before["median"]), float(now.median or 0)
+        pct = int(round((median / was - 1) * 100))
+        self.ctx.emit(
+            "models.price.raised",
+            model=model_id,
+            before=was,
+            now=median,
+            providers=now.providers,
+            providers_before=before.get("providers"),
+        )
         self.ctx.inbox(
             FounderMessage(
                 factory=self.ctx.slug,
@@ -332,12 +378,19 @@ class ModelWatch:
                 sender=SENDER,
                 title=f"{label} ficou {pct}% mais caro",
                 context=(
-                    f"O modelo {label}, que a fábrica usa, passou de {_usd(before)} para "
-                    f"{_usd(now)} por milhão de tokens. O controle de custos já usa o preço novo."
+                    f"O preço típico do modelo {label}, que a fábrica usa, passou de {_usd(was)} "
+                    f"para {_usd(median)} por milhão de tokens. É a mediana entre os "
+                    f"{now.providers} provedores que o atendem pela OpenRouter"
+                    + (
+                        f" (antes eram {before['providers']})."
+                        if before.get("providers") and before["providers"] != now.providers
+                        else "."
+                    )
                 ),
                 impact=(
-                    "O orçamento do período vai render menos com este modelo. Se preferir trocar, "
-                    "peça uma sugestão inteligente na tela de configurações."
+                    "O controle de custos registra o valor que a OpenRouter cobra de fato em cada "
+                    "chamada, então o orçamento do período já acompanha o preço novo. Se preferir "
+                    "trocar de modelo, peça uma sugestão inteligente na tela de configurações."
                 ),
                 allow_free_text=False,
             )

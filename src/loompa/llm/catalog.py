@@ -18,8 +18,9 @@ benchmark, 31 force reasoning without any way to limit it):
 from __future__ import annotations
 
 import json
+import statistics
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -301,6 +302,67 @@ def fetch_catalog(
         ) from exc
     except ValueError as exc:
         raise CatalogError("o catálogo da OpenRouter não veio em JSON") from exc
+
+
+@dataclass(frozen=True)
+class EndpointPrices:
+    """What a model costs across the providers that serve it on OpenRouter, blended 3:1."""
+
+    model: str
+    providers: int  # the ones that accept tools: the only ones the factory's calls can land on
+    median: float | None  # USD per 1M tokens
+
+
+def parse_endpoints(model: str, payload: Any) -> EndpointPrices:
+    """`GET /models/<id>/endpoints`: one entry per provider, each with its own price. The median
+    is the model's price; the catalogue's single `pricing` is one of them, and OpenRouter changes
+    which (DeepSeek V4 Flash showed Relace's US$ 0.01/1.28 among 29 providers from 0.04 to 0.66,
+    checked on 2026-09-30). A provider entering or leaving at either end barely moves a median."""
+    data = _dict(_dict(payload).get("data"))
+    blended = []
+    for entry in _list(data.get("endpoints")):
+        entry = _dict(entry)
+        if "tools" not in _list(entry.get("supported_parameters")):
+            continue
+        pricing = _dict(entry.get("pricing"))
+        prompt, completion = _number(pricing.get("prompt")), _number(pricing.get("completion"))
+        if prompt is None or completion is None or prompt < 0 or completion < 0:
+            continue
+        blended.append((3 * prompt + completion) / 4 * 1_000_000)
+    return EndpointPrices(
+        model=model,
+        providers=len(blended),
+        median=round(statistics.median(blended), 6) if blended else None,
+    )
+
+
+def fetch_endpoint_prices(
+    config: LoompaConfig,
+    model_ids: Iterable[str],
+    *,
+    client: httpx.Client | None = None,
+    timeout: float = 20.0,
+) -> dict[str, EndpointPrices]:
+    """The providers' prices of each model, one public request per model (no key). A model the
+    request fails for is left out: a notice missed today is told on the next refresh."""
+    provider = config.providers.get(PROVIDER)
+    if provider is None or not provider.base_url:
+        return {}
+    base = provider.base_url.rstrip("/")
+    out: dict[str, EndpointPrices] = {}
+    cli = client or httpx.Client(timeout=timeout)
+    try:
+        for model in model_ids:
+            try:
+                resp = cli.get(f"{base}/models/{model}/endpoints")
+                resp.raise_for_status()
+                out[model] = parse_endpoints(model, resp.json())
+            except (httpx.HTTPError, ValueError):
+                continue
+    finally:
+        if client is None:
+            cli.close()
+    return out
 
 
 # ----------------------------------------------------------------------------- ranking
