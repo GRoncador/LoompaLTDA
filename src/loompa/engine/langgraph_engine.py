@@ -175,8 +175,16 @@ class GraphRuntime:
         self.ctx = ctx
         self._conn: aiosqlite.Connection | None = None
         self._graph: CompiledStateGraph | None = None
+        # Two stories dispatched in the same tick both found no graph and each opened a
+        # connection across the `await`; the first was overwritten, never closed, and its
+        # worker thread kept `loompa run` from exiting (live smoke run, 2026-09-30).
+        self._opening = asyncio.Lock()
 
     async def graph(self) -> CompiledStateGraph:
+        async with self._opening:
+            return await self._open()
+
+    async def _open(self) -> CompiledStateGraph:
         if self._graph is None:
             path = self.ctx.factory.paths.loompa / "langgraph.db"
             path.parent.mkdir(parents=True, exist_ok=True)

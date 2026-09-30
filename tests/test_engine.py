@@ -1107,3 +1107,25 @@ async def test_a_run_stopped_mid_dev_neither_redoes_tasks_nor_amends_twice(facto
     assert worked and all("Cobrir NaN" in w for w in worked)  # T1 is [x]: not done again
     assert state.tasks_done == [1, 2]
     await ctx.aclose()
+
+
+async def test_two_stories_dispatched_together_share_one_checkpoint_connection(factory: Factory):
+    """Live smoke run, 2026-09-30: S-001 and S-002 started in the same tick, each opened a
+    connection, the first was never closed and its thread kept `loompa run` from exiting."""
+    import asyncio
+    import threading
+
+    from loompa.engine.langgraph_engine import GraphRuntime
+
+    ctx = make_ctx(factory, dry_run=True)
+    before = threading.active_count()
+    rt = GraphRuntime(ctx)
+    first, second = await asyncio.gather(rt.graph(), rt.graph())
+    assert first is second and threading.active_count() == before + 1  # one worker thread
+    await rt.close()
+    for _ in range(50):  # the worker thread ends shortly after the close
+        if threading.active_count() == before:
+            break
+        await asyncio.sleep(0.02)
+    assert threading.active_count() == before
+    await ctx.aclose()
