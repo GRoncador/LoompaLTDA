@@ -6,7 +6,8 @@ import re
 from datetime import date
 
 from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent, repo_outline
-from loompa.engine.state import StoryState
+from loompa.engine.state import StoryKind, StoryState
+from loompa.hygiene import TEST_DIRS, is_test_path
 from loompa.speckit import render_plan, render_tasks, story_dir, tasks_from_markdown
 
 SYSTEM = """<!-- role:architect -->
@@ -20,10 +21,43 @@ Rules:
 - `tasks` are 2-8 atomic steps; each becomes one commit and must leave the test suite green.
   Every task must include its tests. Order them so each builds on the previous one.
 - Consider the precedents from organizational memory; do not repeat past mistakes.
+- Before choosing the approach, weigh at least two: the quickest one and the one the
+  architecture would want. `alternatives_considered` lists the ones you rejected, each with its
+  trade-off and why it lost, citing the constitution when it decides. A trivial change may list
+  one line. The chosen approach goes in `approach`.
 Respond with JSON only:
-{{"approach": str, "files": [str], "contracts": str, "risks": [str], "tasks": [str], "adr_proposal": str}}
+{{"approach": str, "alternatives_considered": [{{"option": str, "tradeoff": str,
+"rejected_because": str}}], "files": [str], "contracts": str, "risks": [str], "tasks": [str],
+"adr_proposal": str}}
 Write in {language}.
 """
+
+REPRODUCER_NOTE = (
+    "## This story fixes a bug: reproducer first\n"
+    "Task 1 must be: write an automated test that reproduces the bug and FAILS on the current "
+    "code. It touches test files only; the fix comes in the next tasks and makes it pass. Include "
+    "the test paths in `files`.\n\n"
+)
+# The first task of a bugfix when the Architect did not plan one (tasks.md is the founder's
+# language, like the rest of the story artifacts).
+REPRODUCER_TASK = "Escrever um teste automatizado que reproduz o bug e falha no código atual (só arquivos de teste)"
+_REPRODUCER_WORDS = re.compile(r"\b(test|teste|reproduz|reproduce|reprodu)", re.I)
+REPRO_KEY = "reproducer"
+
+
+def ensure_reproducer(tasks: list[str], files: list[str]) -> tuple[list[str], list[str]]:
+    """A bugfix plan starts with its reproducer (7.7), and the Worker may write tests."""
+    if not tasks or not _REPRODUCER_WORDS.search(tasks[0]):
+        tasks = [REPRODUCER_TASK, *tasks]
+    if not any(is_test_path(f) or f.rstrip("/") in TEST_DIRS for f in files):
+        files = [*files, "tests/"]
+    return tasks, files
+
+
+def writable_tests(paths: list[str]) -> list[str]:
+    """The part of a plan's fence a reproducer task may write: test files and directories."""
+    return [p for p in paths if is_test_path(p) or p.rstrip("/").split("/")[-1] in TEST_DIRS]
+
 
 REPLAN_NOTE = (
     "The previous plan was executed and its checks still fail as shown above. Find the actual "
@@ -79,6 +113,7 @@ class ArchitectAgent(LoompaAgent):
                 if state.failure_history
                 else ""
             )
+            + (REPRODUCER_NOTE if state.kind == StoryKind.BUGFIX else "")
             + f"## Repository outline\n{outline}\n\n## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
         )
         # The plan's `files` are the only paths the Worker may touch: let the Architect check
@@ -93,6 +128,9 @@ class ArchitectAgent(LoompaAgent):
             f"Implementar '{state.title}' com testes cobrindo os critérios de aceitação"
         ]
         files = self._list(data, "files")
+        if state.kind == StoryKind.BUGFIX:
+            tasks, files = ensure_reproducer(tasks, files)
+            state.extra[REPRO_KEY] = {"task": 1, "status": "pending"}
         precedent_titles = [
             line[4:].split(" (relev")[0]
             for line in precedents.splitlines()
@@ -107,6 +145,7 @@ class ArchitectAgent(LoompaAgent):
                 contracts=str(data.get("contracts") or ""),
                 risks=self._list(data, "risks"),
                 precedents=precedent_titles,
+                alternatives=_alternatives(data.get("alternatives_considered")),
             ),
             encoding="utf-8",
         )
@@ -218,3 +257,23 @@ class ArchitectAgent(LoompaAgent):
         path.write_text(text, encoding="utf-8")
         self.ctx.memory.index_file(path, kind="constitution", doc_id="constitution.md")
         self.ctx.emit("constitution.lesson", story_id=story_id, agent=self.name, rule=rule)
+
+
+def _alternatives(raw: object) -> list[str]:
+    """`alternatives_considered` as plan lines, whatever shape the model used."""
+    items = raw if isinstance(raw, list) else [raw] if raw else []
+    lines = []
+    for item in items:
+        if isinstance(item, dict):
+            option = str(item.get("option") or "").strip()
+            why = str(item.get("rejected_because") or "").strip()
+            trade = str(item.get("tradeoff") or "").strip()
+            if option:
+                lines.append(
+                    option
+                    + (f" — trade-off: {trade}" if trade else "")
+                    + (f" — descartada: {why}" if why else "")
+                )
+        elif str(item).strip():
+            lines.append(str(item).strip())
+    return lines[:5]

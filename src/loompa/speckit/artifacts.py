@@ -89,12 +89,14 @@ def render_plan(
     contracts: str,
     risks: list[str],
     precedents: list[str],
+    alternatives: list[str] | None = None,
 ) -> str:
     return _template("plan.md").format(
         story_id=story_id,
         title=title,
         date=date.today().isoformat(),
         approach=approach.strip(),
+        alternatives=_bullets(alternatives or []),
         files=_bullets(files),
         contracts=contracts.strip() or "_(nenhum contrato novo)_",
         risks=_bullets(risks),

@@ -55,11 +55,14 @@ class HygieneIssue:
         return f"{self.path}: {self.detail}"
 
 
+TEST_DIRS = ("tests", "test", "__tests__", "spec")
+
+
 def is_test_path(path: str) -> bool:
     p = PurePosixPath(path)
     name = p.name
     return (
-        any(part in ("tests", "test", "__tests__", "spec") for part in p.parts[:-1])
+        any(part in TEST_DIRS for part in p.parts[:-1])
         or name.startswith("test_")
         or name.endswith(("_test.py", "_test.go"))
         or bool(re.search(r"\.(test|spec)\.[jt]sx?$", name))

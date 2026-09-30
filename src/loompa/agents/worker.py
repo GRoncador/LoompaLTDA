@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 
-from loompa.aci import ACI
+from loompa.aci import ACI, run_command, summarize_tests
+from loompa.agents.architect import REPRO_KEY, writable_tests
 from loompa.agents.base import AgentResult, LoompaAgent, repo_outline
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
@@ -70,6 +71,20 @@ still to do (in {language}); empty when complete.
 """
 
 
+REPRODUCER_TASK = """
+
+This is the reproducer task of a bugfix: write ONLY the automated test(s) that reproduce the bug
+described in the spec. The test must FAIL on the current code, for the bug's reason (not an
+import error or a typo). Only test files are writable in this task; the fix comes next."""
+
+REPRODUCER_GREEN = """
+
+The test you wrote PASSES on the current code, so it does not reproduce the bug. Change it so it
+exercises the failing behaviour the spec describes, and check with `run_tests` that it fails."""
+
+_BROKEN_TEST = ("ImportError", "ModuleNotFoundError", "SyntaxError", "NameError", "fixture '")
+
+
 class WorkerAgent(LoompaAgent):
     role = "worker"
     display = "Worker Loompa"
@@ -94,21 +109,32 @@ class WorkerAgent(LoompaAgent):
         outline = repo_outline(wt.path)  # once per run: the same text keeps the prefix cached
         summaries: list[str] = []
         tier_label = self.tier_override or "tier2"
+        repro = state.extra.get(REPRO_KEY) or {}
         for task in pending:
             self.set_state(
                 "WORKING", state, model=tier_label, detail=f"T{task.number}: {task.text[:60]}"
             )
+            reproducer = repro.get("status") == "pending" and repro.get("task") == task.number
+            task_aci = aci
+            if reproducer:  # 7.7: tests only, and the code proves them red before the fix
+                fence = writable_tests(state.allowed_paths) or ["tests/"]
+                task_aci = self.ctx.aci_for(wt.path, allowed_paths=fence)
             result = await self._run_task(
                 state,
-                aci,
+                task_aci,
                 task.number,
-                task.text,
+                task.text + (REPRODUCER_TASK if reproducer else ""),
                 spec,
                 plan,
                 tasks_md,
                 outline=outline,
                 changed=self.ctx.worktrees.diff_stat(wt),
             )
+            if reproducer and not result.blocked_reason:
+                result = await self._prove_reproduced(
+                    state, wt, task_aci, task.number, task.text, spec, plan, tasks_md, outline
+                )
+                self._flush_learnings(state, task_aci)
             if result.blocked_reason:
                 self.set_state("BLOCKED", state, detail="aguardando decisão")
                 self._flush_learnings(state, aci)
@@ -124,7 +150,8 @@ class WorkerAgent(LoompaAgent):
                     issues=[i.line() for i in dirty[:8]],
                 )
             missing = [f"Diff hygiene: {i.line()}" for i in dirty[:5]]
-            missing += await self._dod_check(state, wt, task.text, result.summary)
+            if not reproducer:  # a red test is the reproducer's goal, not something missing
+                missing += await self._dod_check(state, wt, task.text, result.summary)
             if missing:
                 self.ctx.emit(
                     "worker.dod_incomplete",
@@ -151,8 +178,9 @@ class WorkerAgent(LoompaAgent):
                     self._flush_learnings(state, aci)
                     return followup
                 result.summary = f"{result.summary} / {followup.summary}"
+            kind = "test" if reproducer else "feat"
             commit = self.ctx.worktrees.commit_all(
-                wt, f"feat({state.story_id.lower()}): {task.text[:60]}"
+                wt, f"{kind}({state.story_id.lower()}): {task.text[:60]}"
             )
             if commit:
                 state.commits.append(commit.sha)
@@ -174,6 +202,79 @@ class WorkerAgent(LoompaAgent):
         self.set_state("IDLE")
         state.worker_summary = "\n".join(summaries)
         return AgentResult(ok=True, summary=state.worker_summary)
+
+    async def _prove_reproduced(
+        self,
+        state: StoryState,
+        wt: Worktree,
+        aci: ACI,
+        number: int,
+        text: str,
+        spec: str,
+        plan: str,
+        tasks_md: str,
+        outline: str,
+    ) -> AgentResult:
+        """Run the suite after the reproducer task: it must fail anew. A green run gets one more
+        round; a test that still does not fail is recorded and the fix goes on (never blocks)."""
+        repro = state.extra.setdefault(REPRO_KEY, {"task": number})
+        result = AgentResult(ok=True, summary="teste de reprodução escrito")
+        for attempt in range(2):
+            failing = await self._new_failures(state, wt)
+            if failing is None:
+                repro["status"] = "unverified"  # no test command, or dry-run
+                break
+            if failing:
+                repro.update(status="red", failing=failing[:10])
+                break
+            if attempt == 1:
+                repro["status"] = "not_reproduced"
+                state.learnings.append(
+                    {
+                        "kind": "tech_debt",
+                        "title": "O teste de reprodução do bug não falhou antes da correção",
+                        "detail": f"Em {state.story_id} o teste escrito para reproduzir o bug "
+                        "passou no código antigo; a correção seguiu sem essa prova.",
+                    }
+                )
+                break
+            result = await self._run_task(
+                state,
+                aci,
+                number,
+                text + REPRODUCER_TASK + REPRODUCER_GREEN,
+                spec,
+                plan,
+                tasks_md,
+                outline=outline,
+                changed=self.ctx.worktrees.diff_stat(wt),
+            )
+            if result.blocked_reason:
+                return result
+        self.ctx.emit(
+            "bugfix.reproducer",
+            story_id=state.story_id,
+            agent=self.name,
+            status=repro.get("status"),
+            failing=repro.get("failing", []),
+        )
+        return result
+
+    async def _new_failures(self, state: StoryState, wt: Worktree) -> list[str] | None:
+        """Tests failing now that were not failing on the base; None when that cannot be run.
+        A test that breaks on an import or a typo does not reproduce anything."""
+        command = self.ctx.config.quality.test_command
+        if not command or self.ctx.dry_run:
+            return None
+        res = await run_command(command, wt.path, timeout=900)
+        summary = summarize_tests(res.output, res.returncode)
+        baseline = set((state.extra.get("baseline") or {}).get("failing") or [])
+        return [
+            f.name
+            for f in summary.failures
+            if f.name not in baseline
+            and not any(b in f"{f.message} {' '.join(f.frames)}" for b in _BROKEN_TEST)
+        ]
 
     async def _fix_pass(self, state: StoryState, wt: Worktree) -> AgentResult:
         paths = story_dir(self.ctx.root, state.story_id)

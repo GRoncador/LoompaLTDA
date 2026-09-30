@@ -5,6 +5,9 @@
 ## Abordagem técnica
 {approach}
 
+## Alternativas consideradas
+{alternatives}
+
 ## Arquivos e módulos afetados
 {files}
 
