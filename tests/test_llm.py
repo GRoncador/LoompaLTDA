@@ -489,8 +489,8 @@ def test_a_model_the_provider_does_not_have_is_told_apart_from_other_errors():
 
 
 async def test_a_call_that_never_ends_gives_way_to_the_next_model():
-    """`contas`, 2026-09-30: two stories sat for 50 minutes on OpenRouter connections kept alive
-    by keep-alive comments, under the per-read HTTP timeout. A call now has a wall-clock limit."""
+    """The HTTP timeout is per read; a server that keeps a request alive never trips it. A call
+    now has a wall-clock limit and the next model gets the turn."""
     import asyncio
 
     class Hung(MockProvider):

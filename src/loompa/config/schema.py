@@ -223,9 +223,10 @@ class ModelsConfig(BaseModel):
     )
     max_output_ceiling: int = Field(32768, ge=256)
     truncation_retries: int = Field(2, ge=0, le=5)
-    # Wall-clock limit for one model call. The HTTP timeout is per read, and OpenRouter keeps a
-    # long non-streamed request alive with keep-alive comments, so a runaway generation could
-    # hold a story for an hour (`contas`, 2026-09-30). Past it the router moves on.
+    # Wall-clock limit for one model call. The HTTP timeout is per read: a server that keeps a
+    # long non-streamed request alive (OpenRouter sends keep-alive comments) never trips it.
+    # A guard, not a fix for an observed case: the `contas` stalls of 2026-09-30 turned out to be
+    # the Mac asleep on battery, which no in-process timer can see.
     call_timeout_s: float = Field(600.0, ge=10)
     # Off: every role shares the `general` cluster, one 3-tier list instead of three.
     clusters_enabled: bool = True
