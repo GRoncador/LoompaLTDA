@@ -30,6 +30,13 @@ def _py_build_system() -> str:
     return '\n[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n\n[tool.hatch.build.targets.wheel]\npackages = ["src/{pkg}"]\n'
 
 
+def _py_ruff_immutable(calls: list[str]) -> str:
+    # ruff's default rules include B008, which flags `Path = typer.Option(...)` (only immutable
+    # annotations like `str` are exempt): every Typer/FastAPI parameter would fail the lint gate.
+    names = ", ".join(f'"{c}"' for c in calls)
+    return f"\n[tool.ruff.lint.flake8-bugbear]\nextend-immutable-calls = [{names}]\n"
+
+
 def _node_gitignore() -> str:
     return "node_modules/\ndist/\n.env\n.loompa/worktrees/\n.loompa/*.db*\n"
 
@@ -66,6 +73,15 @@ STACK_PRESETS: dict[str, StackPreset] = {
         files={
             ".gitignore": _py_gitignore(),
             "pyproject.toml": '[project]\nname = "{slug}"\nversion = "0.1.0"\nrequires-python = ">=3.11"\ndependencies = ["fastapi", "uvicorn[standard]", "pydantic", "sqlalchemy", "alembic"]\n\n[dependency-groups]\ndev = ["pytest", "httpx", "ruff", "mypy"]\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
+            + _py_ruff_immutable(
+                [
+                    "fastapi.Depends",
+                    "fastapi.Query",
+                    "fastapi.Path",
+                    "fastapi.Body",
+                    "fastapi.Header",
+                ]
+            )
             + _py_build_system(),
             "src/{pkg}/__init__.py": "",
             "src/{pkg}/main.py": 'from fastapi import FastAPI\n\napp = FastAPI(title="{name}")\n\n\n@app.get("/health")\ndef health() -> dict[str, str]:\n    return {{"status": "ok"}}\n',
@@ -91,6 +107,7 @@ STACK_PRESETS: dict[str, StackPreset] = {
         files={
             ".gitignore": _py_gitignore(),
             "pyproject.toml": '[project]\nname = "{slug}"\nversion = "0.1.0"\nrequires-python = ">=3.11"\ndependencies = ["typer", "rich"]\n\n[project.scripts]\n{slug} = "{pkg}.cli:app"\n\n[dependency-groups]\ndev = ["pytest", "ruff"]\n'
+            + _py_ruff_immutable(["typer.Option", "typer.Argument"])
             + _py_build_system(),
             "src/{pkg}/__init__.py": "",
             # The callback keeps Typer in subcommand mode: with a single command and no callback,

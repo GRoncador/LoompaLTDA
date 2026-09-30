@@ -146,3 +146,7 @@ def test_a_python_skeleton_passes_its_own_test(tmp_path: Path, preset: str):
         timeout=120,
     )
     assert res.returncode == 0, res.stdout[-1500:]
+    # ruff's default B008 flags `Path = typer.Option(...)`; the skeleton declares the framework's
+    # parameter factories immutable, or every such parameter fails the lint gate.
+    immutable = meta["tool"]["ruff"]["lint"]["flake8-bugbear"]["extend-immutable-calls"]
+    assert ("typer.Option" if preset == "python-cli" else "fastapi.Depends") in immutable
