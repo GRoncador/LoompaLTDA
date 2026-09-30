@@ -179,9 +179,9 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
             return [ToolCall("r1", "read_file", {"path": "tests/test_new.py"})]
         if len(results) == 1:
             content = (
-                "def test_new():\n    assert 1 == 1\n"
+                "def test_new():\n    assert 1 + 1 == 2\n"
                 if model == tier1_model
-                else "def test_new():\n    assert 1 == 2\n"
+                else "def test_new():\n    assert 1 + 1 == 3\n"
             )
             args = {"path": "tests/test_new.py", "content": content}
             args["reason"] = "the assertion compared two different numbers"  # a retry: diagnosis
@@ -204,7 +204,7 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     # escalating re-plans once: two failures may mean the plan fences the Worker off the cause
     assert types.count("story.replanned") == 1
     assert [c["node"] for c in ctx.store.checkpoints(sid)].count("node_plan") == 2
-    assert len(state.failure_history) == 2 and "assert 1 == 2" in state.failure_history[0]
+    assert len(state.failure_history) == 2 and "assert (1 + 1) == 3" in state.failure_history[0]
     assert (
         "[pytest] FAIL" in state.failure_history[0] and "Traceback" not in state.failure_history[0]
     )
@@ -443,7 +443,7 @@ async def test_persistent_failure_blocks_only_that_story(factory: Factory):
                         "write_file",
                         {
                             "path": "tests/test_ok.py",
-                            "content": "def test_ok():\n    assert True\n",
+                            "content": 'def test_ok():\n    assert len("ok") == 2\n',
                         },
                     )
                 ]
@@ -542,7 +542,7 @@ async def test_worker_question_pauses_and_resumes_with_guidance(factory: Factory
                     "write_file",
                     {
                         "path": "tests/test_reset.py",
-                        "content": "def test_reset():\n    assert True\n",
+                        "content": 'def test_reset():\n    assert len("ok") == 2\n',
                     },
                 ),
             ]

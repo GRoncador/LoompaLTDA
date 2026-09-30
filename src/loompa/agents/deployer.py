@@ -11,6 +11,7 @@ from loompa.comms import (
     sanitize_for_founder,
 )
 from loompa.engine.state import StoryState
+from loompa.hygiene import is_debris
 from loompa.worktrees import Worktree
 
 SUMMARY_SYSTEM = """<!-- role:deployer -->
@@ -26,6 +27,7 @@ class DeployerAgent(LoompaAgent):
 
     async def run(self, state: StoryState, wt: Worktree) -> AgentResult:
         self.set_state("WORKING", state, detail="preparando entrega")
+        self._drop_debris(state, wt)
         commit = self.git.commit_all(wt, f"chore({state.story_id.lower()}): finalize story")
         if commit:
             state.commits.append(commit.sha)
@@ -62,6 +64,22 @@ class DeployerAgent(LoompaAgent):
             commits=len(state.commits),
         )
         return AgentResult(ok=True, summary=state.delivery_summary, data={"message_id": msg.id})
+
+    def _drop_debris(self, state: StoryState, wt: Worktree) -> list[str]:
+        """Untracked leftovers (a `debug.txt`, a `.orig`) were never part of any task's commit:
+        the finalize commit must not be the one that ships them (7.10)."""
+        dropped = []
+        for line in self.git.status(wt):
+            rel = line[3:].strip().strip('"')
+            path = wt.path / rel
+            if line.startswith("??") and is_debris(rel) and path.is_file():
+                path.unlink()
+                dropped.append(rel)
+        if dropped:
+            self.ctx.emit(
+                "deployer.debris_dropped", story_id=state.story_id, agent=self.name, files=dropped
+            )
+        return dropped
 
     def bootstrap_repo(self) -> bool:
         """A repo with no commits cannot host story worktrees. Make the first commit here

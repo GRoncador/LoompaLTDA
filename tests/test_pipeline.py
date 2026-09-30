@@ -38,7 +38,10 @@ def good_worker(model: str, messages: list[Message]) -> Any:
             ToolCall(
                 "w1",
                 "write_file",
-                {"path": "tests/test_new.py", "content": "def test_new():\n    assert True\n"},
+                {
+                    "path": "tests/test_new.py",
+                    "content": 'def test_new():\n    assert len("ok") == 2\n',
+                },
             )
         ]
     return [ToolCall("w2", "done", {"summary": "teste escrito"})]
@@ -186,9 +189,16 @@ async def test_waived_verdict_asks_the_founder(factory: Factory, answer: str):
 
     def inspector(model: str, messages: list[Message]) -> Any:
         calls["inspector"] += 1
-        findings = (
-            [{"prefix": "SEC", "severity": "high", "text": "senha gravada em texto puro"}]
-            if calls["inspector"] == 1
+        findings = (  # it survives the Worker's self-healing round, so the founder decides
+            [
+                {
+                    "prefix": "SEC",
+                    "severity": "high",
+                    "file": "tests/test_new.py",
+                    "text": "senha gravada em texto puro",
+                }
+            ]
+            if calls["inspector"] <= 2
             else []
         )
         return inspector_with(findings)(model, messages)
@@ -210,7 +220,7 @@ async def test_waived_verdict_asks_the_founder(factory: Factory, answer: str):
         await Scheduler(ctx).run()
         final = load_state(ctx, sid)
         assert final.blocked_reason == "delivery" and final.qa_verdict == "PASS"
-        assert calls["inspector"] == 2
+        assert calls["inspector"] == 3
     else:
         assert state.stage == Stage.REVIEW and state.phase == "review"
         await Scheduler(ctx).run()
@@ -227,7 +237,15 @@ async def test_waived_verdict_asks_the_founder(factory: Factory, answer: str):
 
 
 async def test_concerns_ship_and_feed_kaizen(factory: Factory):
-    findings = [{"prefix": "perf", "severity": "medium", "text": "consulta sem índice"}]
+    findings = [
+        {
+            "prefix": "perf",
+            "severity": "medium",
+            "text": "consulta sem índice em tests/test_new.py",
+        },
+        {"prefix": "TEST", "severity": "low", "file": "tests/test_new.py", "text": "nome vago"},
+        {"prefix": "ARCH", "severity": "medium", "file": "outro.py", "text": "fora do diff"},
+    ]
     ctx = make_ctx(
         factory, scripted({"worker": good_worker, "inspector": inspector_with(findings)})
     )
@@ -235,8 +253,16 @@ async def test_concerns_ship_and_feed_kaizen(factory: Factory):
     await Scheduler(ctx).run()
     state = load_state(ctx, sid)
     assert state.blocked_reason == "delivery" and state.qa_verdict == "CONCERNS"
+    # the nit and the finding about a file outside the change are dropped as noise; the file
+    # named only in the text anchors the other one
     assert state.qa_findings == [
-        {"id": "PERF-1", "severity": "medium", "text": "consulta sem índice"}
+        {
+            "id": "PERF-1",
+            "prefix": "PERF",
+            "severity": "medium",
+            "file": "tests/test_new.py",
+            "text": "consulta sem índice em tests/test_new.py",
+        }
     ]
     cards = [s for s in ctx.store.list_stories(factory.slug) if s["origin"] == "kaizen"]
     assert len(cards) == 1 and "PERF-1" in cards[0]["title"]
@@ -258,7 +284,10 @@ async def test_dod_check_reruns_an_incomplete_task(factory: Factory):
                 ToolCall(
                     "w1",
                     "write_file",
-                    {"path": "tests/test_dod.py", "content": "def test_dod():\n    assert True\n"},
+                    {
+                        "path": "tests/test_dod.py",
+                        "content": 'def test_dod():\n    assert len("ok") == 2\n',
+                    },
                 )
             ]
         return [ToolCall("w2", "done", {"summary": "feito"})]
@@ -307,7 +336,10 @@ async def test_dod_counts_what_an_earlier_task_already_committed(factory: Factor
                 ToolCall(
                     "w1",
                     "write_file",
-                    {"path": "tests/test_a.py", "content": "def test_a():\n    assert True\n"},
+                    {
+                        "path": "tests/test_a.py",
+                        "content": 'def test_a():\n    assert len("ok") == 2\n',
+                    },
                 )
             ]
         return [ToolCall("w2", "done", {"summary": "feito"})]

@@ -117,6 +117,7 @@ LAST_BLOCK_KEY = "last_block"
 REPLANNED_KEY = "replanned"
 AMEND_KEY = "amend_plan"
 CONFLICT_RETRIES_KEY = "conflict_retries"
+SELFHEAL_KEY = "self_healed"  # a WAIVED verdict already got its Worker round
 _VOLATILE = re.compile(r"[0-9a-f]{7,}|\d+")
 
 
@@ -308,12 +309,18 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
     WAIVED asks the founder (serious finding the tests do not catch)."""
     wt = _ensure_worktree(ctx, state)
     res = await InspectorAgent(ctx).run(state, wt)
+    if (res.data or {}).get("lint_only") and await WorkerAgent(ctx).autofix_lint(state, wt):
+        # the linter's own fixes, at no model cost, before a failure is counted (7.2)
+        ctx.emit("story.lint_autofixed", story_id=state.story_id)
+        res = await InspectorAgent(ctx).run(state, wt)
     verdict = QAVerdict((res.data or {}).get("verdict") or ("PASS" if res.ok else "FAIL"))
     findings = list((res.data or {}).get("findings") or [])
     state.qa_verdict = verdict
     state.qa_findings = findings
     if verdict in (QAVerdict.PASS, QAVerdict.CONCERNS):
-        if verdict == QAVerdict.CONCERNS and findings:
+        state.extra.pop(SELFHEAL_KEY, None)
+        worth_a_card = [f for f in findings if f.get("severity") in ("medium", "high")]
+        if verdict == QAVerdict.CONCERNS and worth_a_card:
             KaizenAgent(ctx).capture(
                 state,
                 items=[
@@ -322,7 +329,7 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
                         "title": f"{f.get('id', 'QA')}: {str(f.get('text', ''))[:100]}",
                         "detail": f"Ressalva do Inspector ({f.get('severity', 'low')}) em {state.story_id}: {f.get('text', '')}",
                     }
-                    for f in findings
+                    for f in worth_a_card
                 ],
             )
         if state.failure_history and state.current_tier == "tier1":
@@ -337,6 +344,12 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
     if verdict == QAVerdict.WAIVED:
         serious = [f for f in findings if f.get("severity") == "high"] or findings
         detail = "; ".join(str(f.get("text", ""))[:160] for f in serious[:3])
+        if not state.extra.get(SELFHEAL_KEY) and "dev" in state.route:
+            # one focused Worker round on the serious findings before the founder is asked
+            state.extra[SELFHEAL_KEY] = True
+            state.failure_history.append("Inspector found (high severity): " + detail)
+            ctx.emit("story.self_healing", story_id=state.story_id, findings=len(serious))
+            return goto(state, "dev")
         msg = FounderMessage(
             factory=ctx.slug,
             story_id=state.story_id,

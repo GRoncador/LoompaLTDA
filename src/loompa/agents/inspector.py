@@ -12,28 +12,50 @@ findings with a prefix (SEC-/PERF-/TEST-/ARCH-) and a severity. Verdicts:
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
 from loompa.aci import run_command, summarize_lint, summarize_tests, summarize_typecheck
 from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.engine.state import StoryState
+from loompa.hygiene import blocking, render, scan_diff, weak_tests
 from loompa.speckit import story_dir
 from loompa.worktrees import Worktree
 
 JUDGE_SYSTEM = """<!-- role:inspector -->
-You are the Inspector Loompa (QA). Given the acceptance criteria and the diff, decide for EACH criterion
-whether the implementation plus its tests demonstrably satisfy it. Be strict and binary.
-Also review the diff for findings a test suite would not catch, each with a prefix and a severity:
-SEC- (security: injection, secrets, unsafe deserialization, auth bypass), PERF- (obvious N+1, unbounded
-loops, blocking I/O in async code), TEST- (missing or tautological tests), ARCH- (violates the
-constitution or the plan, wrong layer, duplicated logic). Severity: high = must not ship as is;
-medium = should be fixed soon; low = nit.
+You are the Inspector Loompa (QA). The automated checks below already ran: their result is a fact.
+Never claim that tests fail or pass against it; judge only what a test suite cannot tell.
+
+1. Acceptance criteria. For EACH criterion decide whether the diff plus its tests demonstrably
+   satisfy it. Strict and binary. A failed criterion needs a concrete reason: what is missing and
+   where (file, function, test). "Not demonstrated" alone is not a reason.
+
+2. Findings: defects the checks cannot catch. Report ONLY what you can anchor in the diff: `file`
+   must be a path in the diff and `evidence` a short quote of the added or changed line. Rubric:
+   - SEC high: injection (SQL, shell, path traversal) from user input; a secret or credential in
+     code; permission or authentication bypass; unsafe deserialization of untrusted data.
+   - PERF high: N+1 queries or I/O per item over unbounded data; blocking I/O inside async code;
+     unbounded loop or memory driven by user input.
+   - TEST high: a tautological test (asserts a constant, asserts what a mock was told to
+     return, re-implements the function under test); a criterion whose only test does not run
+     the changed code.
+   - ARCH high: breaks an explicit rule of the constitution or the plan's contract (a
+     dependency the constitution does not allow, code in a layer the plan forbids).
+   - medium: a real defect risk to fix soon: an error path of a criterion left unhandled, a
+     stated edge case untested, logic duplicated from an existing function.
+   - Never report style, naming, formatting, wording of messages, "could be more explicit"
+     tests, or anything outside the diff. Those are not findings. At most 3 findings, most
+     severe first; an empty list is the normal case for a clean change.
+   Changes inside the paths the plan allows are in scope.
+
 Respond with JSON only: {{"criteria": [{{"text": str, "pass": bool, "reason": str}}],
-"findings": [{{"prefix": "SEC"|"PERF"|"TEST"|"ARCH", "severity": "high"|"medium"|"low", "text": str}}],
-"summary": str}}. Write reasons in {language}, one sentence each, no stack traces.
+"findings": [{{"prefix": "SEC"|"PERF"|"TEST"|"ARCH", "severity": "high"|"medium", "file": str,
+"evidence": str, "text": str}}], "summary": str}}. Write reasons and texts in {language}, one
+sentence each, no stack traces.
 """
 
+MAX_FINDINGS = 3
 SEVERITIES = ("low", "medium", "high")
 PREFIXES = ("SEC", "PERF", "TEST", "ARCH")
 
@@ -119,6 +141,7 @@ class InspectorAgent(LoompaAgent):
             )
         else:
             parts.append("[tests] nenhum comando de teste configurado — gate de testes ignorado")
+        lint_failed = False
         if q.lint_command:
             res = await run_command(q.lint_command, wt.path, timeout=300)
             s = summarize_lint(res.output, res.returncode)
@@ -127,6 +150,7 @@ class InspectorAgent(LoompaAgent):
                     s.compact() if s.ok else "[lint] PASS (apontamentos pré-existentes na base)"
                 )
             else:
+                lint_failed = ok  # the only failure so far: a candidate for `fix_lint`
                 ok = False
                 parts.append(s.compact())
         if q.typecheck_command:
@@ -145,15 +169,40 @@ class InspectorAgent(LoompaAgent):
                 "[coderabbit] " + ("sem apontamentos críticos" if res.ok else res.output[-1500:])
             )
             ok = ok and res.ok
+        # 7.10: leftovers no test notices (debris files, machine paths, debugger calls, markers)
+        full_diff = (
+            self.ctx.worktrees.diff(wt, max_chars=400_000)
+            + "\n"
+            + self.ctx.worktrees.diff_working(wt, max_chars=200_000)
+        )
+        issues = scan_diff(full_diff)
+        if issues:
+            stop = blocking(issues)
+            ok = ok and not stop
+            parts.append(
+                ("[hygiene] FAIL\n" if stop else "[hygiene] notes\n") + render(stop or issues)
+            )
+            self.ctx.emit(
+                "inspector.hygiene",
+                story_id=state.story_id,
+                agent=self.name,
+                blocking=[i.line() for i in stop[:8]],
+                warnings=len(issues) - len(stop),
+            )
         tooling_ok = ok
         criteria_ok = True
         findings: list[dict[str, str]] = []
+        if ok:
+            findings = _numbered(weak_tests(full_diff))
         if ok and state.acceptance and not self.ctx.dry_run:
-            judge = await self._judge(state, wt)
+            judge = await self._judge(state, wt, "\n".join(parts), full_diff)
             if judge is not None:
                 failed = [c for c in judge.get("criteria", []) if not c.get("pass")]
                 criteria_ok = not failed
-                findings = judge.get("findings", [])
+                findings = _numbered(
+                    [*(f for f in findings if f["severity"] == "high"), *judge["findings"]]
+                    + [f for f in findings if f["severity"] != "high"]
+                )[:MAX_FINDINGS]
                 parts.append(
                     f"[acceptance] {'PASS' if criteria_ok else 'FAIL'}"
                     + (
@@ -166,13 +215,11 @@ class InspectorAgent(LoompaAgent):
                         else ""
                     )
                 )
-                if findings:
-                    parts.append(
-                        "[findings]\n"
-                        + "\n".join(
-                            f"- {f['id']} ({f['severity']}): {f['text'][:200]}" for f in findings
-                        )
-                    )
+        if findings:
+            parts.append(
+                "[findings]\n"
+                + "\n".join(f"- {f['id']} ({f['severity']}): {f['text'][:200]}" for f in findings)
+            )
         verdict = grade(criteria_ok, findings, tooling_ok)
         ok = verdict in ("PASS", "CONCERNS")
         report = "\n".join(parts)
@@ -185,9 +232,20 @@ class InspectorAgent(LoompaAgent):
             verdict=verdict,
             findings=len(findings),
         )
-        return AgentResult(ok=ok, summary=report, data={"verdict": verdict, "findings": findings})
+        return AgentResult(
+            ok=ok,
+            summary=report,
+            data={
+                "verdict": verdict,
+                "findings": findings,
+                # tests green, no debris: only the linter complained, mechanical fixes may do
+                "lint_only": lint_failed and not blocking(issues),
+            },
+        )
 
-    async def _judge(self, state: StoryState, wt: Worktree) -> dict | None:
+    async def _judge(
+        self, state: StoryState, wt: Worktree, checks: str = "", full_diff: str | None = None
+    ) -> dict | None:
         diff = self.ctx.worktrees.diff(wt, max_chars=16000)
         if not diff.strip():
             return {
@@ -196,6 +254,7 @@ class InspectorAgent(LoompaAgent):
                     {"text": c, "pass": False, "reason": "nenhuma alteração de código foi feita"}
                     for c in state.acceptance
                 ],
+                "findings": [],
                 "summary": "diff vazio",
             }
         paths = story_dir(self.ctx.root, state.story_id)
@@ -204,6 +263,7 @@ class InspectorAgent(LoompaAgent):
             "## Acceptance criteria\n"
             + "\n".join(f"- {c}" for c in state.acceptance)
             + f"\n\n## Spec excerpt\n{spec}\n\n"
+            + (f"## Automated checks (already run; facts)\n{checks}\n\n" if checks else "")
             # the plan's fence as it stands now (re-planned or amended at the founder's request):
             # without it the judge guessed the scope from the spec and flagged allowed changes
             + (
@@ -221,26 +281,52 @@ class InspectorAgent(LoompaAgent):
             )
         except Exception:  # noqa: BLE001 - judge is advisory when the LLM is unavailable
             return None
-        criteria = [c for c in data.get("criteria") or [] if isinstance(c, dict)]
-        if not criteria and str(data.get("verdict", "")).upper() == "FAIL":
-            criteria = [
-                {"text": c, "pass": False, "reason": "não demonstrado"} for c in state.acceptance
-            ]
+        criteria = [
+            c
+            for c in data.get("criteria") or []
+            if isinstance(c, dict)
+            # a failure with no reason is a claim, not a finding (`contas`: FAIL "sem achados")
+            and (c.get("pass") or str(c.get("reason") or "").strip())
+        ]
+        in_diff = set(re.findall(r"^\+\+\+ b/(.+)$", full_diff or diff, re.M))
         findings: list[dict[str, str]] = []
-        counters: dict[str, int] = {}
+        dropped = 0
         for f in data.get("findings") or []:
             if not isinstance(f, dict) or not str(f.get("text", "")).strip():
                 continue
             prefix = str(f.get("prefix", "ARCH")).upper().rstrip("-")
-            prefix = prefix if prefix in PREFIXES else "ARCH"
             severity = str(f.get("severity", "low")).lower()
-            severity = severity if severity in SEVERITIES else "low"
-            counters[prefix] = counters.get(prefix, 0) + 1
+            text = str(f["text"]).strip()
+            file = str(f.get("file") or "").strip().removeprefix("b/")
+            file = file or next((path for path in sorted(in_diff) if path in text), "")
+            if severity not in ("medium", "high") or (in_diff and file not in in_diff):
+                dropped += 1  # a nit, or not anchored in the change: noise, not a card
+                continue
             findings.append(
                 {
-                    "id": f"{prefix}-{counters[prefix]}",
+                    "prefix": prefix if prefix in PREFIXES else "ARCH",
                     "severity": severity,
-                    "text": str(f["text"]).strip(),
+                    "file": file,
+                    "text": _with_file(text, file),
                 }
             )
+        if dropped:
+            self.ctx.emit(
+                "inspector.findings_dropped", story_id=state.story_id, agent=self.name, n=dropped
+            )
         return {"criteria": criteria, "findings": findings, "summary": str(data.get("summary", ""))}
+
+
+def _with_file(text: str, file: str) -> str:
+    """The file goes into the text: Kaizen folds cards that name the same file into one."""
+    return text if not file or file in text else f"{file}: {text}"
+
+
+def _numbered(findings: list[dict[str, str]]) -> list[dict[str, str]]:
+    counters: dict[str, int] = {}
+    out = []
+    for f in findings:
+        prefix = str(f.get("prefix") or "TEST")
+        counters[prefix] = counters.get(prefix, 0) + 1
+        out.append({**f, "prefix": prefix, "id": f"{prefix}-{counters[prefix]}"})
+    return out

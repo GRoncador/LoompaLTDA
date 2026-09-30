@@ -13,6 +13,7 @@ from loompa.agents.base import AgentResult, LoompaAgent, repo_outline
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
 from loompa.engine.state import StoryKind, StoryState
+from loompa.hygiene import scan_diff
 from loompa.llm import Message
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.speckit.artifacts import mark_task_done
@@ -112,7 +113,18 @@ class WorkerAgent(LoompaAgent):
                 self.set_state("BLOCKED", state, detail="aguardando decisão")
                 self._flush_learnings(state, aci)
                 return result
-            missing = await self._dod_check(state, wt, task.text, result.summary)
+            # deterministic hygiene first ($0, also in dry-run), then the model's self-check
+            dirty = scan_diff(self.ctx.worktrees.diff_working(wt, max_chars=200_000))
+            if dirty:
+                self.ctx.emit(
+                    "worker.hygiene",
+                    story_id=state.story_id,
+                    agent=self.name,
+                    task=task.number,
+                    issues=[i.line() for i in dirty[:8]],
+                )
+            missing = [f"Diff hygiene: {i.line()}" for i in dirty[:5]]
+            missing += await self._dod_check(state, wt, task.text, result.summary)
             if missing:
                 self.ctx.emit(
                     "worker.dod_incomplete",
@@ -127,7 +139,7 @@ class WorkerAgent(LoompaAgent):
                     task.number,
                     task.text
                     + "\n\nSelf-check found these still missing; finish them:\n"
-                    + "\n".join(f"- {m}" for m in missing[:5]),
+                    + "\n".join(f"- {m}" for m in missing[:8]),
                     spec,
                     plan,
                     tasks_md,
@@ -205,6 +217,26 @@ class WorkerAgent(LoompaAgent):
         self.set_state("IDLE")
         state.worker_summary = f"fix: {result.summary}"
         return AgentResult(ok=True, summary=state.worker_summary)
+
+    async def autofix_lint(self, state: StoryState, wt: Worktree) -> bool:
+        """Self-healing without a model (Fase 7, 7.2): the tests are green and only the linter
+        complains (`contas` S-003 and S-006 failed on an import order), so its own fixes run,
+        narrowed to the plan's paths, and are committed. True when something changed."""
+        aci = self.ctx.aci_for(wt.path, allowed_paths=state.allowed_paths or None)
+        await aci.tool_fix_lint()
+        commit = self.ctx.worktrees.commit_all(wt, f"style({state.story_id.lower()}): lint fixes")
+        if commit is None:
+            return False
+        state.commits.append(commit.sha)
+        self.ctx.emit(
+            "worktree.commit",
+            story_id=state.story_id,
+            agent=self.name,
+            sha=commit.sha,
+            files=commit.files,
+            task=0,
+        )
+        return True
 
     async def resolve_conflicts(
         self, state: StoryState, wt: Worktree, files: list[str]

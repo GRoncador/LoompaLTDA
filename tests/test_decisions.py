@@ -39,7 +39,10 @@ def finder(model: str, messages: list[Message], tools: Any) -> Any:
             ToolCall(
                 "w",
                 "write_file",
-                {"path": "tests/test_f.py", "content": "def test_f():\n    assert True\n"},
+                {
+                    "path": "tests/test_f.py",
+                    "content": 'def test_f():\n    assert len("ok") == 2\n',
+                },
             ),
         ]
     return [ToolCall("d", "done", {"summary": "pronto"})]
