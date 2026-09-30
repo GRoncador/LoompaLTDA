@@ -29,7 +29,15 @@ class Phase:
 PHASES: dict[str, Phase] = {}
 
 
+class PhaseError(ValueError):
+    pass
+
+
 def register(phase: Phase) -> Phase:
+    """Separation of duties (AIOX's `executor != quality_gate`, Fase 7 item 7.4): whoever does
+    a phase's work never reviews it. The registry refuses the phase instead of trusting a prompt."""
+    if phase.reviewer is not None and phase.reviewer == phase.owner:
+        raise PhaseError(f"phase {phase.name!r}: {phase.owner} cannot review its own work")
     PHASES[phase.name] = phase
     return phase
 

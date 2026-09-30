@@ -357,3 +357,17 @@ async def test_dod_counts_what_an_earlier_task_already_committed(factory: Factor
     assert len(seen) == 2  # T2 was judged, not rejected unseen for an empty diff
     assert "nenhuma mudança nova nesta tarefa" in seen[1] and "test_a.py" in seen[1]
     await ctx.aclose()
+
+
+# --------------------------------------------------------- separation of duties (7.4)
+
+
+def test_no_phase_is_reviewed_by_its_own_owner():
+    from loompa.engine.phases import Phase, PhaseError, register
+
+    assert all(p.reviewer != p.owner for p in PHASES.values())
+    assert PHASES["dev"].owner == "worker" and PHASES["test"].owner == "inspector"
+    assert PHASES["plan"].reviewer == "product_owner"
+    with pytest.raises(PhaseError):
+        register(Phase("self_review", PHASES["dev"].node, Stage.DEV, "worker", reviewer="worker"))
+    assert "self_review" not in PHASES
