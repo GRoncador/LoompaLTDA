@@ -294,6 +294,12 @@ class WorktreeManager:
         f":(exclude,glob)**/{pat}"  # glob magic: `**/` also matches the repo root
         for pat in (".env", "*.env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*")
     )
+    # What the factory's agents keep rewriting in the main checkout. Tracked, it left main
+    # permanently dirty after the first story, in the way of the Deployer's merges.
+    AGENT_WRITTEN = tuple(
+        f":(exclude,glob).loompa/{p}"
+        for p in ("specs/**", "decisions/**", "learnings.md", "onboarding_report.md", "audit.json")
+    )
     _SECRET_IN_TEXT = re.compile(
         r"(?<![A-Za-z0-9])(sk-[A-Za-z0-9_\-]{20,}|AIza[0-9A-Za-z_\-]{30,}|tvly-[A-Za-z0-9_\-]{16,}"
         r"|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"
@@ -308,7 +314,7 @@ class WorktreeManager:
         with _BOOTSTRAP_LOCK:
             if self.head_is_valid():
                 return None
-            self.git("add", "-A", "--", ".", *self.JUNK, *self.SECRET_PATHS)
+            self.git("add", "-A", "--", ".", *self.JUNK, *self.SECRET_PATHS, *self.AGENT_WRITTEN)
             staged = [
                 f for f in self.git("diff", "--cached", "--name-only").splitlines() if f.strip()
             ]

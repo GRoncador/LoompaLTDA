@@ -145,6 +145,9 @@ def test_initial_commit_is_the_deployers_and_leaves_secrets_out(tmp_path: Path):
     (repo / ".loompa").mkdir()
     (repo / ".loompa" / "state.db").write_text("x")
     (repo / ".loompa" / "config.yaml").write_text("api_key_env: OPENROUTER_API_KEY\n")
+    (repo / ".loompa" / "specs" / "S-1").mkdir(parents=True)
+    (repo / ".loompa" / "specs" / "S-1" / "spec.md").write_text("# spec\n")
+    (repo / ".loompa" / "learnings.md").write_text("# learnings\n")
     with pytest.raises(GitAuthorityError):
         wm.as_role("worker").initial_commit()
     res = wm.as_role("deployer").initial_commit()
