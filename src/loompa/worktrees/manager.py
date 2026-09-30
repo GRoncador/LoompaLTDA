@@ -59,6 +59,44 @@ def is_deployer_only(args: tuple[str, ...]) -> bool:
     return sub == "branch" and any(a in _BRANCH_DELETE_FLAGS for a in args)
 
 
+def settle_additions(text: str) -> tuple[str, int]:
+    """Resolve, without a model, the diff3 conflict blocks where the common ancestor had
+    nothing: both sides only added lines (two stories appending tests at the end of the same
+    file — `contas` S-007's 22k test file), so the answer is both, story first. Blocks with a
+    real common part are left in the usual two-way form for the Worker. Returns the text and
+    how many blocks are left."""
+    out: list[str] = []
+    ours: list[str] = []
+    base: list[str] = []
+    theirs: list[str] = []
+    section, left = None, 0
+    for line in text.splitlines(keepends=True):
+        if line.startswith("<<<<<<<"):
+            section, head, ours, base, theirs, saw_base = "ours", line, [], [], [], False
+        elif section == "ours" and line.startswith("|||||||"):
+            section, saw_base = "base", True
+        elif section in ("ours", "base") and line.rstrip("\r\n") == "=======":
+            section, sep = "theirs", line
+        elif section == "theirs" and line.startswith(">>>>>>>"):
+            if saw_base and not "".join(base).strip():
+                out += ours + theirs
+            else:
+                out += [head, *ours, sep, *theirs, line]
+                left += 1
+            section = None
+        elif section == "ours":
+            ours.append(line)
+        elif section == "base":
+            base.append(line)
+        elif section == "theirs":
+            theirs.append(line)
+        else:
+            out.append(line)
+    if section is not None:  # unbalanced markers: give the text back untouched
+        return text, max(left, 1)
+    return "".join(out), left
+
+
 @dataclass
 class Worktree:
     story_id: str
@@ -378,12 +416,31 @@ class WorktreeManager:
         A merge, not a rebase: conflicts are resolved once, not once per story commit, and the
         delivery's rebase is then a no-op because the base is already in the branch."""
         self._require_deployer("git merge")
-        self.git(*_BOT, "merge", "--no-ff", "--no-commit", wt.base, cwd=wt.path, check=False)
+        self.git(
+            *_BOT,
+            "-c",
+            "merge.conflictStyle=diff3",
+            "merge",
+            "--no-ff",
+            "--no-commit",
+            wt.base,
+            cwd=wt.path,
+            check=False,
+        )
         conflicts = self.conflicted_files(wt)
         for rel in [c for c in conflicts if c.rsplit("/", 1)[-1] in self.LOCKFILES]:
             self.git("checkout", "--theirs", "--", rel, cwd=wt.path, check=False)
             self.git("add", "--", rel, cwd=wt.path)
             conflicts.remove(rel)
+        for rel in list(conflicts):
+            path = wt.path / rel
+            if not path.is_file():
+                continue
+            text, left = settle_additions(path.read_text(encoding="utf-8", errors="replace"))
+            path.write_text(text, encoding="utf-8")
+            if not left:  # both sides only added lines: keeping both is the whole answer
+                self.git("add", "--", rel, cwd=wt.path)
+                conflicts.remove(rel)
         if not conflicts:
             self.conclude_merge(wt)
         return conflicts

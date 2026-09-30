@@ -333,6 +333,26 @@ async def test_the_founders_changes_can_widen_the_plan_they_did_not_foresee(fact
     await ctx.aclose()
 
 
+def test_two_stories_appending_to_the_same_file_merge_without_a_model():
+    """`contas` S-007: both sides appended tests at the end of test_cli.py; the model took 17
+    minutes and failed. With no common part in the block, the answer is both sides."""
+    from loompa.worktrees.manager import settle_additions
+
+    added = (
+        "a\n<<<<<<< HEAD\ndef test_x():\n    pass\n||||||| base\n=======\n"
+        "def test_y():\n    pass\n>>>>>>> main\nb\n"
+    )
+    assert settle_additions(added) == (
+        "a\ndef test_x():\n    pass\ndef test_y():\n    pass\nb\n",
+        0,
+    )
+    edited = "<<<<<<< HEAD\nx = 1\n||||||| base\nx = 0\n=======\nx = 2\n>>>>>>> main\n"
+    text, left = settle_additions(edited)
+    assert left == 1 and text == "<<<<<<< HEAD\nx = 1\n=======\nx = 2\n>>>>>>> main\n"  # two-way
+    two_way = "<<<<<<< HEAD\nx = 1\n=======\nx = 2\n>>>>>>> main\n"
+    assert settle_additions(two_way) == (two_way, 1)  # no common part shown: never guessed
+
+
 def test_conflict_blocks_are_found_by_line():
     from loompa.agents.worker import conflict_hunks
 
