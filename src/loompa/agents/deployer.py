@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.agents.kaizen import KaizenAgent
+from loompa.agents.product_owner import CRITERIA_REVIEW_KEY
 from loompa.comms import (
     FounderMessage,
     MessageKind,
@@ -45,6 +46,10 @@ class DeployerAgent(LoompaAgent):
         stat = self.git.diff_stat(wt)
         log = self.git.log(wt)
         state.delivery_summary = await self._summary(state, stat, log)
+        revised = state.extra.get(CRITERIA_REVIEW_KEY)
+        if isinstance(revised, dict) and revised.get("founder"):
+            # a criterion withdrawn or rewritten on the way is part of what is being delivered
+            state.delivery_summary = f"{state.delivery_summary} {revised['founder']}".strip()
         story = self.ctx.store.get_story(state.story_id) or {}
         msg = compose_delivery_message(
             factory=self.ctx.slug,

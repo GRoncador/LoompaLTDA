@@ -39,6 +39,9 @@ class Failure:
     location: str = ""
     message: str = ""
     frames: list[str] = field(default_factory=list)
+    # `tests/test_cli.py::test_help`, from pytest's short summary: the test's own file, which
+    # `location` (the deepest frame) is not when the code under test raised
+    nodeid: str = ""
 
 
 @dataclass
@@ -143,8 +146,15 @@ def _summarize_pytest(text: str, returncode: int) -> CommandSummary:
             if fr:
                 current.frames.append(f"{fr.group(1)}:{fr.group(2)}")
         sm = _PYTEST_SHORT.match(line.strip())
-        if sm and not any(f.name.endswith(sm.group(2).split("::")[-1]) for f in s.failures):
-            s.failures.append(Failure(name=sm.group(2), message=(sm.group(3) or "")[:300]))
+        if sm:
+            last = sm.group(2).split("::")[-1]
+            known = next((f for f in s.failures if f.name.endswith(last)), None)
+            if known is None:
+                s.failures.append(
+                    Failure(name=sm.group(2), message=(sm.group(3) or "")[:300], nodeid=sm.group(2))
+                )
+            elif not known.nodeid:
+                known.nodeid = sm.group(2)
     if not (s.passed or s.failed or s.errors or s.skipped):
         bare = next(
             (ln.strip() for ln in reversed(lines) if _PYTEST_BARE_COUNTS.match(ln.strip())), ""

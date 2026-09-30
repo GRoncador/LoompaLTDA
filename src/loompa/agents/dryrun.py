@@ -170,6 +170,8 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
         return json.dumps(
             {"verdicts": [{"key": k, "admit": True, "reason": "", "priority": 3} for k in keys]}
         )
+    if role == "product_owner" and "guardian of the spec" in messages[0].content:
+        return json.dumps({"criteria": [], "summary": "simulação: critérios mantidos"})
     if role == "product_owner":
         return json.dumps({"approved": True, "unsupported": [], "missing": [], "notes": "ok"})
     if role == "inspector":

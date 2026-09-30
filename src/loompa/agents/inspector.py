@@ -22,6 +22,7 @@ from loompa.engine.state import StoryState
 from loompa.hygiene import (
     HygieneIssue,
     blocking,
+    is_test_path,
     new_files,
     render,
     run_residue,
@@ -29,7 +30,7 @@ from loompa.hygiene import (
     weak_tests,
 )
 from loompa.speckit import story_dir
-from loompa.worktrees import Worktree
+from loompa.worktrees import Worktree, WorktreeManager
 
 JUDGE_SYSTEM = """<!-- role:inspector -->
 You are the Inspector Loompa, the factory's quality gate. The automated checks below already ran:
@@ -127,6 +128,8 @@ class InspectorAgent(LoompaAgent):
         q = self.ctx.config.quality
         parts: list[str] = []
         ok = True
+        others_ok = True  # every check but the test suite (lint, types, scanner, hygiene)
+        failing: list[dict[str, str]] = []
         residue: list[str] = []
         if q.test_command:
             before = new_files(wt.path)
@@ -148,6 +151,10 @@ class InspectorAgent(LoompaAgent):
                 else:
                     ok = False
                     parts.append(summary.compact())
+                    failing = [
+                        {"name": f.name, "nodeid": f.nodeid, "location": f.location}
+                        for f in new_failures[:30]
+                    ]
             self.ctx.emit(
                 "inspector.tests",
                 story_id=state.story_id,
@@ -170,12 +177,13 @@ class InspectorAgent(LoompaAgent):
                 )
             else:
                 lint_failed = ok  # the only failure so far: a candidate for `fix_lint`
-                ok = False
+                ok = others_ok = False
                 parts.append(s.compact())
         if q.typecheck_command:
             res = await run_command(q.typecheck_command, wt.path, timeout=600)
             s = summarize_typecheck(res.output, res.returncode)
             ok = ok and s.ok
+            others_ok = others_ok and s.ok
             parts.append(s.compact())
         if (
             ok
@@ -188,6 +196,7 @@ class InspectorAgent(LoompaAgent):
                 "[coderabbit] " + ("no critical findings" if res.ok else res.output[-1500:])
             )
             ok = ok and res.ok
+            others_ok = others_ok and res.ok
         # 7.10: leftovers no test notices (debris files, machine paths, debugger calls, markers)
         full_diff = (
             self.ctx.worktrees.diff(wt, max_chars=400_000)
@@ -211,6 +220,7 @@ class InspectorAgent(LoompaAgent):
         if issues:
             stop = blocking(issues)
             ok = ok and not stop
+            others_ok = others_ok and not stop
             parts.append(
                 ("[hygiene] FAIL\n" if stop else "[hygiene] notes\n") + render(stop or issues)
             )
@@ -272,6 +282,9 @@ class InspectorAgent(LoompaAgent):
                 "findings": findings,
                 # tests green, no debris: only the linter complained, mechanical fixes may do
                 "lint_only": lint_failed and not blocking(issues),
+                # the tests new on this story's run, and whether they are all that failed
+                "failing": failing,
+                "tests_only": bool(failing) and others_ok,
             },
         )
 
@@ -348,6 +361,45 @@ class InspectorAgent(LoompaAgent):
                 "inspector.findings_dropped", story_id=state.story_id, agent=self.name, n=dropped
             )
         return {"criteria": criteria, "findings": findings, "summary": str(data.get("summary", ""))}
+
+
+def test_origin(
+    git: WorktreeManager, wt: Worktree, failing: list[dict[str, str]]
+) -> dict[str, list[str]]:
+    """Which failing tests this story wrote and which the base already had (Fase 7, item 1).
+    The first kind failing again and again can be a criterion the product cannot meet
+    (`contas` S-030); the second is the product breaking. A test whose file or function cannot
+    be told (another runner's output, a collection error) is `unknown`."""
+    out: dict[str, list[str]] = {"own": [], "existing": [], "unknown": []}
+    base: dict[str, str] = {}
+    for f in failing:
+        name = f.get("name", "")
+        path, func = _test_address(f)
+        if not path:
+            out["unknown"].append(name)
+            continue
+        if path not in base:
+            base[path] = git.git("show", f"{wt.base}:{path}", cwd=wt.path, check=False)
+        defined = re.search(rf"^\s*(async\s+)?def {re.escape(func)}\(", base[path], re.M)
+        out["existing" if defined else "own"].append(name)
+    return out
+
+
+def _test_address(f: dict[str, str]) -> tuple[str, str]:
+    """(test file, test function) of a pytest failure, or ("", "") when it cannot be told."""
+    name = f.get("name", "")
+    node = f.get("nodeid") or (name if "::" in name else "")
+    if node:
+        path, _, rest = node.partition("::")
+        func = rest.split("::")[-1]
+    else:
+        where = f.get("location", "").split(":", 1)[0]
+        path = where if is_test_path(where) else ""
+        func = re.split(r"[.:]", name)[-1]
+    func = func.split("[", 1)[0]
+    if not path.endswith(".py") or not func.startswith("test"):
+        return "", ""
+    return path, func
 
 
 def _with_file(text: str, file: str) -> str:

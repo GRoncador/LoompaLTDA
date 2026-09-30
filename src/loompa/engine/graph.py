@@ -28,6 +28,8 @@ from loompa.agents import (
     WorkerAgent,
 )
 from loompa.agents.architect import REPLANNED_KEY
+from loompa.agents.inspector import test_origin
+from loompa.agents.product_owner import CRITERIA_REVIEW_KEY
 from loompa.agents.worker import FOUNDER_CHANGES, unfinished
 from loompa.comms import (
     FounderAnswer,
@@ -57,6 +59,7 @@ from loompa.engine.state import (
     StoryKind,
     StoryState,
 )
+from loompa.hygiene import is_test_path
 from loompa.llm import LLMError
 from loompa.risk import needs_preflight
 from loompa.worktrees import GitError, Worktree
@@ -421,11 +424,80 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
         )
         state.hand_off("Corrigir os apontamentos do Inspector: " + detail, phase="test")
         return await block(ctx, state, BlockedReason.WAIVER, res.summary, resume="dev", message=msg)
-    executive = (
-        "As verificações automáticas continuam falhando após várias tentativas, inclusive com o especialista sênior. "
-        "O detalhe técnico ficou registrado para a equipe."
+    failing = list((res.data or {}).get("failing") or [])
+    origin = test_origin(ctx.worktrees, wt, failing) if failing else None
+    own_only = bool(
+        origin
+        and (res.data or {}).get("tests_only")
+        and origin["own"]
+        and not origin["existing"]
+        and not origin["unknown"]
     )
-    return await climb(ctx, state, res.summary, executive=executive)
+    if own_only:
+        own = sorted(origin["own"])  # type: ignore[index]
+        again = state.extra.get(OWN_FAILURES_KEY) == own
+        state.extra[OWN_FAILURES_KEY] = own
+        if again and state.acceptance and not state.extra.get(CRITERIA_REVIEW_KEY):
+            # The same tests of the story's own failed twice while the product's pass: before a
+            # stronger model is paid to meet it, the Product Owner looks at the criterion itself.
+            review = await ProductOwnerAgent(ctx).review_criteria(
+                state, own, res.summary, _test_changes(ctx, wt)
+            )
+            state.extra[CRITERIA_REVIEW_KEY] = review.data if review.ok else True
+            if review.ok:
+                # the criterion was the problem, not the code: the Worker adapts without a tier
+                state.failure_history.append(review.summary)
+                state.extra.pop(OWN_FAILURES_KEY, None)
+                return goto(state, "dev")
+    else:
+        state.extra.pop(OWN_FAILURES_KEY, None)
+    facts, executive = _failure_story(origin)
+    return await climb(ctx, state, facts + res.summary, executive=executive)
+
+
+OWN_FAILURES_KEY = "own_failures"  # the story's own failing tests at the last test run
+GENERIC_EXECUTIVE = (
+    "As verificações automáticas continuam falhando após várias tentativas, inclusive com o "
+    "especialista sênior. O detalhe técnico ficou registrado para a equipe."
+)
+
+
+def _failure_story(origin: dict[str, list[str]] | None) -> tuple[str, str]:
+    """What is established about a failing suite, measured in code: a `[facts]` line the next
+    attempt and the Master's rewrite read (English), and the founder's fallback text (pt-BR).
+    The factory's own new tests failing is not the product breaking: `contas` S-030 told the
+    founder "users can't see the help" when only the story's new test failed."""
+    if origin and origin["own"] and not origin["existing"]:
+        return (
+            "[facts] Every failing test was written by the factory for this story; every test the "
+            "product already had passes. Nothing was merged: the product the founder uses is "
+            "unchanged.\n",
+            "Os testes que a equipe escreveu para esta entrega continuam falhando, mesmo com o "
+            "especialista sênior. Os testes que o produto já tinha continuam passando: nada do "
+            "que já funcionava foi afetado e nada foi integrado à versão principal. Pode ser que o "
+            "pedido, como está escrito, não combine com o comportamento atual do produto.",
+        )
+    if origin and origin["existing"]:
+        return (
+            "[facts] Tests that existed before this story now fail: "
+            + ", ".join(origin["existing"][:5])
+            + ". Nothing was merged: the product the founder uses is unchanged.\n",
+            "Esta mudança faz falhar verificações de partes do produto que já funcionavam, e as "
+            "tentativas de correção, inclusive com o especialista sênior, não resolveram. Nada foi "
+            "integrado à versão principal: o produto que você usa continua como estava.",
+        )
+    return "", GENERIC_EXECUTIVE
+
+
+def _test_changes(ctx: EngineContext, wt: Worktree) -> str:
+    """The story's changes to test files, for the Product Owner to read what they assert."""
+    diff = ctx.worktrees.diff(wt, max_chars=60_000)
+    blocks = re.split(r"(?=^diff --git )", diff, flags=re.M)
+    return "".join(
+        b
+        for b in blocks
+        if b.startswith("diff --git") and is_test_path(b.split(" b/", 1)[-1].split("\n", 1)[0])
+    )
 
 
 UNFINISHED_EXECUTIVE = (

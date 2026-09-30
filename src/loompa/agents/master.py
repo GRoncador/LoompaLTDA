@@ -62,6 +62,9 @@ who is not technical, in {language}. They read it in the inbox and answer by cho
 listed options, so describe the situation, never a remedy: do not invent options or promise actions
 outside them. No file names, code, error names or stack traces: the message is audited and rejected
 when it has any.
+What the factory already established and the lines marked [facts] come from its own checks: keep
+them true and never contradict them (never say the product or its users are affected when they say
+the product's own tests pass or nothing was merged).
 Respond with JSON only: {{"title": str, "context": str, "impact": str}}
 - title: one sentence;
 - context: 2-3 plain sentences: what we were doing and what happened;
@@ -412,7 +415,14 @@ class MasterAgent(LoompaAgent):
             try:
                 data = await self.ask_json(
                     EXEC_SYSTEM.format(language=self.language),
-                    f"Story: {state.title}\n\nProblem:\n{technical_reason[:3000]}\n\nOptions: {options or DEFAULT_BLOCK_OPTIONS}",
+                    f"Story: {state.title}\n\n"
+                    + (
+                        f"What the factory already established:\n{executive}\n\n"
+                        if executive
+                        else ""
+                    )
+                    + f"Problem:\n{technical_reason[:3000]}\n\n"
+                    f"Options: {options or DEFAULT_BLOCK_OPTIONS}",
                     story=state,
                     task="master.exec_options",
                     max_tokens=800,
