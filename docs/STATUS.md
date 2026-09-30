@@ -32,6 +32,7 @@ Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 6 (parcial: `models sync`) | ✅ catálogo da OpenRouter ranqueado por custo-benefício (tier1: melhor nota sob teto de preço; tier2: mais barato acima de um piso), proposta na Caixa de Entrada, aplicada só com aprovação e fora de sprint. ADR-0011 | `llm/catalog.py`, `models_sync.py`, `cli/models.py`, `engine/scheduler.py`, `tests/test_models_sync.py`, `docs/adr/0011-*` |
 | Plano set/2026 · Fase 7 (Specs, QA Gates e Raciocínio de Agentes) | ✅ ler antes de escrever + `LoopGuard` (7.11), higiene do diff (7.10), juiz com rubrica, evidência de teste e auto-cura (7.2), reproducer-first (7.7), alternativas (7.9), checagem rápida pós-escrita (7.8), spec/plan enriquecidos (7.1), revisão de spec mais funda (7.3), modos de autonomia e pre-flight de risco (7.5/7.6), `owner != reviewer` (7.4; Workers especializados adiados sem evidência). ADR-0014 | `agents/loopguard.py`, `hygiene.py`, `risk.py`, `aci/tools.py`, `agents/inspector.py`, `agents/worker.py`, `agents/architect.py`, `engine/graph.py`, `speckit/templates/` |
 
+| Plano set/2026 · Fase 8 (relatório de sprint e autodiagnóstico da fábrica) | ⚪ planejada em 30/09 a pedido do Founder: telemetria que falta, relatório de sprint (previsto × surgido, tempo, chamadas e custo por história), detector de sinais da fábrica com evidência, `loompa factory-health` e aba Fábrica separada do Kaizen do produto | `docs/PLANO-2026-09.md` Fase 8 |
 
 ## Deliberate divergences from the brief
 
@@ -430,6 +431,19 @@ Decided 2026-09-29:
   15-20 minutes per story. The dashboard showed the same task text for 47 minutes, so a slow story looked
   stuck.
 
+- **2026-09-30 (end of day) — what the founder missed, now Fase 8.** Two gaps showed at the end of the
+  sprint. (1) There is no sprint report: SP-002's close was a one-line inbox note. (2) Product and
+  factory improvements are not told apart, and only the product side exists: the dashboard's "💡 25
+  melhorias catalogadas hoje" counts the Kaizen findings about `contas`' code (the product) since UTC
+  midnight — duplicates included (the stray `gastos.json` four times), not clickable, only medium/high
+  ones become backlog cards; `loompa kaizen` and `.loompa/learnings.md` list them. Everything wrong with
+  the **factory itself** this sprint (silent merge failure, a cut task counted as done, stalls with no
+  alarm, forgotten branches, cut answers, a slow judge) was found only by someone reading events and
+  logs by hand. Fase 8 makes the factory do that: facts detected in code over events/usage/git/logs,
+  kept in the hub (about Loompa, not about the product), with a sprint report, `loompa factory-health`
+  and a dashboard tab of its own. The Finance Loompa's cost suggestions (Worker 78% of cost, `read_file`
+  69% of what tools read) move into it as signals.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
@@ -441,7 +455,9 @@ Decided 2026-09-29:
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
 - CodeRabbit webhook: verify against GitHub (public URL for the dashboard, a repo with CodeRabbit).
 - PyPI: register the trusted publisher, then `git tag v0.1.0 && git push origin v0.1.0`.
-- Speed (from the finished `contas` Sprint 1): a streak of repeats should end the task with a diagnosis
+- **Fase 8** (see the plan): 8.1 telemetry that is missing today → 8.2 sprint report → 8.3 factory
+  self-diagnosis → 8.4 `loompa factory-health` + dashboard tab → 8.5 speed fixes as its first consumers.
+- Speed (from the finished `contas` Sprint 1, part of Fase 8.5): a streak of repeats should end the task with a diagnosis
   instead of running to the tool-call limit; a task cut by that limit must not count as done; measure
   time and cost per role with other tier-2 models for the Worker and the judge before touching presets;
   the dashboard should show live activity (last tool call, calls in this task) and flag a story with no
