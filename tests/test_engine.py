@@ -516,6 +516,7 @@ async def test_persistent_failure_blocks_only_that_story(factory: Factory):
         msg.id, FounderAnswer(option_key="retry", text="pode remover esse teste")
     )
     assert state.stage == Stage.DEV and state.attempts_tier2 == 0 and state.current_tier == "tier2"
+    assert state.extra["amend_plan"] == "pode remover esse teste"  # the plan hears it too
     # founder: skip -> backlog with low priority; drop -> cancelled and worktree removed
     ctx.store.update_story(
         bad,

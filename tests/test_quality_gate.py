@@ -76,6 +76,31 @@ async def test_the_judge_sees_the_checks_and_a_failure_needs_a_reason(factory: F
     await ctx.aclose()
 
 
+async def test_the_founders_guidance_reaches_the_judge_and_the_self_check(factory: Factory):
+    """`contas` S-030: the founder withdrew a criterion the spec still stated; the self-check
+    kept asking for it and the judge would have failed the story on it."""
+    seen: dict[str, list[str]] = {"inspector": [], "dod": []}
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role in seen:
+            seen[role].append(messages[-1].content)
+        if role == "worker":
+            return _worker_writes("tests/test_n.py", "def test_n():\n    assert 2 * 3 == 6\n")(
+                messages
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Com orientação")
+    await Scheduler(ctx).restart_story(sid, "o critério das bordas saiu; as caixas podem ficar")
+    await Scheduler(ctx).run()
+    for role in ("inspector", "dod"):
+        assert seen[role] and "Guidance from the founder" in seen[role][0], role
+        assert "as caixas podem ficar" in seen[role][0]
+    await ctx.aclose()
+
+
 async def test_a_lint_only_failure_is_fixed_by_the_linter_before_it_counts(factory: Factory):
     """`contas` S-003/S-006: green tests, one import-order finding, a whole retry round."""
     factory.config.quality.lint_command = (

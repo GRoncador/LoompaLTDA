@@ -335,6 +335,17 @@ OUTLINE_SUFFIXES = (
 )
 
 
+def founder_guidance(state: StoryState, heading: str = "##") -> str:
+    """The founder's answers so far, for a reviewer that judges against the spec: an answer can
+    withdraw a criterion the spec still states (`contas` S-030's retry kept failing on one)."""
+    if not state.founder_notes:
+        return ""
+    lines = "\n".join(f"- {n}" for n in state.founder_notes)
+    return (
+        f"{heading} Guidance from the founder (overrides the spec where they disagree)\n{lines}\n\n"
+    )
+
+
 def repo_outline(root: Path, max_entries: int = 80) -> str:
     """Directories and source files up to three levels deep: enough to name paths without a
     round of `list_dir` calls (the Worker in `contas` spent hundreds of them)."""

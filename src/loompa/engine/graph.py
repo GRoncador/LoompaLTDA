@@ -676,6 +676,10 @@ def apply_founder_answer(
         state.attempts_tier1 = 0
         state.current_tier = "tier2"
         goto(state, resume or "dev")
+        if note and state.phase == "dev" and "plan" in state.route:
+            # what the founder wrote may withdraw part of the plan: the Architect amends the
+            # tasks, or the Worker's self-check keeps asking for it (`contas` S-030)
+            state.extra[AMEND_KEY] = note
     elif reason == BlockedReason.CONFLICT:
         # back through `dev`: the base is merged in there and conflicts go to the Worker;
         # retrying the delivery's rebase alone only ever met the same conflict again
