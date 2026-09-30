@@ -54,9 +54,20 @@ role, model and what each tool read into the context).
 ## How a story flows (LangGraph `StateGraph`, one thread per story)
 
 ```
-BACKLOG → SPEC (Product) → PLAN (Architect) → DEV (Worker, worktree) → TEST (Inspector)
-        → REVIEW (Deployer: rebase, PR, delivery message) → AWAITING_FOUNDER → DONE (merge)
+BACKLOG → SPEC (Product) → PLAN (Architect) [→ PREFLIGHT (risk.md)] → DEV (Worker, worktree)
+        → TEST (Inspector) → REVIEW (Deployer: rebase, PR, delivery message) → AWAITING_FOUNDER → DONE
 ```
+
+* **Autonomy** (`schedule.autonomy`): simple stories run lean; complex ones, and any plan touching a
+  schema, a migration or a public contract, get a pre-flight risk report built on facts measured in
+  the repository before the first commit.
+* **Worker discipline**: an existing file is edited only after it was read in the task, repeated
+  lookups and test runs with nothing changed are answered from memory, every write reports its
+  syntax errors at once, a bugfix starts with a test that fails, and the diff is checked for
+  leftovers (debug files, machine paths, debugger calls) before it can be delivered.
+* **Quality gate**: tests, lint and hygiene first; a mechanical lint failure is fixed by the linter;
+  then a judge bound by a rubric, which sees the checks as facts and must anchor each finding in the
+  diff.
 
 * **Escalation ladder**: Tier 2 ×2 → Tier 1 ×1 → `BLOCKED_AWAITING_INPUT` with an executive
   inbox message. Other stories never wait.

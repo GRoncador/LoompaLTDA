@@ -30,7 +30,7 @@ Status as of 2026-09-19 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 4 (ferramentas para todos os papéis, MCP, Analyst) | ✅ perfis de permissão por papel (`Toolbox`), loop de ferramentas genérico em `LoompaAgent`, arquivos protegidos, cliente MCP (`loompa/mcp/`, SDK oficial) com Tavily, `AnalystAgent` e rota `research` (fontes conferidas em código, limitação declarada em código, revisão do PO, entrega ao Founder). ADR-0009 | `agents/toolbox.py`, `agents/base.py`, `mcp/client.py`, `agents/analyst.py`, `engine/graph.py`, `engine/phases.py`, `config/schema.py`, `docs/adr/0009-*` |
 | Plano set/2026 · Fase 5 (conversas) | ✅ sessões de chat persistidas com rascunho de backlog e de sprint (só a Master/Analyst propõem operações, o código valida), Sprint Meeting (Master), Brainstorm (Analyst → Product Owner admite), `loompa meeting` como sessão de um turno, `loompa chat`, API e modal no dashboard. ADR-0010 | `conversations.py`, `agents/conversation.py`, `agents/master.py`, `agents/analyst.py`, `agents/product_owner.py`, `cli/chat.py`, `dashboard/app.py`, `ChatModal.tsx`, `docs/adr/0010-*` |
 | Plano set/2026 · Fase 6 (parcial: `models sync`) | ✅ catálogo da OpenRouter ranqueado por custo-benefício (tier1: melhor nota sob teto de preço; tier2: mais barato acima de um piso), proposta na Caixa de Entrada, aplicada só com aprovação e fora de sprint. ADR-0011 | `llm/catalog.py`, `models_sync.py`, `cli/models.py`, `engine/scheduler.py`, `tests/test_models_sync.py`, `docs/adr/0011-*` |
-| Plano set/2026 · Fase 7 (Specs, QA Gates e Raciocínio de Agentes) | ⚪ planejado (ver `docs/PLANO-2026-09.md`): templates SpecKit com NFRs/rastreabilidade, rubricas de QA, loop de auto-cura CodeRabbit, reproducer-first, fast linter no ACI, especialização de executores | `speckit/`, `agents/inspector.py`, `agents/worker.py`, `agents/product_owner.py`, `aci/` |
+| Plano set/2026 · Fase 7 (Specs, QA Gates e Raciocínio de Agentes) | ✅ ler antes de escrever + `LoopGuard` (7.11), higiene do diff (7.10), juiz com rubrica, evidência de teste e auto-cura (7.2), reproducer-first (7.7), alternativas (7.9), checagem rápida pós-escrita (7.8), spec/plan enriquecidos (7.1), revisão de spec mais funda (7.3), modos de autonomia e pre-flight de risco (7.5/7.6), `owner != reviewer` (7.4; Workers especializados adiados sem evidência). ADR-0014 | `agents/loopguard.py`, `hygiene.py`, `risk.py`, `aci/tools.py`, `agents/inspector.py`, `agents/worker.py`, `agents/architect.py`, `engine/graph.py`, `speckit/templates/` |
 
 
 ## Deliberate divergences from the brief
@@ -335,6 +335,31 @@ Decided 2026-09-29:
   workflow — nothing published). Test suite: leaked aiosqlite threads no longer hang pytest at exit.
   Intra-story parallelism stays out: nothing in Fase 1 or since showed a need.
 
+- **2026-09-30 — Fase 7 (ADR-0014), in the order the `contas` run pointed to.** 7.11: the ACI refuses
+  to edit a file the task has not read; `LoopGuard` answers repeated lookups and test runs with nothing
+  changed from memory, notes a streak of reads and a write tool that keeps failing; pruning keeps the
+  latest read of each file; fixes state their root cause in the first edit's `reason`; the outline is in
+  the Worker's cached prefix; `worker.task`/`tool.call` now measure rounds, repeats and paths. 7.10:
+  `hygiene.py` (debris files, machine paths, debugger calls, conflict markers block; TODOs, debug prints,
+  whitespace-only files are noted) in the Worker, the Inspector and the Deployer. 7.2: the judge sees the
+  checks as facts, follows a rubric, keeps at most three anchored medium/high findings and needs a reason
+  for a failed criterion; tautological tests and code without tests are found in code; only medium/high
+  become Kaizen cards; a lint-only failure is fixed by the linter at $0 and a high finding gets one Worker
+  round before the founder. 7.7: a bugfix starts with a test that must fail (tests-only fence during
+  it). 7.9: alternatives in the plan. 7.8: every write returns its syntax errors and undefined names.
+  7.1/7.3: NFRs, edge cases, entities, assumptions; impact, rollback, traceability, constitution check;
+  the PO checks feasibility and declared dependencies; the Architect can bounce a spec once — compared
+  with the official Spec Kit templates (what was taken and what was left out is in ADR-0014). 7.5/7.6:
+  `schedule.autonomy`, and a `preflight` phase with `risk.md` built on facts measured in code. 7.4: the
+  phase registry refuses a self-reviewed phase; specialised Workers not built (no evidence).
+  **Found on the way:** the command runner's `FORCE_COLOR=0` turned colours *on* in Rich/Typer and ruff —
+  the cause of `contas` S-030's failing help tests and of Kaizen card S-037; fixed.
+  **Cost measured before adding:** system prompts +143 to +429 tokens each, ~2-4% more input per story.
+  **Not verified against a real model:** all of it. Resuming `contas` Sprint 1 (S-002, S-007, S-030,
+  S-031) on this build is the test: compare `worker.task` rounds/repeats and Kaizen cards per delivery
+  with Sprint 1 so far. S-030 in particular should now pass its help tests without code changes.
+  Suite: 376 passed.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
@@ -346,6 +371,8 @@ Decided 2026-09-29:
   `opencode` install (tests script a fake binary) — confirming that is part of running the spike.
 - CodeRabbit webhook: verify against GitHub (public URL for the dashboard, a repo with CodeRabbit).
 - PyPI: register the trusted publisher, then `git tag v0.1.0 && git push origin v0.1.0`.
-- Plano set/2026 · Fase 7 (Excelência de Specs, Quality Gates e Raciocínio de Agentes): detalhado em `docs/PLANO-2026-09.md` (absorção dos padrões do AIOX-Core e das CLIs de referência: templates de spec enriquecidos com NFRs e rastreabilidade, rubricas taxativas de QA, self-healing do CodeRabbit, reproducer-first para bugfixes, fast linter no ACI, trade-offs no Arquiteto, diff hygiene e especialização de executores).
+- Fase 7 follow-ups: specialised Workers (7.4) only if `worker.task`/failure history show a stack-context
+  cause; the Inspector judge could prefer a different model from the one that wrote the code (separation
+  at model level, not built); the dashboard does not show `risk.md` or the autonomy mode yet.
 - Some tests leak aiosqlite connections; `tests/conftest.py` exits with the verdict instead of hanging
   on them and names the threads on stderr. Closing them at the source is still open.
