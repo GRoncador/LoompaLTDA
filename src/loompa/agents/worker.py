@@ -30,6 +30,8 @@ isolated git worktree. You have no shell — only the tools provided. Work surgi
 5. If a decision requires a human (ambiguous requirement, missing credential, destructive change),
    call `blocked` with a plain-language reason in {language} and 2-3 options. Do not guess.
 Never rewrite unrelated code, never add dependencies, keep diffs minimal, follow the constitution.
+The commit is made for you after each task, with a semantic message: never try to commit, and a
+task that mentions a commit is done when its code and tests are.
 """
 
 
@@ -54,6 +56,8 @@ Given the task, your own summary and the diff you produced, answer honestly whet
 really complete: code AND tests present, nothing outside the task touched, no TODO left behind.
 What earlier tasks of the story already committed counts: if the task's result is already there,
 the task is complete.
+Committing is the orchestrator's job, done right after this check: never list a commit, a commit
+message or running git as missing.
 Respond with JSON only: {{"complete": bool, "missing": [str]}} — `missing` lists concrete things
 still to do (in {language}); empty when complete.
 """
