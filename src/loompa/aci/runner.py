@@ -30,6 +30,12 @@ class CommandResult:
         return (self.stdout + ("\n" + self.stderr if self.stderr else "")).strip()
 
 
+# Their mere presence turns colour ON in Rich (Typer's help), ruff and others, whatever the
+# value: `FORCE_COLOR=0` here put ANSI codes in every help text a factory's tests read (`contas`
+# S-030 failed on them). Output is captured, so NO_COLOR alone says what is meant.
+FORCES_COLOR = ("FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS")
+
+
 async def run_command(
     command: str,
     cwd: Path,
@@ -44,11 +50,10 @@ async def run_command(
     # seconds), so a same-length fix written within the same second would run stale bytecode.
     pyc_dir = tempfile.mkdtemp(prefix="loompa-pyc-")
     merged_env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k not in FORCES_COLOR},
         "CI": "1",
         "NO_COLOR": "1",
         "PYTHONUNBUFFERED": "1",
-        "FORCE_COLOR": "0",
         "PYTHONPYCACHEPREFIX": pyc_dir,
         **(env or {}),
     }

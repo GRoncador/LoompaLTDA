@@ -11,6 +11,7 @@ import inspect
 import json
 import re
 import shlex
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -232,6 +233,7 @@ class ACI:
         # file from an earlier task or a pruned result is a guess, and so is an edit built on it.
         self.require_read = False
         self._known: set[str] = set()  # files read or written since `begin_task`
+        self._just_written: list[str] = []  # by the call being run (for `quick_check`)
 
     # ------------------------------------------------------------------ helpers
     def _resolve(self, path: str, *, for_write: bool = False) -> Path:
@@ -270,6 +272,7 @@ class ACI:
 
     def _wrote(self, p: Path) -> None:
         rel = self._rel(p)
+        self._just_written.append(rel)
         self.touched.add(rel)
         self._known.add(rel)
         self._symbols = None
@@ -279,10 +282,15 @@ class ACI:
         handler = getattr(self, f"tool_{name}", None)
         if handler is None:
             return ToolResult(False, f"ferramenta desconhecida: {name}")
+        self._just_written = []
         try:
             out = handler(**args)
             if inspect.isawaitable(out):
                 out = await out
+            if self._just_written and name in QUICK_CHECKED:
+                problems = await self.quick_check(self._just_written)
+                if problems:
+                    out = f"{out}\n\n[quick check] problems in what you just wrote:\n{problems}"
             return ToolResult(True, out)
         except ToolError as exc:
             return ToolResult(False, f"erro: {exc}")
@@ -442,6 +450,45 @@ class ACI:
             head += f" (não aplicável só ao plano: {', '.join(skipped)})"
         return head + "\n" + await self.tool_run_lint()
 
+    async def quick_check(self, paths: list[str]) -> str:
+        """Fast feedback right after a write (Fase 7, 7.8; Aider-style): syntax errors, undefined
+        names and unparseable config files come back in the write's own result, instead of a
+        full test run later. Milliseconds in-process; one narrow `ruff` run when the project
+        lints with ruff. Unused imports are not reported: mid-task they are normal."""
+        found: list[str] = []
+        py: list[str] = []
+        for rel in dict.fromkeys(paths):
+            p = self.root / rel
+            if not p.is_file():
+                continue
+            text = p.read_text(encoding="utf-8", errors="replace")
+            try:
+                if rel.endswith(".py"):
+                    compile(text, rel, "exec")
+                    py.append(rel)
+                elif rel.endswith(".json"):
+                    json.loads(text)
+                elif rel.endswith(".toml"):
+                    tomllib.loads(text)
+            except SyntaxError as exc:
+                found.append(f"- {rel}:{exc.lineno}: syntax error: {exc.msg}")
+            except (ValueError, tomllib.TOMLDecodeError) as exc:
+                found.append(f"- {rel}: invalid {Path(rel).suffix[1:]}: {str(exc)[:160]}")
+        ruff = _ruff_prefix(self.lint_command)
+        if py and ruff:
+            cmd = shlex.join(
+                [*ruff, "check", "--select", "E9,F63,F7,F82", "--output-format", "concise", *py]
+            )
+            res = await run_command(cmd, self.root, timeout=60)
+            if res.returncode == 1:  # 2 = ruff itself failed: say nothing rather than guess
+                plain = re.sub(r"\x1b\[[0-9;]*m", "", res.output)
+                found += [
+                    f"- {line.strip()}"
+                    for line in plain.splitlines()
+                    if re.match(r"^\S+:\d+:\d+: [A-Z]+\d+", line.strip())
+                ][:10]
+        return "\n".join(found)
+
     def tool_done(self, summary: str) -> str:
         return f"DONE: {summary}"
 
@@ -453,6 +500,18 @@ class ACI:
     def tool_note_learning(self, title: str, detail: str = "", kind: str = "opportunity") -> str:
         self.learnings.append({"title": title, "detail": detail, "kind": kind})
         return f"registrado para o backlog: {title}"
+
+
+QUICK_CHECKED = frozenset({"write_file", "edit_file", "apply_patch"})
+
+
+def _ruff_prefix(lint_command: str) -> list[str]:
+    """How the project runs ruff (`uv run ruff`, `ruff`, `python -m ruff`), or [] if it does not."""
+    try:
+        parts = shlex.split(lint_command)
+    except ValueError:
+        return []
+    return parts[: parts.index("ruff") + 1] if "ruff" in parts else []
 
 
 # ----------------------------------------------------------------------- patching

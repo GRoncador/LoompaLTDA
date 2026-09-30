@@ -249,3 +249,35 @@ async def test_fix_lint_applies_the_linters_own_fixes_inside_the_plan_only(tmp_p
     assert "other.py:1 I001" in out.output  # and still reported, for the Worker to see
     unscopable = ACI(tmp_path, lint_command="npm run lint", allowed_paths=["app/"])
     assert "nenhum comando" in (await unscopable.call("fix_lint", {})).output
+
+
+# ------------------------------------------------------------ quick check (Fase 7, 7.8)
+
+
+async def test_a_write_reports_its_syntax_error_at_once(tmp_path):
+    aci = ACI(tmp_path)
+    res = await aci.call("write_file", {"path": "app.py", "content": "def f(:\n    pass\n"})
+    assert res.ok and "[quick check]" in res.output and "app.py:1: syntax error" in res.output
+    res = await aci.call("write_file", {"path": "cfg.json", "content": "{nope"})
+    assert "cfg.json: invalid json" in res.output
+    res = await aci.call("write_file", {"path": "ok.py", "content": "x = 1\n"})
+    assert "[quick check]" not in res.output
+
+
+async def test_undefined_names_come_from_the_projects_ruff(tmp_path):
+    import shlex
+    import sys
+
+    aci = ACI(tmp_path, lint_command=f"{shlex.quote(sys.executable)} -m ruff check .")
+    code = "import os\n\n\ndef f():\n    return undefined_thing\n"
+    res = await aci.call("write_file", {"path": "m.py", "content": code})
+    assert "F821" in res.output and "undefined_thing" in res.output
+    assert "F401" not in res.output  # an unused import mid-task is normal, not reported
+
+
+async def test_commands_never_run_with_colour_forced(tmp_path, monkeypatch):
+    """`contas` S-030: `FORCE_COLOR=0` switched Rich's colours ON in Typer's help."""
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    code = "import os; print(sorted(k for k in ('FORCE_COLOR', 'NO_COLOR') if k in os.environ))"
+    res = await run_command(f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}", tmp_path)
+    assert res.output.strip() == "['NO_COLOR']"

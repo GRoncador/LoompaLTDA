@@ -31,7 +31,8 @@ isolated git worktree. You have no shell — only the tools provided. Work surgi
 2. Implement exactly the task, with tests. Do not touch files outside the allowed paths; if you need
    to, call `note_learning` describing why and finish what you can. When you are fixing a failure,
    the first edit's `reason` states the root cause you found (not the symptom).
-3. Run `run_tests` (and `run_lint` when configured) and fix failures until they pass. For
+3. A write reports syntax errors and undefined names at once, under `[quick check]`: fix those
+   first. Then run `run_tests` (and `run_lint` when configured) and fix failures until they pass. For
    mechanical lint findings (import order, spacing, formatting) call `fix_lint` instead of editing
    by hand.
 4. When the task is complete and green, call `done` with a one-sentence summary.
