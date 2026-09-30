@@ -121,6 +121,10 @@ async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
     assert (factory.root / "loompa_dryrun").is_dir()
     assert "feat(s-001)" in git("log", "--oneline", "-1", cwd=factory.root)
     assert ctx.worktrees.get("S-001") is None and ctx.worktrees.get("S-002") is not None
+    # the merged story's branch is gone; the other story's stays with its worktree
+    branches = git("branch", "--list", "loompa/*", "--format=%(refname:short)", cwd=factory.root)
+    assert not any(b.startswith("loompa/s-001") for b in branches.split())
+    assert any(b.startswith("loompa/s-002") for b in branches.split())
     # and asks for changes on the other
     changes = next(m for m in msgs if m.story_id == "S-002")
     state = await Scheduler(ctx).aanswer(

@@ -272,3 +272,23 @@ async def test_an_interrupted_merge_is_started_over_not_committed(factory):
     again = deployer.sync_with_base(state, wt)  # the run restarts
     assert again == ["README.md"] and "wip" not in git("log", "--oneline", "-3", cwd=wt.path)
     await ctx.aclose()
+
+
+def test_merged_story_branches_without_a_worktree_are_pruned_by_the_deployer(git_repo: Path):
+    wm = WorktreeManager(git_repo)
+    deployer = wm.as_role("deployer")
+    old = wm.create("S-001", title="Velha")
+    (old.path / "a.py").write_text("a = 1\n")
+    wm.commit_all(old, "feat: a")
+    deployer.merge_into_base(old)
+    wm.remove("S-001")  # the old way: worktree gone, branch left behind
+    busy = wm.create("S-002", title="Em andamento")  # merged (no commit yet) but in use
+    unmerged = wm.create("S-003", title="Aberta")
+    (unmerged.path / "b.py").write_text("b = 1\n")
+    wm.commit_all(unmerged, "feat: b")
+    wm.remove("S-003")  # no worktree, but its work is not in the base: never deleted
+    with pytest.raises(GitAuthorityError):
+        wm.prune_merged_branches()
+    assert deployer.prune_merged_branches() == [old.branch]
+    left = wm.git("branch", "--list", "loompa/*", "--format=%(refname:short)").split()
+    assert sorted(left) == sorted([busy.branch, unmerged.branch])

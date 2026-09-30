@@ -147,8 +147,18 @@ class DeployerAgent(LoompaAgent):
     def merge(self, state: StoryState, wt: Worktree) -> str:
         sha = self.git.merge_into_base(wt, message=f"feat({state.story_id.lower()}): {state.title}")
         state.merged_sha = sha
-        self.ctx.worktrees.remove(state.story_id)
-        self.ctx.emit("story.merged", story_id=state.story_id, agent=self.name, sha=sha)
+        # The branch is in the base now; kept, it only piles up (`contas` had one per delivery).
+        # Old ones from before this rule go too, the first time something is merged.
+        self.git.remove(state.story_id, delete_branch=True)
+        pruned = self.git.prune_merged_branches(wt.base)
+        self.ctx.emit(
+            "story.merged",
+            story_id=state.story_id,
+            agent=self.name,
+            sha=sha,
+            branch=wt.branch,
+            **({"pruned": pruned} if pruned else {}),
+        )
         return sha
 
     def _maybe_open_pr(self, state: StoryState, wt: Worktree) -> str | None:

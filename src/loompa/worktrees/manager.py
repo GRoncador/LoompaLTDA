@@ -269,6 +269,33 @@ class WorktreeManager:
             self.git("branch", "-D", wt.branch, check=False)
         return True
 
+    def prune_merged_branches(self, base: str | None = None) -> list[str]:
+        """Delete the story branches already merged into the base that no worktree uses: what
+        stories merged before branches were deleted on merge left behind (`contas` had one per
+        delivery). Deployer only; `-d` refuses anything not merged."""
+        self._require_deployer("git branch -d")
+        base = base or self.default_branch()
+        listed = self.git(
+            "branch",
+            "--merged",
+            base,
+            "--format=%(refname:short)",
+            "--list",
+            f"{self.branch_prefix}*",
+            check=False,
+        )
+        busy = {wt.branch for wt in self.list()}
+        pruned = []
+        for branch in (b.strip() for b in listed.splitlines()):
+            if not branch or branch in busy:
+                continue
+            try:
+                self.git("branch", "-d", branch)
+            except GitError:  # checked out somewhere else, or not merged after all
+                continue
+            pruned.append(branch)
+        return pruned
+
     # ----------------------------------------------------------------- operations
     def status(self, wt: Worktree) -> list[str]:
         return [
