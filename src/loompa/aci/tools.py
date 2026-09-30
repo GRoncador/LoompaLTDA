@@ -18,6 +18,7 @@ from typing import Any
 
 from loompa.aci.filters import summarize_lint, summarize_tests, summarize_typecheck
 from loompa.aci.runner import run_command
+from loompa.hygiene import RESIDUE_NOTE, new_files, run_residue
 from loompa.memory.lexical import CodeSearch, SymbolIndex
 
 
@@ -234,6 +235,9 @@ class ACI:
         self.require_read = False
         self._known: set[str] = set()  # files read or written since `begin_task`
         self._just_written: list[str] = []  # by the call being run (for `quick_check`)
+        # files a `run_tests` call created in the repository (a test writing to the working
+        # directory, `contas` S-007): the Worker is told at once and they are never committed
+        self.test_residue: set[str] = set()
 
     # ------------------------------------------------------------------ helpers
     def _resolve(self, path: str, *, for_write: bool = False) -> Path:
@@ -396,10 +400,14 @@ class ACI:
         if not self.test_command:
             return "[tests] no test command configured (quality.test_command)"
         cmd = f"{self.test_command} {selector}".strip() if selector else self.test_command
+        before = new_files(self.root)
         res = await run_command(cmd, self.root, timeout=900)
+        created = [p for p in run_residue(before, new_files(self.root)) if p not in self.touched]
+        self.test_residue.update(created)
+        note = ("\n\n" + RESIDUE_NOTE.format(files=", ".join(created[:5]))) if created else ""
         if res.timed_out:
-            return "[tests] FAIL: timed out (900s)"
-        return summarize_tests(res.output, res.returncode).compact()
+            return "[tests] FAIL: timed out (900s)" + note
+        return summarize_tests(res.output, res.returncode).compact() + note
 
     async def tool_run_lint(self) -> str:
         parts = []

@@ -19,7 +19,15 @@ from pathlib import Path
 from loompa.aci import run_command, summarize_lint, summarize_tests, summarize_typecheck
 from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance
 from loompa.engine.state import StoryState
-from loompa.hygiene import blocking, render, scan_diff, weak_tests
+from loompa.hygiene import (
+    HygieneIssue,
+    blocking,
+    new_files,
+    render,
+    run_residue,
+    scan_diff,
+    weak_tests,
+)
 from loompa.speckit import story_dir
 from loompa.worktrees import Worktree
 
@@ -119,8 +127,11 @@ class InspectorAgent(LoompaAgent):
         q = self.ctx.config.quality
         parts: list[str] = []
         ok = True
+        residue: list[str] = []
         if q.test_command:
+            before = new_files(wt.path)
             res = await run_command(q.test_command, wt.path, timeout=900)
+            residue = run_residue(before, new_files(wt.path))
             summary = summarize_tests(res.output, res.returncode)
             if res.timed_out:
                 ok = False
@@ -183,7 +194,20 @@ class InspectorAgent(LoompaAgent):
             + "\n"
             + self.ctx.worktrees.diff_working(wt, max_chars=200_000)
         )
-        issues = scan_diff(full_diff)
+        issues = scan_diff(full_diff, state.allowed_paths or None)
+        for rel in residue:
+            # the suite wrote into the repository: a test that will leave files behind on every
+            # run (`contas` S-007). Blocking, and this run's copy is removed so nothing ships it.
+            issues.append(
+                HygieneIssue(
+                    rel,
+                    "test_residue",
+                    True,
+                    "created by the test run: the tests must write to a temporary directory "
+                    "(tmp_path), not to the repository",
+                )
+            )
+            (wt.path / rel).unlink(missing_ok=True)
         if issues:
             stop = blocking(issues)
             ok = ok and not stop

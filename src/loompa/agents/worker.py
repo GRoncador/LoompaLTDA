@@ -17,7 +17,7 @@ from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance, repo_
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
 from loompa.engine.state import Autonomy, StoryKind, StoryState
-from loompa.hygiene import scan_diff
+from loompa.hygiene import new_files, scan_diff
 from loompa.llm import Message
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.speckit.artifacts import mark_task_done
@@ -292,16 +292,26 @@ class WorkerAgent(LoompaAgent):
         if result.blocked_reason or unfinished(result):
             return result
         # deterministic hygiene first ($0, also in dry-run), then the model's self-check
-        dirty = scan_diff(self.ctx.worktrees.diff_working(wt, max_chars=200_000))
-        if dirty:
+        dirty = scan_diff(
+            self.ctx.worktrees.diff_working(wt, max_chars=200_000), state.allowed_paths or None
+        )
+        residue = sorted(
+            p for p in task_aci.test_residue | aci.test_residue if (wt.path / p).exists()
+        )
+        if dirty or residue:
             self.ctx.emit(
                 "worker.hygiene",
                 story_id=state.story_id,
                 agent=self.name,
                 task=number,
-                issues=[i.line() for i in dirty[:8]],
+                issues=[i.line() for i in dirty[:8]]
+                + [f"{p}: created by a test run" for p in residue[:5]],
             )
-        missing = [f"Diff hygiene: {i.line()}" for i in dirty[:5]]
+        missing = [f"Diff hygiene: {i.line()}" for i in dirty[:5]] + [
+            f"Diff hygiene: {p}: a test run created it; make the test write to a temporary "
+            "directory (tmp_path) and delete the file"
+            for p in residue[:3]
+        ]
         # a red test is the reproducer's goal; a yolo story trusts hygiene and the Inspector
         if not reproducer and state.autonomy != Autonomy.YOLO:
             missing += await self._dod_check(state, wt, text, result.summary)
@@ -330,6 +340,7 @@ class WorkerAgent(LoompaAgent):
             if followup.blocked_reason or unfinished(followup):
                 return followup
             result.summary = f"{result.summary} / {followup.summary}"
+        self._drop_residue(state, wt, number, task_aci.test_residue | aci.test_residue)
         kind = "test" if reproducer else "feat"
         commit = self.ctx.worktrees.commit_all(wt, f"{kind}({state.story_id.lower()}): {text[:60]}")
         if commit:
@@ -749,6 +760,27 @@ class WorkerAgent(LoompaAgent):
         if not isinstance(data, dict) or data.get("complete", True):
             return []
         return [str(m).strip() for m in data.get("missing") or [] if str(m).strip()]
+
+    def _drop_residue(
+        self, state: StoryState, wt: Worktree, number: int, residue: set[str]
+    ) -> None:
+        """What a test run created and nobody wrote with a tool never goes into the task's commit,
+        whatever the follow-up did (`contas` S-007 committed a `gastos.json` this way)."""
+        uncommitted = new_files(wt.path) if residue else set()
+        dropped = []
+        for rel in sorted(residue & uncommitted):
+            path = wt.path / rel
+            if path.is_file():
+                path.unlink()
+                dropped.append(rel)
+        if dropped:
+            self.ctx.emit(
+                "worker.residue_dropped",
+                story_id=state.story_id,
+                agent=self.name,
+                task=number,
+                files=dropped,
+            )
 
     def _flush_learnings(self, state: StoryState, aci: ACI) -> None:
         for item in aci.learnings:

@@ -11,7 +11,7 @@ from loompa.comms import (
     sanitize_for_founder,
 )
 from loompa.engine.state import StoryState
-from loompa.hygiene import is_debris
+from loompa.hygiene import is_debris, is_stray_data, new_files
 from loompa.worktrees import Worktree
 
 SUMMARY_SYSTEM = """<!-- role:deployer -->
@@ -68,13 +68,15 @@ class DeployerAgent(LoompaAgent):
         return AgentResult(ok=True, summary=state.delivery_summary, data={"message_id": msg.id})
 
     def _drop_debris(self, state: StoryState, wt: Worktree) -> list[str]:
-        """Untracked leftovers (a `debug.txt`, a `.orig`) were never part of any task's commit:
-        the finalize commit must not be the one that ships them (7.10)."""
+        """Untracked leftovers (a `debug.txt`, a `.orig`, a data file a test wrote at the root)
+        were never part of any task's commit: the finalize commit must not ship them (7.10)."""
         dropped = []
-        for line in self.git.status(wt):
-            rel = line[3:].strip().strip('"')
+        allowed = state.allowed_paths or None
+        # never committed: untracked, or only in the index through the Inspector's `add -N`
+        # (a `??` check alone missed every leftover once the Inspector had looked at the diff)
+        for rel in sorted(new_files(wt.path)):
             path = wt.path / rel
-            if line.startswith("??") and is_debris(rel) and path.is_file():
+            if (is_debris(rel) or is_stray_data(rel, allowed)) and path.is_file():
                 path.unlink()
                 dropped.append(rel)
         if dropped:

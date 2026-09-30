@@ -130,3 +130,137 @@ async def test_the_deployer_never_commits_untracked_debris(factory: Factory):
     assert "calc.py.orig" not in stat and "notes.md" in stat
     assert not (wt.path / "app" / "calc.py.orig").exists()
     await ctx.aclose()
+
+
+# ------------------------------------------------- data a test run leaves in the repository
+
+
+def test_a_new_data_file_at_the_root_is_stray_unless_the_plan_lists_it():
+    from loompa.hygiene import is_stray_data
+
+    assert is_stray_data("gastos.json") and is_stray_data("export.csv")
+    assert not is_stray_data("data/gastos.json")  # inside a folder: the project's own data
+    assert not is_stray_data("package.json") and not is_stray_data("tsconfig.app.json")
+    assert not is_stray_data(".eslintrc.json") and not is_stray_data("README.md")
+    assert not is_stray_data("gastos.json", ["gastos.json"])
+    assert not is_stray_data("categorias.csv", ["*.csv"])
+    issues = scan_diff(_diff("gastos.json", ['[{"valor": 10}]']))
+    assert [(i.rule, i.blocking) for i in issues] == [("stray_data", True)]
+    assert scan_diff(_diff("gastos.json", ["[]"]), ["gastos.json"]) == []
+    assert scan_diff(_diff("gastos.json", ["[]"], new=False, removed=["{}"])) == []
+
+
+WRITES_TO_CWD = (
+    "import json\nfrom pathlib import Path\n\n\ndef test_saves():\n"
+    '    Path("gastos.json").write_text(json.dumps([10]))\n'
+    '    assert json.loads(Path("gastos.json").read_text()) == [10]\n'
+)
+WRITES_TO_TMP = (
+    "import json\n\n\ndef test_saves(tmp_path):\n"
+    '    f = tmp_path / "gastos.json"\n    f.write_text(json.dumps([10]))\n'
+    "    assert json.loads(f.read_text()) == [10]\n"
+)
+
+
+async def test_run_tests_says_at_once_what_the_run_left_in_the_repository(factory: Factory):
+    from loompa.aci import ACI
+
+    root = factory.root
+    (root / "tests" / "test_saves.py").write_text(WRITES_TO_CWD)
+    aci = ACI(root, test_command=factory.config.quality.test_command)
+    out = (await aci.call("run_tests", {})).output
+    assert "[hygiene] This test run created files in the repository: gastos.json" in out
+    assert aci.test_residue == {"gastos.json"}
+
+
+async def test_the_inspector_fails_a_suite_that_writes_into_the_repository(factory: Factory):
+    ctx = make_ctx(factory, dry_run=True)
+    wt = ctx.worktrees.create("S-902", title="grava na raiz")
+    (wt.path / "tests" / "test_saves.py").write_text(WRITES_TO_CWD)
+    ctx.worktrees.commit_all(wt, "test: saves")
+    state = StoryState(story_id="S-902", title="grava na raiz")
+    res = await InspectorAgent(ctx).run(state, wt)
+    assert not res.ok and "[hygiene] FAIL" in res.summary and "gastos.json" in res.summary
+    assert not (wt.path / "gastos.json").exists()  # this run's copy is not left behind
+    await ctx.aclose()
+
+
+async def test_the_deployer_drops_an_untracked_data_file_the_plan_does_not_list(
+    factory: Factory,
+):
+    ctx = make_ctx(factory, dry_run=True)
+    wt = ctx.worktrees.create("S-903", title="entrega")
+    (wt.path / "app" / "extra.py").write_text("X = 1\n")
+    ctx.worktrees.commit_all(wt, "feat: extra")
+    (wt.path / "gastos.json").write_text("[]\n")
+    (wt.path / "categorias.json").write_text("[]\n")
+    state = StoryState(story_id="S-903", title="entrega", allowed_paths=["app/", "categorias.json"])
+    res = await DeployerAgent(ctx).run(state, wt)
+    assert res.ok
+    stat = ctx.worktrees.diff_stat(wt)
+    assert "gastos.json" not in stat and "categorias.json" in stat
+    await ctx.aclose()
+
+
+async def test_the_worker_fixes_a_test_that_wrote_into_the_repository(factory: Factory):
+    """`contas` S-007: a test wrote `gastos.json` to the working directory and the task commit
+    took it. Now the test run says so, the self-check asks for the fix, and the file is never
+    committed."""
+    rounds: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) != "worker" or not tools:
+            return dry_run_script(model, messages, tools)
+        task = next(m.content for m in messages if m.role == "user")
+        results = tool_results(messages)
+        if "a test run created it" in task:
+            if results:
+                return [ToolCall("d2", "done", {"summary": "teste usa tmp_path"})]
+            rounds.append("fix")
+            return [
+                ToolCall("r", "read_file", {"path": "tests/test_saves.py"}),
+                ToolCall(
+                    "w", "write_file", {"path": "tests/test_saves.py", "content": WRITES_TO_TMP}
+                ),
+                ToolCall("x", "delete_file", {"path": "gastos.json"}),
+            ]
+        if not results:
+            rounds.append("work")
+            return [
+                ToolCall(
+                    "a", "write_file", {"path": "tests/test_saves.py", "content": WRITES_TO_CWD}
+                ),
+                ToolCall("t", "run_tests", {}),
+            ]
+        assert "[hygiene] This test run created files" in results[-1]
+        return [ToolCall("d", "done", {"summary": "ok"})]
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Salvar gastos")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert rounds == ["work", "fix"] and state.blocked_reason == "delivery"
+    wt = ctx.worktrees.get(sid)
+    assert "diff --git a/gastos.json" not in ctx.worktrees.diff(wt)  # never committed
+    assert not (wt.path / "gastos.json").exists()
+    await ctx.aclose()
+
+
+async def test_leftovers_are_dropped_even_after_the_inspector_looked_at_the_diff(
+    factory: Factory,
+):
+    """The Inspector's `diff_working` runs `git add -N`, after which a new file no longer shows
+    as untracked (`??`): the Deployer's old check never saw a leftover in a real run."""
+    ctx = make_ctx(factory, dry_run=True)
+    wt = ctx.worktrees.create("S-904", title="entrega")
+    (wt.path / "app" / "extra.py").write_text("X = 1\n")
+    ctx.worktrees.commit_all(wt, "feat: extra")
+    (wt.path / "debug.txt").write_text("/Users/gustavo/x\n")
+    (wt.path / "gastos.json").write_text("[]\n")
+    ctx.worktrees.diff_working(wt)  # what the Inspector does before the delivery
+    state = StoryState(story_id="S-904", title="entrega", allowed_paths=["app/"])
+    res = await DeployerAgent(ctx).run(state, wt)
+    assert res.ok
+    stat = ctx.worktrees.diff_stat(wt)
+    assert "debug.txt" not in stat and "gastos.json" not in stat and "extra.py" in stat
+    await ctx.aclose()
