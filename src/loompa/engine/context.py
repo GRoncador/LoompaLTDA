@@ -211,6 +211,7 @@ class EngineContext:
             test_command=q.test_command,
             lint_command=q.lint_command,
             typecheck_command=q.typecheck_command,
+            format_command=q.format_command,
             allowed_paths=allowed_paths,
         )
 

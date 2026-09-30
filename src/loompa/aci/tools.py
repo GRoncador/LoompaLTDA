@@ -7,8 +7,10 @@ searches are exact, and command output is compacted before it reaches the model.
 from __future__ import annotations
 
 import difflib
+import inspect
 import json
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -155,6 +157,11 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {}},
     },
     {
+        "name": "fix_lint",
+        "description": "Aplica as correções automáticas do linter e o formatador só nos caminhos que o plano permite (ordem de imports, espaços, formatação) e devolve o que ainda sobrar.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
         "name": "done",
         "description": "Sinaliza que a tarefa atual foi concluída, com um resumo de uma frase.",
         "parameters": {
@@ -202,12 +209,14 @@ class ACI:
         test_command: str = "",
         lint_command: str = "",
         typecheck_command: str = "",
+        format_command: str = "",
         allowed_paths: list[str] | None = None,
         max_read_lines: int = 200,
     ):
         self.root = Path(root).resolve()
         self.test_command = test_command
         self.lint_command = lint_command
+        self.format_command = format_command
         self.typecheck_command = typecheck_command
         self.allowed_paths = allowed_paths
         self.max_read_lines = max_read_lines
@@ -242,7 +251,9 @@ class ACI:
         if handler is None:
             return ToolResult(False, f"ferramenta desconhecida: {name}")
         try:
-            out = await handler(**args) if name in ("run_tests", "run_lint") else handler(**args)
+            out = handler(**args)
+            if inspect.isawaitable(out):
+                out = await out
             return ToolResult(True, out)
         except ToolError as exc:
             return ToolResult(False, f"erro: {exc}")
@@ -363,6 +374,42 @@ class ACI:
             res = await run_command(self.typecheck_command, self.root, timeout=600)
             parts.append(summarize_typecheck(res.output, res.returncode).compact())
         return "\n".join(parts) or "[lint] nenhum comando configurado"
+
+    async def tool_fix_lint(self) -> str:
+        """Mechanical fixes a model gets wrong by hand: in `contas` S-003 the Worker made eleven
+        edits and never found the import order ruff wanted. Only commands whose target is `.`
+        can be narrowed to the plan's paths; the others are skipped rather than run repo-wide."""
+        targets = (
+            ["."]
+            if self.allowed_paths is None
+            else [p for p in self.allowed_paths if (self.root / p).exists() and not is_protected(p)]
+        )
+        if not targets:
+            return "[fix] nenhum caminho do plano existe ainda"
+        commands = []
+        if "ruff check" in self.lint_command:
+            commands.append(self.lint_command + " --fix")
+        if self.format_command:
+            commands.append(self.format_command)
+        ran, skipped = [], []
+        for cmd in commands:
+            parts = shlex.split(cmd)
+            if "." not in parts:
+                skipped.append(cmd)
+                continue
+            i = len(parts) - 1 - parts[::-1].index(".")
+            scoped = parts[:i] + targets + parts[i + 1 :]
+            await run_command(shlex.join(scoped), self.root, timeout=300)
+            ran.append(parts[-1] if parts else cmd)
+        self._symbols = None
+        head = (
+            "[fix] correções automáticas aplicadas"
+            if ran
+            else "[fix] nenhum comando de correção automática configurado"
+        )
+        if skipped:
+            head += f" (não aplicável só ao plano: {', '.join(skipped)})"
+        return head + "\n" + await self.tool_run_lint()
 
     def tool_done(self, summary: str) -> str:
         return f"DONE: {summary}"

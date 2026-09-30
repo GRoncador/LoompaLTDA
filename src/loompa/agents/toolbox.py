@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from loompa.mcp import McpSession
 
 READ_TOOLS = frozenset({"read_file", "list_dir", "search", "find_symbol"})
-WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file"})
+WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file", "fix_lint"})
 RUN_TOOLS = frozenset({"run_tests", "run_lint"})
 SIGNAL_TOOLS = frozenset({"done", "blocked", "note_learning"})
 

@@ -227,3 +227,25 @@ async def test_loompas_own_virtualenv_does_not_reach_factory_commands(tmp_path: 
         tmp_path,
     )
     assert res.stdout.strip().endswith("their-venv")
+
+
+async def test_fix_lint_applies_the_linters_own_fixes_inside_the_plan_only(tmp_path: Path):
+    """`contas` S-003: eleven hand edits never found the import order ruff wanted."""
+    unsorted = "import sys\nimport os\n\nprint(os, sys)\n"
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "a.py").write_text(unsorted)
+    (tmp_path / "other.py").write_text(unsorted)
+    ruff = f'"{sys.executable}" -m ruff'
+    aci = ACI(
+        tmp_path,
+        lint_command=f"{ruff} check --select I --no-cache .",
+        format_command=f"{ruff} format --no-cache .",
+        allowed_paths=["app/"],
+    )
+    out = await aci.call("fix_lint", {})
+    assert out.ok and "correções automáticas aplicadas" in out.output
+    assert (tmp_path / "app" / "a.py").read_text().startswith("import os\nimport sys\n")
+    assert (tmp_path / "other.py").read_text() == unsorted  # outside the plan: untouched
+    assert "other.py:1 I001" in out.output  # and still reported, for the Worker to see
+    unscopable = ACI(tmp_path, lint_command="npm run lint", allowed_paths=["app/"])
+    assert "nenhum comando" in (await unscopable.call("fix_lint", {})).output
