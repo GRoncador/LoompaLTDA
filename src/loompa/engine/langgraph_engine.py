@@ -59,6 +59,20 @@ def route_after_founder(state: StoryState) -> str:
     return state.phase
 
 
+def checkpoint_enums() -> list[tuple[str, str]]:
+    """Every enum `StoryState` carries, for the checkpointer's msgpack allowlist. Derived, not
+    listed: a hand-kept list missed `Autonomy` (Fase 7) and LangGraph refused to load it back."""
+    from enum import Enum
+
+    from loompa.engine import state as state_mod
+
+    return sorted(
+        (state_mod.__name__, name)
+        for name, obj in vars(state_mod).items()
+        if isinstance(obj, type) and issubclass(obj, Enum) and obj.__module__ == state_mod.__name__
+    )
+
+
 def thread_config(story_id: str) -> dict[str, Any]:
     return {"configurable": {"thread_id": story_id}}
 
@@ -158,15 +172,7 @@ class GraphRuntime:
             self._conn = await aiosqlite.connect(str(path), timeout=30.0)
             await self._conn.execute("PRAGMA journal_mode=WAL")
             await self._conn.execute("PRAGMA busy_timeout=10000")
-            serde = JsonPlusSerializer(
-                allowed_msgpack_modules=[
-                    ("loompa.engine.state", "Stage"),
-                    ("loompa.engine.state", "BlockedReason"),
-                    ("loompa.engine.state", "StoryKind"),
-                    ("loompa.engine.state", "Complexity"),
-                    ("loompa.engine.state", "QAVerdict"),
-                ]
-            )
+            serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_enums())
             saver = AsyncSqliteSaver(self._conn, serde=serde)
             await saver.setup()
             self._graph = build_graph(self.ctx, saver)

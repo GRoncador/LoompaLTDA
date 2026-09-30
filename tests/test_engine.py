@@ -154,6 +154,19 @@ async def test_the_founder_restarts_a_story_from_scratch(factory: Factory):
     await ctx.aclose()
 
 
+def test_every_state_enum_survives_the_checkpointer(caplog):
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from loompa.engine.langgraph_engine import checkpoint_enums
+    from loompa.engine.state import Autonomy, StoryState
+
+    serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_enums())
+    state = StoryState(story_id="S-001", title="t", autonomy=Autonomy.PREFLIGHT)
+    back = serde.loads_typed(serde.dumps_typed(state.model_dump()))
+    assert back["autonomy"] is Autonomy.PREFLIGHT
+    assert "Blocked deserialization" not in caplog.text
+
+
 async def test_a_repo_without_commits_gets_its_first_one_from_the_deployer(tmp_path: Path, hub):
     """The `contas` factory: files on disk, `git init` done, nothing ever committed. Two stories
     dispatched together must not bounce off 'faça o primeiro commit' — the Deployer makes it,
