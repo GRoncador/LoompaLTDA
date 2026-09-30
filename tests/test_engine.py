@@ -399,6 +399,43 @@ async def test_a_file_too_large_to_send_whole_is_resolved_block_by_block(
     await ctx.aclose()
 
 
+async def test_a_conflicted_file_left_unresolved_is_an_event_with_its_reason(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    """Fase 8.1: the resolver used to skip a file without a word; the merge was aborted later and
+    nobody could tell why the story kept its old base (`contas` S-007)."""
+    from loompa.agents import worker as worker_mod
+    from loompa.agents.worker import WorkerAgent
+
+    root = factory.root
+    filler = "".join(f"def test_f{i}():\n    assert {i} == {i}\n\n\n" for i in range(40))
+    (root / "tests" / "test_big.py").write_text(filler + "def test_tail():\n    assert 1\n")
+    git("add", ".", cwd=root)
+    git("commit", "-qm", "big", cwd=root)
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if "one conflict block at a time" in messages[0].content:
+            return json.dumps({"hunks": {}})  # the model answered nothing for the block
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    wt = ctx.worktrees.create("S-098", title="grande")
+    big = wt.path / "tests" / "test_big.py"
+    big.write_text(filler + "def test_tail():\n    assert 2\n")
+    git("commit", "-qam", "story", cwd=wt.path)
+    (root / "tests" / "test_big.py").write_text(filler + "def test_tail():\n    assert 3\n")
+    git("commit", "-qam", "base", cwd=root)
+    subprocess.run(["git", "merge", "main"], cwd=wt.path, capture_output=True)  # conflicts
+    state = load_state(ctx, seed_story(ctx, "grande"))
+    monkeypatch.setattr(worker_mod, "MAX_CONFLICT_CHARS", 500)
+    res = await WorkerAgent(ctx).resolve_conflicts(state, wt, ["tests/test_big.py"])
+    assert not res.ok and "<<<<<<<" in big.read_text()
+    (skip,) = [e for e in ctx.store.events_since(0, limit=500) if e["type"] == "resolver.skipped"]
+    assert skip["payload"]["file"] == "tests/test_big.py"
+    assert "block 1 of 1 was not answered" in skip["payload"]["reason"]
+    await ctx.aclose()
+
+
 async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Factory):
     """`contas` S-001: every story had worked around the broken base its own way, so the fix
     merged on main conflicted with each of them (pyproject, the test, uv.lock) and the rebase

@@ -509,6 +509,7 @@ class WorkerAgent(LoompaAgent):
                 continue
             blocks.append(f"## {rel}\n```\n{text}\n```")
         written = []
+        skipped: dict[str, str] = {}  # file -> why it was left with its markers
         if blocks:
             data = await self.ask_json(
                 CONFLICT_SYSTEM.format(language=self.language),
@@ -522,21 +523,38 @@ class WorkerAgent(LoompaAgent):
                     res = await aci.call("write_file", {"path": rel, "content": content})
                     if res.ok:
                         written.append(rel)
+                    else:
+                        skipped[rel] = f"write refused: {res.output[:200]}"
         for rel in large:
-            if await self._resolve_hunks(state, aci, wt, rel):
+            why = await self._resolve_hunks(state, aci, wt, rel)
+            if why:
+                skipped[rel] = why
+            else:
                 written.append(rel)
+        for rel in files:
+            if rel not in written:
+                # `contas` S-007: a large file skipped without a word, the merge aborted later
+                # and the story kept being tested on its old base. Now the skip is an event.
+                self.ctx.emit(
+                    "resolver.skipped",
+                    story_id=state.story_id,
+                    agent=self.name,
+                    file=rel,
+                    reason=skipped.get(rel, "the model's answer did not include this file"),
+                )
         self.set_state("IDLE")
         return AgentResult(
             ok=bool(written), summary=f"resolvidos: {', '.join(written) or 'nenhum'}"
         )
 
-    async def _resolve_hunks(self, state: StoryState, aci: ACI, wt: Worktree, rel: str) -> bool:
+    async def _resolve_hunks(self, state: StoryState, aci: ACI, wt: Worktree, rel: str) -> str:
         """A file too large to send whole: only its conflict blocks go to the model, with some
-        context, and the answers are spliced back in place."""
+        context, and the answers are spliced back in place. Returns why the file was left as it
+        was, or "" when it was resolved."""
         text = (wt.path / rel).read_text(encoding="utf-8", errors="replace")
         hunks = conflict_hunks(text)
         if not hunks:
-            return False
+            return "no balanced conflict block found in the file"
         lines = text.splitlines(keepends=True)
         prompt = [f"# Story {state.story_id}: {state.title}\n\nFile: {rel}"]
         for n, (start, end) in enumerate(hunks, 1):
@@ -558,14 +576,14 @@ class WorkerAgent(LoompaAgent):
         out, cursor = [], 0
         for n, (start, end) in enumerate(hunks, 1):
             fix = answers.get(str(n), answers.get(f"Block {n}"))
-            if not isinstance(fix, str):
-                return False  # a block left unanswered keeps its markers: nothing is written
+            if not isinstance(fix, str):  # a block left unanswered keeps its markers
+                return f"block {n} of {len(hunks)} was not answered; nothing was written"
             out += lines[cursor:start]
             out.append(fix if fix.endswith("\n") or not fix else fix + "\n")
             cursor = end + 1
         out += lines[cursor:]
         res = await aci.call("write_file", {"path": rel, "content": "".join(out)})
-        return res.ok
+        return "" if res.ok else f"write refused: {res.output[:200]}"
 
     async def _run_task(
         self,
