@@ -1,6 +1,8 @@
 # ADR-0010: Conversations — chat sessions with a backlog/sprint draft, Sprint Meeting and Brainstorm
 
-Date: 2026-09-19 · Status: accepted (implements phase 5 of `docs/PLANO-2026-09.md`; the Brainstorming row of ADR-0006 §2)
+Date: 2026-09-19 · Status: accepted (implements phase 5 of `docs/PLANO-2026-09.md`; the Brainstorming row of ADR-0006 §2);
+amended by ADR-0017: the meeting opens with the Master's briefing and starts a sprint only after the
+Product Owner's proposal, and a third kind, `review`, is born from a refused quick story
 
 ## Context
 

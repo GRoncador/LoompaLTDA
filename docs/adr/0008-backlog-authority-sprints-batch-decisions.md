@@ -1,6 +1,8 @@
 # ADR-0008: Backlog authority, sprints and batch decisions
 
-Date: 2026-09-19 · Status: accepted (implements ADR-0006 §5, phase 3 of `docs/PLANO-2026-09.md`)
+Date: 2026-09-19 · Status: accepted (implements ADR-0006 §5, phase 3 of `docs/PLANO-2026-09.md`);
+§1 and §3 amended by ADR-0017: the Product Owner also reads every card before it is written, and
+the panel starts a sprint only from a Sprint Meeting after the Product Owner's proposal
 
 ## Context
 

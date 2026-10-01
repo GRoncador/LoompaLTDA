@@ -48,9 +48,11 @@ Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · �
    offline (ADR-0003).
 4. **No Next.js / shadcn** — Vite SPA embedded in the wheel so `pip install` ships the dashboard
    (ADR-0004).
-5. **Backlog cards do not auto-run** — they wait for a sprint (`loompa sprint start`, the kanban
-   button or `meeting --run`); Kaizen findings additionally need an explicit yes (a delivery
-   decision, `sprint add` or `promote`), as the brief frames them as catalogued for evaluation.
+5. **Backlog cards do not auto-run** — they wait for a sprint (a Sprint Meeting after the Product
+   Owner's proposal in the panel, or `loompa sprint start` / `meeting --run` from the CLI); Kaizen
+   findings additionally need an explicit yes (a delivery decision, `sprint add` or `promote`), as
+   the brief frames them as catalogued for evaluation. Every direct entry is read by the Product
+   Owner first (ADR-0017).
 6. **Baseline-aware Inspector** — brownfield suites that are already red on `main` are recorded as
    tech-debt cards instead of blocking every story (found during the CLI smoke test).
 
@@ -502,6 +504,32 @@ Decided 2026-09-29:
   they wait for `contas` Sprint 2, which now comes after Fases 8b, 10 and 11 (see next steps).
   Suite: 427 passed, 4 live-skipped (386 before the phase); ruff clean.
 
+- **2026-10-01 — Item 3: the backlog's doors and the drawer fixes (ADR-0017).** The Product Owner now
+  reads every card before it exists, and the panel starts a sprint only from a meeting:
+  - **Triage (10.1, 10.6).** A quick story (`POST /stories`, `loompa story add`) and each Kaizen capture
+    (one call for all its findings) go through the Product Owner: rewritten into clear backlog text,
+    classified (feature/bugfix/research — intake keeps that kind), checked against the open backlog by
+    meaning, slotted after one card. Kaizen findings are never refused; one an open card covers points at
+    it. A refused quick story writes nothing and opens a `review` conversation with the reason
+    (duplicate, contradicts a decision, vague, too big → "Levar ao Brainstorm"); the founder clarifies and
+    the Product Owner reads again, or, after saying why, files it anyway with the objection on the card.
+    The founder's own words become the card's founder notes whenever the text was rewritten, so the
+    spec review still traces criteria to them. Model down → the request goes in as written.
+  - **Meeting (10.2, 10.3).** The Master opens with a briefing counted in code (moving, stuck, ready the
+    longest, backlog) and worded by one `low` call; the draft starts with the cards the inbox planned into
+    the sprint. The Master hands the sprint to the Product Owner (`consult_po`, the "Pedir a proposta"
+    button, `/proposta`), whose proposal edits the draft (picks, order 1–5, how cards relate). "Começar
+    Sprint" needs a proposal that saw every sprint card. `POST /sprints/start` and `/meeting`'s `run` are
+    gone from the API; the CLI keeps `sprint start` and `meeting --run`.
+  - **Order (10.5).** A new card is slotted without moving any other; the full ranking runs only when a
+    meeting or brainstorm commits; a dragged card is pinned (`priority_pinned`, migrated on open) and is a
+    fence the ranking never moves or crosses; 📌 on the card or `"pinned": false` in the meeting releases it.
+  - **Panel (10.6, 11.2).** Meeting, brainstorm and open conversations moved to the kanban header; the
+    one-click "Iniciar sprint" is gone. Drawer tabs in Spec Kit order (spec first), no more `max-h-[50vh]`:
+    only the tab content scrolls, to the bottom of the window, with an always-visible scrollbar.
+  - **Ids (11.4).** Story, sprint and conversation ids = highest number used + 1 (as integers).
+  Not verified against a real model: the five new prompts. `contas` Sprint 2 opens with this meeting.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
@@ -521,8 +549,7 @@ Decided 2026-09-29:
   stops the Architect re-thinking each round (a plan took 8.7 min); one experiment, inconclusive.
 - **Order revised 2026-09-30 (evening), see the plan's "Ordem de execução das Fases 8 a 11":** build
   everything that does not need Sprint 2 first, then run `contas` Sprint 2 once to validate it all.
-  Next: 10.1–10.3/10.5/10.6 + 11.2/11.4 (the meeting and sprint start the founder will open Sprint 2
-  with) → 8.2 sprint report + 10.8 Sprints tab → 10.4 brainstorm → ADR + 10.7/10.9 dependencies →
+  Done: 10.1–10.3/10.5/10.6 + 11.2/11.4 (ADR-0017, 2026-10-01). Next: 8.2 sprint report + 10.8 Sprints tab → 10.4 brainstorm → ADR + 10.7/10.9 dependencies →
   8.3/8.4 self-diagnosis (thresholds from Sprint 1 data in `contas`' state.db; trace-based signals
   provisional until Sprint 2) → 11.1/11.3 → OTLP export to Phoenix (off by default) → Sprint 2 →
   Fase 9 (model changes before Sprint 2 would confound the Sprint 1 × 2 speed comparison).
