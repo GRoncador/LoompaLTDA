@@ -102,7 +102,7 @@ BACKLOG → SPEC (Product) → PLAN (Architect) [→ PREFLIGHT (risk.md)] → DE
 | `loompa schedule [--for launchd\|cron] [--write DIR]` | Prints (or writes) the recipe that runs `loompa run` every night; nothing is switched on for you |
 | `loompa doctor [--no-test]` | Checklist of every service the factory uses, with a connection test per key |
 | `loompa meeting "goals" [--run] [--file transcript.txt]` | Morning meeting (one chat turn) → backlog cards |
-| `loompa chat meeting\|brainstorm [text]`, `chat resume ID`, `chat list` | Conversations: Sprint Meeting with the Master, brainstorm with the Analyst; a draft of the backlog and sprint until `/sprint` or `/backlog` |
+| `loompa chat meeting\|brainstorm [text]`, `chat resume ID`, `chat list` | Conversations: Sprint Meeting and brainstorm with the Master (it consults the Analyst or the Architect in a brainstorm); a draft until `/sprint` or `/backlog` (a brainstorm: `/aprovar` first, the Product Owner proposes the cards) |
 | `loompa sprint start\|add\|status` | Sprints: the Product Owner admits the cards, the factory runs them |
 | `loompa run [--watch] [--parallel N] [--dry-run]` | Continuous batch execution |
 | `loompa inbox list\|reply\|batch` | Founder inbox (batch decisions) |

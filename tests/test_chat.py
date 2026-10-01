@@ -90,10 +90,33 @@ def test_a_brainstorm_over_the_api_ends_in_the_backlog(client: TestClient):
     r = client.post(
         f"{BASE}/conversations", json={"kind": "brainstorm", "text": "Ideias de onboarding"}
     )
+    body = r.json()
+    conv = body["conversation"]
+    assert conv["kind"] == "brainstorm" and conv["turns"][1]["name"] == "Master Loompa"
+    assert {c["role"] for c in body["consultants"]} == {"analyst", "architect"}
+    cid = conv["id"]
+    r = client.post(f"{BASE}/conversations/{cid}/commit", json={})
+    assert r.status_code == 409 and "aprove o rumo" in r.json()["detail"]
+    r = client.post(
+        f"{BASE}/conversations/{cid}/consult",
+        json={"role": "analyst", "question": "Quem faz isso bem?"},
+    )
     conv = r.json()["conversation"]
-    assert conv["kind"] == "brainstorm" and conv["limits"]  # web search declared missing
-    assert conv["turns"][1]["name"] == "Analyst Loompa"
-    r = client.post(f"{BASE}/conversations/{conv['id']}/commit", json={})
+    assert conv["turns"][-1]["name"] == "Analyst Loompa" and conv["limits"]  # no web in dry-run
+    assert (
+        client.post(
+            f"{BASE}/conversations/{cid}/consult", json={"role": "legal", "question": "?"}
+        ).status_code
+        == 409
+    )
+    r = client.post(f"{BASE}/conversations/{cid}/approve")
+    assert r.status_code == 200 and r.json()["conversation"]["draft"]["split"][0]["key"] == "C1"
+    r = client.post(
+        f"{BASE}/conversations/{cid}/draft",
+        json={"ops": [{"op": "update", "ref": "C1", "priority": 1}], "split": True},
+    )
+    assert r.json()["conversation"]["draft"]["split"][0]["priority"] == 1
+    r = client.post(f"{BASE}/conversations/{cid}/commit", json={})
     assert r.status_code == 200 and r.json()["result"]["created"] == ["S-001"]
     assert r.json()["conversation"]["status"] == "committed"
     ov = client.get(f"{BASE}/overview").json()
@@ -105,6 +128,8 @@ def test_a_brainstorm_over_the_api_ends_in_the_backlog(client: TestClient):
         json={"start_sprint": True},
     )
     assert r.status_code == 409 and "só uma reunião" in r.json()["detail"]
+    reopened = client.post(f"{BASE}/conversations/{other.json()['conversation']['id']}/reopen")
+    assert reopened.status_code == 200
 
 
 def test_conversation_errors_are_plain_http_errors(client: TestClient):
@@ -193,11 +218,14 @@ def test_chat_brainstorm_sends_ideas_through_the_product_owner(git_repo: Path, h
     r = runner.invoke(
         app,
         ["chat", "brainstorm", "Como melhorar o onboarding?", "--dry-run"],
-        input="/sprint\n/backlog\n",
+        input="/sprint\n/backlog\n/consultar analyst quem faz isso bem?\n/aprovar\n/backlog\n",
     )
     assert r.exit_code == 0, r.stdout
-    assert "Analyst Loompa" in r.stdout and "simulação" in r.stdout  # the missing web is declared
+    assert "Master Loompa" in r.stdout and "Analyst Loompa" in r.stdout
+    assert "simulação" in r.stdout  # the missing web is declared
     assert "Comando desconhecido" in r.stdout  # a brainstorm has no /sprint
+    assert "aprove o rumo" in r.stdout  # no second OK before the first
+    assert "Proposta do Product Owner" in r.stdout
     assert "backlog atualizado (S-001)" in r.stdout
     r = runner.invoke(app, ["status"])
     assert r.exit_code == 0 and "Kanban" in r.stdout

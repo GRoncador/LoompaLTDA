@@ -40,8 +40,13 @@ export const api = {
     req<ChatReply>(`/api/factories/${slug}/conversations`, { method: "POST", body: JSON.stringify({ kind, text }) }),
   say: (slug: string, id: string, text: string) =>
     req<ChatReply>(`/api/factories/${slug}/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ text }) }),
-  editDraft: (slug: string, id: string, ops: Record<string, unknown>[]) =>
-    req<ChatReply>(`/api/factories/${slug}/conversations/${id}/draft`, { method: "POST", body: JSON.stringify({ ops }) }),
+  editDraft: (slug: string, id: string, ops: Record<string, unknown>[], split = false) =>
+    req<ChatReply>(`/api/factories/${slug}/conversations/${id}/draft`, { method: "POST", body: JSON.stringify({ ops, split }) }),
+  /** A brainstorm (ADR-0020): ask a role for a preliminary opinion; approve the direction (1st OK); go back. */
+  consult: (slug: string, id: string, role: string, question: string) =>
+    req<ChatReply>(`/api/factories/${slug}/conversations/${id}/consult`, { method: "POST", body: JSON.stringify({ role, question }) }),
+  approve: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/approve`, { method: "POST" }),
+  reopen: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/reopen`, { method: "POST" }),
   commit: (slug: string, id: string, body: { start_sprint?: boolean; plan_next?: boolean; goal?: string; run?: boolean; force?: boolean }) =>
     req<ChatReply>(`/api/factories/${slug}/conversations/${id}/commit`, { method: "POST", body: JSON.stringify(body) }),
   /** With a sprint running: adjust it ("current") or pre-assemble the next ("next"), ADR-0018. */

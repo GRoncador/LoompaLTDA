@@ -93,7 +93,17 @@ export interface DraftItem {
   key: string; title: string; description: string; epic: string; priority: number;
   in_sprint: boolean; story_id: string | null; origin: string; note: string; unpin?: boolean;
   stage?: string; restart?: boolean; restart_reason?: string; // a card of the running sprint
+  kind?: string; ideas?: string[]; amend?: string; // a brainstorm's split (ADR-0020)
 }
+
+/** A role's preliminary opinion in a brainstorm (ADR-0020). */
+export interface Opinion {
+  key: string; role: string; name: string; question: string; summary: string;
+  attention: string[]; cost: string; benefit: string; counterpoints: string[]; sources: string[];
+  asked_by: "master" | "founder"; failed: boolean; dismissed: boolean; at: string;
+}
+
+export interface Consultant { role: string; label: string }
 
 /** What a Sprint Meeting is about (ADR-0018); null until the founder chooses, with a sprint running. */
 export type MeetingMode = "current" | "next";
@@ -125,7 +135,7 @@ export type QuickStoryResult =
 
 export interface Turn { who: "founder" | "agent"; name: string; text: string; changes: string[]; at: string }
 
-export interface CommitResult { created: string[]; existing: string[]; held: { key: string; title: string; reason: string }[]; skipped: string[]; sprint_id: string | null; joined?: string[]; withdrawn?: string[]; restarted?: string[] }
+export interface CommitResult { created: string[]; existing: string[]; held: { key: string; title: string; reason: string }[]; skipped: string[]; sprint_id: string | null; joined?: string[]; withdrawn?: string[]; restarted?: string[]; amended?: string[] }
 
 export interface Conversation {
   id: string;
@@ -137,6 +147,10 @@ export interface Conversation {
   draft: {
     goal: string; items: DraftItem[]; proposal?: Proposal | null; review?: Triage | null;
     sprint_id?: string; members?: string[]; cancel_sprint?: boolean; cancel_reason?: string;
+    // a brainstorm (ADR-0020): the first OK approves the direction, the second files the split
+    direction?: string; ready?: boolean; consults?: Opinion[];
+    approved?: { direction: string; ideas: string[]; reviewed: boolean; at: string } | null;
+    split?: DraftItem[] | null;
   };
   limits: string[];
   result: Partial<CommitResult>;
@@ -150,6 +164,7 @@ export interface ChatReply {
   turn?: { reply: string; changes: string[]; ignored: string[]; questions: string[]; failed: boolean } | null;
   report?: { changes: string[]; ignored: string[] };
   result?: CommitResult;
+  consultants?: Consultant[]; // a brainstorm: who the founder can ask for an opinion
 }
 
 export interface Overview {

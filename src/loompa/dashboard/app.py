@@ -105,6 +105,12 @@ class ModeBody(BaseModel):
 
 class DraftBody(BaseModel):
     ops: list[dict[str, Any]]
+    split: bool = False  # a brainstorm: edit the Product Owner's proposed cards (ADR-0020)
+
+
+class ConsultBody(BaseModel):
+    role: str
+    question: str
 
 
 class CommitBody(BaseModel):
@@ -643,11 +649,16 @@ def create_app(
         return rt, Conversations(rt.ctx)
 
     def _payload(conv: Conversation, **extra: Any) -> dict[str, Any]:
-        return {
+        from loompa.agents.brainstorm import CONSULTANTS
+
+        out = {
             "conversation": conv.model_dump(mode="json"),
             "sprints": _sprint_context(hub.get(conv.factory).ctx),
             **extra,
         }
+        if conv.kind == ConversationKind.BRAINSTORM:  # who the founder can ask for an opinion
+            out["consultants"] = [{"role": c.role, "label": c.label} for c in CONSULTANTS.values()]
+        return out
 
     @contextlib.contextmanager
     def _chat_errors():
@@ -712,12 +723,38 @@ def create_app(
                 turn = await chats.propose(conversation_id)
                 return _payload(chats.board.require(conversation_id), turn=asdict(turn))
 
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/consult")
+    async def consult_role(slug: str, conversation_id: str, body: ConsultBody) -> dict[str, Any]:
+        """A brainstorm: the founder asks a role for its preliminary opinion (ADR-0020)."""
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                turn = await chats.consult(conversation_id, body.role, body.question)
+                return _payload(chats.board.require(conversation_id), turn=asdict(turn))
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/approve")
+    async def approve_direction(slug: str, conversation_id: str) -> dict[str, Any]:
+        """A brainstorm's first OK: the Product Owner proposes the cards (ADR-0020)."""
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                turn = await chats.approve(conversation_id)
+                return _payload(chats.board.require(conversation_id), turn=asdict(turn))
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/reopen")
+    async def reopen_direction(slug: str, conversation_id: str) -> dict[str, Any]:
+        """Back from the Product Owner's split to the brainstorm."""
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                return _payload(chats.reopen(conversation_id))
+
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/draft")
     async def edit_draft(slug: str, conversation_id: str, body: DraftBody) -> dict[str, Any]:
         rt, chats = _chat(slug)
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
-                report = chats.edit(conversation_id, body.ops)
+                report = chats.edit(conversation_id, body.ops, split=body.split)
                 return _payload(chats.board.require(conversation_id), report=asdict(report))
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/commit")

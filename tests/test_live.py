@@ -164,8 +164,9 @@ async def test_live_sprint_meeting_conversation(live_reachable: ProbeResult, liv
 
 
 async def test_live_brainstorm_conversation(live_reachable: ProbeResult, live_factory: Factory):
-    """The Analyst answers without web tools (no Tavily key here) and says so; the Product Owner
-    decides on the ideas it proposes."""
+    """The Master leads (ADR-0020): it drafts a direction and ideas, an Analyst opinion comes
+    back preliminary and declares the missing web, and the Product Owner splits the approved
+    direction into cards that the second OK files."""
     if not live_reachable.ok:
         pytest.skip(f"provedor indisponível: {live_reachable.detail}")
     ctx = EngineContext.build(live_factory)
@@ -177,10 +178,17 @@ async def test_live_brainstorm_conversation(live_reachable: ProbeResult, live_fa
         )
         assert not turn.failed and turn.reply, why(ctx, turn)
         assert audit_executive_text(turn.reply) == []
+        opinion = await chats.consult(
+            conv.id, "analyst", "Que operações as calculadoras populares oferecem?"
+        )
+        assert not opinion.failed and audit_executive_text(opinion.reply) == []
         conv = chats.board.require(conv.id)
         assert conv.limits  # the missing web search is declared by code
-        if conv.draft.items:
+        if conv.draft.items or conv.draft.direction:
+            split = await chats.approve(conv.id)
+            assert not split.failed, why(ctx, split)
+            assert chats.board.require(conv.id).draft.split, "the split has no cards"
             result = await chats.commit(conv.id)
-            assert result.created or result.held, result
+            assert result.created or result.amended or result.existing, result
     finally:
         await ctx.aclose()

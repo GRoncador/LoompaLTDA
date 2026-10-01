@@ -1,8 +1,9 @@
 """`loompa chat`: conversations with the Loompas (ADR-0010).
 
-`chat meeting` is a Sprint Meeting with the Master, `chat brainstorm` a brainstorm with the
-Analyst. Both keep a draft of the backlog and of the sprint inside the session; nothing reaches
-the backlog until `/sprint` or `/backlog`. A session survives the terminal: `chat resume C-001`.
+`chat meeting` is a Sprint Meeting with the Master, `chat brainstorm` a brainstorm led by the
+Master, who calls in the Analyst or the Architect when the idea needs them (ADR-0020). Both keep a
+draft inside the session; nothing reaches the backlog until `/sprint` or `/backlog` (in a
+brainstorm, `/aprovar` first: the Product Owner proposes the cards, `/backlog` files them). A session survives the terminal: `chat resume C-001`.
 A review with the Product Owner (ADR-0017) is born from `loompa story add` when the Product
 Owner does not file the request, and is resumed the same way.
 """
@@ -31,7 +32,7 @@ from loompa.engine import EngineContext
 from loompa.sprints import SprintError
 
 console = Console()
-chat_app = typer.Typer(help="Conversas: reunião de sprint (Master) e brainstorm (Analyst).")
+chat_app = typer.Typer(help="Conversas: reunião de sprint e brainstorm, com o Master Loompa.")
 app.add_typer(chat_app, name="chat")
 
 INTRO = {
@@ -40,8 +41,10 @@ INTRO = {
         "Conte o que você quer fazer; o rascunho do backlog e do sprint muda a cada mensagem.",
     ),
     ConversationKind.BRAINSTORM: (
-        "Brainstorm com o Analyst Loompa",
-        "Pense em voz alta; as ideias concretas viram cards no rascunho. O Product Owner decide o que entra no backlog.",
+        "Brainstorm com o Master Loompa",
+        "Pense em voz alta. O Master chama o Analyst ou o Architect quando a ideia pede; os "
+        "pareceres são preliminares. Aprove o rumo (1º OK), o Product Owner propõe os cards e "
+        "você grava (2º OK).",
     ),
     ConversationKind.REVIEW: (
         "Revisão do pedido com o Product Owner Loompa",
@@ -78,7 +81,15 @@ HELP = {
         "/backlog           só salva no backlog\n" + HELP_COMMON
     ),
     ConversationKind.BRAINSTORM: (
-        "/backlog           envia as ideias; o Product Owner admite\n" + HELP_COMMON
+        "/consultar analyst|architect <pergunta>  pede um parecer preliminar\n"
+        "/deixar O1         deixa um parecer de lado (e /retomar O1 o traz de volta)\n"
+        "/aprovar           aprova o rumo (1º OK): o Product Owner propõe os cards\n"
+        "/voltar            descarta a proposta de cards e volta à conversa\n"
+        "/backlog           grava a proposta do Product Owner (2º OK)\n"
+        "/rascunho          mostra o rumo, as ideias, os pareceres e a proposta\n"
+        "/tirar D1 | C1     tira uma ideia (ou um card da proposta)\n"
+        "/descartar         encerra a conversa sem salvar nada\n"
+        "/sair              guarda a conversa para retomar depois"
     ),
     ConversationKind.REVIEW: (
         "/gravar            grava o card mesmo com a objeção do Product Owner\n"
@@ -88,8 +99,48 @@ HELP = {
 }
 
 
+def print_brainstorm(conv: Conversation) -> None:
+    draft = conv.draft
+    console.print(f"[bold]Rumo:[/bold] {draft.direction or '[dim](ainda não definido)[/dim]'}")
+    for i in draft.items:
+        console.print(
+            f"  {i.key} · P{i.priority} · {i.title}"
+            + (f" [yellow]({i.note})[/yellow]" if i.note else "")
+        )
+    if not draft.items:
+        console.print("  [dim]Nenhuma ideia ainda.[/dim]")
+    for o in draft.consults:
+        state = (
+            " [dim](deixado de lado)[/dim]"
+            if o.dismissed
+            else " [red](falhou)[/red]"
+            if o.failed
+            else ""
+        )
+        console.print(f"  [cyan]{o.key}[/cyan] {o.name}{state}: {o.summary[:120]}")
+    if draft.split is not None:
+        table = Table(title="Proposta do Product Owner (2º OK grava)", show_header=True)
+        for col in ("", "card", "prio", "de", "obs"):
+            table.add_column(col)
+        for c in draft.split:
+            what = (
+                f"acrescenta a {c.story_id}"
+                if c.amend
+                else (f"já é {c.story_id}" if c.story_id else c.title)
+            )
+            table.add_row(c.key, what, f"P{c.priority}", " ".join(c.ideas), c.note)
+        console.print(table)
+    elif draft.ready:
+        console.print(
+            "[green]O Master acha que o rumo está claro: /aprovar quando concordar.[/green]"
+        )
+
+
 def print_draft(conv: Conversation) -> None:
     draft = conv.draft
+    if conv.kind == ConversationKind.BRAINSTORM:
+        print_brainstorm(conv)
+        return
     if conv.kind == ConversationKind.MEETING and conv.mode is None:
         console.print(MODE_HELP)
         return
@@ -187,6 +238,7 @@ async def handle(
 ) -> bool:
     """Run one slash command. True ends the session."""
     meeting = conv.kind == ConversationKind.MEETING
+    brainstorm = conv.kind == ConversationKind.BRAINSTORM
     current = meeting and conv.mode == MeetingMode.CURRENT
     if command in ("/sair", "/quit", "/q"):
         console.print(f"Conversa guardada. Retome com [bold]loompa chat resume {conv.id}[/bold]")
@@ -215,8 +267,20 @@ async def handle(
         return True
     elif command in ("/rascunho", "/draft"):
         print_draft(convs.board.require(conv.id))
+    elif command == "/consultar" and brainstorm and len(args) >= 2:
+        await convs.consult(conv.id, args[0], rest.partition(" ")[2])
+        say_aloud(convs, convs.board.require(conv.id))
+    elif command in ("/deixar", "/retomar") and brainstorm and args:
+        op = "dismiss" if command == "/deixar" else "restore"
+        _show(convs.edit(conv.id, [{"op": op, "ref": a} for a in args]))
+    elif command == "/aprovar" and brainstorm:
+        await convs.approve(conv.id)
+        say_aloud(convs, convs.board.require(conv.id))
+    elif command == "/voltar" and brainstorm:
+        say_aloud(convs, convs.reopen(conv.id))
     elif command in ("/tirar", "/drop") and args:
-        report = convs.edit(conv.id, [{"op": "drop", "ref": a} for a in args])
+        split = brainstorm and all(a.upper().startswith("C") for a in args)
+        report = convs.edit(conv.id, [{"op": "drop", "ref": a} for a in args], split=split)
         _show(report)
     elif command in ("/incluir", "/excluir") and args and meeting:
         flag = command == "/incluir"
@@ -247,9 +311,12 @@ async def handle(
         result = await convs.commit(conv.id)
         made = ", ".join(result.created) or "nenhuma nova"
         console.print(f"[green]✔[/green] backlog atualizado ({made})")
-        for held in result.held:
-            console.print(f"  [yellow]![/yellow] “{held['title']}” ficou de fora: {held['reason']}")
-        return convs.board.require(conv.id, open_only=False).status != ConversationStatus.OPEN
+        if result.amended:
+            console.print(f"  acrescentado a: {', '.join(result.amended)}")
+        after = convs.board.require(conv.id, open_only=False)
+        for idea in after.draft.items if brainstorm else []:
+            console.print(f"  [yellow]![/yellow] “{idea.title}” ficou de fora: {idea.note}")
+        return after.status != ConversationStatus.OPEN
     elif command == "/descartar":
         convs.discard(conv.id)
         console.print("Conversa descartada; nada foi salvo.")
@@ -312,7 +379,7 @@ def chat_brainstorm(
     factory: str | None = typer.Option(None, "--factory", "-f"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Sem chamadas de IA (simulação)."),
 ) -> None:
-    """Brainstorm com o Analyst: as ideias viram cards; o Product Owner admite no backlog."""
+    """Brainstorm com o Master, que chama o Analyst ou o Architect; o PO propõe os cards."""
     _start(ConversationKind.BRAINSTORM, text, factory, dry_run, False)
 
 

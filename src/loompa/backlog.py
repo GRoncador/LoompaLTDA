@@ -296,6 +296,25 @@ class Backlog:
             if row is not None and row["priority"] != number:
                 self.set_priority(sid, number)
 
+    def amend(self, story_id: str, addition: str, *, source: str = "") -> bool:
+        """Add to a waiting card what a session decided about it (a brainstorm's split,
+        ADR-0020): the text goes at the end of its description, and the card keeps a record of
+        each addition. Only a card still waiting in the backlog changes; work in progress keeps
+        the spec it started from. False when nothing was added."""
+        addition = addition.strip()
+        row = self._row(story_id)
+        if not addition or row["stage"] != Stage.BACKLOG:
+            return False
+        state = StoryState.from_row(row)
+        lead = f"Acrescentado ({source}):" if source else "Acrescentado:"
+        state.description = f"{state.description}\n\n{lead} {addition}".strip()
+        state.extra.setdefault("amended", []).append({"source": source, "text": addition})
+        self.ctx.store.update_story(
+            story_id, description=state.description, state=state.model_dump(mode="json")
+        )
+        self.ctx.emit("backlog.amended", story_id=story_id, agent=self.agent, source=source)
+        return True
+
     def set_status(self, story_id: str, status: Stage) -> None:
         """Back to the backlog (deferred) or cancelled. Every other stage belongs to the engine."""
         status = Stage(status)

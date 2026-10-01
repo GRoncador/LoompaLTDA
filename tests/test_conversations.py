@@ -486,82 +486,257 @@ async def test_a_meeting_that_drafts_nothing_leaves_no_open_session(factory: Fac
 # ---------------------------------------------------------------------------- brainstorm
 
 
-async def test_a_brainstorm_is_led_by_the_analyst_and_declares_the_missing_web(factory: Factory):
+def brainstorm_script(master: list[dict], *, consult=None, split=None, seen=None):
+    """The Master's brainstorm turns in order; consulted roles and the Product Owner's split
+    answer through `consult(role, messages)` and `split(messages)`; the rest as in dry-run."""
+    queue = list(master)
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role, system = role_of(messages), messages[0].content
+        if seen is not None:
+            seen.append((role, messages))
+        if role == "master" and "Brainstorming session" in system:
+            return json.dumps(queue.pop(0))
+        if "preliminary opinion" in system and consult is not None:
+            return json.dumps(consult(role, messages))
+        if "Split the direction" in system and split is not None:
+            return split(messages)
+        return dry_run_script(model, messages, tools)
+
+    return script
+
+
+def idea(title: str, **fields: Any) -> dict[str, Any]:
+    return {"op": "add", "title": title, "description": f"{title} (detalhes)", **fields}
+
+
+def no_web(factory: Factory) -> None:
+    factory.config.tools.tavily.enabled = False  # no MCP server: the web is declared missing
+
+
+async def test_a_brainstorm_is_led_by_the_master_and_files_only_after_two_oks(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     chats = Conversations(ctx)
     conv = chats.open(ConversationKind.BRAINSTORM)
     turn = await chats.say(conv.id, "Como melhorar o onboarding?")
     conv = chats.board.require(conv.id)
-    assert conv.turns[1].name == "Analyst Loompa" and turn.changes
+    assert conv.turns[1].name == "Master Loompa" and turn.changes
     assert [(i.origin, i.in_sprint) for i in conv.draft.items] == [("brainstorm", False)]
-    assert conv.limits and "simulação" in conv.limits[0]  # declared by code, not by the model
-    assert ctx.store.list_stories(factory.slug) == []
+    assert conv.draft.direction and conv.draft.ready
+    with pytest.raises(ConversationError, match="aprove o rumo"):
+        await chats.commit(conv.id)  # no second OK without the first
     with pytest.raises(ConversationError, match="só uma reunião"):
         await chats.commit(conv.id, start_sprint=True)
+
+    await chats.approve(conv.id)  # first OK: the Product Owner proposes the cards
+    conv = chats.board.require(conv.id)
+    assert conv.draft.approved is not None and conv.turns[-1].name == "Product Owner Loompa"
+    assert [(c.key, c.ideas, c.story_id) for c in conv.draft.split] == [("C1", ["D1"], None)]
+    assert ctx.store.list_stories(factory.slug) == []  # nothing written yet
+
+    result = await chats.commit(conv.id)  # second OK
+    assert result.created == ["S-001"]
+    row = ctx.store.get_story("S-001")
+    assert row["origin"] == "brainstorm"
+    assert row["state"]["extra"]["brainstorm"]["conversation"] == conv.id
+    conv = chats.board.require(conv.id, open_only=False)
+    assert conv.status == ConversationStatus.COMMITTED and conv.draft.split is None
+    assert events(ctx, "brainstorm.approved") and events(ctx, "brainstorm.filed")
     await ctx.aclose()
 
 
-def test_only_urls_a_web_tool_returned_survive_in_a_reply():
-    seen = {"https://docs.exemplo.com/preco"}
-    text = "Veja https://docs.exemplo.com/preco/ e https://inventado.com/x."
-    out = AnalystAgent.only_seen_urls(text, seen)
-    assert "https://docs.exemplo.com/preco/" in out and "inventado.com" not in out
-    assert "fonte não verificada removida" in out
-
-
-async def test_the_product_owner_decides_which_ideas_enter_the_backlog(factory: Factory):
-    def script(model: str, messages: list[Message], tools: Any) -> Any:
-        role, system = role_of(messages), messages[0].content
-        if role == "analyst" and "Brainstorming session" in system:
-            return json.dumps(
-                {
-                    "reply": "Três ideias.",
-                    "ops": [
-                        add("Convite por e-mail", priority=2),
-                        add("Deixar tudo melhor"),
-                        add("Tour guiado"),
-                    ],
-                }
-            )
-        if role == "product_owner" and "## Ideas to review" in messages[-1].content:
-            return json.dumps(
-                {
-                    "verdicts": [
-                        {"key": "D1", "admit": True, "priority": 1},
-                        {"key": "D2", "admit": False, "reason": "Vago demais para construir."},
-                        {"key": "D3", "admit": True},
-                    ]
-                }
-            )
-        return dry_run_script(model, messages, tools)
-
-    ctx = make_ctx(factory, script)
+async def test_the_master_calls_in_only_the_roles_the_idea_needs(factory: Factory):
+    no_web(factory)
+    seen: list = []
+    answer = {
+        "reply": "Vou ouvir o Analyst sobre os concorrentes.",
+        "direction": "Convite por e-mail no primeiro acesso",
+        "ops": [idea("Convite por e-mail")],
+        "consult": [
+            {"role": "analyst", "question": "Como os concorrentes convidam?"},
+            {"role": "legal", "question": "Pode?"},  # no such role in this factory
+            {"role": "Analyst Loompa", "question": "de novo"},  # one question per role
+        ],
+        "ready": False,
+    }
+    opinion = {
+        "summary": "Os concorrentes convidam por e-mail com link mágico.",
+        "attention": ["Entregabilidade do e-mail"],
+        "cost": "baixo",
+        "benefit": "menos atrito no cadastro",
+        "counterpoints": ["Contraria a decisão de não guardar e-mails sem consentimento"],
+        "sources": [],
+    }
+    ctx = make_ctx(factory, brainstorm_script([answer], consult=lambda role, m: opinion, seen=seen))
     chats = Conversations(ctx)
     conv = chats.open(ConversationKind.BRAINSTORM)
-    await chats.say(conv.id, "Ideias de onboarding")
-    result = await chats.commit(conv.id)
-    assert result.created == ["S-001", "S-002"]
-    assert result.held == [
-        {"key": "D2", "title": "Deixar tudo melhor", "reason": "Vago demais para construir."}
-    ]
-    assert ctx.store.get_story("S-001")["priority"] == 100  # the PO raised it
-    assert {ctx.store.get_story(s)["origin"] for s in result.created} == {"brainstorm"}
-    conv = chats.board.require(conv.id)  # held ideas keep the session open
-    assert conv.open and [(i.key, i.note) for i in conv.draft.items] == [
-        ("D2", "Vago demais para construir.")
-    ]
-    assert "Deixei “Deixar tudo melhor” de fora" in conv.turns[-1].text
-    assert conv.turns[-1].name == "Product Owner Loompa"
-    assert events(ctx, "ideas.admitted")
-    chats.edit(conv.id, [{"op": "drop", "ref": "D2"}])
-    with pytest.raises(ConversationError, match="rascunho está vazio"):
-        await chats.commit(conv.id)
+    await chats.say(conv.id, "Quero um convite por e-mail")
+    conv = chats.board.require(conv.id)
+    assert [o.role for o in conv.draft.consults] == ["analyst"]
+    assert [r for r, _ in seen].count("architect") == 0
+    (op,) = conv.draft.consults
+    assert op.key == "O1" and op.asked_by == "master" and op.counterpoints
+    assert [t.name for t in conv.turns] == ["", "Master Loompa", "Analyst Loompa"]
+    assert conv.turns[-1].text.startswith("Parecer preliminar (O1)")
+    assert "Contrapontos" in conv.turns[-1].text
+    assert conv.limits and "busca na web" in conv.limits[0]  # declared by code, not the model
+    assert conv.draft.direction == "Convite por e-mail no primeiro acesso"
+    assert events(ctx, "brainstorm.consulted")
     await ctx.aclose()
 
 
-async def test_ideas_are_admitted_when_the_product_owner_is_unavailable(factory: Factory):
+async def test_an_opinion_keeps_only_sources_that_were_checked(factory: Factory):
+    no_web(factory)
+    (factory.root / "README.md").write_text("# produto\n", encoding="utf-8")
+    opinion = {
+        "summary": "Já existe uma tela de cadastro.",
+        "sources": ["README.md", "https://inventado.com/x", "nao/existe.py"],
+    }
+    ctx = make_ctx(factory, brainstorm_script([], consult=lambda role, m: opinion))
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.BRAINSTORM)
+    turn = await chats.consult(conv.id, "architect", "Isso mexe no cadastro?")
+    conv = chats.board.require(conv.id)
+    (op,) = conv.draft.consults
+    assert op.sources == ["README.md"] and op.asked_by == "founder" and not turn.failed
+    assert any("2 fonte(s)" in a for a in op.attention)
+    assert "README.md" not in conv.turns[-1].text  # paths are for the models, not the founder
+    assert conv.turns[0].who == "founder" and "Architect" in conv.turns[0].text
+    await ctx.aclose()
+
+
+async def test_the_founder_sets_an_opinion_aside_and_unknown_roles_are_refused(factory: Factory):
+    ctx = make_ctx(factory, dry_run=True)
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.BRAINSTORM)
+    await chats.consult(conv.id, "analyst", "Quanto custa um serviço de e-mail?")
+    report = chats.edit(conv.id, [{"op": "dismiss", "ref": "o1"}])
+    assert report.changes and chats.board.require(conv.id).draft.consults[0].dismissed
+    from loompa.conversations import render_brainstorm
+
+    assert "set this opinion aside" in render_brainstorm(chats.board.require(conv.id).draft)
+    with pytest.raises(ConversationError, match="papel"):
+        await chats.consult(conv.id, "legal", "Pode?")
+    with pytest.raises(ConversationError, match="só vale num brainstorm"):
+        await chats.consult(chats.open(ConversationKind.MEETING).id, "analyst", "x")
+    await ctx.aclose()
+
+
+async def test_a_role_that_cannot_answer_leaves_a_failed_opinion(factory: Factory):
+    def boom(role, messages):
+        raise RuntimeError("fora do ar")
+
+    ctx = make_ctx(factory, brainstorm_script([], consult=boom))
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.BRAINSTORM)
+    turn = await chats.consult(conv.id, "architect", "Isso mexe no banco?")
+    conv = chats.board.require(conv.id)
+    assert turn.failed and conv.draft.consults[0].failed and conv.draft.opinions() == []
+    assert "Não consegui ouvir" in conv.turns[-1].text
+    await ctx.aclose()
+
+
+async def test_the_product_owner_splits_into_new_cards_additions_and_held_ideas(factory: Factory):
+    po = ProductOwnerAgent(factory_ctx := make_ctx(factory, dry_run=True))
+    po.add_item("Convite por e-mail")  # S-001, waiting
+    po.add_item("Tela de boas-vindas")  # S-002, about to be in progress
+    factory_ctx.store.update_story("S-002", stage=Stage.DEV.value)
+    await factory_ctx.aclose()
+
+    answer = {
+        "reply": "Anotei.",
+        "direction": "Primeiro acesso mais simples",
+        "ops": [idea("Link mágico"), idea("Lembrete do convite"), idea("Gamificar"), idea("Tour")],
+        "ready": True,
+    }
+    split = {
+        "reply": "Dois cards novos e um acréscimo ao convite.",
+        "cards": [
+            {
+                "title": "Entrar por link mágico",
+                "description": "Login sem senha",
+                "kind": "feature",
+                "epic": "Primeiro acesso",
+                "priority": 1,
+                "ideas": ["D1"],
+                "into": "",
+                "note": "",
+            },
+            {
+                "title": "",
+                "description": "Reenviar o convite após 3 dias",
+                "priority": 2,
+                "ideas": ["D2"],
+                "into": "S-001",
+                "note": "complementa o convite",
+            },
+            {
+                "title": "Boas-vindas com nome",
+                "description": "Saudar pelo nome",
+                "priority": 3,
+                "ideas": [],
+                "into": "S-002",
+                "note": "",
+            },
+        ],
+        "held": [{"ref": "D3", "reason": "Vago demais para construir."}, {"ref": "D4"}],
+    }
+    ctx = make_ctx(factory, brainstorm_script([answer], split=lambda m: json.dumps(split)))
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.BRAINSTORM)
+    await chats.say(conv.id, "Quero um primeiro acesso mais simples")
+    await chats.approve(conv.id)
+    conv = chats.board.require(conv.id)
+    cards = {c.key: c for c in conv.draft.split}
+    assert cards["C1"].title == "Entrar por link mágico" and cards["C1"].kind == "feature"
+    assert (cards["C2"].story_id, cards["C2"].amend) == ("S-001", "Reenviar o convite após 3 dias")
+    assert cards["C3"].story_id is None and "em andamento" in cards["C3"].note  # S-002 is busy
+    assert cards["C4"].ideas == ["D4"] and "não citou" in cards["C4"].note  # a hold needs a reason
+    assert [i.note for i in conv.draft.items if i.key == "D3"] == ["Vago demais para construir."]
+
+    report = chats.edit(
+        conv.id, [{"op": "drop", "ref": "C4"}, {"op": "add", "title": "x"}], split=True
+    )
+    assert report.ignored and chats.board.require(conv.id).draft.approved is not None
+    result = await chats.commit(conv.id)
+    assert result.created == ["S-003", "S-004"] and result.amended == ["S-001"]
+    assert (
+        "Acrescentado (brainstorm C-001): Reenviar o convite"
+        in ctx.store.get_story("S-001")["description"]
+    )
+    assert ctx.store.get_story("S-003")["state"]["kind"] == "feature"
+    conv = chats.board.require(conv.id)  # D3 (held) and D4 (its card was dropped) stay
+    assert conv.open and [i.key for i in conv.draft.items] == ["D3", "D4"]
+    assert conv.draft.split is None and conv.draft.approved is None
+    assert "2 ideias ficaram de fora" in conv.turns[-1].text
+    await ctx.aclose()
+
+
+async def test_going_back_to_the_conversation_takes_the_first_ok_back(factory: Factory):
+    ctx = make_ctx(factory, dry_run=True)
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.BRAINSTORM)
+    await chats.say(conv.id, "Ideia um")
+    await chats.approve(conv.id)
+    chats.edit(conv.id, [{"op": "update", "ref": "C1", "priority": 1}], split=True)
+    assert chats.board.require(conv.id).draft.split[0].priority == 1  # the split is editable
+    await chats.say(conv.id, "Ideia dois")  # talking again: the approval no longer stands
+    conv = chats.board.require(conv.id)
+    assert conv.draft.approved is None and conv.draft.split is None and len(conv.draft.items) == 2
+    await chats.approve(conv.id)
+    chats.edit(conv.id, [{"op": "drop", "ref": "D2"}])  # changing the ideas takes it back too
+    assert chats.board.require(conv.id).draft.split is None
+    await chats.approve(conv.id)
+    conv = chats.reopen(conv.id)
+    assert conv.draft.split is None and "voltamos à conversa" in conv.turns[-1].text
+    with pytest.raises(ConversationError, match="divisão"):
+        chats.edit(conv.id, [{"op": "drop", "ref": "C1"}], split=True)
+    await ctx.aclose()
+
+
+async def test_the_split_falls_back_to_one_card_per_idea_when_the_po_is_down(factory: Factory):
     def script(model: str, messages: list[Message], tools: Any) -> Any:
-        if role_of(messages) == "product_owner":
+        if role_of(messages) == "product_owner" and "Split the direction" in messages[0].content:
             raise RuntimeError("fora do ar")
         return dry_run_script(model, messages, tools)
 
@@ -569,22 +744,9 @@ async def test_ideas_are_admitted_when_the_product_owner_is_unavailable(factory:
     chats = Conversations(ctx)
     conv = chats.open(ConversationKind.BRAINSTORM)
     await chats.say(conv.id, "Uma ideia")
-    result = await chats.commit(conv.id)
-    assert result.created == ["S-001"] and result.held == []
-    assert chats.board.require(conv.id, open_only=False).status == ConversationStatus.COMMITTED
-    await ctx.aclose()
-
-
-async def test_a_hold_without_a_reason_is_not_a_hold(factory: Factory):
-    def script(model: str, messages: list[Message], tools: Any) -> Any:
-        if role_of(messages) == "product_owner" and "## Ideas to review" in messages[-1].content:
-            return json.dumps({"verdicts": [{"key": "D1", "admit": False}]})
-        return dry_run_script(model, messages, tools)
-
-    ctx = make_ctx(factory, script)
-    chats = Conversations(ctx)
-    conv = chats.open(ConversationKind.BRAINSTORM)
-    await chats.say(conv.id, "Uma ideia")
+    turn = await chats.approve(conv.id)
+    conv = chats.board.require(conv.id)
+    assert turn.failed and not conv.draft.approved.reviewed and len(conv.draft.split) == 1
     assert (await chats.commit(conv.id)).created == ["S-001"]
     await ctx.aclose()
 
@@ -597,10 +759,19 @@ async def test_a_repeated_idea_points_at_the_existing_card(factory: Factory):
     await chats.say(conv.id, "onboarding melhor")
     conv = chats.board.require(conv.id)
     assert conv.draft.items[0].story_id == "S-001"  # recognised in the draft already
+    await chats.approve(conv.id)
     result = await chats.commit(conv.id)
     assert result.created == [] and result.existing == ["S-001"]
     assert len(ctx.store.list_stories(factory.slug)) == 1
     await ctx.aclose()
+
+
+def test_only_urls_a_web_tool_returned_survive_in_a_reply():
+    seen = {"https://docs.exemplo.com/preco"}
+    text = "Veja https://docs.exemplo.com/preco/ e https://inventado.com/x."
+    out = AnalystAgent.only_seen_urls(text, seen)
+    assert "https://docs.exemplo.com/preco/" in out and "inventado.com" not in out
+    assert "fonte não verificada removida" in out
 
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
@@ -622,8 +793,8 @@ def gemini_answer(message: dict) -> httpx.Response:
 async def test_a_gemini_turn_that_uses_a_tool_sends_the_signature_back(
     factory: Factory, monkeypatch
 ):
-    """The brainstorm that failed against the real Gemini: it made a tool call, and the next
-    request lacked the thought signature. Runs the whole stack (agent, tool loop, router,
+    """The brainstorm that failed against the real Gemini (then led by the Analyst; the Master
+    leads it now): it made a tool call, and the next request lacked the thought signature. Runs the whole stack (agent, tool loop, router,
     adapter) against an endpoint shaped like Gemini's."""
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     factory.config.tools.tavily.enabled = False  # repository tools only, no network

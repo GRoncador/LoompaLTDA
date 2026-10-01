@@ -1,4 +1,4 @@
-"""Master Loompa (COO): morning meeting, executive translation, end-of-day report."""
+"""Master Loompa (COO): Sprint Meeting and brainstorm, executive translation, reports."""
 
 from __future__ import annotations
 
@@ -357,6 +357,8 @@ class MasterAgent(LoompaAgent):
     # ------------------------------------------------------------------ meeting
     async def converse(self, conv: Conversation, text: str) -> TurnResult:
         """One turn of a Sprint Meeting: the founder speaks, the draft changes, the Master answers."""
+        if conv.kind == ConversationKind.BRAINSTORM:
+            return await self.brainstorm(conv, text)
         self.set_state("WORKING", detail="reunião com o Founder")
         current = conv.mode == MeetingMode.CURRENT
         try:
@@ -381,6 +383,59 @@ class MasterAgent(LoompaAgent):
         if turn.consult and conv.draft.items and not current:  # the Product Owner proposes it
             await ProductOwnerAgent(self.ctx).propose_sprint(conv)
             board.save(conv)
+        return turn
+
+    async def brainstorm(self, conv: Conversation, text: str) -> TurnResult:
+        """One turn of a brainstorm (ADR-0020): the Master keeps the direction and the ideas and
+        calls in the roles the idea needs; their opinions follow its answer in the session."""
+        from loompa.agents.analyst import AnalystAgent
+        from loompa.agents.brainstorm import (
+            BRAINSTORM_CONTRACT,
+            BRAINSTORM_SYSTEM,
+            consult,
+            consult_requests,
+            known_urls,
+            render_consultants,
+        )
+
+        board = ConversationBoard(self.ctx.store, self.ctx.slug)
+        self.set_state("WORKING", detail="brainstorm com o Founder")
+        try:
+            context = (
+                f"## Who you can consult\n{render_consultants()}\n\n"
+                f"## Constitution (excerpt)\n{self.constitution(2500)}\n\n"
+                + self.precedents(
+                    f"{conv.draft.direction}\n{text}",
+                    kinds=("constitution", "adr", "learning", "spec", "doc"),
+                )
+            )
+            seen = known_urls(conv)
+            turn = await run_turn(
+                self,
+                board,
+                conv,
+                text,
+                system=BRAINSTORM_SYSTEM,
+                context=context,
+                toolbox=self.explore_tools(),
+                origin="brainstorm",
+                polish=lambda reply: AnalystAgent.only_seen_urls(reply, seen),
+                max_tokens=2200,
+                contract=BRAINSTORM_CONTRACT,
+            )
+        finally:
+            self.set_state("IDLE")
+        if turn.failed:
+            return turn
+        direction = str(turn.extra.get("direction") or "").strip()
+        if direction:
+            conv.draft.direction = founder_text(direction, 1200)
+        conv.draft.ready = turn.extra.get("ready") is True and bool(
+            conv.draft.items or conv.draft.direction
+        )
+        board.save(conv)
+        for role, question in consult_requests(turn.extra.get("consult")):
+            await consult(self.ctx, board, conv, role, question)
         return turn
 
     async def brief(self, conv: Conversation) -> str:

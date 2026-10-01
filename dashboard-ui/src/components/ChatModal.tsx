@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { ChatReply, Conversation, ConversationKind, DraftItem, MeetingMode, SprintContext } from "../types";
+import type { ChatReply, Consultant, Conversation, ConversationKind, DraftItem, MeetingMode, Opinion, SprintContext } from "../types";
 import { Modal } from "./Modal";
 
 const COPY: Record<ConversationKind, { title: string; hint: string; placeholder: string; agent: string }> = {
@@ -11,10 +11,10 @@ const COPY: Record<ConversationKind, { title: string; hint: string; placeholder:
     agent: "Master Loompa",
   },
   brainstorm: {
-    title: "💡 Brainstorm com o Analyst Loompa",
-    hint: "Pense em voz alta. As ideias concretas viram cards no rascunho e o Product Owner decide o que entra no backlog.",
+    title: "💡 Brainstorm com o Master Loompa",
+    hint: "Pense em voz alta. O Master chama o Analyst ou o Architect quando a ideia pede, e os pareceres voltam preliminares. Aprove o rumo (1º OK), o Product Owner propõe os cards e você grava (2º OK).",
     placeholder: "Ex.: Como podemos tornar o primeiro acesso dos clientes mais simples?",
-    agent: "Analyst Loompa",
+    agent: "Master Loompa",
   },
   review: {
     title: "📋 Revisão do pedido com o Product Owner",
@@ -50,6 +50,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
   const [err, setErr] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [goal, setGoal] = useState("");
+  const [consultants, setConsultants] = useState<Consultant[]>([]);
   const [recording, setRecording] = useState(false);
   const rec = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
@@ -83,7 +84,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
 
   useEffect(() => {
     if (resumeId) {
-      api.conversation(slug, resumeId).then((r) => { setConv(r.conversation); if (r.sprints) setSprints(r.sprints); }).catch((e) => setErr(detail(e)));
+      api.conversation(slug, resumeId).then((r) => { setConv(r.conversation); if (r.sprints) setSprints(r.sprints); if (r.consultants) setConsultants(r.consultants); }).catch((e) => setErr(detail(e)));
     } else if (kind === "meeting" && !opening.current) {
       // the Master opens the meeting with where the project stands (plan 10.2)
       opening.current = true;
@@ -97,6 +98,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
   const apply = (r: ChatReply) => {
     setConv(r.conversation);
     if (r.sprints) setSprints(r.sprints);
+    if (r.consultants) setConsultants(r.consultants);
     setNotes(r.turn?.ignored ?? r.report?.ignored ?? []);
   };
   const run = async (fn: () => Promise<ChatReply>, who: string | null = null): Promise<boolean> => {
@@ -130,6 +132,20 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
     if (conv && conv.kind === "meeting" && conv.status === "open" && founderTurns === 0) api.discard(slug, conv.id).catch(() => {});
     onClose();
   };
+  // a brainstorm (ADR-0020): the founder asks a role directly, with the text box as the question
+  const consult = async (c: Consultant) => {
+    const q = text.trim();
+    if (!q || busy) return;
+    const opened = conv ?? await api.openConversation(slug, "brainstorm", "").then((r) => { apply(r); return r.conversation; }).catch((e) => { setErr(detail(e)); return null; });
+    if (!opened) return;
+    setText(""); setPending(`Parecer do ${c.role}: ${q}`);
+    const ok = await run(() => api.consult(slug, opened.id, c.role, q), `O ${c.role[0].toUpperCase()}${c.role.slice(1)} está preparando o parecer`);
+    setPending(null);
+    if (!ok) setText(q);
+  };
+  const approve = () => conv && run(() => api.approve(slug, conv.id), "O Product Owner está dividindo o rumo em cards");
+  const reopen = () => conv && run(() => api.reopen(slug, conv.id));
+  const editSplit = (ops: Record<string, unknown>[]) => conv && run(() => api.editDraft(slug, conv.id, ops, true));
   const toBrainstorm = async () => {
     if (!conv) return;
     const said = conv.turns.filter((t) => t.who === "founder").map((t) => t.text).join("\n");
@@ -200,7 +216,11 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
           )}
         </section>
 
-        {isReview ? (
+        {current === "brainstorm" ? (
+          <BrainstormPanel conv={conv} consultants={consultants} busy={busy} open={open} question={text.trim()}
+            onConsult={consult} onEdit={(ops) => edit(ops)} onEditSplit={editSplit} onApprove={approve} onReopen={reopen}
+            onCommit={() => commit(false)} onDiscard={discard} />
+        ) : isReview ? (
           <ReviewPanel conv={conv} review={review} busy={busy} open={open} founderTurns={founderTurns}
             onForce={() => commit(false, true)} onBrainstorm={onBrainstorm ? toBrainstorm : undefined} onDiscard={discard} />
         ) : choosing && running ? (
@@ -293,6 +313,149 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
       </div>
       {err && <p className="mt-2 text-xs text-red-300">{err}</p>}
     </Modal>
+  );
+}
+
+const ROLE_LABEL: Record<string, string> = { analyst: "Analyst", architect: "Architect" };
+
+/** A brainstorm (ADR-0020): the direction and the ideas while it is a conversation, the opinions
+ *  the roles gave, and, after the first OK, the Product Owner's split waiting for the second. */
+function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, onEdit, onEditSplit, onApprove, onReopen, onCommit, onDiscard }: {
+  conv: Conversation | null; consultants: Consultant[]; busy: boolean; open: boolean; question: string;
+  onConsult: (c: Consultant) => void; onEdit: (ops: Record<string, unknown>[]) => void; onEditSplit: (ops: Record<string, unknown>[]) => void;
+  onApprove: () => void; onReopen: () => void; onCommit: () => void; onDiscard: () => void;
+}) {
+  const draft = conv?.draft;
+  const ideas = draft?.items ?? [];
+  const split = draft?.split ?? null;
+  const opinions = draft?.consults ?? [];
+  const editable = open && !busy;
+  const done = conv && conv.status !== "open";
+  return (
+    <section className="flex h-[52vh] flex-col rounded-md border border-line bg-ink/40">
+      <div className="flex items-center justify-between border-b border-line px-3 py-2">
+        <h4 className="text-sm font-semibold">{split ? "Proposta de cards do Product Owner" : "Rumo da ideia"}</h4>
+        <span className="text-[11px] text-slate-500">{split ? `${split.length} cards` : `${ideas.length} ${ideas.length === 1 ? "ideia" : "ideias"} · ${opinions.length} ${opinions.length === 1 ? "parecer" : "pareceres"}`}</span>
+      </div>
+      <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3 text-xs">
+        {split ? (
+          <>
+            <p className="rounded-md border border-sky-700/60 bg-sky-900/30 px-2 py-1.5 text-sky-100">
+              Você aprovou o rumo. Confira os cards: mude a prioridade ou tire um; nada vai ao backlog até você gravar.
+            </p>
+            <ul className="space-y-1.5">
+              {split.map((c) => <SplitCard key={c.key} item={c} editable={editable} onEdit={onEditSplit} />)}
+            </ul>
+            {ideas.some((i) => i.note) && (
+              <div className="space-y-1">
+                <div className="text-[10px] uppercase tracking-wide text-slate-500">Ficam de fora (continuam aqui)</div>
+                {ideas.filter((i) => i.note).map((i) => <div key={i.key} className="text-amber-300">{i.key} · {i.title}: {i.note}</div>)}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className={`rounded-md border p-2 ${draft?.ready ? "border-emerald-700/70 bg-emerald-950/30" : "border-line bg-panel"}`}>
+              <div className="text-[10px] uppercase tracking-wide text-slate-500">Rumo{draft?.ready ? " · o Master acha que está claro" : ""}</div>
+              <div className="mt-0.5 whitespace-pre-wrap text-slate-100">{draft?.direction || <span className="text-slate-500">Ainda sem rumo. Conte a ideia na conversa.</span>}</div>
+            </div>
+            <ul className="space-y-1.5">
+              {ideas.length === 0 && <li className="text-slate-500">Nenhuma ideia no rascunho ainda.</li>}
+              {ideas.map((i) => <Item key={i.key} item={i} sprint={false} editable={editable} onEdit={onEdit} />)}
+            </ul>
+            {opinions.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-[10px] uppercase tracking-wide text-slate-500">Pareceres (preliminares)</div>
+                {opinions.map((o) => <OpinionCard key={o.key} o={o} editable={editable} onEdit={onEdit} />)}
+              </div>
+            )}
+          </>
+        )}
+        {done && conv?.result && (conv.result.created?.length || conv.result.amended?.length) ? (
+          <p className="text-emerald-300">✔ {[...(conv.result.created ?? []), ...(conv.result.amended ?? [])].join(", ")} no backlog.</p>
+        ) : null}
+      </div>
+      {open && (
+        <div className="space-y-1 border-t border-line p-2">
+          {!split && consultants.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 text-[11px]">
+              <span className="text-slate-500">Pedir parecer:</span>
+              {consultants.map((c) => (
+                <button key={c.role} className="btn-ghost px-2 py-0.5 text-[11px]" disabled={busy || !question}
+                  title={question ? `${ROLE_LABEL[c.role] ?? c.role}: ${c.label}. A pergunta é o texto da caixa ao lado.` : "Escreva a pergunta na caixa de mensagem"}
+                  onClick={() => onConsult(c)}>{ROLE_LABEL[c.role] ?? c.role}</button>
+              ))}
+            </div>
+          )}
+          {split ? (
+            <div className="flex gap-2">
+              <button className="btn-ghost flex-1" disabled={busy} onClick={onReopen}>↩ Voltar à conversa</button>
+              <button className="btn-primary flex-1" disabled={busy || split.length === 0} title="2º OK: o Product Owner grava os cards no backlog" onClick={onCommit}>✅ Gravar no backlog</button>
+            </div>
+          ) : (
+            <button className={`w-full ${draft?.ready ? "btn-primary" : "btn-ghost"}`} disabled={busy || !conv || (ideas.length === 0 && !draft?.direction)}
+              title="1º OK: o rumo fica aprovado e o Product Owner propõe os cards" onClick={onApprove}>✅ Aprovar o rumo</button>
+          )}
+          <button className="w-full text-[11px] text-slate-500 hover:text-red-300" disabled={busy || !conv} onClick={onDiscard}>Descartar conversa</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function OpinionCard({ o, editable, onEdit }: { o: Opinion; editable: boolean; onEdit: (ops: Record<string, unknown>[]) => void }) {
+  const [openDetails, setOpenDetails] = useState(false);
+  return (
+    <div className={`rounded-md border border-line bg-panel p-2 ${o.dismissed || o.failed ? "opacity-60" : ""}`}>
+      <div className="flex items-start gap-2">
+        <button className="min-w-0 flex-1 text-left" onClick={() => setOpenDetails(!openDetails)}>
+          <div className="text-[10px] text-slate-500">{o.key} · {o.name}{o.asked_by === "founder" ? " · pedido por você" : ""}{o.dismissed ? " · deixado de lado" : ""}{o.failed ? " · não respondeu" : ""}</div>
+          <div className="text-slate-200">{o.failed ? "Não foi possível ouvir este papel agora." : o.summary}</div>
+        </button>
+        {!o.failed && (
+          <button className="text-[10px] text-slate-500 hover:text-amber-300 disabled:opacity-40" disabled={!editable}
+            title={o.dismissed ? "Trazer de volta à conversa" : "Deixar de lado: o Master para de considerar"}
+            onClick={() => onEdit([{ op: o.dismissed ? "restore" : "dismiss", ref: o.key }])}>{o.dismissed ? "retomar" : "deixar de lado"}</button>
+        )}
+      </div>
+      {openDetails && !o.failed && (
+        <div className="mt-1 space-y-0.5 border-t border-white/10 pt-1 text-slate-400">
+          <div><span className="text-slate-500">Pergunta:</span> {o.question}</div>
+          {o.attention.length > 0 && <div><span className="text-slate-500">Atenção:</span> {o.attention.join("; ")}</div>}
+          {o.cost && <div><span className="text-slate-500">Custo:</span> {o.cost}</div>}
+          {o.benefit && <div><span className="text-slate-500">Benefício:</span> {o.benefit}</div>}
+          {o.counterpoints.length > 0 && <div className="text-amber-300"><span className="text-slate-500">Contrapontos:</span> {o.counterpoints.join("; ")}</div>}
+          {o.sources.filter((u) => u.startsWith("http")).map((u) => <a key={u} href={u} target="_blank" rel="noreferrer" className="block truncate text-sky-300 underline">{u}</a>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SplitCard({ item, editable, onEdit }: { item: DraftItem; editable: boolean; onEdit: (ops: Record<string, unknown>[]) => void }) {
+  return (
+    <li className="rounded-md border border-line bg-panel p-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
+            <span>{item.key}</span>
+            {item.amend ? <span className="chip bg-sky-900/50 text-sky-200">acrescenta a {item.story_id}</span>
+              : item.story_id ? <span className="chip bg-slate-800 text-slate-300">já é {item.story_id}</span>
+              : <span className="chip bg-emerald-900/50 text-emerald-200">card novo</span>}
+            {item.kind && item.kind !== "feature" && <span className="chip bg-fuchsia-900/50 text-fuchsia-200">{KIND_LABEL[item.kind] ?? item.kind}</span>}
+            {item.epic && <span className="chip bg-slate-800 text-slate-400">{item.epic}</span>}
+            {item.ideas && item.ideas.length > 0 && <span>de {item.ideas.join(", ")}</span>}
+          </div>
+          <div className="font-medium leading-snug text-slate-100">{item.title}</div>
+          {(item.amend || item.description) && <div className="mt-0.5 line-clamp-3 text-slate-400">{item.amend || item.description}</div>}
+          {item.note && <div className="mt-1 text-amber-300">{item.note}</div>}
+        </div>
+        <select value={item.priority} disabled={!editable} title="Prioridade (1 = primeiro)" onChange={(e) => onEdit([{ op: "update", ref: item.key, priority: Number(e.target.value) }])} className="rounded border border-line bg-ink px-1 py-0.5 text-[11px]">
+          {[1, 2, 3, 4, 5].map((p) => <option key={p} value={p}>P{p}</option>)}
+        </select>
+        <button className="text-slate-500 hover:text-red-300 disabled:opacity-40" title="Tirar da proposta (as ideias dele continuam no brainstorm)" disabled={!editable} onClick={() => onEdit([{ op: "drop", ref: item.key }])}>✕</button>
+      </div>
+    </li>
   );
 }
 

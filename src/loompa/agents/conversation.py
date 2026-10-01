@@ -2,8 +2,8 @@
 
 `run_turn` is the one place a founder message becomes a model call: it records the message
 first (a crash never loses it), builds the prompt from the draft plus the last turns, asks the
-agent for `{reply, ops, questions}`, applies the ops in code and records the answer. The agents
-(Master for a Sprint Meeting, Analyst for a brainstorm) only bring their prompt and their tools.
+agent for `{reply, ops, questions}`, applies the ops in code and records the answer. The agent
+(the Master, in a Sprint Meeting and in a brainstorm) only brings its prompt and its tools.
 `Conversations` opens, continues, edits and commits sessions; committing always goes through the
 Product Owner, so a conversation never writes a card by itself. It is also the dashboard's quick
 story door (ADR-0017): the Product Owner files the request or opens a review conversation.
@@ -31,6 +31,7 @@ from loompa.conversations import (
     Turn,
     apply_ops,
     render_backlog,
+    render_brainstorm,
     render_draft,
     render_transcript,
     to_scale,
@@ -89,6 +90,7 @@ class TurnResult:
     questions: list[str] = field(default_factory=list)
     failed: bool = False
     consult: bool = False  # the Master asked the Product Owner for the sprint proposal
+    extra: dict[str, Any] = field(default_factory=dict)  # the rest of the model's answer
 
 
 def founder_text(text: str, limit: int = MAX_REPLY_CHARS) -> str:
@@ -127,6 +129,7 @@ async def run_turn(
     polish: Callable[[str], str] | None = None,
     rounds: int | None = None,
     max_tokens: int = 1800,
+    contract: str = TURN_CONTRACT,
 ) -> TurnResult:
     text = text.strip()
     if not text:
@@ -137,9 +140,11 @@ async def run_turn(
         conv.title = (sanitize_for_founder(text, max_chars=80).splitlines() or [""])[0]
     board.save(conv)  # the message is safe even if the model call fails
 
+    brainstorm = conv.kind == ConversationKind.BRAINSTORM
+    draft = render_brainstorm(conv.draft) if brainstorm else render_draft(conv.draft)
     user = (
         f"{context}\n\n## Backlog\n{render_backlog(board.cards())}\n\n"
-        f"## Current draft\n{render_draft(conv.draft)}\n\n"
+        f"## Current draft\n{draft}\n\n"
         f"## Conversation so far\n{history}\n\n## Founder's message\n{text}"
     )
     if rounds is None:
@@ -147,7 +152,7 @@ async def run_turn(
     ops: list[Any] = []
     try:
         data = await agent.ask_json_with_tools(
-            system.format(language=agent.language) + TURN_CONTRACT.format(language=agent.language),
+            system.format(language=agent.language) + contract.format(language=agent.language),
             user,
             toolbox,
             max_iterations=rounds,
@@ -165,15 +170,21 @@ async def run_turn(
             conversation_id=conv.id,
             error=f"{type(exc).__name__}: {exc}"[:300],
         )
-        reply, questions, failed, consult = FAILURE_REPLY, [], True, False
+        reply, questions, failed, consult, extra = FAILURE_REPLY, [], True, False, {}
         if fallback_ops is not None and not conv.draft.items:
             ops = fallback_ops(text)  # keep the day moving: a deterministic split of the goals
     else:
         reply, ops, questions = parse_turn(data)
         failed, consult = False, data.get("consult_po") is True
+        extra = {k: v for k, v in data.items() if k not in ("reply", "ops", "questions")}
 
     report = apply_ops(
-        conv.draft, ops, board.cards(), origin=origin, current=conv.mode == MeetingMode.CURRENT
+        conv.draft,
+        ops,
+        board.cards(),
+        origin=origin,
+        current=conv.mode == MeetingMode.CURRENT,
+        brainstorm=brainstorm,
     )
     reply = founder_text(polish(reply) if polish else reply) or (
         "Atualizei o rascunho." if report.changes else "Certo. O que mais você quer ajustar?"
@@ -197,7 +208,7 @@ async def run_turn(
         in_sprint=len(conv.draft.in_sprint()),
         ignored=len(report.ignored),
     )
-    return TurnResult(reply, report.changes, report.ignored, questions, failed, consult)
+    return TurnResult(reply, report.changes, report.ignored, questions, failed, consult, extra)
 
 
 @dataclass
@@ -221,15 +232,14 @@ class Conversations:
         self.board = ConversationBoard(ctx.store, ctx.slug)
 
     def agent_for(self, kind: ConversationKind) -> Any:
-        from loompa.agents.analyst import AnalystAgent
+        """Who answers the founder: the Product Owner in a review, the Master otherwise (in a
+        brainstorm it calls in the other roles, ADR-0020)."""
         from loompa.agents.master import MasterAgent
         from loompa.agents.product_owner import ProductOwnerAgent
 
-        if kind == ConversationKind.MEETING:
-            return MasterAgent(self.ctx)
         if kind == ConversationKind.REVIEW:
             return ProductOwnerAgent(self.ctx)
-        return AnalystAgent(self.ctx)
+        return MasterAgent(self.ctx)
 
     def open(self, kind: ConversationKind, title: str = "") -> Conversation:
         """A new session. A review conversation is never opened by hand: it is born from a
@@ -322,12 +332,80 @@ class Conversations:
             raise ConversationError(
                 "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
             )
+        if conv.kind == ConversationKind.BRAINSTORM and text.strip():
+            self._reopen(conv)  # talking again reopens the direction the founder approved
         turn = await self.agent_for(conv.kind).converse(conv, text)
         if conv.kind == ConversationKind.REVIEW and not turn.failed:
             conv = self.board.require(conversation_id)
             if conv.draft.review is not None and conv.draft.review.admit:
                 await self.commit(conversation_id)  # approved: the Product Owner files it now
         return turn
+
+    # ----------------------------------------------------------- brainstorm (ADR-0020)
+    def _brainstorm(self, conversation_id: str) -> Conversation:
+        conv = self.board.require(conversation_id)
+        if conv.kind != ConversationKind.BRAINSTORM:
+            raise ConversationError("isso só vale num brainstorm")
+        return conv
+
+    def _reopen(self, conv: Conversation) -> bool:
+        """The founder went back to the conversation after the first OK: the approval and the
+        Product Owner's split no longer stand."""
+        if not conv.draft.reopen():
+            return False
+        self.board.save(conv)
+        self.ctx.emit("brainstorm.reopened", conversation_id=conv.id)
+        return True
+
+    async def consult(self, conversation_id: str, role: str, question: str) -> TurnResult:
+        """The founder asks a role for an opinion directly (the Master asks on its own too)."""
+        from loompa.agents.brainstorm import CONSULTANTS, consult, opinion_text
+
+        conv = self._brainstorm(conversation_id)
+        who = CONSULTANTS.get(role.strip().lower())
+        question = question.strip()
+        if who is None:
+            raise ConversationError(f"não há um papel “{role}” para consultar")
+        if not question:
+            raise ConversationError("diga o que perguntar")
+        self._reopen(conv)
+        conv.turns.append(Turn(who="founder", text=f"Parecer do {who.role.title()}: {question}"))
+        self.board.save(conv)  # the question is safe even if the role cannot answer
+        opinion = await consult(self.ctx, self.board, conv, who.role, question, asked_by="founder")
+        return TurnResult(opinion_text(opinion), failed=opinion.failed)
+
+    async def approve(self, conversation_id: str) -> TurnResult:
+        """The founder's first OK: the direction stands, and the Product Owner proposes how it
+        becomes cards. Nothing is written until the second OK (`commit`)."""
+        from loompa.agents.product_owner import ProductOwnerAgent
+        from loompa.conversations import Approval
+
+        conv = self._brainstorm(conversation_id)
+        if not conv.draft.items and not conv.draft.direction:
+            raise ConversationError("ainda não há um rumo para aprovar: conte a ideia primeiro")
+        conv.draft.approved = Approval(
+            direction=conv.draft.direction, ideas=[i.key for i in conv.draft.items]
+        )
+        self.board.save(conv)
+        self.ctx.emit("brainstorm.approved", conversation_id=conv.id, ideas=len(conv.draft.items))
+        turn = await ProductOwnerAgent(self.ctx).propose_split(conv)
+        self.board.save(conv)
+        return turn
+
+    def reopen(self, conversation_id: str) -> Conversation:
+        """Back from the Product Owner's split to the conversation."""
+        conv = self._brainstorm(conversation_id)
+        if self._reopen(conv):
+            conv.turns.append(
+                Turn(
+                    who="agent",
+                    name=self.agent_for(conv.kind).name,
+                    text="Certo, voltamos à conversa. A divisão do Product Owner foi deixada de "
+                    "lado; quando o rumo estiver bom, aprove de novo.",
+                )
+            )
+            self.board.save(conv)
+        return conv
 
     async def propose(self, conversation_id: str) -> TurnResult:
         """The Product Owner's sprint proposal (plan 10.2); the sprint starts only after one."""
@@ -392,12 +470,16 @@ class Conversations:
         )
         return QuickStory(triage=verdict, conversation=conv)
 
-    def edit(self, conversation_id: str, ops: list[Any]) -> OpsReport:
+    def edit(self, conversation_id: str, ops: list[Any], *, split: bool = False) -> OpsReport:
         """The founder's own edits (checkboxes, priorities, removing a card): the same
-        operations the model uses, so the chat and the panel agree."""
+        operations the model uses, so the chat and the panel agree. In a brainstorm, `split`
+        edits the Product Owner's proposed cards (priority, or leaving one out); editing the
+        ideas after the first OK takes the approval back."""
         conv = self.board.require(conversation_id)
         if conv.kind == ConversationKind.REVIEW:
             raise ConversationError("o pedido em revisão muda pela conversa com o Product Owner")
+        if conv.kind == ConversationKind.BRAINSTORM:
+            return self._edit_brainstorm(conv, ops, split=split)
         if conv.kind == ConversationKind.MEETING and conv.mode is None:
             raise ConversationError(
                 "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
@@ -405,6 +487,36 @@ class Conversations:
         report = apply_ops(
             conv.draft, ops, self.board.cards(), current=conv.mode == MeetingMode.CURRENT
         )
+        self.board.save(conv)
+        self.ctx.emit("conversation.edited", conversation_id=conv.id, changes=len(report.changes))
+        return report
+
+    def _edit_brainstorm(self, conv: Conversation, ops: list[Any], *, split: bool) -> OpsReport:
+        from loompa.conversations import Draft
+
+        if split:
+            if conv.draft.split is None:
+                raise ConversationError("ainda não há uma divisão do Product Owner para ajustar")
+            wanted = [
+                o
+                for o in ops
+                if isinstance(o, dict) and str(o.get("op") or "").lower() in ("update", "drop")
+            ]
+            temp = Draft(items=conv.draft.split)
+            report = apply_ops(temp, wanted, {}, brainstorm=True)
+            if len(wanted) < len(ops):
+                report.ignored.append(
+                    "na divisão do Product Owner só a prioridade muda ou um card sai"
+                )
+            conv.draft.split = temp.items
+        else:
+            report = apply_ops(conv.draft, ops, self.board.cards(), brainstorm=True)
+            if report.changes and any(
+                str(o.get("op") or "").lower() not in ("dismiss", "restore")
+                for o in ops
+                if isinstance(o, dict)
+            ):
+                self._reopen(conv)
         self.board.save(conv)
         self.ctx.emit("conversation.edited", conversation_id=conv.id, changes=len(report.changes))
         return report
@@ -447,6 +559,10 @@ class Conversations:
         conv = self.board.require(conversation_id)
         if (start_sprint or plan_next) and conv.kind != ConversationKind.MEETING:
             raise ConversationError("só uma reunião de sprint pode começar um sprint")
+        if conv.kind == ConversationKind.BRAINSTORM and conv.draft.split is None:
+            raise ConversationError(
+                "aprove o rumo primeiro: o Product Owner propõe os cards e você confirma"
+            )
         if conv.kind == ConversationKind.MEETING and conv.mode is None:
             raise ConversationError(
                 "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
@@ -466,10 +582,10 @@ class Conversations:
                 po = ProductOwnerAgent(self.ctx)
                 result = po.commit_review(conv, force=force)
                 closing = po.name, _review_summary(result, conv)
-            else:
+            else:  # a brainstorm: the second OK files the Product Owner's split
                 po = ProductOwnerAgent(self.ctx)
-                result = await po.admit_ideas(conv)
-                closing = po.name, _ideas_summary(result)
+                result = await po.apply_split(conv)
+                closing = po.name, _split_summary(result, conv)
         finally:
             self.board.save(conv)  # ids assigned before a failure survive for the retry
         conv.turns.append(Turn(who="agent", name=closing[0], text=closing[1]))
@@ -555,24 +671,23 @@ def _review_summary(result: CommitResult, conv: Conversation) -> str:
     return f"Gravei {sid} no backlog."
 
 
-def _ideas_summary(result: CommitResult) -> str:
+def _split_summary(result: CommitResult, conv: Conversation) -> str:
     parts = []
     if result.created:
         parts.append(
-            f"Admiti {_plural(len(result.created), 'ideia', 'ideias')} no backlog "
+            f"Gravei {_plural(len(result.created), 'card novo', 'cards novos')} no backlog "
             f"({', '.join(result.created)})."
         )
+    if result.amended:
+        parts.append(f"Acrescentei o que foi decidido a {', '.join(result.amended)}.")
     if result.existing:
         parts.append(
             f"{_plural(len(result.existing), 'já estava', 'já estavam')} no backlog: "
             f"{', '.join(result.existing)}."
         )
-    for held in result.held:
-        parts.append(f"Deixei “{held['title']}” de fora: {held['reason']}")
-    if result.held:
+    if conv.draft.items:
         parts.append(
-            "Ela continua no rascunho para você refinar com o Analyst."
-            if len(result.held) == 1
-            else "Elas continuam no rascunho para você refinar com o Analyst."
+            f"{_plural(len(conv.draft.items), 'ideia ficou', 'ideias ficaram')} de fora e "
+            f"{'continua' if len(conv.draft.items) == 1 else 'continuam'} aqui para outra rodada."
         )
-    return " ".join(parts) or "Nada novo para admitir."
+    return " ".join(parts) or "Nada novo para gravar."
