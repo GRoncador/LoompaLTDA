@@ -77,6 +77,55 @@ async def test_the_tool_loop_ends_as_a_loop_when_the_guard_says_so(git_repo: Pat
     await ctx.aclose()
 
 
+# ------------------------------------------------------- light thinking (ADR-0016)
+
+
+def test_the_signs_of_trouble_that_send_a_light_loop_back_to_the_default(tmp_path: Path):
+    from loompa.aci.tools import ToolResult
+    from loompa.agents.base import trouble
+
+    guard = LoopGuard(ACI(_repo(tmp_path)))
+    failing = ToolResult(True, "[tests] FAIL (1 failed)\n...")
+    assert trouble("run_tests", failing, "", guard, 0) == "tests failing"
+    assert trouble("run_tests", failing, "", guard, 0, red_tests_ok=True) == ""  # a reproducer
+    assert trouble("run_tests", ToolResult(True, "[tests] PASS (3 passed)"), "", guard, 0) == ""
+    wrote = ToolResult(True, "wrote x.py\n\n[quick check] problems in what you just wrote:\n- x")
+    assert trouble("write_file", wrote, "", guard, 0) == "a problem in what it just wrote"
+    assert trouble("read_file", ToolResult(True, "1| x"), "Stop reading", guard, 0)
+    assert trouble("read_file", ToolResult(False, "error: no"), "", guard, 1) == ""
+    assert trouble("read_file", ToolResult(False, "error: no"), "", guard, 2) == "tool errors"
+
+
+async def test_a_light_loop_thinks_at_the_default_after_the_first_trouble(git_repo: Path, hub):
+    from loompa.agents.worker import WorkerAgent
+
+    root = _repo(git_repo)
+    f = bootstrap_factory(root, name="Raise", store=hub).factory
+    rounds = iter(
+        [
+            [ToolCall("w", "write_file", {"path": "app/bad.py", "content": "def broken(:\n"})],
+            [ToolCall("d", "done", {"summary": "ok"})],
+        ]
+    )
+    provider = MockProvider("mock", script=lambda *a: next(rounds))
+    ctx = EngineContext.build(
+        f, router=ModelRouter(f.config, providers=dict.fromkeys(f.config.providers, provider))
+    )
+    loop = await WorkerAgent(ctx).tool_loop(
+        [Message("system", "s"), Message("user", "u")],
+        Toolbox(ACI(root), PROFILES["worker"]),
+        terminal=("done",),
+        reasoning_effort="low",
+        raise_on_trouble=True,
+    )
+    assert loop.ended_by == "done" and loop.raised == "a problem in what it just wrote"
+    assert [c["reasoning_effort"] for c in provider.calls] == ["low", ""]
+    assert [c["max_tokens"] for c in provider.calls] == [16384, 128000]
+    raised = [e for e in ctx.store.events_since(0) if e["type"] == "llm.reasoning_raised"]
+    assert len(raised) == 1 and raised[0]["payload"]["round"] == 1
+    await ctx.aclose()
+
+
 # --------------------------------------------------------------------- the whole story
 
 
@@ -155,6 +204,16 @@ async def test_a_task_going_in_circles_is_not_done_and_never_reaches_the_inspect
     assert {f["outcome"] for f in finished} == {"unfinished"}
     msg = ctx.store.get_message(state.blocked_message_id)
     assert "não chegou ao fim" in f"{msg.title} {msg.context}" or msg.title
+    # ADR-0016: the first attempt started light and went back to the default when it began to
+    # repeat itself; every later attempt thought at the default from the start
+    runs = [
+        e["payload"]
+        for e in ctx.store.events_since(0, limit=5000)
+        if e["type"] == "worker.task" and e["story_id"] == sid
+    ]
+    assert runs[0]["effort"] == "low" and runs[0]["raised"] == "lookups answered from memory"
+    assert {r["effort"] for r in runs[1:]} == {"default"}
+    assert not any(r.get("raised") for r in runs[1:])
     await ctx.aclose()
 
 

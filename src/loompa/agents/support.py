@@ -35,6 +35,9 @@ Respond with JSON only: {{"title": str, "body": str}}. Write both in {language}.
 }
 
 
+LIGHT_SUPPORT_ROLES = ("storyteller",)
+
+
 class SupportAgent(LoompaAgent):
     display = "Support Loompa"
 
@@ -51,6 +54,8 @@ class SupportAgent(LoompaAgent):
             PROMPTS[self.role].format(language=self.language),
             f"# Founder's request\n{request}\n\n## Constitution (excerpt)\n{self.constitution(3000)}\n\n{precedents}",
             max_tokens=2500,
+            # ADR-0016: copy is writing; LGPD and SQL decide something and think at the default
+            reasoning_effort="low" if self.role in LIGHT_SUPPORT_ROLES else None,
         )
         body = str(data.get("body") or "")
         if data.get("sql"):

@@ -398,6 +398,7 @@ class ArchitectAgent(LoompaAgent):
                 LESSON_SYSTEM.format(language=self.language),
                 f"Story: {state.title}\n\n## Failure (filtered)\n{failure[:1500]}\n\n## How it was fixed\n{fix_summary[:800]}",
                 story=state,
+                reasoning_effort="low",  # ADR-0016: wording a rule the fix already found
             )
         except Exception:  # noqa: BLE001 - lesson capture must never break the pipeline
             return None

@@ -426,6 +426,7 @@ class MasterAgent(LoompaAgent):
                     story=state,
                     task="master.exec_options",
                     max_tokens=800,
+                    reasoning_effort="low",  # ADR-0016: the facts are given; this words them
                 )
                 title, context, impact = (
                     str(data.get("title") or ""),

@@ -194,6 +194,7 @@ class DeployerAgent(LoompaAgent):
                 story=state,
                 task="deployer.summary",
                 max_tokens=400,
+                reasoning_effort="low",  # ADR-0016: a sentence for the founder, no decision
             )
             text = str(data.get("summary") or "").strip()
             return sanitize_for_founder(text) if text else fallback

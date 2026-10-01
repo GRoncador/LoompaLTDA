@@ -57,6 +57,38 @@ class LoopResult:
     text: str = ""
     args: dict[str, Any] = field(default_factory=dict)  # arguments of the terminal call
     tool_calls: int = 0
+    raised: str = ""  # why a `low` loop went back to the default effort (ADR-0016), if it did
+
+
+# The signs that a `low` loop should think at the default for the rest of it (ADR-0016): the first
+# trouble is where a cheap round stops being cheap.
+TESTS_FAILED = "[tests] FAIL"
+QUICK_CHECK_PROBLEM = "[quick check] problems"
+TOOL_ERRORS_TO_RAISE = 2
+
+
+def trouble(
+    name: str,
+    result: Any,
+    note: str,
+    guard: LoopGuard,
+    errors: int,
+    *,
+    red_tests_ok: bool = False,
+) -> str:
+    """Why this tool result means the loop should stop thinking lightly, or ""."""
+    out = result.output or ""
+    if name == "run_tests" and out.startswith(TESTS_FAILED) and not red_tests_ok:
+        return "tests failing"
+    if QUICK_CHECK_PROBLEM in out:
+        return "a problem in what it just wrote"
+    if note:
+        return "a LoopGuard note"
+    if guard.streak >= 2:
+        return "lookups answered from memory"
+    if errors >= TOOL_ERRORS_TO_RAISE:
+        return "tool errors"
+    return ""
 
 
 class LoompaAgent:
@@ -140,6 +172,8 @@ class LoompaAgent:
         reasoning_effort: str | None = None,
         guard: LoopGuard | None = None,
         label: str = "",
+        raise_on_trouble: bool = False,
+        red_tests_ok: bool = False,
     ) -> LoopResult:
         """Call the model, run the tools it asks for, feed the results back, until it stops.
 
@@ -147,8 +181,13 @@ class LoompaAgent:
         a reply without tool calls is pushed once more before being accepted. When the rounds run
         out, `final_prompt` (if given) gets one last answer; otherwise the result is `limit`.
         Repeated reads and runs go through a `LoopGuard` (one is made when none is given).
-        Each round is a span of the story's trace (`label` says which pass it belongs to)."""
+        Each round is a span of the story's trace (`label` says which pass it belongs to).
+        With `raise_on_trouble`, a `low` loop goes back to the default effort for the rest of it
+        on the first sign of trouble (`trouble`; `red_tests_ok` when its tests are meant to fail)."""
         guard = guard or LoopGuard(toolbox.aci)
+        effort = reasoning_effort
+        raised = ""
+        errors = 0
         story_id = story.story_id if story else None
         complexity = str(story.complexity) if story else None
         tracer = self.ctx.tracer
@@ -167,7 +206,7 @@ class LoompaAgent:
                     tier_override=tier_override,
                     max_tokens=max_tokens,
                     complexity=complexity,
-                    reasoning_effort=reasoning_effort,
+                    reasoning_effort=effort,
                 )
                 resp = routed.response
                 last_text = resp.text or last_text
@@ -176,11 +215,13 @@ class LoompaAgent:
                     if nudge and i < max_iterations - 1 and "done" not in (resp.text or "").lower():
                         messages += [Message("assistant", resp.text), Message("user", nudge)]
                         continue
-                    return LoopResult("text", last_text, tool_calls=calls)
+                    return LoopResult("text", last_text, tool_calls=calls, raised=raised)
                 messages.append(Message("assistant", resp.text, tool_calls=resp.tool_calls))
                 for call in resp.tool_calls:
                     if call.name in terminal:
-                        return LoopResult(call.name, last_text, dict(call.arguments), calls)
+                        return LoopResult(
+                            call.name, last_text, dict(call.arguments), calls, raised=raised
+                        )
                     args = call.arguments if isinstance(call.arguments, dict) else {}
                     with tracer.span("tool", call.name, agent=self.name, args=args) as tool_span:
                         result = guard.before(call.name, args) or await toolbox.call(
@@ -220,8 +261,25 @@ class LoompaAgent:
                         **_call_facts(args),
                     )
                     messages.append(msg)
+                    errors += 0 if result.ok else 1
+                    why = (
+                        trouble(call.name, result, note, guard, errors, red_tests_ok=red_tests_ok)
+                        if raise_on_trouble and effort is not None and not raised
+                        else ""
+                    )
+                    if why:
+                        raised, effort = why, None  # None: the provider's default from now on
+                        round_span.set(reasoning_raised=why)
+                        self.ctx.emit(
+                            "llm.reasoning_raised",
+                            story_id=story_id,
+                            agent=self.name,
+                            reason=why,
+                            round=i + 1,
+                            label=label or None,
+                        )
                     if guard.stuck:  # going in circles: stop here, the caller reads the guard
-                        return LoopResult("loop", last_text, tool_calls=calls)
+                        return LoopResult("loop", last_text, tool_calls=calls, raised=raised)
                 prune_tool_history(
                     messages, keep_last=keep_tool_results, keep_files_chars=keep_files_chars
                 )
@@ -239,10 +297,12 @@ class LoompaAgent:
                     tier_override=tier_override,
                     max_tokens=max_tokens,
                     complexity=complexity,
-                    reasoning_effort=reasoning_effort,
+                    reasoning_effort=effort,
                 )
-            return LoopResult("text", routed.response.text or last_text, tool_calls=calls)
-        return LoopResult("limit", last_text, tool_calls=calls)
+            return LoopResult(
+                "text", routed.response.text or last_text, tool_calls=calls, raised=raised
+            )
+        return LoopResult("limit", last_text, tool_calls=calls, raised=raised)
 
     async def ask_json_with_tools(
         self,

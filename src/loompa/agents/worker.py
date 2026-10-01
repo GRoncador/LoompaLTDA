@@ -283,6 +283,7 @@ class WorkerAgent(LoompaAgent):
             tasks_md,
             outline=outline,
             changed=self.ctx.worktrees.diff_stat(wt),
+            red_tests_ok=reproducer,
         )
         if reproducer and not result.blocked_reason and not unfinished(result):
             result = await self._prove_reproduced(
@@ -611,8 +612,13 @@ class WorkerAgent(LoompaAgent):
         changed: str = "",
         diagnosis: bool = False,
         label: str = "main",
+        red_tests_ok: bool = False,
     ) -> AgentResult:
         started = time.monotonic()
+        # ADR-0016: a first attempt's task thinks lightly and goes back to the default on the
+        # first trouble; a repair (fix, self-check, reproducer retry) or any later attempt of the
+        # story thinks at the default throughout.
+        light = label == "main" and not state.failure_history and state.current_tier != "tier1"
         retry_ctx = ""
         if state.failure_history:
             retry_ctx = (
@@ -674,6 +680,9 @@ class WorkerAgent(LoompaAgent):
             keep_files_chars=sched.worker_keep_file_chars,
             guard=guard,
             label=label,
+            reasoning_effort="low" if light else None,
+            raise_on_trouble=light,
+            red_tests_ok=red_tests_ok,
         )
         self.ctx.emit(
             "worker.task",
@@ -687,6 +696,8 @@ class WorkerAgent(LoompaAgent):
             nudges=guard.nudges,
             diagnosis=toolbox.diagnosis[:300],
             duration_s=round(time.monotonic() - started, 1),
+            effort="low" if light else "default",
+            raised=loop.raised or None,
         )
         if loop.ended_by == "done":
             return AgentResult(ok=True, summary=str(loop.args.get("summary", ""))[:300])
@@ -752,6 +763,7 @@ class WorkerAgent(LoompaAgent):
                 json_mode=True,
                 max_tokens=600,
                 complexity=str(state.complexity),
+                reasoning_effort="low",  # ADR-0016: a checklist check; the judge looks again
             )
             from loompa.llm.providers import extract_json
 
