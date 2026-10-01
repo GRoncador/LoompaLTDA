@@ -58,7 +58,7 @@ export default function App() {
       setLive((prev) => ({ ...prev, [sid]: advance(prev[sid] ?? snapshot(overviewRef.current, sid), e) }));
       setNow(Date.now());
     }
-    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "story.stalled"].includes(e.type)) {
+    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "sprint.planned", "sprint.adjusted", "sprint.cancelled", "meeting.mode", "story.withdrawn", "story.restarted", "story.stalled"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
@@ -108,9 +108,8 @@ export default function App() {
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
           <Kanban
-            columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now}
+            columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} nextSprint={overview?.next_sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now}
             onChat={(kind, resumeId) => setChat({ kind, resumeId })} onOpen={setStoryId}
-            onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }}
             onCreate={createStory}
             onReorder={async (ids, dragged) => { if (slug) { try { await api.reorderBacklog(slug, ids, dragged); } catch (e) { setError(String(e)); } refresh(); } }}
             onUnpin={async (id) => { if (slug) { try { await api.unpin(slug, id); } catch (e) { setError(String(e)); } refresh(); } }}

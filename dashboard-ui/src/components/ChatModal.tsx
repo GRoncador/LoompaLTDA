@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { ChatReply, Conversation, ConversationKind, DraftItem } from "../types";
+import type { ChatReply, Conversation, ConversationKind, DraftItem, MeetingMode, SprintContext } from "../types";
 import { Modal } from "./Modal";
 
 const COPY: Record<ConversationKind, { title: string; hint: string; placeholder: string; agent: string }> = {
@@ -25,6 +25,10 @@ const COPY: Record<ConversationKind, { title: string; hint: string; placeholder:
 };
 
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
+const STAGE_LABEL: Record<string, string> = {
+  BACKLOG: "backlog", SPEC: "especificação", PLAN: "plano", DEV: "desenvolvimento", TEST: "testes", REVIEW: "revisão",
+  AWAITING_FOUNDER: "aguardando você", DONE: "concluída", CANCELLED: "cancelada",
+};
 
 // api.ts throws `${status} ${body}`; the body is FastAPI's {"detail": "..."}.
 function detail(e: unknown): string {
@@ -38,6 +42,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
   onBrainstorm?: (text: string) => void; onClose: () => void;
 }) {
   const [conv, setConv] = useState<Conversation | null>(null);
+  const [sprints, setSprints] = useState<SprintContext | null>(null);
   const [text, setText] = useState(initialText ?? "");
   const [pending, setPending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,20 +64,31 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
   const items = conv?.draft.items ?? [];
   const inSprint = items.filter((i) => i.in_sprint);
   const proposal = conv?.draft.proposal ?? null;
-  // the sprint starts only after the Product Owner's proposal, and only with cards it saw
-  const unseen = proposal ? inSprint.filter((i) => !proposal.keys.includes(i.key)).map((i) => i.key) : [];
-  const canStart = !!proposal && inSprint.length > 0 && unseen.length === 0;
+  const running = sprints?.running ?? null;
+  const planned = sprints?.planned ?? null;
+  // with a sprint running the founder says what the meeting is about first (ADR-0018)
+  const choosing = isMeeting && !!conv && conv.mode === null && conv.status === "open";
+  const isCurrent = isMeeting && conv?.mode === "current";
+  const members = conv?.draft.members ?? [];
+  const joining = isCurrent ? inSprint.filter((i) => !i.story_id || !members.includes(i.story_id)) : inSprint;
+  // the sprint starts (or joins) only after the Product Owner's proposal, and only with cards it saw
+  const unseen = proposal ? joining.filter((i) => !proposal.keys.includes(i.key)).map((i) => i.key) : joining.map((i) => i.key);
+  const reviewed = !!proposal && unseen.length === 0;
+  const canStart = reviewed && inSprint.length > 0 && !running;
+  const canPlan = reviewed && inSprint.length > 0;
+  const canApply = joining.length === 0 || reviewed;
+  const reviewingPlanned = isMeeting && !isCurrent && !running && !!planned && conv?.draft.sprint_id === planned.id;
   const founderTurns = conv?.turns.filter((t) => t.who === "founder").length ?? 0;
   const review = conv?.draft.review ?? null;
 
   useEffect(() => {
     if (resumeId) {
-      api.conversation(slug, resumeId).then((r) => setConv(r.conversation)).catch((e) => setErr(detail(e)));
+      api.conversation(slug, resumeId).then((r) => { setConv(r.conversation); if (r.sprints) setSprints(r.sprints); }).catch((e) => setErr(detail(e)));
     } else if (kind === "meeting" && !opening.current) {
       // the Master opens the meeting with where the project stands (plan 10.2)
       opening.current = true;
       setBusy(true); setWaitingFor("Master Loompa está preparando o parecer");
-      api.openConversation(slug, "meeting", "").then((r) => setConv(r.conversation)).catch((e) => setErr(detail(e))).finally(() => { setBusy(false); setWaitingFor(null); });
+      api.openConversation(slug, "meeting", "").then((r) => { setConv(r.conversation); if (r.sprints) setSprints(r.sprints); }).catch((e) => setErr(detail(e))).finally(() => { setBusy(false); setWaitingFor(null); });
     }
   }, [slug, resumeId, kind]);
   useEffect(() => { setGoal(conv?.draft.goal ?? ""); }, [conv?.draft.goal]);
@@ -80,6 +96,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
 
   const apply = (r: ChatReply) => {
     setConv(r.conversation);
+    if (r.sprints) setSprints(r.sprints);
     setNotes(r.turn?.ignored ?? r.report?.ignored ?? []);
   };
   const run = async (fn: () => Promise<ChatReply>, who: string | null = null): Promise<boolean> => {
@@ -102,7 +119,8 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
     api.editDraft(slug, conv.id, [{ op: "goal", text: goal }]).then(apply).catch((e) => setErr(detail(e)));
   };
   const propose = () => conv && run(() => api.propose(slug, conv.id), "O Product Owner está montando a proposta");
-  const commit = (start: boolean, force = false) => conv && run(() => api.commit(slug, conv.id, { start_sprint: start, goal, run: true, force }), start ? "Começando o sprint" : null);
+  const commit = (start: boolean, force = false, planNext = false) => conv && run(() => api.commit(slug, conv.id, { start_sprint: start, plan_next: planNext, goal, run: true, force }), start ? "Começando o sprint" : isCurrent ? "Aplicando as mudanças no sprint" : null);
+  const choose = (mode: MeetingMode) => conv && run(() => api.chooseMode(slug, conv.id, mode));
   const discard = async () => {
     if (!conv || !window.confirm(isReview ? "Desistir deste pedido? Nada será gravado." : "Descartar esta conversa? Nada do rascunho será salvo.")) return;
     if (await run(() => api.discard(slug, conv.id))) onClose();
@@ -140,10 +158,14 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
   };
 
   const done = conv && conv.status !== "open";
-  const startHint = !proposal ? "Peça a proposta do Product Owner antes de começar"
+  const startHint = running && !isCurrent ? `O ${running.id} ainda está rodando: só um sprint por vez`
+    : !proposal ? "Peça a proposta do Product Owner antes de começar"
     : inSprint.length === 0 ? "Marque ao menos um card para o sprint"
     : unseen.length ? `${unseen.join(", ")} entrou depois da proposta: peça uma nova`
     : undefined;
+  const applyHint = canApply ? undefined
+    : !proposal ? "O Product Owner avalia o que entra no sprint: peça a avaliação dele"
+    : `${unseen.join(", ")} entrou depois da avaliação: peça uma nova`;
   return (
     <Modal wide title={copy.title} onClose={close}>
       <p className="text-xs text-slate-400">{copy.hint}</p>
@@ -161,16 +183,16 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
           {open ? (
             <div className="border-t border-line p-2">
               <textarea
-                value={text} rows={3} disabled={busy && !!pending}
+                value={text} rows={3} disabled={(busy && !!pending) || choosing}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder="Escreva e tecle Enter (Shift+Enter quebra a linha)"
+                placeholder={choosing ? "Escolha ao lado do que trata a reunião" : "Escreva e tecle Enter (Shift+Enter quebra a linha)"}
                 className="w-full resize-none rounded-md border border-line bg-ink p-2 text-sm"
               />
               <div className="mt-1 flex items-center gap-2">
                 <button className={recording ? "btn bg-red-600 text-white" : "btn-ghost"} onClick={toggleRecord} disabled={busy}>{recording ? "⏹ Parar ditado" : "🎙 Ditar"}</button>
                 <div className="mx-auto" />
-                <button className="btn-primary" disabled={busy || !text.trim()} onClick={send}>Enviar</button>
+                <button className="btn-primary" disabled={busy || !text.trim() || choosing} onClick={send}>Enviar</button>
               </div>
             </div>
           ) : (
@@ -181,13 +203,38 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
         {isReview ? (
           <ReviewPanel conv={conv} review={review} busy={busy} open={open} founderTurns={founderTurns}
             onForce={() => commit(false, true)} onBrainstorm={onBrainstorm ? toBrainstorm : undefined} onDiscard={discard} />
+        ) : choosing && running ? (
+          <section className="flex h-[52vh] flex-col justify-center gap-3 rounded-md border border-line bg-ink/40 p-4">
+            <h4 className="text-sm font-semibold">Do que trata esta reunião?</h4>
+            <button className="btn-primary text-left" disabled={busy} onClick={() => choose("current")}>
+              🔧 Ajustar o {running.id} em andamento
+              <span className="mt-0.5 block text-[11px] font-normal opacity-80">tirar ou incluir cards, recomeçar uma história, cancelar o sprint; discutir alternativas, dependências e bloqueios</span>
+            </button>
+            <button className="btn-ghost text-left" disabled={busy} onClick={() => choose("next")}>
+              🗓 Pré-montar o próximo sprint <span className="text-amber-300">(não recomendado)</span>
+              <span className="mt-0.5 block text-[11px] font-normal text-slate-400">ele espera o {running.id} terminar e começa por uma nova reunião; o que este sprint ensinar ainda não entrou</span>
+            </button>
+            <button className="text-[11px] text-slate-500 hover:text-red-300" disabled={busy} onClick={discard}>Descartar conversa</button>
+          </section>
         ) : (
           <section className="flex h-[52vh] flex-col rounded-md border border-line bg-ink/40">
             <div className="flex items-center justify-between border-b border-line px-3 py-2">
-              <h4 className="text-sm font-semibold">Rascunho {isMeeting ? "do backlog e do sprint" : "de ideias"}</h4>
+              <h4 className="text-sm font-semibold">
+                {isCurrent ? `${conv?.draft.sprint_id} em andamento` : isMeeting ? (running ? "Próximo sprint (fica montado)" : "Rascunho do backlog e do sprint") : "Rascunho de ideias"}
+              </h4>
               <span className="text-[11px] text-slate-500">{items.length} cards{isMeeting ? ` · ${inSprint.length} no sprint` : ""}</span>
             </div>
-            {isMeeting && (
+            {reviewingPlanned && planned && open && (
+              <div className="mx-3 mt-2 rounded-md border border-sky-700/60 bg-sky-900/30 px-2 py-1.5 text-xs text-sky-100">
+                O {planned.id} está montado com {planned.story_ids.length} {planned.story_ids.length === 1 ? "card" : "cards"} e espera você: revise com o Product Owner e inicie.
+              </div>
+            )}
+            {isCurrent && conv?.draft.cancel_sprint && (
+              <div className="mx-3 mt-2 rounded-md border border-red-700/60 bg-red-900/30 px-2 py-1.5 text-xs text-red-100">
+                O {conv.draft.sprint_id} será cancelado ao aplicar: as histórias não concluídas voltam ao backlog.
+              </div>
+            )}
+            {isMeeting && !isCurrent && (
               <input
                 value={goal} disabled={!open || !conv} placeholder="Meta do sprint (uma frase)"
                 onChange={(e) => setGoal(e.target.value)}
@@ -197,30 +244,50 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
             )}
             <ul className="scroll-thin flex-1 space-y-1.5 overflow-y-auto p-3">
               {items.length === 0 && <li className="text-xs text-slate-500">O rascunho está vazio. Conte suas ideias na conversa.</li>}
-              {items.map((i) => <Item key={i.key} item={i} sprint={isMeeting} editable={open && !busy} onEdit={edit} />)}
+              {items.map((i) => <Item key={i.key} item={i} sprint={isMeeting} member={isCurrent && !!i.story_id && members.includes(i.story_id)} editable={open && !busy && !conv?.draft.cancel_sprint} onEdit={edit} />)}
             </ul>
-            {open && conv && (
+            {open && conv && isCurrent && (
+              <div className="space-y-1 border-t border-line p-2">
+                <button className="btn-ghost w-full" disabled={busy || joining.length === 0 || !!conv.draft.cancel_sprint} title="O Product Owner avalia os cards que entrariam no sprint em andamento" onClick={propose}>
+                  📋 Pedir a avaliação do Product Owner{joining.length ? ` (${joining.length} entrando)` : ""}
+                </button>
+                <div className="flex gap-2">
+                  <button className={conv.draft.cancel_sprint ? "btn-ghost flex-1" : "btn flex-1 border border-red-800 text-red-200 hover:bg-red-950"} disabled={busy}
+                    onClick={() => { if (conv.draft.cancel_sprint) edit([{ op: "keep_sprint" }]); else if (window.confirm(`Cancelar o ${conv.draft.sprint_id} ao aplicar? As histórias não concluídas voltam ao backlog.`)) edit([{ op: "cancel_sprint", reason: "decisão do Founder na reunião" }]); }}>
+                    {conv.draft.cancel_sprint ? "Manter o sprint" : "Cancelar o sprint"}
+                  </button>
+                  <button className="btn-primary flex-1" disabled={busy || !canApply} title={applyHint} onClick={async () => { if (await commit(false)) onClose(); }}>Aplicar no sprint</button>
+                </div>
+                {applyHint && <p className="text-center text-[11px] text-slate-500">{applyHint}</p>}
+                <button className="w-full text-[11px] text-slate-500 hover:text-red-300" disabled={busy} onClick={discard}>Descartar conversa (nada muda)</button>
+              </div>
+            )}
+            {open && conv && !isCurrent && (
               <div className="space-y-1 border-t border-line p-2">
                 {isMeeting && (
                   <button className="btn-ghost w-full" disabled={busy || items.length === 0} title="O Product Owner propõe o que entra no sprint, em que ordem e como os cards se relacionam" onClick={propose}>
-                    📋 {proposal ? "Pedir nova proposta ao Product Owner" : "Pedir a proposta do Product Owner"}
+                    📋 {reviewingPlanned && planned ? `Revisar o ${planned.id} com o Product Owner` : proposal ? "Pedir nova proposta ao Product Owner" : "Pedir a proposta do Product Owner"}
                   </button>
                 )}
                 <div className="flex gap-2">
                   {isMeeting ? (
                     <>
                       <button className="btn-ghost flex-1" disabled={busy || items.length === 0} onClick={() => commit(false)}>Salvar no backlog</button>
-                      <button className="btn-primary flex-1" disabled={busy || !canStart} title={startHint} onClick={async () => { if (await commit(true)) onClose(); }}>Começar Sprint ▶</button>
+                      {running ? (
+                        <button className="btn-primary flex-1" disabled={busy || !canPlan} title={canPlan ? `Fica montado e espera o ${running.id} terminar` : startHint} onClick={async () => { if (await commit(false, false, true)) onClose(); }}>Salvar como próximo sprint</button>
+                      ) : (
+                        <button className="btn-primary flex-1" disabled={busy || !canStart} title={startHint} onClick={async () => { if (await commit(true)) onClose(); }}>{reviewingPlanned && planned ? `Iniciar ${planned.id} ▶` : "Começar Sprint ▶"}</button>
+                      )}
                     </>
                   ) : (
                     <button className="btn-primary flex-1" disabled={busy || items.length === 0} onClick={() => commit(false)}>Enviar ao backlog (o Product Owner admite)</button>
                   )}
                 </div>
-                {isMeeting && !canStart && startHint && items.length > 0 && <p className="text-center text-[11px] text-slate-500">{startHint}</p>}
+                {isMeeting && !(running ? canPlan : canStart) && startHint && items.length > 0 && <p className="text-center text-[11px] text-slate-500">{startHint}</p>}
                 <button className="w-full text-[11px] text-slate-500 hover:text-red-300" disabled={busy} onClick={discard}>Descartar conversa</button>
               </div>
             )}
-            {done && conv?.result.created && <p className="border-t border-line p-3 text-xs text-emerald-300">✔ {conv.result.created.length === 1 ? "1 nova história" : `${conv.result.created.length} novas histórias`}{conv.result.sprint_id ? ` · ${conv.result.sprint_id} em andamento` : ""}.</p>}
+            {done && conv?.result.created && !isCurrent && <p className="border-t border-line p-3 text-xs text-emerald-300">✔ {conv.result.created.length === 1 ? "1 nova história" : `${conv.result.created.length} novas histórias`}{conv.result.sprint_id ? ` · ${conv.result.sprint_id}` : ""}.</p>}
           </section>
         )}
       </div>
@@ -283,15 +350,20 @@ function Bubble({ who, name, text, changes }: { who: "founder" | "agent"; name: 
   );
 }
 
-function Item({ item, sprint, editable, onEdit }: { item: DraftItem; sprint: boolean; editable: boolean; onEdit: (ops: Record<string, unknown>[]) => void }) {
+function Item({ item, sprint, member = false, editable, onEdit }: { item: DraftItem; sprint: boolean; member?: boolean; editable: boolean; onEdit: (ops: Record<string, unknown>[]) => void }) {
+  // a card of the running sprint: unchecking takes it out (back to the backlog); ↺ starts it over
+  const leaving = member && !item.in_sprint;
   return (
-    <li className="rounded-md border border-line bg-panel p-2 text-xs">
+    <li className={`rounded-md border bg-panel p-2 text-xs ${leaving ? "border-red-900/70 opacity-70" : item.restart ? "border-amber-700/70" : "border-line"}`}>
       <div className="flex items-start gap-2">
-        {sprint && <input type="checkbox" className="mt-1" title="No sprint" checked={item.in_sprint} disabled={!editable} onChange={(e) => onEdit([{ op: "update", ref: item.key, in_sprint: e.target.checked }])} />}
+        {sprint && <input type="checkbox" className="mt-1" title={member ? "No sprint (desmarque para tirar e devolver ao backlog)" : "No sprint"} checked={item.in_sprint} disabled={!editable} onChange={(e) => onEdit([{ op: "update", ref: item.key, in_sprint: e.target.checked }])} />}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
             <span>{item.key}</span>
-            {item.story_id && <span className="chip bg-sky-900/50 text-sky-200">já no backlog</span>}
+            {member && item.stage && <span className="chip bg-slate-800 text-slate-300">{STAGE_LABEL[item.stage] ?? item.stage}</span>}
+            {leaving && <span className="chip bg-red-900/50 text-red-200">sai do sprint</span>}
+            {item.restart && <span className="chip bg-amber-900/60 text-amber-200" title={item.restart_reason || undefined}>recomeça do zero</span>}
+            {item.story_id && !member && <span className="chip bg-sky-900/50 text-sky-200">já no backlog</span>}
             {item.epic && <span className="chip bg-slate-800 text-slate-400">{item.epic}</span>}
             {item.unpin && <span className="chip bg-slate-800 text-slate-400" title="A posição fixada volta ao Product Owner ao salvar">solta o 📌</span>}
           </div>
@@ -302,7 +374,12 @@ function Item({ item, sprint, editable, onEdit }: { item: DraftItem; sprint: boo
         <select value={item.priority} disabled={!editable} title="Prioridade (1 = urgente)" onChange={(e) => onEdit([{ op: "update", ref: item.key, priority: Number(e.target.value) }])} className="rounded border border-line bg-ink px-1 py-0.5 text-[11px]">
           {[1, 2, 3, 4, 5].map((p) => <option key={p} value={p}>P{p}</option>)}
         </select>
-        <button className="text-slate-500 hover:text-red-300 disabled:opacity-40" title="Tirar do rascunho" disabled={!editable} onClick={() => onEdit([{ op: "drop", ref: item.key }])}>✕</button>
+        {member ? (
+          <button className={`disabled:opacity-40 ${item.restart ? "text-amber-300" : "text-slate-500 hover:text-amber-300"}`} title={item.restart ? "Não recomeçar" : "Recomeçar do zero (descarta spec, plano e código)"} disabled={!editable || leaving}
+            onClick={() => onEdit([{ op: "restart", ref: item.key, restart: !item.restart, reason: item.restart ? "" : "pedido do Founder na reunião" }])}>↺</button>
+        ) : (
+          <button className="text-slate-500 hover:text-red-300 disabled:opacity-40" title="Tirar do rascunho" disabled={!editable} onClick={() => onEdit([{ op: "drop", ref: item.key }])}>✕</button>
+        )}
       </div>
     </li>
   );

@@ -7,9 +7,10 @@ const TONE: Record<string, string> = {
 
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
 
-export default function Kanban({ columns, sprint, conversations, live, now, onChat, onOpen, onPromote, onCreate, onReorder, onUnpin }: {
-  columns: Column[]; sprint: SprintSummary | null; conversations: ConversationSummary[]; live: Record<string, StoryActivity>; now: number;
-  onChat: (kind: ConversationKind, resumeId?: string) => void; onOpen: (id: string) => void; onPromote: (id: string) => void;
+export default function Kanban({ columns, sprint, nextSprint, conversations, live, now, onChat, onOpen, onCreate, onReorder, onUnpin }: {
+  columns: Column[]; sprint: SprintSummary | null; nextSprint: { id: string; goal: string; story_ids: string[] } | null;
+  conversations: ConversationSummary[]; live: Record<string, StoryActivity>; now: number;
+  onChat: (kind: ConversationKind, resumeId?: string) => void; onOpen: (id: string) => void;
   onCreate: (title: string) => Promise<QuickStoryResult | null>; onReorder: (ids: string[], dragged: string | null) => Promise<void>; onUnpin: (id: string) => Promise<void>;
 }) {
   const [title, setTitle] = useState("");
@@ -64,6 +65,12 @@ export default function Kanban({ columns, sprint, conversations, live, now, onCh
               {sprint.progress.waiting > 0 ? ` · ${sprint.progress.waiting} aguardando você` : ""}
             </span>
           )}
+          {/* one sprint runs at a time; the next one can be assembled and waits (ADR-0018) */}
+          {sprint?.status === "running" && nextSprint && (
+            <span className="chip bg-slate-800 text-slate-300" title={`Montado numa reunião; inicia por uma nova reunião quando o ${sprint.id} terminar${nextSprint.goal ? ` · meta: ${nextSprint.goal}` : ""}`}>
+              próximo: {nextSprint.id} · {nextSprint.story_ids.length} {nextSprint.story_ids.length === 1 ? "card" : "cards"}
+            </span>
+          )}
           {/* a sprint starts only from a meeting, after the Product Owner's proposal (ADR-0017) */}
           <button className="btn-primary text-xs" title="O Master abre com o estado do projeto; o Product Owner propõe o sprint" onClick={() => onChat("meeting")}>🗓 Reunião de Sprint</button>
           <button className="btn-ghost text-xs" title="Discutir uma ideia com a fábrica" onClick={() => onChat("brainstorm")}>💡 Brainstorm</button>
@@ -113,10 +120,10 @@ export default function Kanban({ columns, sprint, conversations, live, now, onCh
                     onDrop={(e) => { e.preventDefault(); drop(); }}
                     onDragEnd={() => { if (!dropped.current) { setDragId(null); setPreview(null); } }}
                   >
-                    <Card s={s} onOpen={onOpen} onPromote={onPromote} onUnpin={onUnpin} />
+                    <Card s={s} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} onPromote={onPromote} />
+                  <Card key={s.id} s={s} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
                 ),
               )}
             </div>
@@ -127,8 +134,7 @@ export default function Kanban({ columns, sprint, conversations, live, now, onCh
   );
 }
 
-function Card({ s, activity, now, onOpen, onPromote, onUnpin }: { s: StoryCard; activity?: StoryActivity | null; now?: number; onOpen: (id: string) => void; onPromote: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
-  const kaizen = s.origin === "kaizen" && s.stage === "BACKLOG";
+function Card({ s, activity, now, onOpen, onUnpin }: { s: StoryCard; activity?: StoryActivity | null; now?: number; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
   const pinned = s.priority_pinned && s.stage === "BACKLOG";
   return (
     <div className="relative rounded-md border border-line bg-panel p-2 text-xs hover:border-slate-500">
@@ -145,7 +151,7 @@ function Card({ s, activity, now, onOpen, onPromote, onUnpin }: { s: StoryCard; 
           {s.epic && <span className="chip bg-slate-800 text-slate-400">{s.epic}</span>}
           {s.kind && s.kind !== "feature" && <span className="chip bg-fuchsia-900/50 text-fuchsia-200">{s.kind}</span>}
           {s.complexity && s.complexity !== "STANDARD" && <span className="chip bg-slate-800 text-slate-400">{s.complexity.toLowerCase()}</span>}
-          {s.phase && s.stage !== "AWAITING_FOUNDER" && s.stage !== "DONE" && <span className="chip bg-slate-800 text-slate-400" title={s.route.join(" → ")}>{s.phase.replace("_", " ")}</span>}
+          {s.phase && !["BACKLOG", "AWAITING_FOUNDER", "DONE"].includes(s.stage) && <span className="chip bg-slate-800 text-slate-400" title={s.route.join(" → ")}>{s.phase.replace("_", " ")}</span>}
           {s.current_tier === "tier1" && <span className="chip bg-blue-900/60 text-blue-200">tier 1</span>}
           {s.qa_verdict === "CONCERNS" && <span className="chip bg-orange-900/50 text-orange-200">ressalvas</span>}
           {s.blocked_reason && <span className="chip bg-amber-900/60 text-amber-200">{s.blocked_reason === "delivery" ? "revisar" : s.blocked_reason === "question" ? "dúvida" : s.blocked_reason === "waiver" ? "risco" : "bloqueada"}</span>}
@@ -153,7 +159,6 @@ function Card({ s, activity, now, onOpen, onPromote, onUnpin }: { s: StoryCard; 
         </div>
         {activity && now !== undefined && <Activity a={activity} now={now} />}
       </button>
-      {kaizen && <button className="mt-1 w-full rounded bg-lime-900/50 py-0.5 text-[10px] text-lime-200 hover:bg-lime-800/60" onClick={() => onPromote(s.id)}>💡 executar agora (fora do sprint)</button>}
     </div>
   );
 }

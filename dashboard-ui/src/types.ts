@@ -62,7 +62,7 @@ export interface Decision { id: string; title: string; context: string; options:
 
 export interface SprintSummary {
   id: string;
-  status: "open" | "running" | "closed";
+  status: "open" | "running" | "closed" | "cancelled";
   goal: string;
   story_ids: string[];
   progress: { total: number; done: number; cancelled: number; waiting: number };
@@ -90,6 +90,15 @@ export type ConversationKind = "meeting" | "brainstorm" | "review";
 export interface DraftItem {
   key: string; title: string; description: string; epic: string; priority: number;
   in_sprint: boolean; story_id: string | null; origin: string; note: string; unpin?: boolean;
+  stage?: string; restart?: boolean; restart_reason?: string; // a card of the running sprint
+}
+
+/** What a Sprint Meeting is about (ADR-0018); null until the founder chooses, with a sprint running. */
+export type MeetingMode = "current" | "next";
+
+export interface SprintContext {
+  running: (SprintSummary & { story_ids: string[] }) | null;
+  planned: { id: string; goal: string; story_ids: string[] } | null;
 }
 
 /** The Product Owner's reading of a request before it becomes a card (ADR-0017). */
@@ -114,23 +123,28 @@ export type QuickStoryResult =
 
 export interface Turn { who: "founder" | "agent"; name: string; text: string; changes: string[]; at: string }
 
-export interface CommitResult { created: string[]; existing: string[]; held: { key: string; title: string; reason: string }[]; skipped: string[]; sprint_id: string | null }
+export interface CommitResult { created: string[]; existing: string[]; held: { key: string; title: string; reason: string }[]; skipped: string[]; sprint_id: string | null; joined?: string[]; withdrawn?: string[]; restarted?: string[] }
 
 export interface Conversation {
   id: string;
   kind: ConversationKind;
   status: "open" | "committed" | "discarded";
+  mode: MeetingMode | null;
   title: string;
   turns: Turn[];
-  draft: { goal: string; items: DraftItem[]; proposal?: Proposal | null; review?: Triage | null };
+  draft: {
+    goal: string; items: DraftItem[]; proposal?: Proposal | null; review?: Triage | null;
+    sprint_id?: string; members?: string[]; cancel_sprint?: boolean; cancel_reason?: string;
+  };
   limits: string[];
   result: Partial<CommitResult>;
 }
 
-export interface ConversationSummary { id: string; kind: ConversationKind; status: string; title: string; turns: number; cards: number; in_sprint: number; updated_at: string }
+export interface ConversationSummary { id: string; kind: ConversationKind; mode?: MeetingMode | null; status: string; title: string; turns: number; cards: number; in_sprint: number; updated_at: string }
 
 export interface ChatReply {
   conversation: Conversation;
+  sprints?: SprintContext;
   turn?: { reply: string; changes: string[]; ignored: string[]; questions: string[]; failed: boolean } | null;
   report?: { changes: string[]; ignored: string[] };
   result?: CommitResult;
@@ -144,6 +158,7 @@ export interface Overview {
   finance: { today_usd: number; period: BudgetPeriod; period_usd: number; cap_usd: number; fraction: number; warn: boolean; exhausted: boolean; downgrade: boolean };
   kaizen_today: number;
   sprint: SprintSummary | null;
+  next_sprint: { id: string; goal: string; story_ids: string[] } | null; // assembled, waiting (ADR-0018)
   conversations: ConversationSummary[];
   last_event_id: number;
 }
