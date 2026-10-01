@@ -41,6 +41,7 @@ from loompa.conversations import (
     ConversationStatus,
     MeetingMode,
 )
+from loompa.dependencies import WAIT_KEY, plan_gate
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column, load_state
 from loompa.engine.lock import EngineBusy, EngineLock
 from loompa.factory import Factory
@@ -372,9 +373,12 @@ def create_app(
         stories = ctx.store.list_stories(slug)
         columns: dict[str, list[dict[str, Any]]] = {k: [] for k, _ in KANBAN_COLUMNS}
         sprint_of = sprint_report.current_sprints(ctx.store, slug)  # read, never stored (10.8)
+        rows = {s["id"]: s for s in stories}
         for s in stories:
             card = _story_card(s)
             card["sprint_id"] = sprint_of.get(s["id"])
+            if (s.get("state") or {}).get("extra", {}).get(WAIT_KEY):  # computed now (ADR-0021)
+                card["waiting"] = plan_gate(rows, s["id"]).as_dict()
             if s["stage"] in LIVE_STAGES:  # only a story at work has something to show
                 card["activity"] = ctx.store.story_activity(s["id"])
             columns[kanban_column(s["stage"])].append(card)
@@ -1195,6 +1199,7 @@ def _story_card(s: dict[str, Any]) -> dict[str, Any]:
         "column": kanban_column(s["stage"]),
         "priority": s.get("priority", 100),
         "priority_pinned": bool(s.get("priority_pinned")),
+        "depends_on": list(s.get("depends_on") or []),
         "origin": s.get("origin", "founder"),
         "cost_usd": round(float(s.get("cost_usd") or 0), 4),
         "blocked_reason": st.get("blocked_reason"),

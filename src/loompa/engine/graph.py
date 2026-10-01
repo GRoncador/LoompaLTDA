@@ -41,6 +41,7 @@ from loompa.comms import (
     compose_research_message,
     sanitize_for_founder,
 )
+from loompa.dependencies import WAIT_KEY, Gate, dependents, deps_of, plan_gate, rows_by_id
 from loompa.engine.context import EngineContext
 from loompa.engine.phases import (
     Phase,
@@ -133,6 +134,67 @@ async def block(
     state.stage = Stage.AWAITING_FOUNDER
     ctx.emit("story.blocked", story_id=state.story_id, reason=reason.value, message_id=msg.id)
     return state
+
+
+async def gate_plan(ctx: EngineContext, state: StoryState) -> StoryState | None:
+    """The gate before `plan` (ADR-0021). None: plan now. Otherwise the state to keep: parked
+    (the chain is not ready; the run ends and the slot frees) or blocked for the founder (a
+    dependency was cancelled or left the sprint)."""
+    rows = rows_by_id(ctx.store, ctx.slug)
+    me = rows.get(state.story_id)
+    if me is None or not (deps_of(me) or dependents(rows, state.story_id)):
+        state.extra.pop(WAIT_KEY, None)
+        return None
+    gate = plan_gate(rows, state.story_id)
+    if gate.gate == Gate.OPEN:
+        if state.extra.pop(WAIT_KEY, None) is not None:
+            ctx.emit("story.unparked", story_id=state.story_id)
+        return None
+    if gate.gate == Gate.WAIT:
+        first = WAIT_KEY not in state.extra
+        state.extra[WAIT_KEY] = gate.as_dict()
+        if first:
+            ctx.emit(
+                "story.waiting",
+                story_id=state.story_id,
+                pending=gate.pending,
+                chain=gate.chain,
+                founder=gate.founder,
+            )
+        return state
+    state.extra.pop(WAIT_KEY, None)
+    titles = [f"{d} (“{(rows.get(d) or {}).get('title', d)}”)" for d in gate.gone]
+    one = len(titles) == 1
+    msg = FounderMessage(
+        factory=ctx.slug,
+        story_id=state.story_id,
+        kind=MessageKind.BLOCKED,
+        sender=MasterAgent.display,
+        title=f"“{state.title}” dependia de {'uma história que saiu' if one else 'histórias que saíram'} do sprint",
+        context=(
+            f"Esta história foi pensada em cima de {', '.join(titles)}, que "
+            f"{'foi cancelada ou voltou' if one else 'foram canceladas ou voltaram'} ao backlog. "
+            "A especificação dela já está pronta; o plano ainda não foi feito."
+        ),
+        impact="Nada foi construído em cima disso ainda. As demais entregas seguem normalmente.",
+        options=[
+            Option(key="skip", label="Devolver ao backlog", recommended=True),
+            Option(
+                key="detach",
+                label="Seguir sem a dependência",
+                description="A especificação é refeita sem contar com ela.",
+            ),
+            Option(key="drop", label="Cancelar esta também"),
+        ],
+    )
+    return await block(
+        ctx,
+        state,
+        BlockedReason.DEPENDENCY,
+        f"dependencies gone: {', '.join(gate.gone)}",
+        resume="plan",
+        message=msg,
+    )
 
 
 # Blocks whose default answer is "try again": when the same one comes back, saying "try again"
@@ -804,10 +866,22 @@ def back_to_backlog(
         po.set_priority(state.story_id, priority)
     goto(state, "intake" if not state.route else state.route[0])
     state.stage = Stage.BACKLOG
+    state.extra.pop(WAIT_KEY, None)
     state.blocked_reason = None
     state.blocked_message_id = None
     state.resume_stage = None
     state.resume_phase = None
+
+
+def _drop_gone_dependencies(ctx: EngineContext, state: StoryState) -> list[tuple[str, str]]:
+    """Forget the dependencies that were cancelled or went back to the backlog; returns them
+    as `(id, title)`. The relation is the Product Owner's to write (ADR-0021)."""
+    rows = rows_by_id(ctx.store, ctx.slug)
+    gone = plan_gate(rows, state.story_id).gone
+    if gone:
+        keep = [d for d in deps_of(rows.get(state.story_id)) if d not in gone]
+        ProductOwnerAgent(ctx).set_dependencies(state.story_id, keep)
+    return [(d, (rows.get(d) or {}).get("title", d)) for d in gone]
 
 
 def apply_founder_answer(
@@ -830,7 +904,18 @@ def apply_founder_answer(
         state.phase = ""
         ctx.worktrees.remove(state.story_id)
     elif key == "skip":
+        if reason == BlockedReason.DEPENDENCY:
+            _drop_gone_dependencies(ctx, state)
         back_to_backlog(ctx, state, priority=SKIPPED_PRIORITY)
+    elif reason == BlockedReason.DEPENDENCY:  # "detach": go on without what left the sprint
+        for dep, title in _drop_gone_dependencies(ctx, state):
+            state.note(
+                f"A história {dep} (“{title}”), da qual esta dependia, saiu do sprint: a "
+                "especificação deve seguir sem ela."
+            )
+        state.spec_ready = False
+        state.spec_review_rounds = 0
+        goto(state, "spec")
     elif reason == BlockedReason.DELIVERY:
         if key in ("approve", "approved", "ok", "yes", "sim"):
             wt = ctx.worktrees.get(state.story_id)

@@ -38,6 +38,8 @@ export interface StoryCard {
   updated_at: string;
   activity?: StoryActivity | null;
   sprint_id?: string | null; // the sprint it is in, else the last one it went through (10.8)
+  depends_on?: string[]; // cards it needs delivered first (ADR-0021)
+  waiting?: { gate: string; pending: string[]; founder: string[]; gone: string[]; chain: string[]; label: string } | null;
 }
 
 /** What a story at work is doing now (server snapshot, then advanced by live events). */
@@ -94,6 +96,7 @@ export interface DraftItem {
   in_sprint: boolean; story_id: string | null; origin: string; note: string; unpin?: boolean;
   stage?: string; restart?: boolean; restart_reason?: string; // a card of the running sprint
   kind?: string; ideas?: string[]; amend?: string; // a brainstorm's split (ADR-0020)
+  depends_on?: string[]; // keys of the cards it needs delivered first (ADR-0021)
 }
 
 /** A role's preliminary opinion in a brainstorm (ADR-0020). */

@@ -27,6 +27,7 @@ from typing import Any
 
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent, StoryStalled, triage
 from loompa.comms import FounderAnswer, FounderMessage, MessageKind
+from loompa.dependencies import WAIT_KEY, Gate, in_chain, plan_gate, spec_passed
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, back_to_backlog, block
 from loompa.engine.langgraph_engine import GraphRuntime
@@ -84,7 +85,13 @@ class StoryRunner:
 
     async def run(self) -> StoryState:
         state = load_state(self.ctx, self.story_id)
-        return await runtime_for(self.ctx).run_story(state)
+        runtime = runtime_for(self.ctx)
+        if state.extra.pop(WAIT_KEY, None) is not None:
+            # parked before `plan` and the chain is ready now (ADR-0021): resume at `plan` from
+            # the checkpoint, the way a founder answer resumes a paused story
+            save_state(self.ctx, state, "gate_open")
+            await runtime.inject_founder_answer(state)
+        return await runtime.run_story(state)
 
 
 @dataclass
@@ -107,14 +114,23 @@ class Scheduler:
         return self.max_parallel or self.ctx.config.schedule.max_parallel
 
     def _eligible(self) -> list[dict[str, Any]]:
-        return [
+        """Admitted stories not running now. A story parked before `plan` (ADR-0021) is left out
+        while its chain still says wait; among the rest, chain stories whose spec is not approved
+        go first, so the whole chain leaves the spec phase quickly; then the backlog order."""
+        rows = {s["id"]: s for s in self.ctx.store.list_stories(self.ctx.slug)}
+        out = [
             s
-            for s in self.ctx.store.list_stories(self.ctx.slug)
+            for s in rows.values()
             if s["stage"] not in TERMINAL
             and s["stage"] not in PAUSED
             and s["id"] not in self.running
             and s["stage"] != Stage.BACKLOG  # cards wait for a sprint
+            and not (
+                (s.get("state") or {}).get("extra", {}).get(WAIT_KEY)
+                and plan_gate(rows, s["id"]).gate == Gate.WAIT
+            )
         ]
+        return sorted(out, key=lambda s: 0 if in_chain(rows, s["id"]) and not spec_passed(s) else 1)
 
     def runnable(self) -> list[dict[str, Any]]:
         """Stories ready to execute: the ones the Product Owner admitted out of the backlog

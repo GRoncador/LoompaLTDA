@@ -676,6 +676,7 @@ async def test_the_product_owner_splits_into_new_cards_additions_and_held_ideas(
                 "priority": 3,
                 "ideas": [],
                 "into": "S-002",
+                "depends_on": ["C1"],
                 "note": "",
             },
         ],
@@ -705,6 +706,7 @@ async def test_the_product_owner_splits_into_new_cards_additions_and_held_ideas(
         in ctx.store.get_story("S-001")["description"]
     )
     assert ctx.store.get_story("S-003")["state"]["kind"] == "feature"
+    assert ctx.store.get_story("S-004")["depends_on"] == ["S-003"]  # C3 needs C1 first
     conv = chats.board.require(conv.id)  # D3 (held) and D4 (its card was dropped) stay
     assert conv.open and [i.key for i in conv.draft.items] == ["D3", "D4"]
     assert conv.draft.split is None and conv.draft.approved is None

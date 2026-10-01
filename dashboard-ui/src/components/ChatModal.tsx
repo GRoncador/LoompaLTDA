@@ -445,6 +445,7 @@ function SplitCard({ item, editable, onEdit }: { item: DraftItem; editable: bool
             {item.kind && item.kind !== "feature" && <span className="chip bg-fuchsia-900/50 text-fuchsia-200">{KIND_LABEL[item.kind] ?? item.kind}</span>}
             {item.epic && <span className="chip bg-slate-800 text-slate-400">{item.epic}</span>}
             {item.ideas && item.ideas.length > 0 && <span>de {item.ideas.join(", ")}</span>}
+            {!!item.depends_on?.length && <span className="chip bg-indigo-900/50 text-indigo-200">↳ depende de {item.depends_on.join(", ")}</span>}
           </div>
           <div className="font-medium leading-snug text-slate-100">{item.title}</div>
           {(item.amend || item.description) && <div className="mt-0.5 line-clamp-3 text-slate-400">{item.amend || item.description}</div>}
@@ -528,6 +529,11 @@ function Item({ item, sprint, member = false, editable, onEdit }: { item: DraftI
             {item.restart && <span className="chip bg-amber-900/60 text-amber-200" title={item.restart_reason || undefined}>recomeça do zero</span>}
             {item.story_id && !member && <span className="chip bg-sky-900/50 text-sky-200">já no backlog</span>}
             {item.epic && <span className="chip bg-slate-800 text-slate-400">{item.epic}</span>}
+            {!!item.depends_on?.length && (
+              <button className="chip bg-indigo-900/50 text-indigo-200 hover:bg-indigo-800/60 disabled:opacity-60" disabled={!editable}
+                title="Depende destes cards: o plano espera eles serem entregues. Clique para tirar a dependência."
+                onClick={() => onEdit([{ op: "update", ref: item.key, depends_on: [] }])}>↳ depende de {item.depends_on.join(", ")} ✕</button>
+            )}
             {item.unpin && <span className="chip bg-slate-800 text-slate-400" title="A posição fixada volta ao Product Owner ao salvar">solta o 📌</span>}
           </div>
           <div className="font-medium leading-snug text-slate-100">{item.title}</div>

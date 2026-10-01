@@ -296,6 +296,29 @@ class Backlog:
             if row is not None and row["priority"] != number:
                 self.set_priority(sid, number)
 
+    def set_dependencies(self, story_id: str, depends_on: list[str]) -> list[str]:
+        """Record which cards `story_id` needs delivered first (ADR-0021). Refused in code: an
+        unknown card, the card itself, a finished card gaining dependencies, and any cycle.
+        Returns the list as saved."""
+        from loompa.dependencies import deps_of, edges_of, would_cycle
+
+        row = self._row(story_id)
+        wanted = list(dict.fromkeys(d.strip().upper() for d in depends_on if d and d.strip()))
+        if wanted == deps_of(row):
+            return wanted
+        if story_id in wanted:
+            raise BacklogError(f"{story_id} não pode depender de si mesma")
+        if wanted and row["stage"] in TERMINAL:
+            raise BacklogError(f"{story_id} já está encerrada")
+        for dep in wanted:
+            self._row(dep)
+        cycle = would_cycle(edges_of(self.ctx.store.list_stories(self.ctx.slug)), story_id, wanted)
+        if cycle:
+            raise BacklogError(f"isso criaria um ciclo de dependências: {' → '.join(cycle)}")
+        self.ctx.store.update_story(story_id, depends_on=wanted)
+        self.ctx.emit("backlog.depends", story_id=story_id, agent=self.agent, depends_on=wanted)
+        return wanted
+
     def amend(self, story_id: str, addition: str, *, source: str = "") -> bool:
         """Add to a waiting card what a session decided about it (a brainstorm's split,
         ADR-0020): the text goes at the end of its description, and the card keeps a record of

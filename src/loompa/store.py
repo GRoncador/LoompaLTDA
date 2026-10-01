@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS stories (
     stage TEXT NOT NULL,
     priority INTEGER NOT NULL DEFAULT 100,
     priority_pinned INTEGER NOT NULL DEFAULT 0,
+    depends_on TEXT NOT NULL DEFAULT '[]',
     origin TEXT NOT NULL DEFAULT 'founder',
     state_json TEXT NOT NULL DEFAULT '{}',
     attempts_tier2 INTEGER NOT NULL DEFAULT 0,
@@ -192,7 +193,11 @@ class Store:
     # open, with the defaults new rows would have. `CREATE TABLE IF NOT EXISTS` never adds any.
     ADDED_COLUMNS = {
         # the founder dragged the card into place: the Product Owner's ranking leaves it there
-        "stories": (("priority_pinned", "INTEGER NOT NULL DEFAULT 0"),),
+        "stories": (
+            ("priority_pinned", "INTEGER NOT NULL DEFAULT 0"),
+            # the cards this one needs delivered first; only the Product Owner writes it (ADR-0021)
+            ("depends_on", "TEXT NOT NULL DEFAULT '[]'"),
+        ),
         "usage": (
             ("served_by", "TEXT NOT NULL DEFAULT ''"),
             ("finish_reason", "TEXT NOT NULL DEFAULT ''"),
@@ -257,6 +262,7 @@ class Store:
             "stage",
             "priority",
             "priority_pinned",
+            "depends_on",
             "origin",
             "state_json",
             "attempts_tier2",
@@ -276,12 +282,15 @@ class Store:
                     existing.get(c) if c != "state_json" else json.dumps(existing.get("state", {})),
                 )
             story["created_at"] = existing["created_at"]
+            if isinstance(story["depends_on"], list):
+                story["depends_on"] = json.dumps(story["depends_on"])
         else:
             defaults = {
                 "description": "",
                 "epic": "",
                 "priority": 100,
                 "priority_pinned": 0,
+                "depends_on": "[]",
                 "origin": "founder",
                 "attempts_tier2": 0,
                 "attempts_tier1": 0,
@@ -301,6 +310,8 @@ class Store:
     def update_story(self, story_id: str, **fields: Any) -> None:
         if "state" in fields:
             fields["state_json"] = json.dumps(fields.pop("state"), ensure_ascii=False, default=str)
+        if isinstance(fields.get("depends_on"), list):
+            fields["depends_on"] = json.dumps(fields["depends_on"])
         fields["updated_at"] = now_iso()
         sets = ", ".join(f"{k} = ?" for k in fields)
         self._x(f"UPDATE stories SET {sets} WHERE id = ?", (*fields.values(), story_id))
@@ -344,6 +355,8 @@ class Store:
     def _hydrate(row: dict[str, Any]) -> dict[str, Any]:
         row = dict(row)
         row["state"] = json.loads(row.pop("state_json") or "{}")
+        if "depends_on" in row:
+            row["depends_on"] = json.loads(row["depends_on"] or "[]")
         return row
 
     # -------------------------------------------------------------- checkpoints

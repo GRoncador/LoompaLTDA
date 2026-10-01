@@ -42,6 +42,7 @@ class BlockedReason(StrEnum):
     DELIVERY = "delivery"  # waiting for founder to approve a delivery
     CONFLICT = "conflict"  # merge conflict with base
     WAIVER = "waiver"  # Inspector found a serious concern the tests do not catch; founder decides
+    DEPENDENCY = "dependency"  # a story it depends on was cancelled or left the sprint (ADR-0021)
 
 
 class StoryKind(StrEnum):

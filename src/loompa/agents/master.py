@@ -32,6 +32,7 @@ from loompa.conversations import (
     from_scale,
     to_scale,
 )
+from loompa.dependencies import missing_from, rows_by_id
 from loompa.engine.state import TERMINAL, Complexity, Stage, StoryKind, StoryState
 from loompa.sprints import Sprint, SprintBoard, SprintError, SprintStatus, running_message
 
@@ -265,6 +266,14 @@ class MasterAgent(LoompaAgent):
             sprint = board.get(sprint.id) or sprint
             if not sprint.story_ids:
                 raise SprintError("não há histórias no backlog para começar um sprint")
+            missing = missing_from(rows_by_id(store, self.ctx.slug), sprint.story_ids)
+            if missing:  # ADR-0021: a dependency travels with the story that needs it
+                raise SprintError(
+                    "; ".join(
+                        f"{sid} depende de {dep}, que não está neste sprint nem concluída"
+                        for sid, dep in missing
+                    )
+                )
             for sid in sprint.story_ids:
                 po.admit(sid)
             sprint = board.start(sprint.id, goal)
@@ -496,6 +505,12 @@ class MasterAgent(LoompaAgent):
                 row = store.get_story(item.story_id) if item.story_id else None
                 if item.story_id and (row is None or row["stage"] != Stage.BACKLOG):
                     raise ConversationError(f"{item.story_id} não está mais esperando no backlog")
+            running = board.running()
+            check_assembly(
+                draft.in_sprint(),
+                store,
+                also=set(running.story_ids) if plan_next and running else set(),
+            )
         result = CommitResult()
         picks: list[str] = []
         for item in draft.items:
@@ -522,6 +537,7 @@ class MasterAgent(LoompaAgent):
                     picks.append(item.story_id)
                 else:  # a repeated title matched work that already started
                     result.skipped.append(item.story_id)
+        po.save_dependencies(draft.items)
         if sprinting:
             if not picks:  # `start_sprint([])` would mean "everything in the backlog"
                 raise ConversationError(
@@ -586,6 +602,17 @@ class MasterAgent(LoompaAgent):
                 row = store.get_story(item.story_id) if item.story_id else None
                 if item.story_id and (row is None or row["stage"] != Stage.BACKLOG):
                     raise ConversationError(f"{item.story_id} não está mais esperando no backlog")
+            staying = {i.story_id for i in members if i.in_sprint}
+            check_assembly(joining, store, also=staying)
+        if not draft.cancel_sprint:  # nothing that stays may depend on what leaves (ADR-0021)
+            gone = {i.story_id for i in leaving}
+            for item in members:
+                row = store.get_story(item.story_id) or {}
+                if item.in_sprint and row.get("stage") not in TERMINAL:
+                    for dep in set(row.get("depends_on") or []) & gone:
+                        raise ConversationError(
+                            f"{item.story_id} depende de {dep}: tire as duas do sprint ou nenhuma"
+                        )
         stage = {i.story_id: (store.get_story(i.story_id) or {}).get("stage") for i in members}
         in_flight = [i.story_id for i in [*leaving, *restarting] if stage[i.story_id] in AT_WORK]
         holder = EngineLock(self.ctx.factory.paths.loompa / "engine.lock").holder()
@@ -627,8 +654,10 @@ class MasterAgent(LoompaAgent):
                 item.story_id = added.story_id
                 (result.created if added.created else result.existing).append(added.story_id)
             board.add(item.story_id, running.id)
-            po.admit(item.story_id)
             result.joined.append(item.story_id)
+        po.save_dependencies(joining)
+        for sid in result.joined:
+            po.admit(sid)
         for item in draft.items:
             row = store.get_story(item.story_id) if item.story_id else None
             if row is None or row["stage"] in TERMINAL:
@@ -829,6 +858,26 @@ class MasterAgent(LoompaAgent):
             allow_free_text=False,
         )
         return self.ctx.inbox(msg)
+
+
+# ---------------------------------------------------------------------- dependencies
+
+
+def check_assembly(
+    items: list[Any], store: Any, *, also: set[str] | frozenset = frozenset()
+) -> None:
+    """ADR-0021's assembly rule on a draft: every dependency of a card going into the sprint
+    goes in too, is already in it (`also`), or is done. Checked before anything is written."""
+    keys = {i.key for i in items} | {i.story_id for i in items if i.story_id} | set(also)
+    for item in items:
+        for dep in item.depends_on:
+            row = store.get_story(dep)
+            if dep in keys or (row is not None and row["stage"] == Stage.DONE):
+                continue
+            raise ConversationError(
+                f"{item.key} depende de {dep}, que não está no sprint: inclua {dep} ou tire a "
+                "dependência"
+            )
 
 
 # ------------------------------------------------------------------ meeting briefing

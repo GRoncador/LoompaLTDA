@@ -206,6 +206,10 @@ class EngineContext:
         )
 
     def inbox(self, msg: FounderMessage) -> FounderMessage:
+        if msg.story_id and msg.kind.value in ("blocked", "decision", "delivery"):
+            from loompa.dependencies import note_dependents
+
+            note_dependents(self.store, self.slug, msg)  # one answer may unblock several
         violations = msg.executive_audit()
         if violations:  # never let technical noise through, even from an LLM rewrite
             from loompa.comms import sanitize_for_founder

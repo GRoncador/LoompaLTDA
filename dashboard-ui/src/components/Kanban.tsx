@@ -155,7 +155,9 @@ function Card({ s, activity, now, onOpen, onUnpin }: { s: StoryCard; activity?: 
           {s.phase && !["BACKLOG", "AWAITING_FOUNDER", "DONE"].includes(s.stage) && <span className="chip bg-slate-800 text-slate-400" title={s.route.join(" → ")}>{s.phase.replace("_", " ")}</span>}
           {s.current_tier === "tier1" && <span className="chip bg-blue-900/60 text-blue-200">tier 1</span>}
           {s.qa_verdict === "CONCERNS" && <span className="chip bg-orange-900/50 text-orange-200">ressalvas</span>}
-          {s.blocked_reason && <span className="chip bg-amber-900/60 text-amber-200">{s.blocked_reason === "delivery" ? "revisar" : s.blocked_reason === "question" ? "dúvida" : s.blocked_reason === "waiver" ? "risco" : "bloqueada"}</span>}
+          {s.blocked_reason && <span className="chip bg-amber-900/60 text-amber-200">{s.blocked_reason === "delivery" ? "revisar" : s.blocked_reason === "question" ? "dúvida" : s.blocked_reason === "waiver" ? "risco" : s.blocked_reason === "dependency" ? "dependência saiu" : "bloqueada"}</span>}
+          {s.waiting?.label && <span className="chip bg-indigo-900/50 text-indigo-200" title="Esperando sem precisar de você: retoma sozinha quando a cadeia estiver pronta">⏳ {s.waiting.label}</span>}
+          {!s.waiting && !!s.depends_on?.length && !["DONE", "CANCELLED"].includes(s.stage) && <span className="chip bg-slate-800 text-slate-400" title="O plano desta história só é feito depois que estas forem entregues">↳ depende de {s.depends_on.join(", ")}</span>}
           {s.tasks_total > 0 && <span className="chip bg-slate-800 text-slate-400">{s.tasks_done}/{s.tasks_total}</span>}
         </div>
         {activity && now !== undefined && <Activity a={activity} now={now} />}

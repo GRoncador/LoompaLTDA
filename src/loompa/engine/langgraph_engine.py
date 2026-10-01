@@ -14,6 +14,8 @@ The story pipeline is a `StateGraph` over `StoryState` whose nodes come from the
 * The Founder inbox is the human-in-the-loop channel: a reply calls `aupdate_state(...,
   as_node="await_founder")` so the graph continues on the next `loompa run` without executing
   inside the reply process.
+* A story of a dependency chain stops before `plan` while its chain is not ready (ADR-0021):
+  the run ends with the checkpoint kept, and the Scheduler resumes it at `plan` the same way.
 """
 
 from __future__ import annotations
@@ -31,8 +33,9 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent
+from loompa.dependencies import WAIT_KEY
 from loompa.engine.context import EngineContext
-from loompa.engine.graph import BlockedReason, block
+from loompa.engine.graph import BlockedReason, block, gate_plan
 from loompa.engine.phases import PHASES, ensure_route
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.store import LOCK_BACKOFF_S, LOCK_RETRIES, is_lock_error
@@ -46,6 +49,8 @@ def route(state: StoryState) -> str:
         return END
     if state.stage in PAUSED:
         return "await_founder"
+    if state.extra.get(WAIT_KEY):
+        return END  # parked before `plan`: the Scheduler resumes it when the chain is ready
     ensure_route(state)
     return state.phase
 
@@ -88,6 +93,11 @@ def build_graph(
         async def node(state: StoryState) -> dict[str, Any]:
             ops = OpsAgent(ctx)
             ensure_route(state)
+            if name == "plan":  # a chain story plans only when its chain is ready (ADR-0021)
+                gated = await gate_plan(ctx, state)
+                if gated is not None:
+                    _project(ctx, gated, "gate_plan")
+                    return gated.model_dump()
             while True:
                 try:
                     # one span per run of the node: the root of everything its agents call

@@ -89,6 +89,9 @@ class DraftItem(BaseModel):
     kind: str = ""  # StoryKind value the Product Owner gave the card, "" when it did not say
     ideas: list[str] = Field(default_factory=list)  # the ideas (D1…) the card came from
     amend: str = ""  # with `story_id`: what this brainstorm adds to that waiting card
+    depends_on: list[str] = Field(
+        default_factory=list
+    )  # keys of the cards it needs first (ADR-0021)
 
 
 class Proposal(BaseModel):
@@ -232,6 +235,7 @@ class OpenCard:
     origin: str = "founder"
     pinned: bool = False  # the founder dragged it into place
     kind: str = ""
+    depends_on: tuple[str, ...] = ()
 
     @property
     def waiting(self) -> bool:
@@ -254,6 +258,7 @@ def from_scale(priority: int) -> int:
 class OpsReport:
     changes: list[str] = field(default_factory=list)
     ignored: list[str] = field(default_factory=list)
+    cycles: list[str] = field(default_factory=list)  # relations refused for closing a cycle
 
 
 def _bool(value: Any) -> bool | None:
@@ -310,7 +315,15 @@ def apply_ops(
             _dismiss(draft, raw, op == "dismiss", report)
             continue
         if op == "add":
-            _add(draft, raw, by_title, origin, report, noun="ideia" if brainstorm else "história")
+            _add(
+                draft,
+                raw,
+                by_title,
+                origin,
+                report,
+                noun="ideia" if brainstorm else "história",
+                cards=cards,
+            )
         elif op in ("update", "set"):
             _update(draft, raw, cards, report)
         elif op in ("drop", "remove"):
@@ -359,6 +372,7 @@ def _pull(draft: Draft, card: OpenCard, *, in_sprint: bool = False) -> DraftItem
         in_sprint=in_sprint,
         story_id=card.id,
         origin=card.origin,
+        depends_on=list(card.depends_on),
     )
     draft.items.append(item)
     return item
@@ -372,7 +386,9 @@ def _add(
     report: OpsReport,
     *,
     noun: str = "história",
+    cards: Mapping[str, OpenCard] | None = None,
 ) -> None:
+    cards = cards or {}
     title = (_text(raw, "title", MAX_TITLE) or "").strip()
     if not title:
         report.ignored.append("uma história precisa de título")
@@ -382,6 +398,7 @@ def _add(
     same = next((i for i in draft.items if normalize_title(i.title) == key), None)
     if same is not None:  # the model repeated itself: refine the card instead of doubling it
         _apply_fields(same, raw)
+        _set_deps(draft, same, raw.get("depends_on"), cards, report)
         report.changes.append(f"atualizei “{same.title}”")
         return
     card = by_title.get(key)
@@ -408,6 +425,7 @@ def _add(
     draft.next_key += 1
     draft.items.append(item)
     report.changes.append(f"nova {noun} “{title}”" + (" no sprint" if in_sprint else ""))
+    _set_deps(draft, item, raw.get("depends_on"), cards, report)
 
 
 def _apply_fields(item: DraftItem, raw: Mapping[str, Any]) -> list[str]:
@@ -428,6 +446,47 @@ def _apply_fields(item: DraftItem, raw: Mapping[str, Any]) -> list[str]:
     if item.story_id and _bool(raw.get("pinned")) is False:
         item.unpin = True
     return refused
+
+
+def _set_deps(
+    draft: Draft,
+    item: DraftItem,
+    raw: Any,
+    cards: Mapping[str, OpenCard],
+    report: OpsReport,
+) -> None:
+    """Which cards `item` needs delivered first (ADR-0021): draft keys or open cards' ids. An
+    unknown reference is skipped, and a set that would close a cycle is refused whole."""
+    from loompa.dependencies import would_cycle
+
+    if raw is None:
+        return
+    refs = [raw] if isinstance(raw, str) else raw if isinstance(raw, list) else []
+    wanted: list[str] = []
+    for ref in (str(r).strip() for r in refs if str(r).strip()):
+        target = draft.find(ref)
+        key = target.key if target else (ref.upper() if ref.upper() in cards else None)
+        if key is None:
+            report.ignored.append(f"{item.key} depende de {ref}, que não está aberto")
+        elif key == item.key:
+            report.ignored.append(f"{item.key} não pode depender de si mesmo")
+        elif key not in wanted:
+            wanted.append(key)
+    edges = {c.id: list(c.depends_on) for c in cards.values()}
+    edges.update({i.key: list(i.depends_on) for i in draft.items})
+    cycle = would_cycle(edges, item.key, wanted)
+    if cycle:
+        path = " → ".join(cycle)
+        report.cycles.append(path)
+        report.ignored.append(f"essa dependência fecharia um ciclo ({path}) e não entrou")
+        return
+    if wanted != item.depends_on:
+        item.depends_on = wanted
+        report.changes.append(
+            f"“{item.title}” depende de {', '.join(wanted)}"
+            if wanted
+            else f"“{item.title}” não depende de outro card"
+        )
 
 
 def _ref(raw: Mapping[str, Any]) -> str:
@@ -456,6 +515,7 @@ def _update(
         report.ignored.append(
             f"o texto de {item.key} pertence ao backlog e não muda por aqui ({', '.join(refused)})"
         )
+    _set_deps(draft, item, raw.get("depends_on"), cards, report)
     report.changes.append(f"ajustei “{item.title}”")
 
 
@@ -484,6 +544,9 @@ def _drop(draft: Draft, raw: dict[str, Any], report: OpsReport) -> None:
         report.changes.append(f"“{item.title}” sai do sprint ao aplicar (volta ao backlog)")
         return
     draft.items.remove(item)
+    for other in draft.items:  # nobody depends on a card that left the draft
+        if item.key in other.depends_on:
+            other.depends_on.remove(item.key)
     report.changes.append(
         f"tirei “{item.title}” do rascunho" + (" (continua no backlog)" if item.story_id else "")
     )
@@ -514,7 +577,8 @@ def render_draft(draft: Draft) -> str:
             where = "JOINS THE RUNNING SPRINT"
         existing = " · existing backlog card" if i.story_id else ""
         epic = f" · epic: {i.epic}" if i.epic else ""
-        lines.append(f'- {i.key} · P{i.priority} · {where}{existing}{epic} · "{i.title}"')
+        needs = f" · depends on {', '.join(i.depends_on)}" if i.depends_on else ""
+        lines.append(f'- {i.key} · P{i.priority} · {where}{existing}{epic}{needs} · "{i.title}"')
         if i.description and not i.story_id:
             lines.append(f"    {i.description[:400]}")
         if i.note:
@@ -566,11 +630,20 @@ def render_backlog(cards: Mapping[str, OpenCard], *, limit: int = 60) -> str:
     waiting = [c for c in cards.values() if c.waiting]
     busy = [c for c in cards.values() if not c.waiting]
     lines = ["Cards waiting in the backlog (reference them by id):"]
-    lines += [
-        f"- {c.id} · P{c.priority}{' · pinned by the founder' if c.pinned else ''} · {c.origin}"
-        f'{f" · {c.kind}" if c.kind not in ("", "feature") else ""}{f" · epic: {c.epic}" if c.epic else ""} · "{c.title}"'
-        for c in waiting[:limit]
-    ] or ["(none)"]
+    for c in waiting[:limit]:
+        tags = [f"P{c.priority}"]
+        if c.pinned:
+            tags.append("pinned by the founder")
+        tags.append(c.origin)
+        if c.kind not in ("", "feature"):
+            tags.append(c.kind)
+        if c.epic:
+            tags.append(f"epic: {c.epic}")
+        if c.depends_on:
+            tags.append(f"depends on {', '.join(c.depends_on)}")
+        lines.append(f'- {c.id} · {" · ".join(tags)} · "{c.title}"')
+    if not waiting:
+        lines.append("(none)")
     if busy:
         lines.append("Work already in progress (never duplicate it):")
         lines += [f'- {c.id} · {c.stage} · "{c.title}"' for c in busy[:limit]]
@@ -644,6 +717,7 @@ class ConversationBoard:
                 origin=row.get("origin", "founder"),
                 pinned=bool(row.get("priority_pinned")),
                 kind=str((row.get("state") or {}).get("kind") or ""),
+                depends_on=tuple(row.get("depends_on") or ()),
             )
             for row in self.store.list_stories(self.slug)
             if row["stage"] not in TERMINAL
