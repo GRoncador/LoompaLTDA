@@ -13,12 +13,13 @@ from contextlib import contextmanager
 
 from loompa.aci import ACI, run_command, summarize_tests
 from loompa.agents.architect import REPRO_KEY, task_origin, writable_tests
-from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance, repo_outline
+from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance, lifted, repo_outline
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
 from loompa.engine.state import Autonomy, StoryKind, StoryState
 from loompa.hygiene import new_files, scan_diff
 from loompa.llm import Message
+from loompa.llm.router import TIER_ABOVE
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.speckit.artifacts import mark_task_done
 from loompa.worktrees import Worktree
@@ -368,11 +369,13 @@ class WorkerAgent(LoompaAgent):
         tasks_md: str,
         outline: str,
     ) -> AgentResult:
-        """Run the suite after the reproducer task: it must fail anew. A green run gets one more
-        round; a test that still does not fail is recorded and the fix goes on (never blocks)."""
+        """Run the suite after the reproducer task: it must fail anew. A green run gets three more
+        rounds — one on the Worker's tier, two on the tier above (ADR-0016 §5); a test that still
+        does not fail is recorded and the fix goes on (never blocks)."""
         repro = state.extra.setdefault(REPRO_KEY, {"task": number})
         result = AgentResult(ok=True, summary="teste de reprodução escrito")
-        for attempt in range(2):
+        retries = self.ctx.config.schedule.ops_max_recoveries
+        for attempt in range(retries + 1):
             failing = await self._new_failures(state, wt)
             if failing is None:
                 repro["status"] = "unverified"  # no test command, or dry-run
@@ -380,7 +383,7 @@ class WorkerAgent(LoompaAgent):
             if failing:
                 repro.update(status="red", failing=failing[:10])
                 break
-            if attempt == 1:
+            if attempt == retries:
                 repro["status"] = "not_reproduced"
                 state.learnings.append(
                     {
@@ -402,6 +405,7 @@ class WorkerAgent(LoompaAgent):
                 outline=outline,
                 changed=self.ctx.worktrees.diff_stat(wt),
                 label="reproducer_retry",
+                tier=TIER_ABOVE[self.tier_override or "tier2"] if attempt >= 1 else None,
             )
             if result.blocked_reason:
                 return result
@@ -506,7 +510,11 @@ class WorkerAgent(LoompaAgent):
         return True
 
     async def resolve_conflicts(
-        self, state: StoryState, wt: Worktree, files: list[str]
+        self,
+        state: StoryState,
+        wt: Worktree,
+        files: list[str],
+        left_before: list[str] | None = None,
     ) -> AgentResult:
         """The base merged into the story left conflict markers in `files`. One structured call
         with every conflicted file in the prompt returns each file resolved; the ACI writes them
@@ -526,8 +534,17 @@ class WorkerAgent(LoompaAgent):
         if blocks:
             data = await self.ask_json(
                 CONFLICT_SYSTEM.format(language=self.language),
-                f"# Story {state.story_id}: {state.title}\n\n" + "\n\n".join(blocks),
+                f"# Story {state.story_id}: {state.title}\n\n"
+                + (
+                    "A previous attempt left conflict markers in: "
+                    + ", ".join(left_before)
+                    + ". Resolve every block of those files completely.\n\n"
+                    if left_before
+                    else ""
+                )
+                + "\n\n".join(blocks),
                 story=state,
+                tier_override=self.tier_override,  # the tier this try was given (ADR-0016 §5)
                 max_tokens=max(2000, sum(len(b) for b in blocks) // 2),
             )
             resolved = data.get("files") if isinstance(data.get("files"), dict) else {}
@@ -583,6 +600,7 @@ class WorkerAgent(LoompaAgent):
             CONFLICT_HUNKS_SYSTEM.format(language=self.language),
             body,
             story=state,
+            tier_override=self.tier_override,
             max_tokens=max(2000, len(body) // 2),
         )
         answers = data.get("hunks") if isinstance(data.get("hunks"), dict) else {}
@@ -613,6 +631,7 @@ class WorkerAgent(LoompaAgent):
         diagnosis: bool = False,
         label: str = "main",
         red_tests_ok: bool = False,
+        tier: str | None = None,
     ) -> AgentResult:
         started = time.monotonic()
         # ADR-0016: a first attempt's task thinks lightly and goes back to the default on the
@@ -673,7 +692,7 @@ class WorkerAgent(LoompaAgent):
             toolbox,
             story=state,
             max_iterations=sched.worker_max_iterations,
-            tier_override=self.tier_override,
+            tier_override=tier or self.tier_override,
             terminal=("done", "blocked"),
             nudge="Continue with the tools, or call `done` if the task is complete and its checks are green.",
             keep_tool_results=sched.worker_keep_tool_results,
@@ -764,6 +783,7 @@ class WorkerAgent(LoompaAgent):
                 max_tokens=600,
                 complexity=str(state.complexity),
                 reasoning_effort="low",  # ADR-0016: a checklist check; the judge looks again
+                lift=lifted(state),
             )
             from loompa.llm.providers import extract_json
 

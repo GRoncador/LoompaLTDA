@@ -91,6 +91,15 @@ def trouble(
     return ""
 
 
+# Set on a story while a failed step is retried on the tier above (ADR-0016 §5); every model call
+# the story's agents make then goes one tier up, until the step succeeds.
+TIER_LIFT_KEY = "tier_lift"
+
+
+def lifted(story: StoryState | None) -> bool:
+    return bool(story is not None and story.extra.get(TIER_LIFT_KEY))
+
+
 class LoompaAgent:
     role: str = "worker"
     display: str = "Loompa"
@@ -207,6 +216,7 @@ class LoompaAgent:
                     max_tokens=max_tokens,
                     complexity=complexity,
                     reasoning_effort=effort,
+                    lift=lifted(story),
                 )
                 resp = routed.response
                 last_text = resp.text or last_text
@@ -298,6 +308,7 @@ class LoompaAgent:
                     max_tokens=max_tokens,
                     complexity=complexity,
                     reasoning_effort=effort,
+                    lift=lifted(story),
                 )
             return LoopResult(
                 "text", routed.response.text or last_text, tool_calls=calls, raised=raised
@@ -351,6 +362,7 @@ class LoompaAgent:
                 max_tokens=max_tokens,
                 complexity=str(story.complexity) if story else None,
                 reasoning_effort=reasoning_effort,
+                lift=lifted(story),
             )
             try:
                 return _as_dict(extract_json(routed.response.text))
@@ -385,6 +397,7 @@ class LoompaAgent:
                 max_tokens=max_tokens,
                 complexity=str(story.complexity) if story else None,
                 reasoning_effort=reasoning_effort,
+                lift=lifted(story),
             )
             try:
                 return _as_dict(extract_json(routed.response.text))

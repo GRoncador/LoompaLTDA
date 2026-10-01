@@ -63,9 +63,8 @@ A Worker task starts at `low`. The first sign of trouble moves the rest of that 
 wrote, a LoopGuard note, or lookups answered from memory twice in a row. The reproducer task (whose
 tests are meant to fail) does not raise on a failing run. A later attempt of the story (anything
 after the first failure), the fix pass, the self-check pass and the reproducer retry run at the
-default throughout. The story ladder stays as it is — tier 2, tier 2 again, tier 1 re-planned,
-the founder — but its second rung is now at the default everywhere; there is no "tier 1 high"
-rung, because `high` is not a deeper state on these models.
+default throughout. There is no "tier 1 high" rung (§5): `high` is not a deeper state on these
+models.
 
 ### 3. Output room is a backstop, not an estimate
 
@@ -98,15 +97,35 @@ While a call streams, `llm.progress` (throttled to one every 30 s, with the toke
 the stall watchdog, so a long, progressing call is never taken for a hang, and the card can read
 "pensando · 12k tokens".
 
-### 5. Integration problems get more than one try
+### 5. Three tries before the founder, everywhere
 
-- A conflict when the base is merged into a story is resolved at the default on tier 2; if markers
-  are left, once more on tier 1; then the founder, as before.
-- A git failure the Ops Loompa does not recognise (merge, push, PR) gets one diagnosis by the
+The founder's rule: every loop that fixes something tries three more times after the first failure
+before the founder hears of it, each try with the errors and test data of the one before — **one on
+the tier it was on, then two on the tier above** (all three on tier 1 when it already was there).
+
+- **The story ladder** (the judge's FAIL, a task the Worker could not finish): the first attempt and
+  one more on tier 2, then two on tier 1, re-planned on the way up (`tier1_max_attempts` 1 → 2); a
+  story on tier 1 from the start gets its three tries there. The PO's criteria review still comes
+  before the stronger model is paid.
+- **A step that fails** (the Ops Loompa): every failure but a setup problem (no API key) gets
+  `ops_max_recoveries` (3) more tries. An instability still waits a growing backoff; anything else —
+  an answer cut even at full room, an unexpected answer, an unexpected error — is tried again at
+  once. From the second try on, the story carries a tier lift: every call its agents make goes one
+  tier up (`TIER_ABOVE`), until the step succeeds. The smoke run's plan, cut on every tier-2 model,
+  now gets through on tier 1 instead of blocking. A worktree that cannot be prepared is such a
+  failure too (it used to block at once). The founder's note says how many tries were made and
+  that a stronger model was among them.
+- **A conflict** when the base is merged into a story: resolved, and if markers are left the merge
+  is redone and resolved again — once on the same tier, twice on the tier above — each try told
+  which files the one before left unresolved; a story whose base moves again during its delivery is
+  reintegrated up to three times. Found on the way: the resolver never used the tier it was given.
+- **The reproducer** of a bug fix: a test that does not fail gets three more rounds (one on the
+  Worker's tier, two above) before the fix goes on without that proof (it never blocks).
+- **A git failure the Ops Loompa does not recognise** (merge, push, PR) gets a diagnosis by the
   Deployer at the default: the model reads the command, its error and `git status`, and picks one
   action from a closed list (retry, re-sync the story with its base, abort the merge and requeue
-  the story, ask the founder). The code runs it through `agent.git` only (ADR-0008); at most two
-  diagnoses per story, then the founder.
+  the story, ask the founder). The code runs it through `agent.git` only (ADR-0008); three
+  diagnoses at most, by the same rule, then the founder.
 
 ### 6. The judge checks that tests call the product the way a user does
 

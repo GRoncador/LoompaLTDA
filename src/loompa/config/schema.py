@@ -54,7 +54,7 @@ class FactoryConfig(BaseModel):
 class ScheduleConfig(BaseModel):
     max_parallel: int = Field(3, ge=1, le=32)
     tier2_max_attempts: int = Field(2, ge=1)
-    tier1_max_attempts: int = Field(1, ge=1)
+    tier1_max_attempts: int = Field(2, ge=1)
     worker_max_iterations: int = Field(40, ge=1)
     worker_keep_tool_results: int = Field(6, ge=1)
     # Older file reads kept verbatim (newest first, while still current), in characters, and the

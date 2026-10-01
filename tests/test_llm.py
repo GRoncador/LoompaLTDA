@@ -663,6 +663,15 @@ async def test_a_low_call_stays_low_when_it_is_cut():
     assert {c["reasoning_effort"] for c in prov.calls} == {"low"}
 
 
+def test_a_lifted_call_goes_one_tier_above_and_tier_one_stays():
+    cfg = two_provider_matrix()
+    router = ModelRouter(cfg, providers={})
+    assert router.candidates("worker", lift=True)[0] == "tier1"
+    assert router.candidates("worker", tier_override="tier1", lift=True)[0] == "tier1"
+    assert router.candidates("worker", tier_override="tier3", lift=True)[0] == "tier2"
+    assert router.candidates("worker")[0] == "tier2"
+
+
 def test_ops_does_not_wait_out_a_cut_answer_and_says_why_in_plain_words():
     from loompa.agents.ops import triage
     from loompa.comms import audit_executive_text

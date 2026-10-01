@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from loompa.agents.base import LoompaAgent
+from loompa.agents.base import TIER_LIFT_KEY, LoompaAgent
 from loompa.comms import FounderMessage, MessageKind
 from loompa.engine.state import StoryState
 from loompa.llm import LLMError
@@ -32,10 +32,16 @@ class StoryStalled(RuntimeError):
         self.minutes = minutes
 
 
+# A failure that is not an instability is tried again without waiting: time will not change it.
+RETRY_AT_ONCE_S = 1.0
+
+
 @dataclass
 class Triage:
     transient: bool
     cause: str  # plain pt-BR sentence fragment, e.g. "o serviço de IA atingiu o limite de uso"
+    # A setup problem (no API key): trying again cannot fix it, the founder must.
+    setup: bool = False
 
 
 def triage(exc: BaseException) -> Triage:
@@ -46,7 +52,7 @@ def triage(exc: BaseException) -> Triage:
         )
     if isinstance(exc, LLMError):
         if "chave de api" in text or "não configurado" in text:
-            return Triage(False, "falta configurar o acesso ao serviço de IA")
+            return Triage(False, "falta configurar o acesso ao serviço de IA", setup=True)
         if "resposta cortada" in text:
             return Triage(
                 False,
@@ -80,16 +86,24 @@ class OpsAgent(LoompaAgent):
 
     def on_failure(self, state: StoryState, node: str, exc: BaseException) -> float | None:
         """Decide what to do with a crash. Returns seconds to wait before re-running the node,
-        or None when the story must be escalated to the Founder (see `executive_reason`)."""
+        or None when the story must be escalated to the Founder (see `executive_reason`).
+
+        Every failure but a setup problem gets `ops_max_recoveries` (3) more tries before the
+        founder hears of it (ADR-0016 §5): the first on the tier the step used, the next ones on
+        the tier above. An instability waits a growing backoff first; anything else (an answer
+        cut even at full room, an unexpected answer or error) is tried again at once."""
         t = triage(exc)
         incident = dict(state.extra.get(INCIDENT_KEY) or {})
         recoveries = int(incident.get("recoveries", 0)) + 1
         incident.update(node=node, cause=t.cause, recoveries=recoveries, transient=t.transient)
         state.extra[INCIDENT_KEY] = incident
-        if not t.transient or recoveries > self.max_recoveries:
+        if t.setup or recoveries > self.max_recoveries:
+            state.extra.pop(TIER_LIFT_KEY, None)
             self.set_state("idle", state)
             return None
-        wait = self.wait_for(recoveries)
+        if recoveries >= 2:
+            state.extra[TIER_LIFT_KEY] = True
+        wait = self.wait_for(recoveries) if t.transient else RETRY_AT_ONCE_S
         self.set_state(
             "waiting",
             state,
@@ -102,6 +116,7 @@ class OpsAgent(LoompaAgent):
             wait_s=wait,
             recoveries=recoveries,
             cause=t.cause,
+            lifted=bool(state.extra.get(TIER_LIFT_KEY)) or None,
         )
         return wait
 
@@ -111,14 +126,16 @@ class OpsAgent(LoompaAgent):
         cause = str(incident.get("cause") or "aconteceu um problema inesperado nesta etapa")
         tried = int(incident.get("recoveries", 1)) - 1
         if tried > 0:
+            stronger = f", {tried - 1} delas com um modelo de IA mais forte," if tried >= 2 else ""
             return (
-                f"{cause[0].upper()}{cause[1:]}. O Ops Loompa tentou retomar sozinho {tried} vez(es), "
-                "sem sucesso, e preferiu pedir sua orientação em vez de insistir."
+                f"{cause[0].upper()}{cause[1:]}. O Ops Loompa tentou retomar sozinho {tried} vez(es)"
+                f"{stronger} sem sucesso, e preferiu pedir sua orientação em vez de insistir."
             )
         return f"{cause[0].upper()}{cause[1:]}. O Ops Loompa não conseguiu resolver sozinho e pediu sua orientação."
 
     def on_success(self, state: StoryState) -> None:
         """The node ran fine after a retry: close the incident and leave one calm note."""
+        state.extra.pop(TIER_LIFT_KEY, None)
         incident = state.extra.pop(INCIDENT_KEY, None)
         if not incident or not incident.get("transient"):
             return

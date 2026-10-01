@@ -56,6 +56,10 @@ def _cut_tail(resp: LLMResponse) -> dict[str, str]:
 # thought as little as `low`, and `max` as much as the default: the labels are not a scale.
 LIGHT_EFFORTS = ("low", "minimal")
 
+# One tier up, for the retries of a failed step (ADR-0016 §5: one try on the tier it used, then two
+# on the tier above; tier 1 has nothing above it and stays).
+TIER_ABOVE = {"tier3": "tier2", "tier2": "tier1", "tier1": "tier1"}
+
 
 @dataclass
 class RoutedCall:
@@ -169,9 +173,11 @@ class ModelRouter:
         tier_override: str | None = None,
         complexity: str | None = None,
         task: str | None = None,
+        lift: bool = False,
     ) -> tuple[str, list[ModelCandidate]]:
         """Tier for a call: explicit override > story complexity > task > role/cluster default.
-        Candidates are resolved from the matrix: cluster(role) x tier."""
+        Candidates are resolved from the matrix: cluster(role) x tier. With `lift` (a retry of a
+        step that failed) the call goes one tier above what it would have used."""
         cluster = self.config.models.cluster_for_role(role)
         tier = tier_override or self.config.models.tier_for_task(role, task)
         if tier_override is None and complexity:
@@ -182,6 +188,8 @@ class ModelRouter:
                 tier = "tier1"
 
         tier = tier or ("tier3" if cluster == "routine" else "tier2")
+        if lift:
+            tier = TIER_ABOVE.get(tier, tier)
         # The cap is spent and the founder asked for free models instead of a pause: every call
         # drops to tier 3, whatever the role, the task or the story asked for.
         if self.budget_downgrade():
@@ -218,8 +226,9 @@ class ModelRouter:
         complexity: str | None = None,
         reasoning_effort: str | None = None,
         task: str | None = None,
+        lift: bool = False,
     ) -> RoutedCall:
-        tier, cands = self.candidates(role, tier_override, complexity, task)
+        tier, cands = self.candidates(role, tier_override, complexity, task, lift)
         with self.tracer.span(
             "llm",
             agent or role,

@@ -61,6 +61,7 @@ from loompa.engine.state import (
 )
 from loompa.hygiene import is_test_path
 from loompa.llm import LLMError
+from loompa.llm.router import TIER_ABOVE
 from loompa.risk import needs_preflight
 from loompa.worktrees import GitError, Worktree
 
@@ -302,25 +303,40 @@ def _ensure_worktree(ctx: EngineContext, state: StoryState) -> Worktree:
     return wt
 
 
-async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
-    try:
-        wt = _ensure_worktree(ctx, state)
-    except GitError as exc:
-        return await block(
-            ctx,
-            state,
-            BlockedReason.PERSISTENT_FAILURE,
-            f"Não foi possível preparar o ambiente isolado: {exc}",
-            resume="dev",
+async def _resolve_with_retries(
+    ctx: EngineContext, state: StoryState, wt: Worktree, conflicts: list[str]
+) -> bool:
+    """Resolve the conflicts of merging the base into the story: the first try on the story's
+    tier, then `ops_max_recoveries` (3) more — one on the same tier, the others on the tier above
+    (ADR-0016 §5) — each told which files the try before left with markers. False leaves the
+    story on its old base, as before; the delivery then reports the conflict."""
+    deployer = DeployerAgent(ctx)
+    start = "tier1" if state.current_tier == "tier1" else "tier2"
+    left: list[str] = []
+    for n in range(ctx.config.schedule.ops_max_recoveries + 1):
+        tier = start if n <= 1 else TIER_ABOVE[start]
+        if n:
+            ctx.emit("worktree.sync_retry", story_id=state.story_id, attempt=n, tier=tier)
+            conflicts = deployer.sync_with_base(state, wt) or []  # the last try was aborted
+            if not conflicts:
+                return True
+        await WorkerAgent(ctx, tier_override=tier).resolve_conflicts(
+            state, wt, conflicts, left_before=left
         )
+        left = deployer.git.has_conflict_markers(wt, conflicts)
+        if deployer.finish_sync(state, wt, conflicts):
+            return True
+    return False
+
+
+async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
+    # A worktree that cannot be prepared raises: the Ops Loompa tries again (three times, ADR-0016
+    # §5) before the founder hears of it, as with any other failure of a step.
+    wt = _ensure_worktree(ctx, state)
     if "baseline" not in state.extra:
         state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
     elif (conflicts := DeployerAgent(ctx).sync_with_base(state, wt)) is not None:
-        merged = not conflicts
-        if conflicts:
-            tier = "tier1" if state.current_tier == "tier1" else None
-            await WorkerAgent(ctx, tier_override=tier).resolve_conflicts(state, wt, conflicts)
-            merged = DeployerAgent(ctx).finish_sync(state, wt, conflicts)
+        merged = not conflicts or await _resolve_with_retries(ctx, state, wt, conflicts)
         if merged:
             # the base moved under a story going back to work: "already failing" moved too
             with ctx.worktrees.base_checkout(wt.base) as base_path:
@@ -509,8 +525,9 @@ UNFINISHED_EXECUTIVE = (
 async def climb(
     ctx: EngineContext, state: StoryState, failure: str, *, executive: str
 ) -> StoryState:
-    """A failed attempt climbs the escalation ladder: tier 2 again, then tier 1 (re-planned once),
-    then the founder. Failed means the Inspector's FAIL, or a Worker that could not finish a task
+    """A failed attempt climbs the escalation ladder: tier 2 once more, then tier 1 twice (re-planned
+    on the way up), then the founder — three tries after the first failure (ADR-0016 §5), each
+    with the failure before it in hand. Failed means the Inspector's FAIL, or a Worker that could not finish a task
     (Fase 8.5) — which never costs an Inspector run on a half-built story."""
     state.failure_history.append(failure)
     sched = ctx.config.schedule
@@ -537,7 +554,12 @@ async def climb(
             return goto(state, "plan")
         return goto(state, "dev")
     state.attempts_tier1 += 1
-    if state.attempts_tier1 < sched.tier1_max_attempts:
+    # ADR-0016 §5: three tries after the first failure — one more on tier 2, two on tier 1. A
+    # story that was on tier 1 from the start has all three there.
+    tier1_limit = sched.tier1_max_attempts + (
+        sched.tier2_max_attempts if state.attempts_tier2 == 0 else 0
+    )
+    if state.attempts_tier1 < tier1_limit:
         ctx.emit("story.retry", story_id=state.story_id, tier="tier1", attempt=state.attempts_tier1)
         return goto(state, "dev")
     return await block(
@@ -555,7 +577,10 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     KaizenAgent(ctx).capture(state)  # findings never get lost: sweep what no earlier phase filed
     res = await DeployerAgent(ctx).run(state, wt)
     if not res.ok:
-        if "dev" in state.route and state.extra.get(CONFLICT_RETRIES_KEY, 0) < 1:
+        if (
+            "dev" in state.route
+            and state.extra.get(CONFLICT_RETRIES_KEY, 0) < ctx.config.schedule.ops_max_recoveries
+        ):
             # the base moved while the story was in test: `dev` merges it in and resolves the
             # conflict, then the story is tested again. The founder hears only if that fails.
             state.extra[CONFLICT_RETRIES_KEY] = state.extra.get(CONFLICT_RETRIES_KEY, 0) + 1

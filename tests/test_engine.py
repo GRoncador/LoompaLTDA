@@ -524,6 +524,91 @@ async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Facto
     await ctx.aclose()
 
 
+async def test_a_conflict_left_with_markers_is_tried_again_then_on_the_tier_above(
+    factory: Factory,
+):
+    """ADR-0016 §5: a resolution that leaves markers is no longer the end. The merge is redone
+    and resolved again — once on the same tier, then on the tier above — each try told which
+    files the one before left unresolved."""
+    root = factory.root
+    resolves: list[tuple[str, str]] = []  # (model, prompt)
+
+    def worker(model: str, messages: list[Message]) -> Any:
+        task = next(m.content for m in messages if m.role == "user")
+        if "You resolve git merge conflicts" in messages[0].content:
+            resolves.append((model, task))
+            if len(resolves) < 3:  # the first two tries leave the markers where they were
+                return json.dumps({"files": {}})
+            merged = (
+                "def add(a, b):\n    return b + a  # main\n\n\ndef sub(a, b):\n    return a - b\n"
+            )
+            return json.dumps({"files": {"app/calc.py": merged}})
+        if tool_results(messages):
+            return [ToolCall("d", "done", {"summary": "ok"})]
+        if not resolves and "sub" not in (root / "app" / "calc.py").read_text():
+            story = (
+                "def add(a, b):\n    return a + b  # story\n\n\ndef sub(a, b):\n    return a - b\n"
+            )
+            (root / "app" / "calc.py").write_text("def add(a, b):\n    return b + a  # main\n")
+            git("add", ".", cwd=root)
+            git("commit", "-qm", "fix: main mexe na mesma linha", cwd=root)
+            return [
+                ToolCall("r1", "read_file", {"path": "app/calc.py"}),
+                ToolCall("w1", "write_file", {"path": "app/calc.py", "content": story}),
+                ToolCall(
+                    "w3",
+                    "write_file",
+                    {
+                        "path": "tests/test_sub.py",
+                        "content": "from app.calc import sub\n\n\ndef test_sub():\n    assert sub(3, 1) == 3\n",
+                    },
+                ),
+            ]
+        fixed = "from app.calc import sub\n\n\ndef test_sub():\n    assert sub(3, 1) == 2\n"
+        return [
+            ToolCall("r4", "read_file", {"path": "tests/test_sub.py"}),
+            ToolCall(
+                "w4",
+                "write_file",
+                {"path": "tests/test_sub.py", "content": fixed, "reason": "3 - 1 is 2"},
+            ),
+        ]
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect" and "## Founder's guidance" not in messages[-1].content:
+            return json.dumps(
+                {
+                    "approach": "sub",
+                    "files": ["app/", "tests/"],
+                    "contracts": "",
+                    "risks": [],
+                    "tasks": ["Criar sub"],
+                    "adr_proposal": "",
+                }
+            )
+        if role_of(messages) == "worker":
+            return worker(model, messages)
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Subtrair")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "delivery", state.failure_history
+    assert len(resolves) == 3
+    tier2 = _tier_models(ctx, "worker", "tier2")
+    tier1 = _tier_models(ctx, "worker", "tier1")
+    assert resolves[0][0] in tier2 and resolves[1][0] in tier2 and resolves[2][0] in tier1
+    assert "left conflict markers in: app/calc.py" not in resolves[0][1]
+    assert all("left conflict markers in: app/calc.py" in p for _, p in resolves[1:])
+    events = ctx.store.events_since(0, limit=10_000)
+    retries = [e["payload"] for e in events if e["type"] == "worktree.sync_retry"]
+    assert [(r["attempt"], r["tier"]) for r in retries] == [(1, "tier2"), (2, "tier1")]
+    calc = (Path(state.worktree) / "app" / "calc.py").read_text()
+    assert "# main" in calc and "def sub" in calc and "<<<<<<<" not in calc
+    await ctx.aclose()
+
+
 async def test_a_conflict_found_at_delivery_is_reintegrated_before_asking(factory: Factory):
     """`contas` S-002: main moved (another story merged) while it was in test, so the
     delivery's rebase conflicted and the founder was asked. Merging the base and resolving is
@@ -614,7 +699,8 @@ async def test_persistent_failure_blocks_only_that_story(factory: Factory):
         bad_state.stage == Stage.AWAITING_FOUNDER
         and bad_state.blocked_reason == "persistent_failure"
     )
-    assert bad_state.attempts_tier2 == 2 and bad_state.attempts_tier1 == 1
+    # ADR-0016 §5: three tries after the first failure — one more on tier 2, two on tier 1
+    assert bad_state.attempts_tier2 == 2 and bad_state.attempts_tier1 == 2
     msg = ctx.store.get_message(bad_state.blocked_message_id)
     assert msg.kind == "blocked" and msg.requires_action and msg.executive_audit() == []
     assert "quebrado de propósito" not in msg.context and msg.technical_ref.endswith(f"{bad}.log")
@@ -849,6 +935,93 @@ async def test_ops_loompa_escalates_in_plain_language_after_max_recoveries(facto
     assert msg.executive_audit() == [] and "Ops Loompa tentou" in msg.context
     assert "cooldown" not in msg.context and "LLMError" not in msg.context
     await ctx.aclose()
+
+
+def _simple(model: str, messages: list[Message], tools: Any) -> Any:
+    """The dry run, with every story classified SIMPLE (its planning runs on tier 2)."""
+    if role_of(messages) == "master" and "Classify the story" in messages[0].content:
+        return json.dumps(
+            {"kind": "feature", "complexity": "SIMPLE", "children": [], "reason": "pequena"}
+        )
+    return dry_run_script(model, messages, tools)
+
+
+def _tier_models(ctx: EngineContext, role: str, tier: str) -> set[str]:
+    cluster = ctx.config.models.cluster_for_role(role)
+    return {c.model for c in ctx.config.models.candidates_for_cluster_tier(cluster, tier)}
+
+
+async def test_a_step_that_fails_is_tried_again_then_twice_on_the_tier_above(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    """ADR-0016 §5, the smoke run's S-001: a plan cut on every tier-2 model went straight to the
+    founder. Now the step is tried again on its tier, then on the tier above, before anyone is
+    asked — and the retry on tier 1 is where it gets through."""
+    from loompa.agents import ops
+    from loompa.llm.providers import LLMResponse
+
+    monkeypatch.setattr(ops, "RETRY_AT_ONCE_S", 0.0)
+    used: list[str] = []
+    ctx_box: dict[str, EngineContext] = {}
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect":
+            used.append(model)
+            if model in _tier_models(ctx_box["ctx"], "architect", "tier2"):
+                return LLMResponse("", [], model, "mock", 100, 128000, finish_reason="length")
+        return _simple(model, messages, tools)
+
+    ctx = ctx_box["ctx"] = make_ctx(factory, script)
+    sid = seed_story(ctx, "Plano difícil")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "delivery", state.failure_history  # got through on tier 1
+    tier1 = _tier_models(ctx, "architect", "tier1")
+    assert used and used[-1] in tier1 and not set(used[:-1]) & tier1  # tier 2 first, then up
+    retries = [
+        e["payload"] for e in ctx.store.events_since(0, limit=10_000) if e["type"] == "story.retry"
+    ]
+    assert [bool(r.get("lifted")) for r in retries] == [False, True]  # same tier, then above
+    assert "tier_lift" not in state.extra and "ops_incident" not in state.extra
+    await ctx.aclose()
+
+
+async def test_three_tries_then_the_founder_hears_a_stronger_model_was_tried(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    from loompa.agents import ops
+    from loompa.llm.providers import LLMResponse
+
+    monkeypatch.setattr(ops, "RETRY_AT_ONCE_S", 0.0)
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect":
+            return LLMResponse("", [], model, "mock", 100, 128000, finish_reason="length")
+        return _simple(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Nunca cabe")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "persistent_failure"
+    types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
+    assert types.count("story.retry") == 3 and "tier_lift" not in state.extra
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert "3 vez(es), 2 delas com um modelo de IA mais forte" in msg.context
+    assert msg.executive_audit() == []
+    await ctx.aclose()
+
+
+def test_a_setup_problem_goes_to_the_founder_without_retrying(factory: Factory):
+    from loompa.agents.ops import OpsAgent
+    from loompa.engine.state import StoryState
+
+    ctx = make_ctx(factory, dry_run=True)
+    state = StoryState(story_id="S-9", title="x")
+    ops_agent = OpsAgent(ctx)
+    assert ops_agent.on_failure(state, "plan", LLMError("chave de API ausente: defina X")) is None
+    assert ops_agent.on_failure(StoryState(story_id="S-8", title="y"), "plan", ValueError("x"))
+    ctx.close()
 
 
 async def test_the_same_block_twice_stops_recommending_try_again(factory: Factory):

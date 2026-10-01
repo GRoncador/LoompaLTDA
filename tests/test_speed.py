@@ -184,7 +184,8 @@ async def test_a_task_going_in_circles_is_not_done_and_never_reaches_the_inspect
     seen = types(ctx, sid)
     # every attempt stopped inside `dev`: the Inspector never judged a half-built story
     assert "inspector.verdict" not in seen and "worker.dod_incomplete" not in seen
-    assert seen.count("story.task_unfinished") == 3  # tier 2 twice, tier 1 once (re-planned)
+    # the first attempt and three tries (ADR-0016 §5): tier 2 twice, tier 1 twice (re-planned)
+    assert seen.count("story.task_unfinished") == 4
     assert "story.escalated" in seen and "story.replanned" in seen
     assert (
         state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason.value == "persistent_failure"
