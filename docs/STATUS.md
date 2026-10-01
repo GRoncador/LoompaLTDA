@@ -566,6 +566,17 @@ Decided 2026-09-29:
   waiting cards via `Backlog.amend`, held ideas); the second OK files it; talking again takes the first
   OK back. `admit_ideas` and the Analyst's chat are gone. Seen in headless Chrome (dry-run). The three
   prompts are unseen with a real model.
+- **2026-10-01 (later) — Dependencies between stories and the chain gate (ADR-0021, plan item 6: 10.7 +
+  10.9).** `stories.depends_on` (migrated on open), written only by the Product Owner
+  (`Backlog.set_dependencies`: no self, no unknown card, no cycle). Declared in the sprint proposal
+  (`picks[].depends_on`, asked again once on a cycle) and in a brainstorm split; the founder removes
+  one from the draft card. Assembly rule in code: a dependency joins the sprint with its dependent
+  (`bring_dependencies`), and `start_sprint`, `commit_meeting` and a running-sprint adjustment refuse
+  what breaks it. `dependencies.plan_gate` before `plan`: open, wait (parked in `extra.waiting`, run
+  ends with the checkpoint, slot freed, no inbox; the Scheduler resumes it at `plan` and puts chain
+  stories without an approved spec first) or gone (`BlockedReason.DEPENDENCY`: skip/detach/drop).
+  `ctx.inbox` adds "A S-0XX depende desta" to a message others wait on; the card shows the wait
+  computed live. Dry-run end to end: the dependent's spec runs once and its plan sees the merged code.
 
 ## Known gaps / next steps
 
@@ -586,7 +597,7 @@ Decided 2026-09-29:
   stops the Architect re-thinking each round (a plan took 8.7 min); one experiment, inconclusive.
 - **Order revised 2026-09-30 (evening), see the plan's "Ordem de execução das Fases 8 a 11":** build
   everything that does not need Sprint 2 first, then run `contas` Sprint 2 once to validate it all.
-  Done: 10.1–10.3/10.5/10.6 + 11.2/11.4 (ADR-0017), 8.2 + 10.8 (ADR-0019), 10.4 (ADR-0020), all 2026-10-01. Next: ADR + 10.7/10.9 dependencies →
+  Done: 10.1–10.3/10.5/10.6 + 11.2/11.4 (ADR-0017), 8.2 + 10.8 (ADR-0019), 10.4 (ADR-0020), 10.7/10.9 (ADR-0021), all 2026-10-01. Next:
   8.3/8.4 self-diagnosis (thresholds from Sprint 1 data in `contas`' state.db; trace-based signals
   provisional until Sprint 2) → 11.1/11.3 → OTLP export to Phoenix (off by default) → Sprint 2 →
   Fase 9 (model changes before Sprint 2 would confound the Sprint 1 × 2 speed comparison).
