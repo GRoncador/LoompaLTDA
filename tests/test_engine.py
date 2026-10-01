@@ -986,6 +986,40 @@ async def test_a_step_that_fails_is_tried_again_then_twice_on_the_tier_above(
     await ctx.aclose()
 
 
+async def test_a_judge_that_gives_no_verdict_is_tried_again_and_never_approves(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    """Second smoke run: both models were cut mid-thought judging S-002 and the Inspector passed
+    it anyway ("the judge is advisory"). A silent judge now fails the step like any other: tried
+    again, then on the tier above, where it answers."""
+    from loompa.agents import ops
+    from loompa.llm.providers import LLMResponse
+
+    monkeypatch.setattr(ops, "RETRY_AT_ONCE_S", 0.0)
+    judged: list[str] = []
+    ctx_box: dict[str, EngineContext] = {}
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "inspector" and "quality gate" in messages[0].content:
+            judged.append(model)
+            if model in _tier_models(ctx_box["ctx"], "inspector", "tier2"):
+                return LLMResponse("", [], model, "mock", 100, 96000, finish_reason="length")
+        return _simple(model, messages, tools)
+
+    ctx = ctx_box["ctx"] = make_ctx(factory, script)
+    sid = seed_story(ctx, "Julgamento difícil")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "delivery", state.failure_history
+    tier1 = _tier_models(ctx, "inspector", "tier1")
+    assert judged[-1] in tier1 and not set(judged[:-1]) & tier1  # tier 2 first, then above
+    verdicts = [
+        e for e in ctx.store.events_since(0, limit=10_000) if e["type"] == "inspector.verdict"
+    ]
+    assert len(verdicts) == 1  # no verdict was ever given without a judge
+    await ctx.aclose()
+
+
 async def test_three_tries_then_the_founder_hears_a_stronger_model_was_tried(
     factory: Factory, monkeypatch: pytest.MonkeyPatch
 ):

@@ -47,6 +47,11 @@ cannot tell.
    or calling the function behind the command line when the criterion is about the command line.
    Why: a command that failed for every real user (`converter -40 C`: "No such option: -4")
    passed review because its test called it as `converter -- -40 C`.
+   A test runner that invokes the command with exactly the user's arguments (Typer's or Click's
+   `CliRunner`, a subprocess) IS the user's path. Do not re-derive from memory how a library
+   parses arguments: the automated checks ran the code, and their result is the fact. When you
+   cannot tell without running something, decide on the tests and say so in `reason`.
+   Why: two models spent 128k tokens each recalling Click's parser instead of reading the tests.
 
 2. Findings: defects the checks cannot catch. Report ONLY what you can anchor in the diff: `file`
    is a path in the diff and `evidence` a short verbatim quote of the added or changed line.
@@ -245,25 +250,23 @@ class InspectorAgent(LoompaAgent):
             findings = _numbered(weak_tests(full_diff))
         if ok and state.acceptance and not self.ctx.dry_run:
             judge = await self._judge(state, wt, "\n".join(parts), full_diff)
-            if judge is not None:
-                failed = [c for c in judge.get("criteria", []) if not c.get("pass")]
-                criteria_ok = not failed
-                findings = _numbered(
-                    [*(f for f in findings if f["severity"] == "high"), *judge["findings"]]
-                    + [f for f in findings if f["severity"] != "high"]
-                )[:MAX_FINDINGS]
-                parts.append(
-                    f"[acceptance] {'PASS' if criteria_ok else 'FAIL'}"
-                    + (
-                        "\n"
-                        + "\n".join(
-                            f"- {c.get('text', '')[:120]}: {c.get('reason', '')[:200]}"
-                            for c in failed
-                        )
-                        if failed
-                        else ""
+            failed = [c for c in judge.get("criteria", []) if not c.get("pass")]
+            criteria_ok = not failed
+            findings = _numbered(
+                [*(f for f in findings if f["severity"] == "high"), *judge["findings"]]
+                + [f for f in findings if f["severity"] != "high"]
+            )[:MAX_FINDINGS]
+            parts.append(
+                f"[acceptance] {'PASS' if criteria_ok else 'FAIL'}"
+                + (
+                    "\n"
+                    + "\n".join(
+                        f"- {c.get('text', '')[:120]}: {c.get('reason', '')[:200]}" for c in failed
                     )
+                    if failed
+                    else ""
                 )
+            )
         if findings:
             parts.append(
                 "[findings]\n"
@@ -297,7 +300,7 @@ class InspectorAgent(LoompaAgent):
 
     async def _judge(
         self, state: StoryState, wt: Worktree, checks: str = "", full_diff: str | None = None
-    ) -> dict | None:
+    ) -> dict:
         diff = self.ctx.worktrees.diff(wt, max_chars=16000)
         if not diff.strip():
             return {
@@ -329,12 +332,12 @@ class InspectorAgent(LoompaAgent):
             )
             + f"## Diff\n```diff\n{diff}\n```"
         )
-        try:
-            data = await self.ask_json(
-                JUDGE_SYSTEM.format(language=self.language), user, story=state, max_tokens=2500
-            )
-        except Exception:  # noqa: BLE001 - judge is advisory when the LLM is unavailable
-            return None
+        # A judge that gives no verdict fails the step, it never approves it: the Ops Loompa tries
+        # again (three times, the later ones on the tier above) and then asks the founder
+        # (ADR-0016 §5). The second smoke run passed S-002 after both models were cut mid-thought.
+        data = await self.ask_json(
+            JUDGE_SYSTEM.format(language=self.language), user, story=state, max_tokens=2500
+        )
         criteria = [
             c
             for c in data.get("criteria") or []
