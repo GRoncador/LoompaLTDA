@@ -41,6 +41,12 @@ cannot tell.
 1. Acceptance criteria. For EACH criterion decide whether the diff plus its tests demonstrably
    satisfy it. Strict and binary. A failed criterion needs a concrete reason: what is missing and
    where (file, function, test). "Not demonstrated" alone is not a reason.
+   A test proves a criterion only if it reaches the product the way the criterion's user does.
+   A test that gets there by a path no user takes does not prove it, and the criterion fails:
+   an argument separator such as `--` the spec never mentions, a mocked parser or entry point,
+   or calling the function behind the command line when the criterion is about the command line.
+   Why: a command that failed for every real user (`converter -40 C`: "No such option: -4")
+   passed review because its test called it as `converter -- -40 C`.
 
 2. Findings: defects the checks cannot catch. Report ONLY what you can anchor in the diff: `file`
    is a path in the diff and `evidence` a short verbatim quote of the added or changed line.
