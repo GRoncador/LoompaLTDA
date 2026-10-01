@@ -1,13 +1,20 @@
 import { useRef, useState } from "react";
-import type { Column, SprintSummary, StoryActivity, StoryCard } from "../types";
+import type { Column, ConversationKind, ConversationSummary, QuickStoryResult, SprintSummary, StoryActivity, StoryCard } from "../types";
 
 const TONE: Record<string, string> = {
   BACKLOG: "border-slate-600", SPEC: "border-violet-500", DEV: "border-emerald-500", TEST: "border-sky-500", AWAITING_FOUNDER: "border-amber-500", DONE: "border-slate-500",
 };
 
-export default function Kanban({ columns, sprint, live, now, onStartSprint, onOpen, onPromote, onCreate, onReorder }: { columns: Column[]; sprint: SprintSummary | null; live: Record<string, StoryActivity>; now: number; onStartSprint: () => Promise<void>; onOpen: (id: string) => void; onPromote: (id: string) => void; onCreate: (title: string) => Promise<void>; onReorder: (ids: string[]) => Promise<void> }) {
+const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
+
+export default function Kanban({ columns, sprint, conversations, live, now, onChat, onOpen, onPromote, onCreate, onReorder, onUnpin }: {
+  columns: Column[]; sprint: SprintSummary | null; conversations: ConversationSummary[]; live: Record<string, StoryActivity>; now: number;
+  onChat: (kind: ConversationKind, resumeId?: string) => void; onOpen: (id: string) => void; onPromote: (id: string) => void;
+  onCreate: (title: string) => Promise<QuickStoryResult | null>; onReorder: (ids: string[], dragged: string | null) => Promise<void>; onUnpin: (id: string) => Promise<void>;
+}) {
   const [title, setTitle] = useState("");
-  const [starting, setStarting] = useState(false);
+  const [reading, setReading] = useState(false); // the Product Owner is reading a quick story
+  const [filed, setFiled] = useState<{ id: string; title: string; kind: string; rewritten: boolean } | null>(null);
   // drag-and-drop priority, backlog only: the preview order while dragging, sent on drop
   const [dragId, setDragId] = useState<string | null>(null);
   const [preview, setPreview] = useState<string[] | null>(null);
@@ -25,18 +32,31 @@ export default function Kanban({ columns, sprint, live, now, onStartSprint, onOp
     setPreview(ids);
   };
   const drop = async () => {
-    const ids = preview;
+    const ids = preview, moved = dragId;
     dropped.current = true;
     setDragId(null);
-    if (ids && ids.join() !== backlog.map((s) => s.id).join()) await onReorder(ids);
+    if (ids && ids.join() !== backlog.map((s) => s.id).join()) await onReorder(ids, moved);
     setPreview(null);
   };
-  // the founder's own cards wait for a sprint; Kaizen findings wait for an explicit yes
-  const waiting = (columns.find((c) => c.key === "BACKLOG")?.stories ?? []).filter((s) => s.origin !== "kaizen").length;
+  // the founder's quick story goes to the Product Owner first: filed as it reads, or a review chat
+  const create = async () => {
+    const t = title.trim();
+    if (!t || reading) return;
+    setReading(true); setFiled(null);
+    try {
+      const r = await onCreate(t);
+      if (!r) return;
+      setTitle("");
+      if (r.status === "created") {
+        const rewritten = !!r.story && r.story.title !== t;
+        setFiled({ id: r.id, title: r.story?.title ?? t, kind: r.story?.kind ?? "feature", rewritten });
+      }
+    } finally { setReading(false); }
+  };
   return (
     <>
-      <div className="flex items-center justify-between border-b border-line px-3 py-2">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold">📋 Kanban de Fluxo de Valor</h2>
           {sprint && (
             <span className="chip bg-sky-900/50 text-sky-200" title={sprint.goal || undefined}>
@@ -44,15 +64,34 @@ export default function Kanban({ columns, sprint, live, now, onStartSprint, onOp
               {sprint.progress.waiting > 0 ? ` · ${sprint.progress.waiting} aguardando você` : ""}
             </span>
           )}
-          {waiting > 0 && (
-            <button className="btn-primary text-xs" disabled={starting} onClick={async () => { setStarting(true); try { await onStartSprint(); } finally { setStarting(false); } }}>
-              ▶ Iniciar sprint ({waiting})
-            </button>
+          {/* a sprint starts only from a meeting, after the Product Owner's proposal (ADR-0017) */}
+          <button className="btn-primary text-xs" title="O Master abre com o estado do projeto; o Product Owner propõe o sprint" onClick={() => onChat("meeting")}>🗓 Reunião de Sprint</button>
+          <button className="btn-ghost text-xs" title="Discutir uma ideia com a fábrica" onClick={() => onChat("brainstorm")}>💡 Brainstorm</button>
+          {conversations.length > 0 && (
+            <details className="relative">
+              <summary className="btn-ghost cursor-pointer list-none text-xs" title="Conversas em aberto">💬 {conversations.length}</summary>
+              <ul className="card absolute left-0 z-30 mt-1 w-72 space-y-1 p-2 text-xs">
+                {conversations.map((c) => (
+                  <li key={c.id}>
+                    <button className="w-full rounded px-2 py-1 text-left hover:bg-line" onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; onChat(c.kind, c.id); }}>
+                      <span className="text-slate-500">{c.id} · {c.kind === "meeting" ? "reunião" : c.kind === "review" ? "revisão do PO" : "brainstorm"}</span>
+                      <div className="truncate text-slate-100">{c.title || "(sem título)"}</div>
+                      <div className="text-[10px] text-slate-500">{c.kind === "review" ? "pedido aguardando você" : `${c.cards} cards`} · {c.turns} mensagens</div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
         </div>
-        <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); if (title.trim()) { await onCreate(title.trim()); setTitle(""); } }}>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Nova história rápida…" className="w-64 rounded-md border border-line bg-ink px-2 py-1 text-xs" />
-          <button className="btn-ghost text-xs" type="submit">+ Backlog</button>
+        <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); create(); }}>
+          {filed && (
+            <button type="button" className="max-w-[18rem] truncate text-[11px] text-emerald-300 hover:underline" title="O Product Owner gravou o card; clique para ver" onClick={() => { onOpen(filed.id); setFiled(null); }}>
+              ✔ {filed.id} · {filed.title} · {KIND_LABEL[filed.kind] ?? filed.kind}{filed.rewritten ? " (reescrita pelo PO)" : ""}
+            </button>
+          )}
+          <input value={title} disabled={reading} onChange={(e) => setTitle(e.target.value)} placeholder={reading ? "O Product Owner está lendo…" : "Nova história rápida…"} className="w-64 rounded-md border border-line bg-ink px-2 py-1 text-xs disabled:opacity-60" />
+          <button className="btn-ghost text-xs" type="submit" disabled={reading || !title.trim()} title="O Product Owner lê o pedido, classifica e grava, ou explica por que não">{reading ? "lendo…" : "+ Backlog"}</button>
         </form>
       </div>
       <div className="scroll-thin grid flex-1 grid-cols-6 gap-2 overflow-x-auto p-3">
@@ -74,7 +113,7 @@ export default function Kanban({ columns, sprint, live, now, onStartSprint, onOp
                     onDrop={(e) => { e.preventDefault(); drop(); }}
                     onDragEnd={() => { if (!dropped.current) { setDragId(null); setPreview(null); } }}
                   >
-                    <Card s={s} onOpen={onOpen} onPromote={onPromote} />
+                    <Card s={s} onOpen={onOpen} onPromote={onPromote} onUnpin={onUnpin} />
                   </div>
                 ) : (
                   <Card key={s.id} s={s} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} onPromote={onPromote} />
@@ -88,12 +127,16 @@ export default function Kanban({ columns, sprint, live, now, onStartSprint, onOp
   );
 }
 
-function Card({ s, activity, now, onOpen, onPromote }: { s: StoryCard; activity?: StoryActivity | null; now?: number; onOpen: (id: string) => void; onPromote: (id: string) => void }) {
+function Card({ s, activity, now, onOpen, onPromote, onUnpin }: { s: StoryCard; activity?: StoryActivity | null; now?: number; onOpen: (id: string) => void; onPromote: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
   const kaizen = s.origin === "kaizen" && s.stage === "BACKLOG";
+  const pinned = s.priority_pinned && s.stage === "BACKLOG";
   return (
-    <div className="rounded-md border border-line bg-panel p-2 text-xs hover:border-slate-500">
+    <div className="relative rounded-md border border-line bg-panel p-2 text-xs hover:border-slate-500">
+      {pinned && onUnpin && (
+        <button className="absolute right-1.5 top-1 text-[11px] opacity-80 hover:opacity-100" title="Posição fixada por você: o Product Owner não move este card. Clique para devolver a ordem a ele." onClick={() => onUnpin(s.id)}>📌</button>
+      )}
       <button className="w-full text-left" onClick={() => onOpen(s.id)}>
-        <div className="flex items-center justify-between text-[10px] text-slate-500">
+        <div className={`flex items-center justify-between text-[10px] text-slate-500 ${pinned ? "pr-4" : ""}`}>
           <span>{s.id}</span>
           <span>{s.cost_usd > 0 ? `$${s.cost_usd.toFixed(2)}` : ""}</span>
         </div>

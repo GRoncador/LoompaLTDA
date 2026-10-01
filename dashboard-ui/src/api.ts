@@ -1,4 +1,4 @@
-import type { ChatReply, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, Settings, SettingsPatch } from "./types";
+import type { ChatReply, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
@@ -33,8 +33,8 @@ export const api = {
   reply: (slug: string, id: string, body: { option_key?: string | null; text?: string | null; decisions?: Record<string, string> }) =>
     req<{ stage: string | null }>(`/api/factories/${slug}/inbox/${id}/reply`, { method: "POST", body: JSON.stringify(body) }),
   archive: (slug: string, id: string) => req(`/api/factories/${slug}/inbox/${id}/archive`, { method: "POST" }),
-  meeting: (slug: string, goals: string, run: boolean) =>
-    req<{ stories: { id: string; title: string }[]; clarifications: string[] }>(`/api/factories/${slug}/meeting`, { method: "POST", body: JSON.stringify({ goals, run }) }),
+  meeting: (slug: string, goals: string) =>
+    req<{ stories: { id: string; title: string }[]; clarifications: string[] }>(`/api/factories/${slug}/meeting`, { method: "POST", body: JSON.stringify({ goals }) }),
   conversation: (slug: string, id: string) => req<{ conversation: ChatReply["conversation"] }>(`/api/factories/${slug}/conversations/${id}`),
   openConversation: (slug: string, kind: ConversationKind, text: string) =>
     req<ChatReply>(`/api/factories/${slug}/conversations`, { method: "POST", body: JSON.stringify({ kind, text }) }),
@@ -42,19 +42,22 @@ export const api = {
     req<ChatReply>(`/api/factories/${slug}/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ text }) }),
   editDraft: (slug: string, id: string, ops: Record<string, unknown>[]) =>
     req<ChatReply>(`/api/factories/${slug}/conversations/${id}/draft`, { method: "POST", body: JSON.stringify({ ops }) }),
-  commit: (slug: string, id: string, body: { start_sprint?: boolean; goal?: string; run?: boolean }) =>
+  commit: (slug: string, id: string, body: { start_sprint?: boolean; goal?: string; run?: boolean; force?: boolean }) =>
     req<ChatReply>(`/api/factories/${slug}/conversations/${id}/commit`, { method: "POST", body: JSON.stringify(body) }),
+  /** The Product Owner's sprint proposal: "Começar Sprint" waits for one (ADR-0017). */
+  propose: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/propose`, { method: "POST" }),
   discard: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/discard`, { method: "POST" }),
-  startSprint: (slug: string, story_ids: string[] = [], goal = "") =>
-    req<{ id: string; story_ids: string[] }>(`/api/factories/${slug}/sprints/start`, { method: "POST", body: JSON.stringify({ story_ids, goal, run: true }) }),
   story: (slug: string, id: string) => req<any>(`/api/factories/${slug}/stories/${id}`),
+  /** A quick story: the Product Owner files it or opens a review conversation (ADR-0017). */
   createStory: (slug: string, title: string, description: string) =>
-    req<{ id: string }>(`/api/factories/${slug}/stories`, { method: "POST", body: JSON.stringify({ title, description }) }),
+    req<QuickStoryResult>(`/api/factories/${slug}/stories`, { method: "POST", body: JSON.stringify({ title, description }) }),
+  unpin: (slug: string, id: string) => req(`/api/factories/${slug}/stories/${id}/unpin`, { method: "POST" }),
   storyDiff: (slug: string, id: string) =>
     req<{ source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string }>(`/api/factories/${slug}/stories/${id}/diff`),
-  /** The founder's drag-and-drop order for the backlog; applied by the Product Owner. */
-  reorderBacklog: (slug: string, story_ids: string[]) =>
-    req<{ order: string[] }>(`/api/factories/${slug}/backlog/order`, { method: "POST", body: JSON.stringify({ story_ids }) }),
+  /** The founder's drag-and-drop order for the backlog; applied by the Product Owner. The
+   *  dragged card stays pinned where it was dropped. */
+  reorderBacklog: (slug: string, story_ids: string[], dragged: string | null) =>
+    req<{ order: string[] }>(`/api/factories/${slug}/backlog/order`, { method: "POST", body: JSON.stringify({ story_ids, dragged }) }),
   promote: (slug: string, id: string) => req(`/api/factories/${slug}/stories/${id}/promote`, { method: "POST" }),
   agent: (slug: string, name: string) => req<any>(`/api/factories/${slug}/agents/${encodeURIComponent(name)}`),
   finance: (slug: string) => req<any>(`/api/factories/${slug}/finance`),

@@ -19,6 +19,7 @@ export interface StoryCard {
   stage: string;
   column: string;
   priority: number;
+  priority_pinned: boolean; // the founder dragged it there: the Product Owner's ranking leaves it
   origin: string;
   cost_usd: number;
   blocked_reason: string | null;
@@ -84,12 +85,32 @@ export interface Message {
   answer?: { option_key: string | null; text: string | null; answered_at: string } | null;
 }
 
-export type ConversationKind = "meeting" | "brainstorm";
+export type ConversationKind = "meeting" | "brainstorm" | "review";
 
 export interface DraftItem {
   key: string; title: string; description: string; epic: string; priority: number;
-  in_sprint: boolean; story_id: string | null; origin: string; note: string;
+  in_sprint: boolean; story_id: string | null; origin: string; note: string; unpin?: boolean;
 }
+
+/** The Product Owner's reading of a request before it becomes a card (ADR-0017). */
+export interface Triage {
+  admit: boolean;
+  reason_code: "" | "duplicate" | "contradicts" | "vague" | "too_big" | "other";
+  reason: string;
+  duplicate_of: string;
+  title: string;
+  description: string;
+  kind: string;
+  epic: string;
+  after: string | null;
+  reviewed: boolean;
+}
+
+export interface Proposal { keys: string[]; reviewed: boolean; at: string }
+
+export type QuickStoryResult =
+  | { status: "created"; id: string; story: StoryCard | null; triage: Triage | null }
+  | { status: "refused"; id: null; triage: Triage | null; conversation: Conversation | null };
 
 export interface Turn { who: "founder" | "agent"; name: string; text: string; changes: string[]; at: string }
 
@@ -101,7 +122,7 @@ export interface Conversation {
   status: "open" | "committed" | "discarded";
   title: string;
   turns: Turn[];
-  draft: { goal: string; items: DraftItem[] };
+  draft: { goal: string; items: DraftItem[]; proposal?: Proposal | null; review?: Triage | null };
   limits: string[];
   result: Partial<CommitResult>;
 }

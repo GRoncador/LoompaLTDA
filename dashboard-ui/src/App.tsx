@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { useSocket } from "./useSocket";
-import type { ConversationKind, FactoryRef, LoompaEvent, Message, Overview, StoryActivity } from "./types";
+import type { ConversationKind, FactoryRef, LoompaEvent, Message, Overview, QuickStoryResult, StoryActivity } from "./types";
 import Header from "./components/Header";
 import Office from "./components/Office";
 import Inbox from "./components/Inbox";
@@ -19,7 +19,7 @@ export default function App() {
   const [slug, setSlug] = useState<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [events, setEvents] = useState<LoompaEvent[]>([]);
-  const [chat, setChat] = useState<{ kind: ConversationKind; resumeId?: string } | null>(null);
+  const [chat, setChat] = useState<{ kind: ConversationKind; resumeId?: string; text?: string } | null>(null);
   const [newFactoryOpen, setNewFactoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [financeOpen, setFinanceOpen] = useState(false);
@@ -58,7 +58,7 @@ export default function App() {
       setLive((prev) => ({ ...prev, [sid]: advance(prev[sid] ?? snapshot(overviewRef.current, sid), e) }));
       setNow(Date.now());
     }
-    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "story.stalled"].includes(e.type)) {
+    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "story.stalled"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
@@ -75,10 +75,15 @@ export default function App() {
     await api.reply(slug, m.id, { option_key, text, decisions });
     refresh();
   };
-  const startSprint = async () => {
-    if (!slug) return;
-    try { await api.startSprint(slug); setError(null); } catch (e) { setError(String(e)); }
-    refresh();
+  // the quick story: the Product Owner files it, or opens a review chat explaining why not
+  const createStory = async (title: string): Promise<QuickStoryResult | null> => {
+    if (!slug) return null;
+    try {
+      const r = await api.createStory(slug, title, "");
+      if (r.status === "refused" && r.conversation) setChat({ kind: "review", resumeId: r.conversation.id });
+      setError(null);
+      return r;
+    } catch (e) { setError(String(e)); return null; } finally { refresh(); }
   };
 
   const pendingCount = useMemo(() => overview?.inbox.filter((m) => m.kind === "decision" || m.kind === "blocked" || m.kind === "delivery").length ?? 0, [overview]);
@@ -87,7 +92,7 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
-        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onChat={(kind, resumeId) => setChat({ kind, resumeId })} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)}
+        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)}
       />
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
       <main className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
@@ -102,11 +107,18 @@ export default function App() {
           <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} />
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
-          <Kanban columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} live={live} now={now} onStartSprint={startSprint} onOpen={setStoryId} onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }} onCreate={async (title) => { if (slug) { await api.createStory(slug, title, ""); refresh(); } }} onReorder={async (ids) => { if (slug) { try { await api.reorderBacklog(slug, ids); } catch (e) { setError(String(e)); } refresh(); } }} />
+          <Kanban
+            columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now}
+            onChat={(kind, resumeId) => setChat({ kind, resumeId })} onOpen={setStoryId}
+            onPromote={async (id) => { if (slug) { await api.promote(slug, id); refresh(); } }}
+            onCreate={createStory}
+            onReorder={async (ids, dragged) => { if (slug) { try { await api.reorderBacklog(slug, ids, dragged); } catch (e) { setError(String(e)); } refresh(); } }}
+            onUnpin={async (id) => { if (slug) { try { await api.unpin(slug, id); } catch (e) { setError(String(e)); } refresh(); } }}
+          />
         </section>
       </main>
       <EventTicker events={events} />
-      {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} onClose={() => { setChat(null); refresh(); }} />}
+      {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
       {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
       {settingsOpen && slug && <SettingsModal slug={slug} onClose={() => { setSettingsOpen(false); refresh(); }} />}
       {newFactoryOpen && <NewFactoryModal onClose={async (created) => { setNewFactoryOpen(false); await loadFactories(); if (created) setSlug(created); }} />}

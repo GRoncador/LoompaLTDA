@@ -11,3 +11,13 @@ body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
 .chip { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide; }
 .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 .scroll-thin::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+/* Always shown, not only while scrolling (macOS hides overlay bars): the founder sees at a glance
+   that a long spec or diff goes on below. */
+.scroll-always { overflow-y: scroll; }
+.scroll-always::-webkit-scrollbar { width: 10px; }
+.scroll-always::-webkit-scrollbar-track { background: #0f172a; border-radius: 5px; }
+.scroll-always::-webkit-scrollbar-thumb { background: #475569; border-radius: 5px; border: 2px solid #0f172a; }
+.scroll-always::-webkit-scrollbar-thumb:hover { background: #64748b; }
+@supports not selector(::-webkit-scrollbar) {
+  .scroll-always { scrollbar-width: auto; scrollbar-color: #475569 #0f172a; }
+}
