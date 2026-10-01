@@ -120,7 +120,7 @@ async def test_an_error_in_the_middle_of_the_stream_is_an_llm_error(provider):
 @respx.mock
 async def test_a_stream_that_only_keeps_alive_fails_on_silence(provider):
     """A server that keeps the connection open but writes nothing is not progress."""
-    provider.idle_s = 0.05
+    provider.token_idle_s = 0.05  # bytes keep coming: the connection is fine, the work is not
 
     async def keep_alive() -> AsyncIterator[bytes]:
         yield sse(delta(content="a"))

@@ -154,8 +154,10 @@ models:
   full_output_tokens: 128000
   max_output_ceiling: 128000
   truncation_retries: 2
-  # A streamed call fails after this long (s) without a token; no wall-clock limit otherwise.
+  # A streamed call fails after this long (s) with nothing received, or with only "processing"
+  # keep-alives and no token; no wall-clock limit otherwise.
   stream_idle_s: 300
+  stream_token_idle_s: 900
   # Wall-clock limit (s) for a provider that is not streamed.
   call_timeout_s: 600
 

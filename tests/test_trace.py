@@ -151,6 +151,35 @@ async def test_a_call_that_never_answered_still_shows_what_it_cost_and_what_it_t
     assert "m1" in line and "out 1.8k" in line and "US$ 0.0200" in line and "2 corte(s)" in line
 
 
+async def test_a_long_answer_keeps_the_tail_of_its_reasoning_even_when_it_finishes(
+    tmp_path: Path,
+):
+    cfg = _one_model_config()
+    long_one = LLMResponse(
+        "veredito",
+        [],
+        "m1",
+        "p",
+        100,
+        20000,
+        finish_reason="stop",
+        reasoning_tokens=19000,
+        raw={"choices": [{"message": {"reasoning": "y" * 1000 + "and so, PASS"}}]},
+    )
+    short_one = LLMResponse("ok", [], "m1", "p", 100, 50, finish_reason="stop", reasoning_tokens=40)
+    answers = iter([long_one, short_one])
+    router = ModelRouter(
+        cfg,
+        tracker=CostTracker(Store(":memory:"), cfg, "f"),
+        providers={"p": MockProvider("p", script=lambda *a: next(answers))},
+        tracer=Tracer(tmp_path),
+    )
+    await router.complete("inspector", [Message("user", "a")], story_id="S-1")
+    await router.complete("inspector", [Message("user", "b")], story_id="S-1")
+    first, second = (s["attrs"]["attempts"][0] for s in spans_of(tmp_path / "S-1.jsonl"))
+    assert first["reasoning_tail"].endswith("and so, PASS") and "reasoning_tail" not in second
+
+
 async def test_a_cut_answer_and_its_retry_are_one_call_with_two_attempts(tmp_path: Path):
     cfg = _one_model_config()
     answers = iter(

@@ -233,10 +233,13 @@ class ModelsConfig(BaseModel):
     output_scale: dict[str, float] = Field(
         default_factory=lambda: {"SIMPLE": 1.0, "STANDARD": 1.5, "COMPLEX": 3.0}
     )
-    # A streamed call fails (retryable) after this long without a single token; keep-alive
-    # comments prove the connection, not progress. There is no wall-clock limit on a streamed
-    # call: its output room ends a runaway.
+    # A streamed call fails (retryable) when nothing at all arrives for `stream_idle_s` (the
+    # connection is gone), or when the server keeps saying it is processing (keep-alive comments)
+    # but no token comes for `stream_token_idle_s`. Live, a healthy judge call waited ~100 s for
+    # its first token while the provider worked. No wall-clock limit: the output room ends a
+    # runaway.
     stream_idle_s: float = Field(300.0, ge=10)
+    stream_token_idle_s: float = Field(900.0, ge=10)
     # Wall-clock limit for a call to a provider that is not streamed.
     call_timeout_s: float = Field(600.0, ge=10)
     # Off: every role shares the `general` cluster, one 3-tier list instead of three.

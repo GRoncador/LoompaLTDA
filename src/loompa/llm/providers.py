@@ -440,6 +440,7 @@ class OpenAICompatibleProvider(LLMProvider):
         timeout: float = 180.0,
         secrets: Mapping[str, str] | None = None,
         idle_s: float = 300.0,
+        token_idle_s: float = 900.0,
     ):
         self.name = name
         self.cfg = cfg
@@ -449,6 +450,7 @@ class OpenAICompatibleProvider(LLMProvider):
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._owned = client is None
         self.idle_s = idle_s
+        self.token_idle_s = token_idle_s
 
     @property
     def streams(self) -> bool:  # type: ignore[override]
@@ -564,10 +566,10 @@ class OpenAICompatibleProvider(LLMProvider):
         on_progress: Callable[[int], None] | None,
     ) -> LLMResponse:
         """A streamed call: no wall-clock limit, only silence. No byte at all for `idle_s` (the
-        read timeout) or bytes without a token for as long (keep-alive comments prove the
-        connection, not progress) fail it as retryable. A server answering with plain JSON is
-        read whole, as before."""
-        idle = self.idle_s
+        read timeout: the connection is gone) or keep-alive comments without a token for
+        `token_idle_s` (the server says it is working, but nothing comes) fail it as retryable.
+        A server answering with plain JSON is read whole, as before."""
+        idle, token_idle = self.idle_s, self.token_idle_s
         answer = _StreamedAnswer()
         try:
             async with self._client.stream(
@@ -591,9 +593,10 @@ class OpenAICompatibleProvider(LLMProvider):
                         last_token = now
                         if on_progress is not None:
                             on_progress(answer.tokens)
-                    elif now - last_token > idle:
+                    elif now - last_token > token_idle:
                         raise LLMError(
-                            f"{self.name}/{model}: nenhum token por {idle:.0f}s", retryable=True
+                            f"{self.name}/{model}: nenhum token por {token_idle:.0f}s",
+                            retryable=True,
                         )
                     if answer.done:
                         break
@@ -856,12 +859,15 @@ def build_provider(
     client: httpx.AsyncClient | None = None,
     secrets: Mapping[str, str] | None = None,
     idle_s: float = 300.0,
+    token_idle_s: float = 900.0,
 ) -> LLMProvider:
     if cfg.kind == "anthropic":
         return AnthropicProvider(name, cfg, client=client, secrets=secrets)
     if cfg.kind == "mock":
         return MockProvider(name)
-    return OpenAICompatibleProvider(name, cfg, client=client, secrets=secrets, idle_s=idle_s)
+    return OpenAICompatibleProvider(
+        name, cfg, client=client, secrets=secrets, idle_s=idle_s, token_idle_s=token_idle_s
+    )
 
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.S)

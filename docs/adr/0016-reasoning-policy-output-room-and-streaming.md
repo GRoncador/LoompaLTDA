@@ -81,7 +81,8 @@ A call pays only for what it writes, so the budget only decides when a call is c
 - `models.output_scale` and the global `models.max_output_tokens` no longer size calls.
 - Worst case of a runaway answer at 128k: about US$0.07 on glm-5.3-flash, US$0.16 on
   deepseek-v4-flash. No loop detector is built: no cut so far was a loop (each converged with room);
-  the trace keeps the tail of any cut, and a detector comes if Sprint 2 shows real loops.
+  the trace keeps the tail of any cut and of any answer that reasoned past 16k tokens, and a
+detector comes if Sprint 2 shows real loops.
 
 ### 4. Calls are streamed; the timeout is silence, not duration
 
@@ -91,8 +92,11 @@ arrive, the final chunk carries the usage and the billed cost, and a mid-stream 
 `LLMError`. Gemini's endpoint is not streamed yet: its streamed thought signatures were never
 checked with a real key, and a broken one fails every tool call (`providers.<x>.stream` turns
 streaming off for any provider). A server that answers with plain JSON is still
-read as before. The call fails as retryable when no token arrives for `models.stream_idle_s` (300);
-keep-alive comments prove the connection, not progress. There is no wall-clock limit on a streamed
+read as before. The call fails as retryable on two kinds of silence: nothing at all for
+`models.stream_idle_s` (300: the connection is gone), or keep-alive comments without a token for
+`models.stream_token_idle_s` (900: the server says it is working, but nothing comes). The second
+smoke run showed why they differ: a healthy judge call waited ~100 s for its first token while
+OpenRouter kept the connection alive. There is no wall-clock limit on a streamed
 call: the output room ends a runaway. Providers without streaming here keep `call_timeout_s`.
 
 While a call streams, `llm.progress` (one every 30 s, with ~tokens so far: characters / 4, since a

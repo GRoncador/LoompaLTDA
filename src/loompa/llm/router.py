@@ -34,6 +34,10 @@ TRUNCATED_SUFFIX = " (resposta cortada no limite)"
 
 
 CUT_TAIL_CHARS = 600
+# An answer that thought this long keeps its tail too, cut or not: whether the factory needs a loop
+# detector (ADR-0016 §3) is decided on what long reasoning looked like (a judge thought 50k+ tokens
+# about a one-line command in the second smoke run, and nothing of it was kept).
+LONG_REASONING_TOKENS = 16384
 
 
 def _cut_tail(resp: LLMResponse) -> dict[str, str]:
@@ -141,6 +145,7 @@ class ModelRouter:
                 client=self._client,
                 secrets=self.secrets,
                 idle_s=self.config.models.stream_idle_s,
+                token_idle_s=self.config.models.stream_token_idle_s,
             )
         return self._providers[name]
 
@@ -548,7 +553,11 @@ class ModelRouter:
                     **(
                         {"reasoning_tokens": resp.reasoning_tokens} if resp.reasoning_tokens else {}
                     ),
-                    **(_cut_tail(resp) if resp.truncated else {}),
+                    **(
+                        _cut_tail(resp)
+                        if resp.truncated or resp.reasoning_tokens > LONG_REASONING_TOKENS
+                        else {}
+                    ),
                 )
                 if not resp.truncated:
                     if cuts:
