@@ -1,4 +1,4 @@
-"""FastAPI backend for the Loompa LTDA HQ dashboard.
+"""FastAPI backend for the Loompa LTDA dashboard.
 
 REST for factories, kanban, inbox, meeting, agents, finance and memory; one WebSocket (`/ws`)
 fanning out engine events; a background engine loop per factory (watch mode) that can be
@@ -298,7 +298,7 @@ def create_app(
         yield
         await hub.shutdown()
 
-    app = FastAPI(title="Loompa LTDA HQ", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="Loompa LTDA", version=__version__, lifespan=lifespan)
     app.state.hub = hub
 
     # ------------------------------------------------------------- factories
@@ -1121,7 +1121,7 @@ def create_app(
         if index_file.is_file():
             return FileResponse(index_file)
         return HTMLResponse(
-            "<h1>Loompa LTDA HQ</h1><p>Interface não compilada. Rode <code>cd dashboard-ui && npm install && npm run build</code>."
+            "<h1>Loompa LTDA</h1><p>Interface não compilada. Rode <code>cd dashboard-ui && npm install && npm run build</code>."
             "<br>API disponível em <a href='/docs'>/docs</a>.</p>"
         )
 

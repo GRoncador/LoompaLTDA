@@ -162,7 +162,7 @@ def test_websocket_hello_and_events(client: TestClient):
 
 def test_index_without_bundle(client: TestClient):
     r = client.get("/")
-    assert r.status_code == 200 and ("Loompa LTDA HQ" in r.text or '<div id="root"' in r.text)
+    assert r.status_code == 200 and ("<h1>Loompa LTDA</h1>" in r.text or '<div id="root"' in r.text)
     assert client.get("/api/nope").status_code == 404
 
 

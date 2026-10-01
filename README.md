@@ -7,7 +7,7 @@ worktrees, and every question, blocker or delivery lands in an **executive inbox
 plain business language. No babysitting, no serial blocking, no terminal noise.
 
 ```
-[ Founder terminal / HQ dashboard ]
+[ Founder terminal / dashboard ]
             │
    ┌────────┴────────┐
    ▼                 ▼
@@ -112,7 +112,7 @@ BACKLOG → SPEC (Product) → PLAN (Architect) [→ PREFLIGHT (risk.md)] → DE
 | `loompa ask compliance\|metrics\|storyteller "…"` | On-demand support Loompas |
 | `loompa memory index\|search` | Organizational memory |
 | `loompa factories list\|use\|remove` | Multi-factory hub (`~/.loompa/factories.yaml`) |
-| `loompa dashboard [--dry-run] [--no-engine]` | Localhost HQ |
+| `loompa dashboard [--dry-run] [--no-engine]` | Localhost dashboard |
 
 ## Development
 

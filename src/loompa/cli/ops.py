@@ -626,7 +626,7 @@ def dashboard(
         ref_port = port or f.config.dashboard.port
     except typer.Exit:
         pass
-    console.print(Panel.fit(f"[bold]Loompa LTDA HQ[/bold] → http://{ref_host}:{ref_port}"))
+    console.print(Panel.fit(f"[bold]Loompa LTDA[/bold] → http://{ref_host}:{ref_port}"))
     uvicorn.run(
         create_app(dry_run=dry_run, run_engine=not no_engine),
         host=ref_host,

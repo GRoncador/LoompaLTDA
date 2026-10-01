@@ -9,8 +9,8 @@ export default function Header(props: {
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-line bg-panel px-4 py-2">
       <div className="flex items-center gap-2">
-        <span className="text-xl">🏭</span>
-        <span className="font-pixel text-[11px] tracking-wider text-brand">LOOMPA LTDA · HQ</span>
+        <img src="/loompa-logo.png" alt="" className="h-7 w-7" />
+        <span className="font-pixel text-[11px] tracking-wider text-brand">LOOMPA LTDA</span>
       </div>
       <label className="flex items-center gap-2 text-sm">
         <span className="hidden text-slate-400 2xl:inline">Empresa ativa</span>
