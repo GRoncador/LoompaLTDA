@@ -9,7 +9,8 @@
   (`loompa/backlog.py`), git merge/push/PR only through the Deployer's `agent.git`, and BACKLOG cards run only
   after a sprint start (`loompa sprint start`, `meeting --run`) — don't call `store.upsert_story` or the raw `git()`.
   A new direct entry into the backlog goes through the Product Owner's triage first (ADR-0017), and the panel
-  starts a sprint only from a Sprint Meeting after the Product Owner's proposal.
+  starts a sprint only from a Sprint Meeting after the Product Owner's proposal. One sprint runs at a time and
+  nothing runs outside a sprint (ADR-0018).
 - Tools per role (ADR-0009): every agent gets its tools from `agents/toolbox.py` (`self.toolbox()`,
   `self.explore_tools()`); the profile is enforced at call time, so don't call `ACI` directly for a
   role and don't widen a profile to make a prompt work. Web/external tools come only through

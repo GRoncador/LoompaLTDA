@@ -50,9 +50,10 @@ Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · �
    (ADR-0004).
 5. **Backlog cards do not auto-run** — they wait for a sprint (a Sprint Meeting after the Product
    Owner's proposal in the panel, or `loompa sprint start` / `meeting --run` from the CLI); Kaizen
-   findings additionally need an explicit yes (a delivery decision, `sprint add` or `promote`), as
-   the brief frames them as catalogued for evaluation. Every direct entry is read by the Product
-   Owner first (ADR-0017).
+   findings run only inside a sprint, prioritized by the Product Owner (a meeting, a delivery
+   decision or `sprint add`; there is no "run it now" lane), as the brief frames them as catalogued
+   for evaluation. Every direct entry is read by the Product Owner first (ADR-0017); one sprint
+   runs at a time (ADR-0018).
 6. **Baseline-aware Inspector** — brownfield suites that are already red on `main` are recorded as
    tech-debt cards instead of blocking every story (found during the CLI smoke test).
 
@@ -529,6 +530,20 @@ Decided 2026-09-29:
     only the tab content scrolls, to the bottom of the window, with an always-visible scrollbar.
   - **Ids (11.4).** Story, sprint and conversation ids = highest number used + 1 (as integers).
   Not verified against a real model: the five new prompts. `contas` Sprint 2 opens with this meeting.
+- **2026-10-01 (later) — One sprint at a time and meetings about the running sprint (ADR-0018).**
+  The founder's follow-up: the "executar agora" lane (`promote`) is gone, a Kaizen fix runs inside a
+  sprint as the Product Owner ranks it (the proposal now says so); `start` refuses while a sprint
+  runs, before any card moves. A meeting during a sprint asks first: **adjust the running sprint**
+  (take cards out — back to the backlog with their branch —, bring cards in after the Product Owner's
+  review, restart a story from scratch, cancel the sprint; discuss alternatives, dependencies and
+  blockers with the Master, who sees each story's stage and what it waits on) or **pre-assemble the
+  next** (not recommended; saved as the `open` sprint after the Product Owner's proposal). Nothing
+  starts it: when the running sprint closes, the inbox and the next meeting say it is assembled, and
+  that meeting reviews it with the Product Owner and starts it. Touching a story in flight needs the
+  engine stopped: the dashboard pauses its own around the commit, the CLI refuses while any engine
+  runs. Found on the way: a story sent back to the backlog stayed in its sprint and kept it open
+  forever; it now leaves the running sprint. Seen in headless Chrome (choice, adjust and apply,
+  pre-assemble, "próximo: SP-002" chip).
 
 ## Known gaps / next steps
 

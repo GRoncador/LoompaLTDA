@@ -1,7 +1,8 @@
 # ADR-0017: The backlog's doors — the Product Owner reads every entry, a sprint starts from its proposal
 
 Date: 2026-10-01 · Status: accepted (Plano set/2026 · item 3: 10.1, 10.2, 10.3, 10.5, 10.6, 11.2,
-11.4; amends ADR-0008 §1/§3 and ADR-0010)
+11.4; amends ADR-0008 §1/§3 and ADR-0010); §2 amended by ADR-0018 the same day: one sprint at a
+time, the meeting adjusts the running sprint or assembles the next, and `promote` is gone
 
 ## Context
 
@@ -68,8 +69,8 @@ founder has the last word.
   proposal never saw (added after it). Founder adjustments to cards it saw are fine.
 - The panel loses its one-click start: `POST /sprints/start` is gone and `/meeting` no longer takes
   `run`. `loompa sprint start`, `loompa meeting --run` and `MasterAgent.start_sprint` stay — the CLI,
-  automation and the `live` tests need an unreviewed start. The `promote` lane on a Kaizen card
-  stays too (ADR-0008 §3): it runs one card the Product Owner already triaged, never the backlog.
+  automation and the `live` tests need an unreviewed start. (The `promote` lane on a Kaizen card
+  stayed here at first; the founder removed it the same day, ADR-0018.)
 
 ### 3. Order: slot the new card, rank only when planning closes, the founder's drag wins (10.5)
 
