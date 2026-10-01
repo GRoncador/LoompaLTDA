@@ -225,8 +225,8 @@ class ModelsConfig(BaseModel):
     # light room, every other call the full one; a cut doubles it up to the ceiling, then the next
     # candidate at the same effort, `truncation_retries` times per model.
     light_output_tokens: int = Field(16384, ge=256)
-    full_output_tokens: int = Field(128000, ge=256)
-    max_output_ceiling: int = Field(128000, ge=256)
+    full_output_tokens: int = Field(96000, ge=256)
+    max_output_ceiling: int = Field(96000, ge=256)
     truncation_retries: int = Field(2, ge=0, le=5)
     # Legacy, no longer used to size calls (ADR-0016); kept so older config files still load.
     max_output_tokens: int = 4096

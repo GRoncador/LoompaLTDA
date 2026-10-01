@@ -3,10 +3,12 @@ endpoint), OpenRouter, Groq, Ollama and vLLM; a native Anthropic adapter is opti
 
 from __future__ import annotations
 
+import collections
 import json
 import os
 import re
 import time
+import zlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -32,6 +34,16 @@ class LLMError(RuntimeError):
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+
+
+class LoopDetected(LLMError):
+    """A streamed answer caught repeating itself (ADR-0016 §3): cut on strong evidence only.
+    `partial` is what was written up to the cut, so the attempt is still metered and traced."""
+
+    def __init__(self, message: str, *, partial: LLMResponse, sample: str):
+        super().__init__(message, retryable=False)
+        self.partial = partial
+        self.sample = sample
 
 
 # How each provider says "I do not have that model". A 404 is the documented answer, but the one
@@ -327,6 +339,61 @@ def _parse_openai_response(data: Any, model: str, provider: str, duration_ms: in
     )
 
 
+# The loop detector (ADR-0016 §3) cuts only on strong evidence: in the last LOOP_WINDOW characters
+# of what the model writes, one sentence pattern (literal text, with code spans, numbers and quotes
+# masked) making up most of the lines. Text with almost no sentences to count (a degenerate
+# repetition of words) is judged by how well it compresses instead.
+# Calibrated live (2026-10-01): real reasoning compressed ~2.7x with no pattern above 2 lines; the
+# second smoke run's loop ("doesn't use `tibetan`. Good." for hundreds of scripts) had one pattern
+# in 99% of its lines and compressed 38x. A compression rule for all text was tried and dropped the
+# same day: it cut a converging plan at 17x (it had re-written the same code snippet a few times
+# while deliberating). Deliberation is thinking; the output room bounds it.
+LOOP_WINDOW = 12000
+LOOP_CHECK_EVERY = 4000
+LOOP_MIN_REPEATS = 30
+LOOP_MIN_SHARE = 0.5
+LOOP_FEW_SENTENCES = 5  # below this, the text has too few sentences for the pattern rule
+LOOP_MIN_RATIO = 30.0
+_SENTENCES = re.compile(r"[\n.!?]+")
+
+
+def _pattern(sentence: str) -> str:
+    s = re.sub(r"`[^`]*`", "`x`", sentence.lower())
+    s = re.sub(r"\d+(?:\.\d+)?", "0", s)
+    s = re.sub(r"'[^'\n]*'|\"[^\"\n]*\"", "'x'", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _tail(parts: list[str], size: int = LOOP_WINDOW) -> str:
+    """The last `size` characters of a list of stream deltas, without joining all of it."""
+    out: list[str] = []
+    n = 0
+    for piece in reversed(parts):
+        out.append(piece)
+        n += len(piece)
+        if n >= size:
+            break
+    return "".join(reversed(out))[-size:]
+
+
+def repetition(text: str) -> str:
+    """Why the end of `text` is a loop, or "" when it is not (see LOOP_* above)."""
+    window = text[-LOOP_WINDOW:]
+    if len(window) < LOOP_WINDOW // 2:
+        return ""
+    lines = [x for x in _SENTENCES.split(window) if len(x.strip()) >= 20]
+    if len(lines) >= LOOP_FEW_SENTENCES:
+        pattern, n = collections.Counter(_pattern(x) for x in lines).most_common(1)[0]
+        if n >= LOOP_MIN_REPEATS and n / len(lines) >= LOOP_MIN_SHARE:
+            return f"one sentence pattern {n} times in {len(lines)}: {pattern[:120]}"
+        return ""
+    raw = window.encode()
+    ratio = len(raw) / max(1, len(zlib.compress(raw, 6)))
+    if ratio >= LOOP_MIN_RATIO:
+        return f"text with no sentences compresses {ratio:.0f}x: {window[-120:]}"
+    return ""
+
+
 class _StreamedAnswer:
     """An OpenAI-shaped answer assembled from its server-sent chunks: content, reasoning and
     tool-call deltas (merged by index), the finish reason, and the usage of the last chunk."""
@@ -344,11 +411,19 @@ class _StreamedAnswer:
         # characters written so far (content, reasoning, tool arguments): a chunk carries several
         # tokens, so counting chunks read 7k for a call that wrote 18k (live, 2026-10-01)
         self.chars = 0
+        self._checked = 0
 
     @property
     def tokens(self) -> int:
         """Roughly the tokens written so far (four characters each)."""
         return self.chars // 4
+
+    def looping(self) -> str:
+        """Every LOOP_CHECK_EVERY characters, whether the answer is repeating itself."""
+        if self.chars - self._checked < LOOP_CHECK_EVERY:
+            return ""
+        self._checked = self.chars
+        return repetition(_tail(self.reasoning)) or repetition(_tail(self.content))
 
     def feed(self, line: str) -> bool:
         """Read one line of the stream; True when it carried tokens (progress)."""
@@ -593,6 +668,8 @@ class OpenAICompatibleProvider(LLMProvider):
                         last_token = now
                         if on_progress is not None:
                             on_progress(answer.tokens)
+                        if why := answer.looping():
+                            raise self._loop(model, answer, payload, start, why)
                     elif now - last_token > token_idle:
                         raise LLMError(
                             f"{self.name}/{model}: nenhum token por {token_idle:.0f}s",
@@ -618,6 +695,22 @@ class OpenAICompatibleProvider(LLMProvider):
             )
         duration = int((time.monotonic() - start) * 1000)
         return self._parse(answer.as_response(), model, duration)
+
+    def _loop(
+        self, model: str, answer: _StreamedAnswer, payload: dict[str, Any], start: float, why: str
+    ) -> LoopDetected:
+        """What was written until the cut, metered on estimates: the stream ends before the
+        usage chunk, and the provider bills the tokens anyway."""
+        partial = self._parse(answer.as_response(), model, int((time.monotonic() - start) * 1000))
+        partial.finish_reason = "loop"
+        partial.output_tokens = partial.output_tokens or answer.tokens
+        partial.reasoning_tokens = partial.reasoning_tokens or answer.tokens
+        partial.input_tokens = partial.input_tokens or len(json.dumps(payload["messages"])) // 4
+        return LoopDetected(
+            f"{self.name}/{model}: raciocínio em loop, cortado ({why[:160]})",
+            partial=partial,
+            sample=why,
+        )
 
     def _raise_for_status(self, resp: httpx.Response, model: str) -> None:
         if resp.status_code == 429 or resp.status_code in (402, 503):

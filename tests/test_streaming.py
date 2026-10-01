@@ -191,3 +191,122 @@ async def test_a_long_streamed_call_reports_progress_and_has_no_wall_clock_limit
     assert progress and progress[-1]["tokens"] == len("um dois três") // 4
     assert progress[0]["story_id"] == "S-1"
     await router.aclose()
+
+
+# ----------------------------------------------------------------- the loop detector (ADR-0016 §3)
+
+LANGS = ["lao", "tibetan", "myanmar", "georgian", "armenian", "ethiopic", "cherokee", "khmer"]
+LOOP = "".join(
+    f"\nPotential issue: The implementation's `media` command doesn't use `{lang}`. Good.\n"
+    for lang in LANGS * 30
+)
+
+
+def test_the_smoke_runs_loop_is_caught_and_real_reasoning_is_not():
+    from pathlib import Path
+
+    from loompa.llm.providers import repetition
+
+    assert "sentence pattern" in repetition("Let me check the implementation.\n" + LOOP)
+    # repetition with no sentence to count is caught by how well it compresses
+    assert "compresses" in repetition("pensando de novo sobre o parser sem fim " * 400)
+    # real prose of this repository, long and on one subject, is not a loop
+    prose = (
+        Path(__file__).parents[1] / "docs" / "adr" / "0015-trace-real-cost-and-stall-watchdog.md"
+    )
+    assert repetition(prose.read_text()) == ""
+    assert repetition(LOOP[:3000]) == ""  # too little text to call it a loop
+    # the false positive of the calibration run: a converging plan that deliberated, re-writing
+    # the same code snippet a few times between varied ideas, compressed 17x and was cut
+    snippet = (
+        "```python\n@app.command(context_settings={'ignore_unknown_options': True})\n"
+        "def converter(valor: str, unidade: str) -> None:\n    ...\n```\n"
+    )
+    ideas = [
+        "OK, executive decision: I'll treat this as a risk and let the Worker verify it early.",
+        "But better: design it so it works regardless of how the parser splits the tokens.",
+        "Idea: use a custom parser on the argument? No, that does not change tokenization.",
+        "Idea: the context has allow_interspersed_args, but that is about order, not dashes.",
+        "Idea: an app-level setting on the Typer object; I do not think there is a relevant one.",
+        "Hmm, actually, the safest route is a test that calls the command with -40 exactly.",
+        "If that test fails, the Worker adds ignore_unknown_options and checks again.",
+        "The spec asks for one decimal place, so the format string is the easy part here.",
+        "Rounding 37.77 gives 37.8 with the default formatting, which matches criterion four.",
+        "What about lowercase units? Normalising with upper() covers criterion seven.",
+        "An invalid unit must exit with a non-zero code and print nothing converted.",
+        "A non-numeric value fails the float conversion; catching it gives a clear message.",
+        "Without arguments, Click's missing-argument error already exits with code two.",
+        "So the plan has three tasks: the pure functions, the command, and the error paths.",
+    ]
+    deliberation = (
+        "".join(idea + "\n" + (snippet if i % 4 == 0 else "") for i, idea in enumerate(ideas)) * 6
+    )  # the same thoughts revisited a few times, as a long deliberation does
+    assert repetition(deliberation) == ""
+
+
+@respx.mock
+async def test_a_streamed_answer_that_loops_is_cut_and_still_metered(provider):
+    from loompa.llm.providers import LoopDetected
+
+    chunks = [delta(reasoning=line + "\n") for line in LOOP.strip().splitlines() if line]
+    respx.post(URL).mock(return_value=httpx.Response(200, headers=SSE, content=sse(*chunks)))
+    with pytest.raises(LoopDetected) as exc:
+        await provider.complete("m", [Message("user", "julgue a entrega")])
+    partial = exc.value.partial
+    assert partial.finish_reason == "loop" and partial.output_tokens > 1000
+    assert partial.input_tokens > 0 and "sentence pattern" in exc.value.sample
+    assert not exc.value.retryable
+    await provider.aclose()
+
+
+async def test_the_router_traces_a_loop_and_tries_the_next_model(tmp_path):
+    from loompa.config.schema import ModelCandidate
+    from loompa.finance import CostTracker
+    from loompa.llm import MockProvider
+    from loompa.llm.providers import LLMResponse, LoopDetected
+    from loompa.store import Store
+    from loompa.trace import Tracer, read_trace
+
+    cfg = default_config()
+    cfg.models.tiers = {
+        "tier2": [
+            ModelCandidate(provider="a", model="looper"),
+            ModelCandidate(provider="b", model="ok"),
+        ]
+    }
+    cfg.models.matrix = {}
+
+    class Looper(MockProvider):
+        async def complete(self, model, messages, **kw):  # type: ignore[override]
+            partial = LLMResponse("", [], model, "a", 900, 30000, finish_reason="loop")
+            partial.raw = {"choices": [{"message": {"reasoning": LOOP}}]}
+            raise LoopDetected(
+                "a/looper: raciocínio em loop, cortado (x)", partial=partial, sample="x"
+            )
+
+    events: list[tuple[str, dict]] = []
+    store = Store(":memory:")
+    router = ModelRouter(
+        cfg,
+        tracker=CostTracker(store, cfg, "f"),
+        providers={"a": Looper("a"), "b": MockProvider("b", script=lambda *a: "veredito")},
+        tracer=Tracer(tmp_path),
+        on_event=lambda t, **kw: events.append((t, kw)),
+    )
+    rc = await router.complete("inspector", [Message("user", "u")], story_id="S-1")
+    assert rc.response.text == "veredito" and rc.candidate.model == "ok"
+    assert [t for t, _ in events] == ["llm.loop", "llm.fallthrough"]
+    assert events[1][1]["reason"] == "loop"
+    (span,) = [s for s in read_trace(tmp_path / "S-1.jsonl").spans if s.get("kind") == "llm"]
+    first = span["attrs"]["attempts"][0]
+    assert first["outcome"] == "loop" and first["output_tokens"] == 30000
+    assert "doesn't use" in first["reasoning_tail"]
+    assert store.usage_totals("f")["calls"] == 2  # the cut attempt was metered too
+
+
+def test_ops_tells_the_founder_a_loop_plainly_and_tries_again_at_once():
+    from loompa.agents.ops import triage
+    from loompa.comms import audit_executive_text
+
+    t = triage(LLMError("todos os modelos do tier falharam: a/x: raciocínio em loop, cortado (y)"))
+    assert not t.transient and "repetitivo" in t.cause and audit_executive_text(t.cause) == []

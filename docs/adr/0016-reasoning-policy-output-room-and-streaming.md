@@ -70,19 +70,35 @@ models.
 
 A call pays only for what it writes, so the budget only decides when a call is cut:
 
-- `models.light_output_tokens` (16384) for `low` calls; `models.full_output_tokens` (128000) for
+- `models.light_output_tokens` (16384) for `low` calls; `models.full_output_tokens` (96000) for
   default calls; never above the candidate's own `max_output_tokens` when the founder set one.
-  128000 fits every provider of glm-5.3 and qwen3.8-max and all but 4 of 33 (glm-5.3-flash) and 1 of
-  29 (deepseek-v4-flash) that accept tools.
-- A cut answer gets twice the room up to `models.max_output_ceiling` (128000), then the next
+  128000 at first; the founder brought it to 75% (96000) after the second smoke run, still about
+  3.5× the largest legitimate call measured (27.7k tokens). 96000 fits every provider of glm-5.3
+  and qwen3.8-max and all but 1 of 33 (glm-5.3-flash) and 1 of 29 (deepseek-v4-flash) that accept
+  tools.
+- A cut answer gets twice the room up to `models.max_output_ceiling` (96000), then the next
   candidate at the **same** effort. The effort is never lowered on a cut: the rule of ADR-0015 §9
   and the older "less thinking at the ceiling" are withdrawn. The cut attempt keeps its tail and
   reasoning tokens in the trace (ADR-0015 §9).
 - `models.output_scale` and the global `models.max_output_tokens` no longer size calls.
-- Worst case of a runaway answer at 128k: about US$0.07 on glm-5.3-flash, US$0.16 on
-  deepseek-v4-flash. No loop detector is built: no cut so far was a loop (each converged with room);
-  the trace keeps the tail of any cut and of any answer that reasoned past 16k tokens, and a
-detector comes if Sprint 2 shows real loops.
+- **A loop detector cuts on strong evidence only.** Dropped at first (no cut had been a loop),
+  built after the second smoke run showed one: judging S-002, deepseek-v4-flash wrote "Potential
+  issue: The implementation's `media` command doesn't use `tibetan`. Good." for hundreds of
+  scripts until 128k tokens (18 min), after glm-5.3-flash had spent 128k recalling Click's parser.
+  While a call streams, every 4000 characters the last 12000 of its reasoning (and of its answer)
+  are checked: one sentence pattern (code spans, numbers and quotes masked) in at least 30 lines
+  and half of them is a loop; only text with almost no sentences (fewer than 5, a degenerate
+  repetition of words) is judged by compression instead, at 30× or more. Calibrated live: real
+  reasoning compressed ~2.7× with no pattern above 2 lines; the loop had one pattern in 99% of its
+  lines and compressed 38×. A compression rule for all text (at 10×) was tried first and dropped
+  the same day: it cut a converging plan at 17× — the model had re-written the same code snippet
+  a few times while deliberating. Deliberation is thinking, and the output room bounds it. A cut loop is `llm.loop`, metered on estimates (the
+  stream ends before the usage chunk), traced with its tail, and falls through to the next model
+  at the same effort; when every model loops, the Ops Loompa's three tries apply and the founder
+  reads that the AI got into repetitive reasoning.
+- The trace keeps the reasoning tail of any cut, any loop and any answer that reasoned past 16k
+  tokens. Worst case of a runaway that does not repeat itself, at 96k: about US$0.05 on
+  glm-5.3-flash, US$0.13 on deepseek-v4-flash.
 
 ### 4. Calls are streamed; the timeout is silence, not duration
 
@@ -126,6 +142,9 @@ the tier it was on, then two on the tier above** (all three on tier 1 when it al
   is redone and resolved again — once on the same tier, twice on the tier above — each try told
   which files the one before left unresolved; a story whose base moves again during its delivery is
   reintegrated up to three times. Found on the way: the resolver never used the tier it was given.
+- **A judge that gives no verdict** (every model cut or looping) fails the test step and gets the
+  same three tries; it used to count as a pass ("the judge is advisory"), and the second smoke run
+  passed S-002 that way after both models were cut.
 - **The reproducer** of a bug fix: a test that does not fail gets three more rounds (one on the
   Worker's tier, two above) before the fix goes on without that proof (it never blocks).
 - **An approved delivery whose merge into the base fails** used to come back to the founder as a
@@ -145,7 +164,10 @@ the tier it was on, then two on the tier above** (all three on tier 1 when it al
 The smoke run merged `converter -40 C` failing for a real user ("No such option: -4") because the
 test called it with `--`. The judge's rubric now treats a test that reaches the product by a path
 no user takes (an argument separator the spec never mentions, a mocked parser, a call around the
-command line) as not proving the criterion.
+command line) as not proving the criterion. A test runner that invokes the command with exactly
+the user's arguments (`CliRunner`, a subprocess) is the user's path, and the judge is told not to
+re-derive from memory how a library parses arguments — the checks ran the code. That is what the
+GLM attempt of the second smoke run spent 128k tokens doing.
 
 ## Consequences
 
@@ -160,5 +182,7 @@ command line) as not proving the criterion.
 
 ## Not decided here
 
-- A loop detector on the streamed reasoning (only if Sprint 2 shows real loops).
+- Passing the reasoning back on the next tool round (OpenRouter's `reasoning` field), which might
+  stop a model re-thinking from scratch each round (a plan took 8.7 min over several deep rounds);
+  the one experiment was inconclusive (the round never ended in a tool call).
 - Which tier-2 models to keep; `loompa trace --stats` measures, the founder decides.

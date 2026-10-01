@@ -968,7 +968,7 @@ async def test_a_step_that_fails_is_tried_again_then_twice_on_the_tier_above(
         if role_of(messages) == "architect":
             used.append(model)
             if model in _tier_models(ctx_box["ctx"], "architect", "tier2"):
-                return LLMResponse("", [], model, "mock", 100, 128000, finish_reason="length")
+                return LLMResponse("", [], model, "mock", 100, 96000, finish_reason="length")
         return _simple(model, messages, tools)
 
     ctx = ctx_box["ctx"] = make_ctx(factory, script)
@@ -1030,7 +1030,7 @@ async def test_three_tries_then_the_founder_hears_a_stronger_model_was_tried(
 
     def script(model: str, messages: list[Message], tools: Any) -> Any:
         if role_of(messages) == "architect":
-            return LLMResponse("", [], model, "mock", 100, 128000, finish_reason="length")
+            return LLMResponse("", [], model, "mock", 100, 96000, finish_reason="length")
         return _simple(model, messages, tools)
 
     ctx = make_ctx(factory, script)

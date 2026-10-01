@@ -120,7 +120,7 @@ async def test_a_light_loop_thinks_at_the_default_after_the_first_trouble(git_re
     )
     assert loop.ended_by == "done" and loop.raised == "a problem in what it just wrote"
     assert [c["reasoning_effort"] for c in provider.calls] == ["low", ""]
-    assert [c["max_tokens"] for c in provider.calls] == [16384, 128000]
+    assert [c["max_tokens"] for c in provider.calls] == [16384, 96000]
     raised = [e for e in ctx.store.events_since(0) if e["type"] == "llm.reasoning_raised"]
     assert len(raised) == 1 and raised[0]["payload"]["round"] == 1
     await ctx.aclose()

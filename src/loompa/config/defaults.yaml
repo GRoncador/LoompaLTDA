@@ -151,8 +151,8 @@ models:
   # the light room, every other call the full one; a cut doubles it up to the ceiling, then the
   # next model is tried at the same effort.
   light_output_tokens: 16384
-  full_output_tokens: 128000
-  max_output_ceiling: 128000
+  full_output_tokens: 96000
+  max_output_ceiling: 96000
   truncation_retries: 2
   # A streamed call fails after this long (s) with nothing received, or with only "processing"
   # keep-alives and no token; no wall-clock limit otherwise.

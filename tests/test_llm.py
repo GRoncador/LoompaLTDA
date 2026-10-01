@@ -558,7 +558,7 @@ async def test_the_output_room_is_a_backstop_set_by_the_effort():
     router = ModelRouter(cfg, providers={"deepseek": prov})
     for complexity in ("SIMPLE", "STANDARD", "COMPLEX"):  # the story's size no longer sizes it
         await router.complete("architect", [Message("user", "x")], complexity=complexity)
-        assert prov.calls[-1]["max_tokens"] == 128000, complexity
+        assert prov.calls[-1]["max_tokens"] == 96000, complexity
     await router.complete(
         "deployer", [Message("user", "x")], max_tokens=400, reasoning_effort="low"
     )

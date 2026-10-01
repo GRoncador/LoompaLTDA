@@ -53,6 +53,10 @@ def triage(exc: BaseException) -> Triage:
     if isinstance(exc, LLMError):
         if "chave de api" in text or "não configurado" in text:
             return Triage(False, "falta configurar o acesso ao serviço de IA", setup=True)
+        if "em loop" in text:
+            return Triage(
+                False, "a IA entrou em um raciocínio repetitivo, sem chegar a uma resposta"
+            )
         if "resposta cortada" in text:
             return Triage(
                 False,

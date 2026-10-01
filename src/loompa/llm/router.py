@@ -21,6 +21,7 @@ from loompa.llm.providers import (
     LLMError,
     LLMProvider,
     LLMResponse,
+    LoopDetected,
     Message,
     QuotaExhausted,
     build_provider,
@@ -513,6 +514,35 @@ class ModelRouter:
                     self._cooldown[key] = loop.time() + pause
                     resp = None
                     break  # next candidate
+                except LoopDetected as exc:
+                    # Cut on strong evidence of a loop (ADR-0016 §3): what it wrote was billed,
+                    # and its tail is what tells the next reader what the loop looked like.
+                    cost = self._record(exc.partial, cand, tier, role, agent, story_id)
+                    calls.spent += cost
+                    calls.errors.append(str(exc))
+                    attempt.update(
+                        outcome="loop",
+                        output_tokens=exc.partial.output_tokens,
+                        cost_usd=round(cost, 6),
+                        ms=int((loop.time() - started) * 1000),
+                        loop=exc.sample[:300],
+                        **_cut_tail(exc.partial),
+                    )
+                    log.warning("%s entrou em loop; cortado e próximo modelo", key)
+                    self._event(
+                        "llm.loop",
+                        story_id,
+                        who,
+                        model=key,
+                        role=role,
+                        tokens=exc.partial.output_tokens,
+                        sample=exc.sample[:200],
+                    )
+                    self._event(
+                        "llm.fallthrough", story_id, who, model=key, role=role, reason="loop"
+                    )
+                    resp = None
+                    break  # next candidate, same effort
                 except LLMError as exc:
                     calls.errors.append(str(exc))
                     attempt.update(
