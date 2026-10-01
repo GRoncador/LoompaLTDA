@@ -1,4 +1,5 @@
 import type { FactoryRef, Overview } from "../types";
+import logo from "../assets/loompa-logo.png";
 
 export default function Header(props: {
   factories: FactoryRef[]; slug: string | null; overview: Overview | null; connected: boolean; pending: number;
@@ -9,7 +10,7 @@ export default function Header(props: {
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-line bg-panel px-4 py-2">
       <div className="flex items-center gap-2">
-        <img src="/loompa-logo.png" alt="" className="h-7 w-7" />
+        <img src={logo} alt="" className="h-7 w-7" />
         <span className="font-pixel text-[11px] tracking-wider text-brand">LOOMPA LTDA</span>
       </div>
       <label className="flex items-center gap-2 text-sm">
