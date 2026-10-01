@@ -11,7 +11,7 @@ const KIND: Record<Message["kind"], { label: string; cls: string }> = {
 };
 
 export default function Inbox(props: {
-  messages: Message[]; finance: Overview["finance"] | null; kaizen: number;
+  messages: Message[]; finance: Overview["finance"] | null; kaizen: number; onProductFindings: () => void;
   onReply: (m: Message, option: string | null, text: string | null, decisions?: Record<string, string>) => Promise<void>;
   onArchive: (m: Message) => Promise<void>;
   onOpenStory: (id: string) => void;
@@ -30,7 +30,7 @@ export default function Inbox(props: {
         {finance && (
           <div className="flex items-center justify-between rounded-md border border-line bg-ink/60 px-3 py-2 text-xs">
             <span>💰 Gasto hoje: <b>US$ {finance.today_usd.toFixed(2)}</b> · {finance.period === "weekly" ? "semana" : "mês"}: US$ {finance.period_usd.toFixed(2)} de {finance.cap_usd.toFixed(2)}</span>
-            <span>💡 {kaizen} melhorias catalogadas hoje</span>
+            <button className="hover:underline" title="O que o Kaizen achou no produto hoje, sem repetidos" onClick={props.onProductFindings}>💡 {kaizen} {kaizen === 1 ? "achado" : "achados"} no produto hoje</button>
           </div>
         )}
         {messages.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nada pendente. Aproveite o dia. 🎉</p>}

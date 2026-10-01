@@ -14,6 +14,8 @@ import EventTicker from "./components/EventTicker";
 import SettingsModal from "./components/SettingsModal";
 import FinanceModal from "./components/FinanceModal";
 import SprintsModal from "./components/SprintsModal";
+import FactoryModal from "./components/FactoryModal";
+import ProductFindingsModal from "./components/ProductFindingsModal";
 
 export default function App() {
   const [factories, setFactories] = useState<FactoryRef[]>([]);
@@ -24,6 +26,8 @@ export default function App() {
   const [newFactoryOpen, setNewFactoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [financeOpen, setFinanceOpen] = useState(false);
+  const [factoryOpen, setFactoryOpen] = useState(false); // the factory's self-diagnosis (8.4)
+  const [productOpen, setProductOpen] = useState(false); // today's Kaizen findings in the product
   // the Sprints tab (10.8): open, and on which sprint ("" = the current one)
   const [sprintsAt, setSprintsAt] = useState<string | null>(null);
   const [agentName, setAgentName] = useState<string | null>(null);
@@ -95,7 +99,7 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
-        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")}
+        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")} onFactory={() => setFactoryOpen(true)}
       />
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
       <main className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
@@ -107,7 +111,7 @@ export default function App() {
           <Office agents={overview?.agents ?? []} onSelect={setAgentName} />
         </section>
         <section className="card flex min-h-[320px] flex-col overflow-hidden">
-          <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} onOpenSprint={setSprintsAt} />
+          <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onProductFindings={() => setProductOpen(true)} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} onOpenSprint={setSprintsAt} />
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
           <Kanban
@@ -123,6 +127,8 @@ export default function App() {
       <EventTicker events={events} />
       {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
       {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
+      {factoryOpen && slug && <FactoryModal slug={slug} onClose={() => setFactoryOpen(false)} onOpenSprint={(id) => { setFactoryOpen(false); setSprintsAt(id); }} onOpenStory={setStoryId} />}
+      {productOpen && slug && <ProductFindingsModal slug={slug} onClose={() => setProductOpen(false)} onOpenStory={setStoryId} />}
       {sprintsAt !== null && slug && <SprintsModal slug={slug} initial={sprintsAt || null} onClose={() => setSprintsAt(null)} onOpenStory={setStoryId} />}
       {settingsOpen && slug && <SettingsModal slug={slug} onClose={() => { setSettingsOpen(false); refresh(); }} />}
       {newFactoryOpen && <NewFactoryModal onClose={async (created) => { setNewFactoryOpen(false); await loadFactories(); if (created) setSlug(created); }} />}

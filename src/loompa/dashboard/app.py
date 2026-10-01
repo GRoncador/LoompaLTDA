@@ -109,6 +109,14 @@ class DraftBody(BaseModel):
     split: bool = False  # a brainstorm: edit the Product Owner's proposed cards (ADR-0020)
 
 
+class ResolveBody(BaseModel):
+    commit: str
+
+
+class ScanBody(BaseModel):
+    sprint_id: str | None = None
+
+
 class ConsultBody(BaseModel):
     role: str
     question: str
@@ -431,7 +439,8 @@ def create_app(
                 "exhausted": budget.exhausted,
                 "downgrade": budget.downgrade,
             },
-            "kaizen_today": len(ctx.store.list_learnings(since_iso=today_start_iso())),
+            # product findings (Kaizen), not the factory's: no repeats, the founder's own day (8.4)
+            "kaizen_today": len(_product_findings(ctx)),
             "sprint": _sprint_summary(ctx),
             "next_sprint": _sprint_context(ctx)["planned"],
             "conversations": [
@@ -641,6 +650,55 @@ def create_app(
             "saved": saved is not None,
             "markdown": sprint_report.render_markdown(report, summary),
         }
+
+    # ---------------------------------------------------------- factory health (8.3, 8.4)
+    @app.get("/api/factory-health")
+    def factory_health_list(status: str = "open", factory: str | None = None) -> dict[str, Any]:
+        """The factory's own findings, from the hub: about Loompa, for every factory."""
+        from loompa.factory_health import hub_book
+
+        book = hub_book()
+        return {
+            "findings": book.findings(status=None if status == "all" else status, factory=factory),
+            "scans": book.scans(factory)[:20],
+        }
+
+    @app.post("/api/factory-health/{signature}/resolve")
+    def factory_health_resolve(signature: str, body: ResolveBody) -> dict[str, Any]:
+        from loompa.factory_health import hub_book
+
+        if not body.commit.strip() or not hub_book().resolve(signature, body.commit):
+            raise HTTPException(404, "achado não encontrado ou commit vazio")
+        return {"signature": signature, "status": "resolved"}
+
+    @app.post("/api/factory-health/{signature}/reopen")
+    def factory_health_reopen(signature: str) -> dict[str, Any]:
+        from loompa.factory_health import hub_book
+
+        if not hub_book().reopen(signature):
+            raise HTTPException(404, "achado não encontrado")
+        return {"signature": signature, "status": "open"}
+
+    @app.post("/api/factories/{slug}/factory-health/scan")
+    async def factory_health_scan(slug: str, body: ScanBody) -> dict[str, Any]:
+        from loompa.factory_health import scan
+
+        ctx = hub.get(slug).ctx
+        sprint = SprintBoard(ctx.store, slug).get(body.sprint_id) if body.sprint_id else None
+        if body.sprint_id and sprint is None:
+            raise HTTPException(404, f"{body.sprint_id} não existe")
+        result = await scan(ctx, sprint=sprint)
+        return {
+            "found": len(result.findings),
+            "new": result.new,
+            "back": result.back,
+            "confirmed": result.confirmed,
+        }
+
+    @app.get("/api/factories/{slug}/product-findings")
+    def product_findings(slug: str) -> list[dict[str, Any]]:
+        """What the Kaizen loop caught in the product today (the founder's day), no repeats."""
+        return _product_findings(hub.get(slug).ctx)
 
     # No `POST /sprints/start` (ADR-0017): the panel starts a sprint only from a Sprint Meeting,
     # after the Product Owner's proposal. `loompa sprint start` stays for the CLI and automation.
@@ -1217,6 +1275,29 @@ def _story_card(s: dict[str, Any]) -> dict[str, Any]:
         "pr_url": st.get("pr_url"),
         "updated_at": s.get("updated_at", ""),
     }
+
+
+def _product_findings(ctx: EngineContext) -> list[dict[str, Any]]:
+    """Today's Kaizen findings about the product, counted once each: the day is the founder's
+    local day (not UTC), and the same finding met again is the same finding."""
+    from datetime import UTC, datetime
+
+    from loompa.backlog import normalize_title
+
+    start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+    out: dict[str, dict[str, Any]] = {}
+    for row in reversed(ctx.store.list_learnings(since_iso=start.astimezone(UTC).isoformat())):
+        key = normalize_title(row["title"])
+        if key and key not in out:
+            out[key] = {
+                "title": row["title"],
+                "kind": row["kind"],
+                "detail": row.get("detail", "")[:400],
+                "story_id": row.get("story_id"),
+                "card": row.get("created_story_id"),
+                "at": row["created_at"],
+            }
+    return list(out.values())
 
 
 def _agent_cost(ctx: EngineContext, name: str) -> float:

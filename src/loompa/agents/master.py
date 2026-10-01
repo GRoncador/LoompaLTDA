@@ -308,8 +308,15 @@ class MasterAgent(LoompaAgent):
                 cancelled=counts["cancelled"],
             )
             summary = ""
+            health = None
+            try:  # the factory's self-diagnosis over the sprint's window (8.3), into the hub
+                from loompa import factory_health
+
+                health = await factory_health.scan(self.ctx, sprint=sprint)
+            except Exception:  # noqa: BLE001 - a diagnosis that fails never keeps a sprint open
+                log.exception("could not scan the factory over %s", sprint.id)
             try:
-                _, summary = await self.write_sprint_report(sprint)
+                _, summary = await self.write_sprint_report(sprint, health=health)
             except Exception:  # noqa: BLE001 - a report that fails never keeps a sprint open
                 log.exception("could not write the report of %s", sprint.id)
             self.ctx.inbox(
@@ -335,13 +342,23 @@ class MasterAgent(LoompaAgent):
         return closed
 
     async def write_sprint_report(
-        self, sprint: Sprint, *, summarize: bool = True
+        self, sprint: Sprint, *, summarize: bool = True, health: Any = None
     ) -> tuple[dict[str, Any], str]:
         """The sprint's report (8.2): the part measured in code, then the executive summary on
         top, worded by a `low` call (the numbers are given; ADR-0016) and written in code when
         no model can or its text fails the audit. Saved next to the factory's other records and
         returned as `(report, summary)`."""
         report = sprint_report.measure(self.ctx.store, self.ctx.slug, sprint)
+        if health is not None:
+            report["factory"] = [
+                {
+                    "signature": f.signature,
+                    "title": f.title,
+                    "severity": f.severity,
+                    "new": f.signature in health.new,
+                }
+                for f in health.findings
+            ]
         summary = ""
         if summarize and not self.ctx.dry_run:
             self.set_state("WORKING", detail=f"relatório do {sprint.id}")

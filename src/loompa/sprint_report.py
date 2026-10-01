@@ -678,6 +678,14 @@ def render_markdown(report: dict[str, Any], summary: str = "") -> str:
             "respostas cortadas e o custo informado pelo provedor aparecem como “não medido”._",
             "",
         ]
+    factory = report.get("factory") or []
+    if factory:  # the factory's own findings of this sprint (8.3): the Fábrica tab has the rest
+        lines += ["## Achados da fábrica neste sprint", ""]
+        lines += [
+            f"- [{f['severity']}] {f['title']}" + (" (novo)" if f.get("new") else "")
+            for f in factory
+        ]
+        lines += ["", "Detalhes e evidências na aba Fábrica do painel.", ""]
     return "\n".join(lines)
 
 

@@ -3,7 +3,7 @@ import logo from "../assets/loompa-logo.png";
 
 export default function Header(props: {
   factories: FactoryRef[]; slug: string | null; overview: Overview | null; connected: boolean; pending: number;
-  onSwitch: (slug: string) => void; onNewFactory: () => void; onToggleEngine: () => void; onSettings: () => void; onFinance: () => void; onSprints: () => void;
+  onSwitch: (slug: string) => void; onNewFactory: () => void; onToggleEngine: () => void; onSettings: () => void; onFinance: () => void; onSprints: () => void; onFactory: () => void;
 }) {
   const { factories, slug, overview, connected, pending } = props;
   const fin = overview?.finance;
@@ -32,6 +32,7 @@ export default function Header(props: {
             </button>
           )}
           <button className="btn-ghost" title="Histórico de sprints: andamento, custo, tempo e relatórios" onClick={props.onSprints}>🏁 Sprints</button>
+          <button className="btn-ghost" title="O que a fábrica achou sobre si mesma: problemas do Loompa, não do produto" onClick={props.onFactory}>🏭 Fábrica</button>
           <span className="text-sm" title="Decisões aguardando você">📬 {pending}</span>
           <button className={overview.factory.engine ? "btn-ghost" : "btn-primary"} onClick={props.onToggleEngine}>
             {overview.factory.engine ? "⏸ Pausar esteira" : "▶ Ligar esteira"}

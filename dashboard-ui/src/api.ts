@@ -1,3 +1,4 @@
+import type { FactoryFinding, FactoryScan, ProductFinding } from "./types";
 import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -56,6 +57,14 @@ export const api = {
   propose: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/propose`, { method: "POST" }),
   discard: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/discard`, { method: "POST" }),
   story: (slug: string, id: string) => req<any>(`/api/factories/${slug}/stories/${id}`),
+  /** The factory's self-diagnosis (8.3/8.4): findings live in the hub, for every factory. */
+  factoryHealth: (status: "open" | "all" = "open") => req<{ findings: FactoryFinding[]; scans: FactoryScan[] }>(`/api/factory-health?status=${status}`),
+  resolveFinding: (signature: string, commit: string) =>
+    req<{ status: string }>(`/api/factory-health/${encodeURIComponent(signature)}/resolve`, { method: "POST", body: JSON.stringify({ commit }) }),
+  reopenFinding: (signature: string) => req<{ status: string }>(`/api/factory-health/${encodeURIComponent(signature)}/reopen`, { method: "POST" }),
+  scanFactory: (slug: string, sprint_id: string | null = null) =>
+    req<{ found: number; new: string[]; back: string[]; confirmed: string[] }>(`/api/factories/${slug}/factory-health/scan`, { method: "POST", body: JSON.stringify({ sprint_id }) }),
+  productFindings: (slug: string) => req<ProductFinding[]>(`/api/factories/${slug}/product-findings`),
   /** A quick story: the Product Owner files it or opens a review conversation (ADR-0017). */
   createStory: (slug: string, title: string, description: string) =>
     req<QuickStoryResult>(`/api/factories/${slug}/stories`, { method: "POST", body: JSON.stringify({ title, description }) }),
