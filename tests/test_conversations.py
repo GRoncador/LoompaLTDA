@@ -212,6 +212,9 @@ async def test_the_draft_evolves_over_turns_and_committing_starts_the_sprint(fac
     assert "Founder: Quero login e CSV hoje" in second and "Montei dois cards." in second
     assert ctx.store.list_stories(factory.slug) == []
 
+    with pytest.raises(ConversationError, match="proposta do Product Owner"):
+        await chats.commit(conv.id, start_sprint=True)  # never the first act of a meeting
+    await chats.propose(conv.id)
     result = await chats.commit(conv.id, start_sprint=True)
     assert result.created == ["S-001"] and result.sprint_id == "SP-001"
     story = ctx.store.get_story("S-001")
@@ -260,6 +263,7 @@ async def test_existing_cards_join_the_sprint_and_change_priority_through_the_po
     chats = Conversations(ctx)
     conv = chats.open(ConversationKind.MEETING)
     await chats.say(conv.id, "Quero o relatório e um login")
+    await chats.propose(conv.id)
     result = await chats.commit(conv.id, start_sprint=True, goal="Meta")
     assert result.existing == ["S-001"] and result.created == ["S-003"]
     assert ctx.store.get_story("S-001")["priority"] == 100  # re-ranked by the Product Owner
@@ -282,6 +286,7 @@ async def test_commit_checks_everything_before_it_writes(factory: Factory):
         await chats.commit(conv.id)
     await chats.say(conv.id, "puxe o S-001")
     await chats.say(conv.id, "e crie uma nova")
+    await chats.propose(conv.id)
     ProductOwnerAgent(ctx).admit("S-001")  # someone else started it in the meantime
     with pytest.raises(ConversationError, match="S-001 não está mais esperando"):
         await chats.commit(conv.id, start_sprint=True)
@@ -303,6 +308,7 @@ async def test_a_sprint_never_sweeps_in_the_backlog_when_every_pick_was_taken(fa
     chats = Conversations(ctx)
     conv = chats.open(ConversationKind.MEETING)
     await chats.say(conv.id, "quero o login")
+    await chats.propose(conv.id)
     po.admit(po.add_item("Login").story_id)  # the same work started elsewhere meanwhile
     with pytest.raises(ConversationError, match="nenhuma das histórias do sprint"):
         await chats.commit(conv.id, start_sprint=True)

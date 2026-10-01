@@ -30,6 +30,9 @@ def test_a_sprint_meeting_over_the_api(client: TestClient):
     cid = body["conversation"]["id"]
     assert cid == "C-001" and body["turn"]["reply"] and len(body["turn"]["changes"]) == 2
     assert [i["key"] for i in body["conversation"]["draft"]["items"]] == ["D1", "D2"]
+    # the Master opened the meeting with where the project stands (plan 10.2)
+    opening = body["conversation"]["turns"][0]
+    assert opening["who"] == "agent" and "No backlog: 0 cards" in opening["text"]
 
     ov = client.get(f"{BASE}/overview").json()  # the drafts live in the session, not the board
     assert all(c["stories"] == [] for c in ov["columns"]) and ov["sprint"] is None
@@ -50,8 +53,21 @@ def test_a_sprint_meeting_over_the_api(client: TestClient):
 
     r = client.post(f"{BASE}/conversations/{cid}/messages", json={"text": "Relatório mensal"})
     assert r.status_code == 200 and len(r.json()["conversation"]["draft"]["items"]) == 3
-    assert [t["who"] for t in r.json()["conversation"]["turns"]] == ["founder", "agent"] * 2
+    assert [t["who"] for t in r.json()["conversation"]["turns"]] == ["agent"] + [
+        "founder",
+        "agent",
+    ] * 2
 
+    # the sprint starts only after the Product Owner's proposal
+    r = client.post(f"{BASE}/conversations/{cid}/commit", json={"start_sprint": True, "run": False})
+    assert r.status_code == 409 and "proposta do Product Owner" in r.json()["detail"]
+    r = client.post(f"{BASE}/conversations/{cid}/propose")
+    assert r.status_code == 200 and r.json()["conversation"]["draft"]["proposal"]["keys"] == [
+        "D1",
+        "D2",
+        "D3",
+    ]
+    assert r.json()["conversation"]["turns"][-1]["name"] == "Product Owner Loompa"
     r = client.post(f"{BASE}/conversations/{cid}/commit", json={"start_sprint": True, "run": False})
     assert r.status_code == 200
     result = r.json()["result"]
@@ -130,11 +146,15 @@ def test_chat_meeting_starts_a_sprint_from_the_terminal(git_repo: Path, hub, mon
     r = runner.invoke(
         app,
         ["chat", "meeting", "Cadastro de clientes; Relatório mensal", "--dry-run"],
-        input="/tirar D2\n/meta Primeira entrega\n/rascunho\n/sprint\n",
+        input="/tirar D2\n/meta Primeira entrega\n/rascunho\n/sprint\n/proposta\n/sprint\n",
     )
     assert r.exit_code == 0, r.stdout
     assert "Master Loompa" in r.stdout and "Cadastro de clientes" in r.stdout
+    assert "No backlog: 0 cards" in r.stdout  # the Master opened with where things stand
     assert "tirei “Relatório mensal” do rascunho" in r.stdout
+    # the sprint waits for the Product Owner's proposal (ADR-0017)
+    assert "peça a proposta do Product Owner" in r.stdout
+    assert "Product Owner Loompa" in r.stdout and "Simulação: mantive o rascunho" in r.stdout
     assert "SP-001 iniciado" in r.stdout and "loompa run" in r.stdout
     r = runner.invoke(app, ["sprint", "status"])
     assert "SP-001" in r.stdout and "Primeira entrega" in r.stdout and "S-001" in r.stdout

@@ -1,7 +1,8 @@
 """Conversations: chat sessions with a draft of the backlog and of the sprint (ADR-0010).
 
 A session is where the founder thinks out loud with a Loompa: the Master in a Sprint Meeting,
-the Analyst in a brainstorm. Everything the session produces is a *draft* kept inside the session
+the Analyst in a brainstorm, the Product Owner in the review of a quick story it would not file
+(ADR-0017). Everything the session produces is a *draft* kept inside the session
 (`conversations` table); the stories table is not touched until the founder commits, and then
 only through the Product Owner (`ProductOwnerAgent.add_item`, ADR-0008).
 
@@ -21,7 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from loompa.backlog import DEFAULT_PRIORITY, normalize_title
+from loompa.backlog import DEFAULT_PRIORITY, Triage, normalize_title
 from loompa.engine.state import TERMINAL, Stage
 from loompa.store import Store, now_iso
 
@@ -42,6 +43,7 @@ class ConversationNotFound(ConversationError):
 class ConversationKind(StrEnum):
     MEETING = "meeting"  # Sprint Meeting, led by the Master
     BRAINSTORM = "brainstorm"  # led by the Analyst; the Product Owner admits the ideas
+    REVIEW = "review"  # the Product Owner refused a quick story; the founder can clarify (ADR-0017)
 
 
 class ConversationStatus(StrEnum):
@@ -72,12 +74,24 @@ class DraftItem(BaseModel):
     story_id: str | None = None
     origin: str = "founder"
     note: str = ""  # e.g. why the Product Owner held the idea back
+    unpin: bool = False  # hand the founder's pinned place back to the Product Owner on commit
+
+
+class Proposal(BaseModel):
+    """The Product Owner's sprint proposal in a meeting (ADR-0017): the sprint starts only after
+    one, and only with cards it saw."""
+
+    keys: list[str] = Field(default_factory=list)  # the draft's cards when it was made
+    reviewed: bool = True  # False: the model could not be asked, the draft went as it was
+    at: str = Field(default_factory=now_iso)
 
 
 class Draft(BaseModel):
     goal: str = ""
     items: list[DraftItem] = Field(default_factory=list)
     next_key: int = 1
+    proposal: Proposal | None = None  # meetings
+    review: Triage | None = None  # review conversations: the Product Owner's latest reading
 
     def find(self, ref: str) -> DraftItem | None:
         ref = ref.strip().lower()
@@ -136,6 +150,8 @@ class OpenCard:
     priority: int  # 1-5
     epic: str = ""
     origin: str = "founder"
+    pinned: bool = False  # the founder dragged it into place
+    kind: str = ""
 
     @property
     def waiting(self) -> bool:
@@ -283,6 +299,8 @@ def _apply_fields(item: DraftItem, raw: Mapping[str, Any]) -> list[str]:
         item.priority = prio
     if (flag := _bool(raw.get("in_sprint"))) is not None:
         item.in_sprint = flag
+    if item.story_id and _bool(raw.get("pinned")) is False:
+        item.unpin = True
     return refused
 
 
@@ -340,6 +358,8 @@ def render_draft(draft: Draft) -> str:
         lines.append(f'- {i.key} · P{i.priority} · {where}{existing}{epic} · "{i.title}"')
         if i.description and not i.story_id:
             lines.append(f"    {i.description[:400]}")
+        if i.note:
+            lines.append(f"    Product Owner: {i.note[:300]}")
     return "\n".join(lines)
 
 
@@ -348,7 +368,8 @@ def render_backlog(cards: Mapping[str, OpenCard], *, limit: int = 60) -> str:
     busy = [c for c in cards.values() if not c.waiting]
     lines = ["Cards waiting in the backlog (reference them by id):"]
     lines += [
-        f'- {c.id} · P{c.priority} · {c.origin}{f" · epic: {c.epic}" if c.epic else ""} · "{c.title}"'
+        f"- {c.id} · P{c.priority}{' · pinned by the founder' if c.pinned else ''} · {c.origin}"
+        f'{f" · {c.kind}" if c.kind not in ("", "feature") else ""}{f" · epic: {c.epic}" if c.epic else ""} · "{c.title}"'
         for c in waiting[:limit]
     ] or ["(none)"]
     if busy:
@@ -422,6 +443,8 @@ class ConversationBoard:
                 priority=to_scale(row["priority"]),
                 epic=row.get("epic", ""),
                 origin=row.get("origin", "founder"),
+                pinned=bool(row.get("priority_pinned")),
+                kind=str((row.get("state") or {}).get("kind") or ""),
             )
             for row in self.store.list_stories(self.slug)
             if row["stage"] not in TERMINAL

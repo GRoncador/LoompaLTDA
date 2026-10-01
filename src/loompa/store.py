@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS stories (
     epic TEXT NOT NULL DEFAULT '',
     stage TEXT NOT NULL,
     priority INTEGER NOT NULL DEFAULT 100,
+    priority_pinned INTEGER NOT NULL DEFAULT 0,
     origin TEXT NOT NULL DEFAULT 'founder',
     state_json TEXT NOT NULL DEFAULT '{}',
     attempts_tier2 INTEGER NOT NULL DEFAULT 0,
@@ -190,6 +191,8 @@ class Store:
     # Columns added after a table first shipped: a factory's state.db from before gets them on
     # open, with the defaults new rows would have. `CREATE TABLE IF NOT EXISTS` never adds any.
     ADDED_COLUMNS = {
+        # the founder dragged the card into place: the Product Owner's ranking leaves it there
+        "stories": (("priority_pinned", "INTEGER NOT NULL DEFAULT 0"),),
         "usage": (
             ("served_by", "TEXT NOT NULL DEFAULT ''"),
             ("finish_reason", "TEXT NOT NULL DEFAULT ''"),
@@ -253,6 +256,7 @@ class Store:
             "epic",
             "stage",
             "priority",
+            "priority_pinned",
             "origin",
             "state_json",
             "attempts_tier2",
@@ -277,6 +281,7 @@ class Store:
                 "description": "",
                 "epic": "",
                 "priority": 100,
+                "priority_pinned": 0,
                 "origin": "founder",
                 "attempts_tier2": 0,
                 "attempts_tier1": 0,

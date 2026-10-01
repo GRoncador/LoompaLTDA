@@ -1,10 +1,14 @@
-"""Backlog: the single write path for story cards (ADR-0006 §5, ADR-0008).
+"""Backlog: the single write path for story cards (ADR-0006 §5, ADR-0008, ADR-0017).
 
 Only the Product Owner Loompa may hold a `Backlog`; every other agent (Master, Kaizen, the
 dashboard, the founder's answers) asks the Product Owner. That keeps duplicate detection,
 priorities and admission to the pipeline in one place. The engine still writes a story's
 *progress* (stage, checkpoints, cost) through the store, but never creates, ranks, admits or
 cancels a card.
+
+Order (ADR-0017): a new card is slotted after one named card and no other card changes place;
+the whole backlog is re-ranked only when a planning session closes, and a card the founder
+dragged (`priority_pinned`) is a fence that ranking never moves nor lets another card pass.
 """
 
 from __future__ import annotations
@@ -12,9 +16,11 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from loompa.engine.state import TERMINAL, Stage, StoryState
+from pydantic import BaseModel
+
+from loompa.engine.state import TERMINAL, Stage, StoryKind, StoryState
 
 if TYPE_CHECKING:
     from loompa.agents.base import LoompaAgent
@@ -24,6 +30,10 @@ OWNER_ROLE = "product_owner"
 DEFAULT_PRIORITY = 300
 MIN_PRIORITY, MAX_PRIORITY = 1, 999
 SETTABLE_STATUS = (Stage.BACKLOG, Stage.CANCELLED)
+TOP = "top"  # `after` value: the new card goes before every waiting card
+# state.extra: how the Product Owner read the request that became this card (ADR-0017)
+TRIAGE_KEY = "po_triage"
+REFUSAL_CODES = ("duplicate", "contradicts", "vague", "too_big")
 
 
 class BacklogError(ValueError):
@@ -32,6 +42,29 @@ class BacklogError(ValueError):
 
 class BacklogAuthorityError(PermissionError):
     """Someone other than the Product Owner tried to write the backlog."""
+
+
+class Triage(BaseModel):
+    """The Product Owner's reading of a request before it becomes a card (ADR-0017). Even a
+    refusal carries the card as the Product Owner would file it: the founder has the last word."""
+
+    admit: bool = True
+    reason_code: str = ""  # one of REFUSAL_CODES when refused
+    reason: str = ""  # for the founder, plain language
+    duplicate_of: str = ""
+    title: str = ""
+    description: str = ""
+    kind: str = ""  # StoryKind value, "" when the Product Owner did not say
+    epic: str = ""
+    after: str | None = None  # slot right after this waiting card; TOP = first; None = unplaced
+    reviewed: bool = True  # False: the model could not be asked, the request went in as written
+
+    def record(self, **extra: Any) -> dict[str, Any]:
+        """What the card keeps of its admission (`state.extra[TRIAGE_KEY]`)."""
+        keep = {"reviewed": self.reviewed, "kind": self.kind, "reason": self.reason}
+        if not self.admit:
+            keep["reason_code"] = self.reason_code
+        return {**keep, **extra}
 
 
 @dataclass
@@ -113,8 +146,13 @@ class Backlog:
         priority: int = DEFAULT_PRIORITY,
         origin: str = "founder",
         founder_notes: list[str] | None = None,
+        kind: str = "",
+        extra: dict[str, Any] | None = None,
+        after: str | None = None,
     ) -> Admission:
-        """Create a card in the backlog, or point at the open card that already says the same."""
+        """Create a card in the backlog, or point at the open card that already says the same.
+        `after` slots the new card right after that waiting card (`TOP`: first) without moving
+        any other; `kind` and `extra` keep what the Product Owner decided when it read it."""
         title = title.strip()[:120]
         if not title:
             raise BacklogError("uma história precisa de título")
@@ -129,7 +167,10 @@ class Backlog:
             description=description.strip(),
             epic=epic.strip(),
             founder_notes=list(founder_notes or []),
+            extra=dict(extra or {}),
         )
+        if kind in {k.value for k in StoryKind}:
+            state.kind = StoryKind(kind)
         self.ctx.store.upsert_story(
             {
                 "id": story_id,
@@ -146,6 +187,8 @@ class Backlog:
         self.ctx.emit(
             "story.created", story_id=story_id, agent=self.agent, title=title, origin=origin
         )
+        if after is not None:
+            self.place(story_id, after)
         return Admission(story_id, created=True)
 
     def set_priority(self, story_id: str, priority: int) -> None:
@@ -155,19 +198,103 @@ class Backlog:
             "backlog.priority", story_id=story_id, agent=self.agent, priority=self._clamp(priority)
         )
 
-    def reorder(self, story_ids: list[str]) -> list[str]:
+    def reorder(self, story_ids: list[str], *, dragged: str | None = None) -> list[str]:
         """The founder dragged the backlog into this order: first is next. Only cards still in
-        the backlog move; the rest (already running or done) are skipped and not returned."""
+        the backlog move; the rest (already running or done) are skipped and not returned. The
+        card the founder dragged is pinned there: the Product Owner's ranking leaves it."""
         moved: list[str] = []
         for sid in story_ids:
             row = self.ctx.store.get_story(sid)
             if row is None or row["stage"] != Stage.BACKLOG or sid in moved:
                 continue
             moved.append(sid)
-        step = max(1, (MAX_PRIORITY - MIN_PRIORITY) // max(len(moved) + 1, 10))
-        for i, sid in enumerate(moved):
-            self.set_priority(sid, MIN_PRIORITY + step * (i + 1))
+        self._spread(moved)
+        if dragged in moved:
+            self.pin(dragged, True)
         return moved
+
+    def pin(self, story_id: str, pinned: bool) -> None:
+        """Pin a card where the founder put it, or hand its place back to the Product Owner."""
+        row = self._row(story_id)
+        if bool(row.get("priority_pinned")) == pinned:
+            return
+        self.ctx.store.update_story(story_id, priority_pinned=int(pinned))
+        self.ctx.emit("backlog.pinned", story_id=story_id, agent=self.agent, pinned=pinned)
+
+    def waiting(self) -> list[dict[str, Any]]:
+        """Cards waiting in the backlog, first to be built first."""
+        return self.ctx.store.list_stories(self.ctx.slug, stage=Stage.BACKLOG)
+
+    def place(self, story_id: str, after: str) -> bool:
+        """Slot a waiting card right after `after` (`TOP`: before all) without changing anyone
+        else's place: other numbers only grow where they must to keep the order. False when the
+        card or the reference is not waiting in the backlog (the card keeps its number)."""
+        rows = self.waiting()
+        me = next((r for r in rows if r["id"] == story_id), None)
+        others = [r for r in rows if r["id"] != story_id]
+        if me is None:
+            return False
+        if after == TOP or not others:
+            order = [me, *others]
+            start = max(MIN_PRIORITY, others[0]["priority"] - 1) if others else me["priority"]
+        else:
+            idx = next((i for i, r in enumerate(others) if r["id"] == after), None)
+            if idx is None:
+                return False
+            order = [*others[: idx + 1], me, *others[idx + 1 :]]
+            start = others[idx]["priority"]
+        wanted: dict[str, int] = {}
+        last: tuple[int, str] | None = None
+        for row in order:
+            number = start if row is me else row["priority"]
+            if last is not None and (number, row["created_at"]) <= last:
+                # equal numbers sort by creation: a newer card can share its predecessor's
+                number = last[0] if row["created_at"] > last[1] else last[0] + 1
+            last = (number, row["created_at"])
+            wanted[row["id"]] = number
+        if max(wanted.values()) > MAX_PRIORITY:  # no room left at the bottom: even spread
+            self._spread([r["id"] for r in order])
+        else:
+            for row in order:
+                if wanted[row["id"]] != row["priority"]:
+                    self.set_priority(row["id"], wanted[row["id"]])
+        self.ctx.emit("backlog.placed", story_id=story_id, agent=self.agent, after=after)
+        return True
+
+    def rerank(self, ranked: list[str]) -> list[str]:
+        """Apply the Product Owner's ranking of the waiting cards. Pinned cards are fences: they
+        keep their place and no card crosses them, so the ranking only reorders the cards between
+        two pins. Cards the ranking left out keep their place. Returns the ids that moved."""
+        rows = self.waiting()
+        current = [r["id"] for r in rows]
+        pinned = {r["id"] for r in rows if r.get("priority_pinned")}
+        ranked = [sid for sid in dict.fromkeys(ranked) if sid in current and sid not in pinned]
+        final: list[str] = []
+        segment: list[str] = []
+        for sid in [*current, None]:
+            if sid is not None and sid not in pinned:
+                segment.append(sid)
+                continue
+            mentioned = [r for r in ranked if r in segment]
+            slots = iter(mentioned)
+            final += [next(slots) if s in mentioned else s for s in segment]
+            segment = []
+            if sid is not None:
+                final.append(sid)
+        moved = [a for a, b in zip(final, current, strict=True) if a != b]
+        if moved:
+            self._spread(final)
+        self.ctx.emit("backlog.reranked", agent=self.agent, moved=len(moved))
+        return moved
+
+    def _spread(self, ordered: list[str]) -> None:
+        """Even numbers in this order, first is next (what a drag and a full ranking write)."""
+        step = max(1, (MAX_PRIORITY - MIN_PRIORITY) // max(len(ordered) + 1, 10))
+        for i, sid in enumerate(ordered):
+            number = self._clamp(MIN_PRIORITY + step * (i + 1))
+            row = self.ctx.store.get_story(sid)
+            if row is not None and row["priority"] != number:
+                self.set_priority(sid, number)
 
     def set_status(self, story_id: str, status: Stage) -> None:
         """Back to the backlog (deferred) or cancelled. Every other stage belongs to the engine."""

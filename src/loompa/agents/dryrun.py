@@ -170,6 +170,45 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
         return json.dumps(
             {"verdicts": [{"key": k, "admit": True, "reason": "", "priority": 3} for k in keys]}
         )
+    if role == "product_owner" and "Triage the founder's request" in messages[0].content:
+        request = messages[-1].content.split("## Founder's request\n", 1)[-1].split("\n\n## ", 1)[0]
+        title, _, description = request.strip().partition("\n")
+        return json.dumps(
+            {
+                "admit": True,
+                "reason_code": "",
+                "reason": "",
+                "duplicate_of": "",
+                "title": title.strip(),
+                "description": description.strip(),
+                "kind": "feature",
+                "epic": "",
+                "after": "",
+            }
+        )
+    if role == "product_owner" and "Triage the findings" in messages[0].content:
+        keys = re.findall(r"^- (F\d+) ", messages[-1].content, re.M)
+        return json.dumps(
+            {
+                "findings": [
+                    {
+                        "key": k,
+                        "duplicate_of": "",
+                        "title": "",
+                        "description": "",
+                        "kind": "",
+                        "after": "",
+                    }
+                    for k in keys
+                ]
+            }
+        )
+    if role == "product_owner" and "Propose the sprint" in messages[0].content:
+        return json.dumps(
+            {"reply": "Simulação: mantive o rascunho como está para o sprint.", "picks": []}
+        )
+    if role == "product_owner" and "rank the backlog" in messages[0].content:
+        return json.dumps({"order": [], "notes": "simulação: ordem mantida"})
     if role == "product_owner" and "guardian of the spec" in messages[0].content:
         return json.dumps({"criteria": [], "summary": "simulação: critérios mantidos"})
     if role == "product_owner":

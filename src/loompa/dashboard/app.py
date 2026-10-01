@@ -87,14 +87,6 @@ class ProbeBody(BaseModel):
 
 class MeetingBody(BaseModel):
     goals: str
-    run: bool = False
-
-
-class SprintBody(BaseModel):
-    story_ids: list[str] = []
-    goal: str = ""
-    limit: int | None = None
-    run: bool = True
 
 
 class ChatOpenBody(BaseModel):
@@ -114,6 +106,7 @@ class CommitBody(BaseModel):
     start_sprint: bool = False
     goal: str = ""
     run: bool = True
+    force: bool = False  # a review: the founder files the card over the Product Owner's objection
 
 
 class StoryBody(BaseModel):
@@ -124,6 +117,7 @@ class StoryBody(BaseModel):
 
 class OrderBody(BaseModel):
     story_ids: list[str]
+    dragged: str | None = None  # the card the founder moved: it stays pinned there
 
 
 class FactoryBody(BaseModel):
@@ -269,6 +263,11 @@ def _conversation_summary(conv: Conversation) -> dict[str, Any]:
     }
 
 
+def _is_listed(conv: Conversation) -> bool:
+    """A meeting opened and left before the founder said anything is not worth resuming."""
+    return any(t.who == "founder" for t in conv.turns)
+
+
 def create_app(
     *, dry_run: bool = False, run_engine: bool = True, store: ConfigStore | None = None
 ) -> FastAPI:
@@ -406,8 +405,10 @@ def create_app(
             "kaizen_today": len(ctx.store.list_learnings(since_iso=today_start_iso())),
             "sprint": _sprint_summary(ctx),
             "conversations": [
-                _conversation_summary(c) for c in _board(ctx).list(ConversationStatus.OPEN)[:10]
-            ],
+                _conversation_summary(c)
+                for c in _board(ctx).list(ConversationStatus.OPEN)
+                if _is_listed(c)
+            ][:10],
             "last_event_id": _last_event_id(ctx),
         }
 
@@ -480,25 +481,54 @@ def create_app(
 
     @app.post("/api/factories/{slug}/backlog/order")
     def backlog_order(slug: str, body: OrderBody) -> dict[str, Any]:
-        """Drag-and-drop priority: the founder's order, applied by the Product Owner."""
+        """Drag-and-drop priority: the founder's order, applied by the Product Owner. The card
+        that was dragged is pinned there (ADR-0017)."""
         ctx = hub.get(slug).ctx
         from loompa.agents import ProductOwnerAgent
 
-        return {"order": ProductOwnerAgent(ctx).reorder(body.story_ids)}
+        return {"order": ProductOwnerAgent(ctx).reorder(body.story_ids, dragged=body.dragged)}
+
+    @app.post("/api/factories/{slug}/stories/{story_id}/unpin")
+    def unpin_story(slug: str, story_id: str) -> dict[str, Any]:
+        """Hand a pinned card's place back to the Product Owner's ranking."""
+        ctx = hub.get(slug).ctx
+        from loompa.agents import ProductOwnerAgent
+        from loompa.backlog import BacklogError
+
+        try:
+            ProductOwnerAgent(ctx).unpin(story_id)
+        except BacklogError as exc:
+            raise HTTPException(404, str(exc)) from None
+        return {"id": story_id, "priority_pinned": False}
 
     @app.post("/api/factories/{slug}/stories")
-    def create_story(slug: str, body: StoryBody) -> dict[str, Any]:
-        ctx = hub.get(slug).ctx
-        from loompa.agents import ProductOwnerAgent
+    async def create_story(slug: str, body: StoryBody) -> dict[str, Any]:
+        """The quick story (ADR-0017): the Product Owner reads it before anything is written.
+        Filed, it answers with the card as it became; refused, with the review conversation
+        that explains why."""
+        from loompa.agents import Conversations
 
-        added = ProductOwnerAgent(ctx).add_item(
-            body.title,
-            body.description,
-            priority=max(1, min(5, body.priority)) * 100,
-            origin="founder",
-        )
-        sid = added.story_id
-        return {"id": sid}
+        ctx = hub.get(slug).ctx
+        try:
+            out = await Conversations(ctx).quick_story(
+                body.title, body.description, max(1, min(5, body.priority))
+            )
+        except ConversationError as exc:
+            raise HTTPException(409, str(exc)) from None
+        if out.story_id:
+            row = ctx.store.get_story(out.story_id)
+            return {
+                "status": "created",
+                "id": out.story_id,
+                "story": _story_card(row) if row else None,
+                "triage": out.triage.model_dump() if out.triage else None,
+            }
+        return {
+            "status": "refused",
+            "id": None,
+            "triage": out.triage.model_dump() if out.triage else None,
+            "conversation": out.conversation.model_dump(mode="json") if out.conversation else None,
+        }
 
     @app.post("/api/factories/{slug}/stories/{story_id}/promote")
     def promote(slug: str, story_id: str) -> dict[str, Any]:
@@ -542,13 +572,9 @@ def create_app(
 
         rt = hub.get(slug)
         rt.ctx.index_memory()
-        master = MasterAgent(rt.ctx)
-        result = await master.meeting(body.goals)
-        if body.run:
-            if result["stories"]:
-                master.start_sprint([s["id"] for s in result["stories"]])
-            await hub.start_engine(slug)
-        return result
+        # Only fills the backlog: a sprint starts from a Sprint Meeting with the Product Owner's
+        # proposal (ADR-0017). An unreviewed start is the CLI's (`loompa meeting --run`).
+        return await MasterAgent(rt.ctx).meeting(body.goals)
 
     # ----------------------------------------------------------------- sprints
     @app.get("/api/factories/{slug}/sprints")
@@ -557,21 +583,8 @@ def create_app(
         board = SprintBoard(ctx.store, slug)
         return [{**sp.model_dump(), "progress": board.progress(sp)} for sp in board.sprints()]
 
-    @app.post("/api/factories/{slug}/sprints/start")
-    async def start_sprint(slug: str, body: SprintBody) -> dict[str, Any]:
-        from loompa.agents import MasterAgent
-
-        rt = hub.get(slug)
-        try:
-            sprint = MasterAgent(rt.ctx).start_sprint(
-                body.story_ids or None, goal=body.goal, limit=body.limit
-            )
-        except SprintError as exc:
-            raise HTTPException(409, str(exc)) from None
-        if body.run:
-            await hub.start_engine(slug)
-        board = SprintBoard(rt.ctx.store, slug)
-        return {**sprint.model_dump(), "progress": board.progress(sprint)}
+    # No `POST /sprints/start` (ADR-0017): the panel starts a sprint only from a Sprint Meeting,
+    # after the Product Owner's proposal. `loompa sprint start` stays for the CLI and automation.
 
     # ---------------------------------------------------------- conversations
     def _chat(slug: str) -> tuple[FactoryRuntime, Any]:
@@ -602,13 +615,16 @@ def create_app(
     async def open_conversation(slug: str, body: ChatOpenBody) -> dict[str, Any]:
         rt, chats = _chat(slug)
         rt.ctx.index_memory()
-        conv = chats.open(body.kind)
+        with _chat_errors():
+            conv = chats.open(body.kind)
         turn = None
-        if body.text.strip():
-            async with rt.chat_lock(conv.id):
-                with _chat_errors():
+        async with rt.chat_lock(conv.id):
+            with _chat_errors():
+                if conv.kind == ConversationKind.MEETING:
+                    await chats.brief(conv.id)  # the Master opens with where things stand
+                if body.text.strip():
                     turn = await chats.say(conv.id, body.text)
-        conv = chats.board.require(conv.id)
+        conv = chats.board.require(conv.id, open_only=False)
         return _payload(conv, turn=turn and asdict(turn))
 
     @app.get("/api/factories/{slug}/conversations/{conversation_id}")
@@ -623,6 +639,16 @@ def create_app(
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
                 turn = await chats.say(conversation_id, body.text)
+                conv = chats.board.require(conversation_id, open_only=False)
+                return _payload(conv, turn=asdict(turn))
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/propose")
+    async def propose_sprint(slug: str, conversation_id: str) -> dict[str, Any]:
+        """The Product Owner's sprint proposal; "Começar Sprint" waits for one (ADR-0017)."""
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                turn = await chats.propose(conversation_id)
                 return _payload(chats.board.require(conversation_id), turn=asdict(turn))
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/draft")
@@ -641,7 +667,10 @@ def create_app(
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
                 result = await chats.commit(
-                    conversation_id, start_sprint=body.start_sprint, goal=body.goal
+                    conversation_id,
+                    start_sprint=body.start_sprint,
+                    goal=body.goal,
+                    force=body.force,
                 )
                 conv = chats.board.require(conversation_id, open_only=False)
         if body.start_sprint and body.run:
@@ -1057,6 +1086,7 @@ def _story_card(s: dict[str, Any]) -> dict[str, Any]:
         "stage": s["stage"],
         "column": kanban_column(s["stage"]),
         "priority": s.get("priority", 100),
+        "priority_pinned": bool(s.get("priority_pinned")),
         "origin": s.get("origin", "founder"),
         "cost_usd": round(float(s.get("cost_usd") or 0), 4),
         "blocked_reason": st.get("blocked_reason"),

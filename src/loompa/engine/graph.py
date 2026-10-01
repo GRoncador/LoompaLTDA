@@ -31,6 +31,7 @@ from loompa.agents.architect import REPLANNED_KEY
 from loompa.agents.inspector import test_origin
 from loompa.agents.product_owner import CRITERIA_REVIEW_KEY
 from loompa.agents.worker import FOUNDER_CHANGES, unfinished
+from loompa.backlog import TRIAGE_KEY
 from loompa.comms import (
     FounderAnswer,
     FounderMessage,
@@ -201,7 +202,10 @@ async def node_intake(ctx: EngineContext, state: StoryState) -> StoryState:
     story become an epic whose child stories run independently."""
     master = MasterAgent(ctx)
     verdict = await master.classify(state)
-    state.kind = verdict.kind
+    # the kind the Product Owner gave the card when it entered the backlog is the card's (the
+    # founder already sees it on the board); intake still decides complexity and any split
+    triaged = (state.extra.get(TRIAGE_KEY) or {}).get("kind")
+    state.kind = StoryKind(triaged) if triaged in {k.value for k in StoryKind} else verdict.kind
     state.complexity = verdict.complexity
     if len(verdict.children) > 1:
         ids = master.split_epic(state, verdict.children)
@@ -357,7 +361,7 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     )
     worker = worker_cls(ctx, name=label, tier_override=tier)
     res = await worker.run(state, wt)
-    KaizenAgent(ctx).capture(state)
+    await KaizenAgent(ctx).capture(state)
     if res.blocked_reason:
         return await block(
             ctx,
@@ -395,7 +399,7 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
         state.extra.pop(SELFHEAL_KEY, None)
         worth_a_card = [f for f in findings if f.get("severity") in ("medium", "high")]
         if verdict == QAVerdict.CONCERNS and worth_a_card:
-            KaizenAgent(ctx).capture(
+            await KaizenAgent(ctx).capture(
                 state,
                 items=[
                     {
@@ -631,7 +635,9 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     failed = state.extra.pop(MERGE_FAILED_KEY, None)
     if failed:
         return await _merge_after_approval(ctx, state, wt, str(failed))
-    KaizenAgent(ctx).capture(state)  # findings never get lost: sweep what no earlier phase filed
+    await KaizenAgent(ctx).capture(
+        state
+    )  # findings never get lost: sweep what no earlier phase filed
     res = await DeployerAgent(ctx).run(state, wt)
     if not res.ok:
         if (
@@ -683,7 +689,7 @@ async def node_research_review(ctx: EngineContext, state: StoryState) -> StorySt
     else:
         report.pop("review_concerns", None)
     ctx.emit("research.approved", story_id=state.story_id, rounds=state.research_review_rounds)
-    KaizenAgent(ctx).capture(state)  # follow-ups become cards the founder decides on
+    await KaizenAgent(ctx).capture(state)  # follow-ups become cards the founder decides on
     story = ctx.store.get_story(state.story_id) or {}
     state.delivery_summary = str(report.get("summary") or state.title)
     msg = ctx.inbox(

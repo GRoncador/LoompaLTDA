@@ -59,13 +59,11 @@ def test_meeting_run_inbox_flow(client: TestClient):
     ]
     ov = client.get("/api/factories/demo-hq/overview").json()
     assert len(ov["columns"][0]["stories"]) == 2 and ov["sprint"] is None
-    # the backlog waits for a sprint: nothing runs until the founder starts one
-    sprint = client.post("/api/factories/demo-hq/sprints/start", json={"run": False}).json()
-    assert sprint["id"] == "SP-001" and sprint["status"] == "running"
-    assert sprint["story_ids"] == ["S-001", "S-002"] and sprint["progress"]["total"] == 2
-    assert (
-        client.post("/api/factories/demo-hq/sprints/start", json={"run": False}).status_code == 409
-    )
+    # the backlog waits for a sprint: the panel has no one-click start any more (ADR-0017), a
+    # sprint starts from a Sprint Meeting; the unreviewed start is the CLI's `loompa sprint start`
+    assert client.post("/api/factories/demo-hq/sprints/start", json={}).status_code in (404, 405)
+    sprint = _start_sprint_as_the_cli_does(client)
+    assert sprint.id == "SP-001" and sprint.story_ids == ["S-001", "S-002"]
     ov = client.get("/api/factories/demo-hq/overview").json()
     assert ov["sprint"]["id"] == "SP-001" and ov["columns"][0]["stories"] == []
     # run the engine until the stories await the founder
@@ -117,6 +115,12 @@ def test_meeting_run_inbox_flow(client: TestClient):
     assert rep["kind"] == "info" and "Concluídas: 1" in rep["context"]
 
 
+def _start_sprint_as_the_cli_does(client: TestClient):
+    from loompa.agents import MasterAgent
+
+    return MasterAgent(client.app.state.hub.get("demo-hq").ctx).start_sprint()
+
+
 def test_create_story_promote_and_memory(client: TestClient):
     sid = client.post(
         "/api/factories/demo-hq/stories", json={"title": "Nova ideia", "priority": 1}
@@ -150,7 +154,9 @@ def test_websocket_hello_and_events(client: TestClient):
         assert hello["type"] == "hello" and hello["factory"] == "demo-hq"
         client.post("/api/factories/demo-hq/stories", json={"title": "Via API"})
         ev = ws.receive_json()
-        assert ev["type"] == "story.created" and ev["payload"]["title"] == "Via API"
+        while ev["type"] != "story.created":  # the Product Owner reads it first (ADR-0017)
+            ev = ws.receive_json()
+        assert ev["payload"]["title"] == "Via API"
 
 
 def test_index_without_bundle(client: TestClient):
@@ -252,7 +258,7 @@ def _deliver_one(client: TestClient) -> dict:
     import time
 
     client.post("/api/factories/demo-hq/meeting", json={"goals": "Tela de login"})
-    client.post("/api/factories/demo-hq/sprints/start", json={"run": False})
+    _start_sprint_as_the_cli_does(client)
     client.post("/api/factories/demo-hq/engine/start")
     for _ in range(100):
         inbox = client.get("/api/factories/demo-hq/inbox").json()
