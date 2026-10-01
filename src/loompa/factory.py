@@ -74,6 +74,10 @@ class FactoryPaths:
         return self.loompa / "traces"
 
     @property
+    def reports(self) -> Path:
+        return self.loompa / "reports"
+
+    @property
     def state_db(self) -> Path:
         return self.loompa / "state.db"
 

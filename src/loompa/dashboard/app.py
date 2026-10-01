@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from loompa import __version__
+from loompa import __version__, sprint_report
 from loompa.comms import FounderAnswer
 from loompa.config import ConfigStore
 from loompa.config.settings import SettingsPatch
@@ -365,8 +365,10 @@ def create_app(
         ctx = rt.ctx
         stories = ctx.store.list_stories(slug)
         columns: dict[str, list[dict[str, Any]]] = {k: [] for k, _ in KANBAN_COLUMNS}
+        sprint_of = sprint_report.current_sprints(ctx.store, slug)  # read, never stored (10.8)
         for s in stories:
             card = _story_card(s)
+            card["sprint_id"] = sprint_of.get(s["id"])
             if s["stage"] in LIVE_STAGES:  # only a story at work has something to show
                 card["activity"] = ctx.store.story_activity(s["id"])
             columns[kanban_column(s["stage"])].append(card)
@@ -445,6 +447,7 @@ def create_app(
         }
         return {
             "story": _story_card(row),
+            "sprints": sprint_report.sprints_of(ctx.store, slug, story_id),
             "state": state.model_dump(mode="json"),
             "docs": docs,
             "checkpoints": ctx.store.checkpoints(story_id),
@@ -596,7 +599,38 @@ def create_app(
     def sprints(slug: str) -> list[dict[str, Any]]:
         ctx = hub.get(slug).ctx
         board = SprintBoard(ctx.store, slug)
-        return [{**sp.model_dump(), "progress": board.progress(sp)} for sp in board.sprints()]
+        return [
+            {
+                **sp.model_dump(),
+                "progress": board.progress(sp),
+                # the list and the comparison chart need the totals only (10.8)
+                "totals": sprint_report.measure(ctx.store, slug, sp, previous=False)["totals"]
+                if sp.started_at
+                else None,
+            }
+            for sp in board.sprints()
+        ]
+
+    @app.get("/api/factories/{slug}/sprints/{sprint_id}/report")
+    def sprint_report_view(slug: str, sprint_id: str) -> dict[str, Any]:
+        """A sprint's report (8.2) for the Sprints tab: the saved one once it ended (measured
+        part and executive summary, the same as the file and `loompa sprint report`), measured
+        as of now while it runs."""
+        ctx = hub.get(slug).ctx
+        sprint = SprintBoard(ctx.store, slug).get(sprint_id)
+        if sprint is None:
+            raise HTTPException(404, sprint_id)
+        saved = sprint_report.load(ctx.factory.paths.reports, sprint_id)
+        if saved is not None and sprint.closed_at:
+            report, summary = saved, str(saved.pop("summary", "") or "")
+        else:
+            report, summary = sprint_report.measure(ctx.store, slug, sprint), ""
+        return {
+            **report,
+            "summary": summary,
+            "saved": saved is not None,
+            "markdown": sprint_report.render_markdown(report, summary),
+        }
 
     # No `POST /sprints/start` (ADR-0017): the panel starts a sprint only from a Sprint Meeting,
     # after the Product Owner's proposal. `loompa sprint start` stays for the CLI and automation.

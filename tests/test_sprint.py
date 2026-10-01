@@ -122,12 +122,12 @@ async def test_draft_sprint_is_built_then_started(factory: Factory):
     assert ctx.store.get_story(b)["stage"] == Stage.SPEC
     assert ctx.store.get_story(a)["stage"] == Stage.BACKLOG
 
-    def finish(sprint_id: str) -> None:  # the sprint's stories end; the next one may start
+    async def finish(sprint_id: str) -> None:  # the sprint's stories end; the next may start
         for sid in board.get(sprint_id).story_ids:
             ctx.store.update_story(sid, stage=Stage.DONE.value)
-        master.close_finished_sprints()
+        await master.close_finished_sprints()
 
-    finish(sprint.id)
+    await finish(sprint.id)
     # default pick: the founder's cards in priority order, never the Kaizen findings
     second = master.start_sprint(limit=1)
     assert second.story_ids == [a]
@@ -135,10 +135,10 @@ async def test_draft_sprint_is_built_then_started(factory: Factory):
     board.add(kaizen)
     with pytest.raises(SprintError, match="já está no"):
         board.add(kaizen, sprint_id=second.id)
-    finish(second.id)
+    await finish(second.id)
     third = master.start_sprint([c])
     assert third.story_ids == [kaizen, c]
-    finish(third.id)
+    await finish(third.id)
     with pytest.raises(SprintError, match="não há histórias"):
         master.start_sprint()
     with pytest.raises(SprintError, match="não está esperando"):

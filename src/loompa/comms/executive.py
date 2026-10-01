@@ -75,6 +75,7 @@ class FounderMessage(BaseModel):
     decisions: list[Decision] = Field(default_factory=list)  # independent side decisions
     allow_free_text: bool = True
     technical_ref: str | None = None  # pointer to the filtered technical log, never shown inline
+    sprint_id: str | None = None  # a note about a sprint opens its report in the Sprints tab
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     answer: FounderAnswer | None = None
 

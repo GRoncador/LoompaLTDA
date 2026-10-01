@@ -309,6 +309,61 @@ def sprint_status(factory: str | None = typer.Option(None, "--factory", "-f")) -
     store.close()
 
 
+@sprint_app.command("report")
+def sprint_report_cmd(
+    sprint_id: str | None = typer.Argument(None, help="O sprint (padrão: o atual ou o último)."),
+    rewrite: bool = typer.Option(
+        False, "--rewrite", help="Mede de novo e reescreve o relatório salvo, com novo resumo."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Os números medidos, em JSON."),
+    factory: str | None = typer.Option(None, "--factory", "-f"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Sem chamadas de IA: o resumo é escrito pelos números."
+    ),
+) -> None:
+    """Relatório de um sprint: o que foi feito, quanto tempo, quanto custou e o que não estava previsto."""
+    import json
+
+    from rich.markdown import Markdown
+
+    from loompa import sprint_report
+
+    f = resolve_factory(factory)
+    if not f.paths.state_db.is_file():
+        console.print("Nenhum sprint ainda.")
+        raise typer.Exit(1)
+    ctx = build_context(f, dry_run=dry_run)
+    board = SprintBoard(ctx.store, f.slug)
+    sprints = board.sprints()
+    sprint = (
+        board.get(sprint_id)
+        if sprint_id
+        else (board.running() or next((s for s in reversed(sprints) if s.started_at), None))
+    )
+    if sprint is None:
+        console.print(f"[red]{sprint_id or 'nenhum sprint começou ainda'}[/red]")
+        ctx.close()
+        raise typer.Exit(1)
+    finished = sprint.status in (SprintStatus.CLOSED, SprintStatus.CANCELLED)
+    saved = None if rewrite else sprint_report.load(f.paths.reports, sprint.id)
+    if saved is not None and finished:
+        report, summary = saved, str(saved.get("summary") or "")
+    elif finished:
+        from loompa.agents import MasterAgent
+
+        report, summary = asyncio.run(MasterAgent(ctx).write_sprint_report(sprint))
+    else:  # still running or planned: measured as of now, nothing saved
+        report, summary = sprint_report.measure(ctx.store, f.slug, sprint), ""
+    if as_json:
+        console.print_json(json.dumps({**report, "summary": summary}, ensure_ascii=False))
+    else:
+        console.print(Markdown(sprint_report.render_markdown(report, summary)))
+        if finished:
+            md, _ = sprint_report.report_paths(f.paths.reports, sprint.id)
+            console.print(f"[dim]{md}[/dim]")
+    ctx.close()
+
+
 # ------------------------------------------------------------------------------ inbox
 
 

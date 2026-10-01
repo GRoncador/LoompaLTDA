@@ -408,6 +408,27 @@ class Store:
             r["payload"] = json.loads(r.pop("payload_json") or "{}")
         return rows
 
+    def events_between(self, factory: str, start: str, end: str) -> list[dict[str, Any]]:
+        """Every event of a factory in [start, end], oldest first: a sprint's window (8.2)."""
+        rows = self._q(
+            "SELECT id, story_id, agent, type, payload_json, created_at FROM events "
+            "WHERE factory = ? AND created_at >= ? AND created_at <= ? AND type NOT IN "
+            "('llm.progress', 'agent.state') ORDER BY id",
+            (factory, start, end),
+        )
+        for r in rows:
+            r["payload"] = json.loads(r.pop("payload_json") or "{}")
+        return rows
+
+    def usage_between(self, factory: str, start: str, end: str) -> list[dict[str, Any]]:
+        """Every model call of a factory in [start, end]: a sprint's window (8.2)."""
+        return self._q(
+            "SELECT story_id, role, model, input_tokens, output_tokens, cost_usd, duration_ms, "
+            "finish_reason, cost_source, span_id, created_at FROM usage "
+            "WHERE factory = ? AND created_at >= ? AND created_at <= ? ORDER BY id",
+            (factory, start, end),
+        )
+
     # -------------------------------------------------------------------- inbox
     def put_message(self, msg: FounderMessage) -> None:
         self._x(

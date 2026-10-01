@@ -372,12 +372,12 @@ async def test_an_approval_mid_sprint_waits_for_the_work_to_end(factory: Factory
     await sched.aanswer(msg.id, FounderAnswer(option_key="approve"))
     assert tier_ids(ctx.config, "tier1") == before  # not swapped under the running story
     assert any("terminar" in m.context for m in ctx.store.list_messages(factory.slug))
-    sched.close_sprints()
+    await sched.close_sprints()
     assert tier_ids(ctx.config, "tier1") == before  # still running
     ctx.store.update_story(story, stage=Stage.DONE.value)
-    sched.close_sprints()
+    await sched.close_sprints()
     assert tier_ids(ctx.config, "tier1") == ["b/strong", "c/mid"]
-    sched.close_sprints()  # and it is applied once
+    await sched.close_sprints()  # and it is applied once
     assert len([m for m in ctx.store.list_messages(factory.slug) if "atualizados" in m.title]) == 1
 
 

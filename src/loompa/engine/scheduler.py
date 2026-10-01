@@ -133,11 +133,11 @@ class Scheduler:
         ]
         return max(min(waits), 0.0) if waits else None
 
-    def close_sprints(self) -> None:
-        """Close sprints whose stories all finished (the Master tells the founder)."""
+    async def close_sprints(self) -> None:
+        """Close sprints whose stories all finished (the Master reports to the founder)."""
         from loompa.agents.master import MasterAgent
 
-        MasterAgent(self.ctx).close_finished_sprints()
+        await MasterAgent(self.ctx).close_finished_sprints()
         ModelSync(self.ctx).apply_deferred()  # an approved model swap waits for the work to end
 
     def budget_ok(self) -> BudgetStatus:
@@ -324,7 +324,7 @@ class Scheduler:
             while True:
                 self._watch()
                 self._dispatch()
-                self.close_sprints()
+                await self.close_sprints()
                 if not self.running:
                     wait = self.waiting_for()
                     if wait is not None and until_idle:
@@ -353,7 +353,7 @@ class Scheduler:
     async def aanswer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:
         """Apply an inbox reply; returns the updated story state (None for non-story messages)."""
         state = await self._apply_answer(message_id, answer)
-        self.close_sprints()  # an approval or a cancel may have finished the sprint
+        await self.close_sprints()  # an approval or a cancel may have finished the sprint
         return state
 
     def _decide_cards(self, msg: FounderMessage, answer: FounderAnswer) -> None:

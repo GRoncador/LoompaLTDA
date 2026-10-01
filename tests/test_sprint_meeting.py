@@ -30,10 +30,10 @@ def running_sprint(ctx, *titles: str) -> list[str]:
     return ids
 
 
-def finish(ctx, sprint_id: str) -> None:
+async def finish(ctx, sprint_id: str) -> None:
     for sid in SprintBoard(ctx.store, ctx.slug).get(sprint_id).story_ids:
         ctx.store.update_story(sid, stage=Stage.DONE.value)
-    MasterAgent(ctx).close_finished_sprints()
+    await MasterAgent(ctx).close_finished_sprints()
 
 
 def master_says(*answers: dict[str, Any]):
@@ -50,7 +50,7 @@ def master_says(*answers: dict[str, Any]):
 # ----------------------------------------------------------------------- one at a time
 
 
-def test_only_one_sprint_runs_at_a_time(factory: Factory):
+async def test_only_one_sprint_runs_at_a_time(factory: Factory):
     ctx = make_ctx(factory)
     running_sprint(ctx, "Login")
     later = ProductOwnerAgent(ctx).add_item("Relatório").story_id
@@ -61,7 +61,7 @@ def test_only_one_sprint_runs_at_a_time(factory: Factory):
     planned = board.add(later)  # assembling the next one is fine
     with pytest.raises(SprintError, match="só um sprint roda por vez"):
         board.start(planned.id)
-    finish(ctx, "SP-001")
+    await finish(ctx, "SP-001")
     assert MasterAgent(ctx).start_sprint().id == planned.id
     ctx.close()
 
@@ -82,7 +82,7 @@ async def test_a_story_sent_back_to_the_backlog_leaves_the_running_sprint(factor
     sprint = SprintBoard(ctx.store, ctx.slug).get("SP-001")
     assert sprint.story_ids == [b] and ctx.store.get_story(a)["stage"] == Stage.BACKLOG
     ctx.store.update_story(b, stage=Stage.DONE.value)
-    MasterAgent(ctx).close_finished_sprints()
+    await MasterAgent(ctx).close_finished_sprints()
     assert SprintBoard(ctx.store, ctx.slug).get("SP-001").status == SprintStatus.CLOSED
     await ctx.aclose()
 
@@ -233,7 +233,7 @@ async def test_the_next_sprint_is_assembled_then_reviewed_and_started(factory: F
     assert "está montado" in closing and "abra uma reunião de sprint" in closing
 
     # the running sprint ends: nothing starts by itself, the founder is told how to go on
-    finish(ctx, "SP-001")
+    await finish(ctx, "SP-001")
     assert board.running() is None and board.get(planned.id).status == SprintStatus.OPEN
     note = [m for m in ctx.store.list_messages(ctx.slug) if "SP-001 concluído" in m.title][0]
     assert f"O {planned.id} já está montado" in note.impact
