@@ -15,6 +15,7 @@ export default function Inbox(props: {
   onReply: (m: Message, option: string | null, text: string | null, decisions?: Record<string, string>) => Promise<void>;
   onArchive: (m: Message) => Promise<void>;
   onOpenStory: (id: string) => void;
+  onOpenSprint: (id: string) => void;
 }) {
   const { messages, finance, kaizen } = props;
   const actionable = messages.filter((m) => m.options.length > 0 || m.kind === "decision" || m.kind === "blocked");
@@ -40,7 +41,7 @@ export default function Inbox(props: {
   );
 }
 
-function MessageCard({ m, onReply, onArchive, onOpenStory }: { m: Message } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory">) {
+function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: Message } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint">) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(m.kind !== "info");
@@ -64,6 +65,7 @@ function MessageCard({ m, onReply, onArchive, onOpenStory }: { m: Message } & Pi
         <>
           <p className="mt-2 whitespace-pre-line text-sm text-slate-300">{m.context}</p>
           {m.impact && <p className="mt-1 text-xs italic text-slate-400">{m.impact}</p>}
+          {m.sprint_id && <button className="btn-ghost mt-2 text-xs" onClick={() => onOpenSprint(m.sprint_id!)}>📊 Ver o relatório do {m.sprint_id}</button>}
           {m.decisions.length > 0 && (
             <div className="mt-3 space-y-2 rounded-md border border-line bg-panel/60 p-2">
               <p className="text-xs font-semibold text-slate-300">💡 Achados sugeridos — decida cada um</p>

@@ -7,7 +7,8 @@ const TONE: Record<string, string> = {
 
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
 
-export default function Kanban({ columns, sprint, nextSprint, conversations, live, now, onChat, onOpen, onCreate, onReorder, onUnpin }: {
+export default function Kanban({ onOpenSprint, columns, sprint, nextSprint, conversations, live, now, onChat, onOpen, onCreate, onReorder, onUnpin }: {
+  onOpenSprint: (id: string) => void;
   columns: Column[]; sprint: SprintSummary | null; nextSprint: { id: string; goal: string; story_ids: string[] } | null;
   conversations: ConversationSummary[]; live: Record<string, StoryActivity>; now: number;
   onChat: (kind: ConversationKind, resumeId?: string) => void; onOpen: (id: string) => void;
@@ -60,10 +61,10 @@ export default function Kanban({ columns, sprint, nextSprint, conversations, liv
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold">📋 Kanban de Fluxo de Valor</h2>
           {sprint && (
-            <span className="chip bg-sky-900/50 text-sky-200" title={sprint.goal || undefined}>
+            <button className="chip bg-sky-900/50 text-sky-200 hover:bg-sky-800/60" title={`${sprint.goal ? `${sprint.goal} · ` : ""}abrir na aba Sprints`} onClick={() => onOpenSprint(sprint.id)}>
               {sprint.id} · {sprint.status === "open" ? "em planejamento" : "rodando"} · {sprint.progress.done}/{sprint.progress.total}
               {sprint.progress.waiting > 0 ? ` · ${sprint.progress.waiting} aguardando você` : ""}
-            </span>
+            </button>
           )}
           {/* one sprint runs at a time; the next one can be assembled and waits (ADR-0018) */}
           {sprint?.status === "running" && nextSprint && (
@@ -143,7 +144,7 @@ function Card({ s, activity, now, onOpen, onUnpin }: { s: StoryCard; activity?: 
       )}
       <button className="w-full text-left" onClick={() => onOpen(s.id)}>
         <div className={`flex items-center justify-between text-[10px] text-slate-500 ${pinned ? "pr-4" : ""}`}>
-          <span>{s.id}</span>
+          <span>{s.id}{s.sprint_id && <span className="ml-1 rounded bg-sky-900/40 px-1 text-sky-300" title={`Sprint ${s.sprint_id}`}>{s.sprint_id}</span>}</span>
           <span>{s.cost_usd > 0 ? `$${s.cost_usd.toFixed(2)}` : ""}</span>
         </div>
         <div className="mt-0.5 font-medium leading-snug text-slate-100">{s.title}</div>

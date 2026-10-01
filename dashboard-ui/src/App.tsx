@@ -13,6 +13,7 @@ import NewFactoryModal from "./components/NewFactoryModal";
 import EventTicker from "./components/EventTicker";
 import SettingsModal from "./components/SettingsModal";
 import FinanceModal from "./components/FinanceModal";
+import SprintsModal from "./components/SprintsModal";
 
 export default function App() {
   const [factories, setFactories] = useState<FactoryRef[]>([]);
@@ -23,6 +24,8 @@ export default function App() {
   const [newFactoryOpen, setNewFactoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [financeOpen, setFinanceOpen] = useState(false);
+  // the Sprints tab (10.8): open, and on which sprint ("" = the current one)
+  const [sprintsAt, setSprintsAt] = useState<string | null>(null);
   const [agentName, setAgentName] = useState<string | null>(null);
   const [storyId, setStoryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +61,7 @@ export default function App() {
       setLive((prev) => ({ ...prev, [sid]: advance(prev[sid] ?? snapshot(overviewRef.current, sid), e) }));
       setNow(Date.now());
     }
-    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "sprint.planned", "sprint.adjusted", "sprint.cancelled", "meeting.mode", "story.withdrawn", "story.restarted", "story.stalled"].includes(e.type)) {
+    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "sprint.report", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "sprint.planned", "sprint.adjusted", "sprint.cancelled", "meeting.mode", "story.withdrawn", "story.restarted", "story.stalled"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
@@ -92,7 +95,7 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
-        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)}
+        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")}
       />
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
       <main className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
@@ -104,10 +107,11 @@ export default function App() {
           <Office agents={overview?.agents ?? []} onSelect={setAgentName} />
         </section>
         <section className="card flex min-h-[320px] flex-col overflow-hidden">
-          <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} />
+          <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} onOpenSprint={setSprintsAt} />
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
           <Kanban
+            onOpenSprint={setSprintsAt}
             columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} nextSprint={overview?.next_sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now}
             onChat={(kind, resumeId) => setChat({ kind, resumeId })} onOpen={setStoryId}
             onCreate={createStory}
@@ -119,10 +123,11 @@ export default function App() {
       <EventTicker events={events} />
       {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
       {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
+      {sprintsAt !== null && slug && <SprintsModal slug={slug} initial={sprintsAt || null} onClose={() => setSprintsAt(null)} onOpenStory={setStoryId} />}
       {settingsOpen && slug && <SettingsModal slug={slug} onClose={() => { setSettingsOpen(false); refresh(); }} />}
       {newFactoryOpen && <NewFactoryModal onClose={async (created) => { setNewFactoryOpen(false); await loadFactories(); if (created) setSlug(created); }} />}
       {agentName && slug && <AgentDrawer slug={slug} name={agentName} onClose={() => setAgentName(null)} onOpenStory={setStoryId} />}
-      {storyId && slug && <StoryDrawer slug={slug} id={storyId} onClose={() => setStoryId(null)} />}
+      {storyId && slug && <StoryDrawer slug={slug} id={storyId} onClose={() => setStoryId(null)} onOpenSprint={(id) => { setStoryId(null); setSprintsAt(id); }} />}
     </div>
   );
 }

@@ -37,6 +37,7 @@ export interface StoryCard {
   pr_url: string | null;
   updated_at: string;
   activity?: StoryActivity | null;
+  sprint_id?: string | null; // the sprint it is in, else the last one it went through (10.8)
 }
 
 /** What a story at work is doing now (server snapshot, then advanced by live events). */
@@ -83,6 +84,7 @@ export interface Message {
   allow_free_text: boolean;
   created_at: string;
   answer?: { option_key: string | null; text: string | null; answered_at: string } | null;
+  sprint_id?: string | null; // a note about a sprint opens its report (8.2)
 }
 
 export type ConversationKind = "meeting" | "brainstorm" | "review";
@@ -285,3 +287,44 @@ export interface SettingsPatch {
 }
 
 export interface ProbeResult { name: string; ok: boolean; detail: string; model: string; latency_ms: number }
+
+// ---------------------------------------------------------------- sprint report (8.2, 10.8)
+
+export interface SprintTotals {
+  stories: number; planned: number; joined: number; delivered: number; cancelled: number; withdrawn: number; waiting: number; working: number;
+  duration_s: number; wall_s: number; model_s: number; founder_wait_s: number;
+  calls: number; input_tokens: number; output_tokens: number; cost_usd: number; factory_cost_usd: number; cost_per_delivered_usd: number | null;
+  retries: number; escalations: number; replans: number; restarts: number; recoveries: number; stalls: number; blocks: number;
+  founder_answers: number; deliveries: number; changes_asked: number; review_rounds: number; rework: number;
+  tasks_done: number | null; cuts: number | null; // null: the sprint ran before the trace ("não medido")
+}
+
+export interface SprintStoryReport {
+  id: string; title: string; origin: string; kind: string; complexity: string; planned: boolean; joined_how: string | null;
+  stage: string; result: "delivered" | "cancelled" | "withdrawn" | "waiting" | "working";
+  started_at: string | null; finished_at: string | null; wall_s: number; model_s: number; stage_s: Record<string, number>; founder_wait_s: number;
+  calls: number; input_tokens: number; output_tokens: number; cost_usd: number;
+  retries: number; escalations: number; replans: number; restarts: number; recoveries: number; stalls: number;
+  blocks: Record<string, number>; founder_answers: number; deliveries: number; changes_asked: number; review_rounds: number; verdicts: string[]; spec_rejections: number;
+  tasks: { done: number; runs: number; unfinished: number; seconds: number | null; by_origin: Record<string, number> | null } | null;
+  cuts: number | null; unfinished_tasks: number | null;
+}
+
+export interface SprintReport {
+  sprint: { id: string; goal: string; status: SprintSummary["status"]; created_at: string; started_at: string | null; closed_at: string | null };
+  generated_at: string;
+  measured: { traced: boolean; reported_cost_calls: number; calls: number };
+  totals: SprintTotals;
+  stories: SprintStoryReport[];
+  unplanned: { joined: { id: string; title: string; how: string }[]; tasks_added: Record<string, number> | null; extra_review_rounds: number; spec_rejections: number; replans: number; restarts: number };
+  later: { cards: { id: string; title: string; origin: string; stage: string }[]; findings: Record<string, number>; withdrawn: { id: string; title: string }[]; duplicates: number };
+  stage_time: Record<string, number>;
+  timeline: { at: string; BACKLOG: number; SPEC: number; DEV: number; TEST: number; AWAITING_FOUNDER: number; DONE: number }[];
+  previous: { id: string; goal: string; totals: SprintTotals } | null;
+  summary: string; saved: boolean; markdown: string;
+}
+
+export interface SprintListItem extends SprintSummary {
+  created_at: string; started_at: string | null; closed_at: string | null;
+  totals: SprintTotals | null;
+}

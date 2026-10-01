@@ -1,4 +1,4 @@
-import type { ChatReply, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
+import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
@@ -63,6 +63,9 @@ export const api = {
     req<{ order: string[] }>(`/api/factories/${slug}/backlog/order`, { method: "POST", body: JSON.stringify({ story_ids, dragged }) }),
   agent: (slug: string, name: string) => req<any>(`/api/factories/${slug}/agents/${encodeURIComponent(name)}`),
   finance: (slug: string) => req<any>(`/api/factories/${slug}/finance`),
+  sprints: (slug: string) => req<SprintListItem[]>(`/api/factories/${slug}/sprints`),
+  /** The sprint's report (8.2): saved once it ended, measured as of now while it runs. */
+  sprintReport: (slug: string, id: string) => req<SprintReport>(`/api/factories/${slug}/sprints/${id}/report`),
   report: (slug: string) => req<Message>(`/api/factories/${slug}/report`, { method: "POST" }),
   transcribe: async (slug: string, blob: Blob) => {
     const fd = new FormData();

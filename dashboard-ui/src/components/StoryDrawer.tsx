@@ -5,7 +5,7 @@ import { Drawer, Row } from "./AgentDrawer";
 type Tab = "spec" | "plan" | "tasks" | "research" | "diff" | "log";
 type Diff = { source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string };
 
-export default function StoryDrawer({ slug, id, onClose }: { slug: string; id: string; onClose: () => void }) {
+export default function StoryDrawer({ slug, id, onClose, onOpenSprint }: { slug: string; id: string; onClose: () => void; onOpenSprint: (id: string) => void }) {
   const [data, setData] = useState<any>(null);
   // the order Spec Kit writes them in: what, then how, then the steps (plan 11.2)
   const [tab, setTab] = useState<Tab>("spec");
@@ -31,6 +31,7 @@ export default function StoryDrawer({ slug, id, onClose }: { slug: string; id: s
       {/* header, details and tabs stay put; only the active tab's content scrolls */}
       <div className="scroll-thin max-h-[40vh] shrink-0 space-y-2 overflow-y-auto text-sm">
         <Row k="Etapa" v={<span className="chip bg-slate-800 text-slate-200">{s.stage}</span>} />
+        {data.sprints?.length > 0 && <Row k="Sprints" v={<span className="flex flex-wrap gap-1">{data.sprints.map((sp: string) => <button key={sp} className="chip bg-sky-900/50 text-sky-200 hover:bg-sky-800/60" title="abrir na aba Sprints" onClick={() => onOpenSprint(sp)}>{sp}</button>)}</span>} />}
         <Row k="Custo" v={`US$ ${Number(data.usage?.cost_usd ?? 0).toFixed(4)} · ${data.usage?.calls ?? 0} consultas`} />
         <Row k="Tentativas" v={`tier 2: ${s.attempts.tier2} · tier 1: ${s.attempts.tier1} · atual: ${s.current_tier}`} />
         {s.branch && <Row k="Branch" v={<code className="text-xs">{s.branch}</code>} />}

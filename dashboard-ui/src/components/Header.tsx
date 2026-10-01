@@ -2,7 +2,7 @@ import type { FactoryRef, Overview } from "../types";
 
 export default function Header(props: {
   factories: FactoryRef[]; slug: string | null; overview: Overview | null; connected: boolean; pending: number;
-  onSwitch: (slug: string) => void; onNewFactory: () => void; onToggleEngine: () => void; onSettings: () => void; onFinance: () => void;
+  onSwitch: (slug: string) => void; onNewFactory: () => void; onToggleEngine: () => void; onSettings: () => void; onFinance: () => void; onSprints: () => void;
 }) {
   const { factories, slug, overview, connected, pending } = props;
   const fin = overview?.finance;
@@ -30,6 +30,7 @@ export default function Header(props: {
               💰 US$ {fin.today_usd.toFixed(2)} hoje · {fin.period_usd.toFixed(2)}/{fin.cap_usd.toFixed(2)} {fin.period === "weekly" ? "na semana" : "no mês"}
             </button>
           )}
+          <button className="btn-ghost" title="Histórico de sprints: andamento, custo, tempo e relatórios" onClick={props.onSprints}>🏁 Sprints</button>
           <span className="text-sm" title="Decisões aguardando você">📬 {pending}</span>
           <button className={overview.factory.engine ? "btn-ghost" : "btn-primary"} onClick={props.onToggleEngine}>
             {overview.factory.engine ? "⏸ Pausar esteira" : "▶ Ligar esteira"}
