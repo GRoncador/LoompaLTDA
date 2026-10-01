@@ -499,6 +499,15 @@ class WorktreeManager:
         self._require_deployer("git merge")
         self.git("merge", "--abort", cwd=wt.path, check=False)
 
+    def abort_base_merge(self) -> None:
+        """Abort a merge left half-done in the main checkout (a merge into the base that died)."""
+        self._require_deployer("git merge")
+        self.git("merge", "--abort", check=False)
+
+    def main_status(self) -> str:
+        """`git status --short --branch` of the main checkout, for the Deployer's diagnosis."""
+        return self.git("status", "--short", "--branch", check=False)
+
     def rebase_on_base(self, wt: Worktree) -> bool:
         """Try to rebase the story branch on its base; abort cleanly on conflict. A branch that
         already contains the base (merged in by `merge_base_into`) is left alone: replaying its

@@ -1024,6 +1024,99 @@ def test_a_setup_problem_goes_to_the_founder_without_retrying(factory: Factory):
     ctx.close()
 
 
+def _approved_merge_fails_once(monkeypatch: pytest.MonkeyPatch, actions: list[str]):
+    """A script whose Deployer diagnosis answers `actions` in turn, and a merge that fails the
+    first time it runs (a lock file another process held)."""
+    from loompa.agents.deployer import DeployerAgent
+    from loompa.worktrees import GitError
+
+    asked: list[str] = []
+    answers = iter(actions)
+    original = DeployerAgent.merge
+    merges: list[int] = []
+
+    def flaky(self, state, wt):  # type: ignore[no-untyped-def]
+        merges.append(1)
+        if len(merges) == 1:
+            raise GitError("fatal: Unable to create '/repo/.git/index.lock': File exists.")
+        return original(self, state, wt)
+
+    monkeypatch.setattr(DeployerAgent, "merge", flaky)
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "deployer" and "A git operation of the factory failed" in (
+            messages[0].content
+        ):
+            asked.append(messages[-1].content)
+            return json.dumps({"action": next(answers), "reason": "a lock was held"})
+        return dry_run_script(model, messages, tools)
+
+    return script, asked, merges
+
+
+async def _deliver_and_approve(ctx: EngineContext) -> str:
+    sid = seed_story(ctx, "Entrega aprovada")
+    await Scheduler(ctx).run()
+    delivery = next(
+        m for m in ctx.store.list_messages(ctx.slug, status="pending") if m.kind == "delivery"
+    )
+    await Scheduler(ctx).aanswer(delivery.id, FounderAnswer(option_key="approve"))
+    await Scheduler(ctx).run()
+    return sid
+
+
+async def test_an_approved_merge_that_fails_is_diagnosed_and_merged_without_asking_again(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    """ADR-0016 §5: an approved delivery whose merge failed used to come back to the founder as
+    a new delivery. The Deployer now diagnoses the git error and the code runs what it picked."""
+    script, asked, merges = _approved_merge_fails_once(monkeypatch, ["retry"])
+    ctx = make_ctx(factory, script)
+    sid = await _deliver_and_approve(ctx)
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.DONE and state.merged_sha and len(merges) == 2
+    assert len(asked) == 1 and "index.lock" in asked[0] and "git status" in asked[0]
+    diag = [
+        e["payload"]
+        for e in ctx.store.events_since(0, limit=10_000)
+        if e["type"] == "deployer.diagnosis"
+    ]
+    assert [(d["action"], d["attempt"]) for d in diag] == [("retry", 1)]
+    pending = [m for m in ctx.store.list_messages(ctx.slug, status="pending") if m.story_id == sid]
+    assert pending == []  # approved once is enough
+    await ctx.aclose()
+
+
+async def test_a_diagnosis_that_asks_or_cannot_be_read_goes_to_the_founder_plainly(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+):
+    diagnose, asked, merges = _approved_merge_fails_once(monkeypatch, ["rm -rf everything"])
+    told: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "master" and any(
+            "What the factory already established" in m.content for m in messages
+        ):
+            told.append(messages[1].content)
+            return "not json"  # the founder's text falls back to the established facts
+        return diagnose(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = await _deliver_and_approve(ctx)
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "persistent_failure" and len(merges) == 1  # nothing was run
+    diag = [
+        e["payload"]
+        for e in ctx.store.events_since(0, limit=10_000)
+        if e["type"] == "deployer.diagnosis"
+    ]
+    assert [d["action"] for d in diag] == ["ask_founder"]  # outside the list: ask, never guess
+    assert told and "Você aprovou a entrega" in told[0]  # the Master words the facts
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert "Você aprovou a entrega" in msg.context and msg.executive_audit() == []
+    await ctx.aclose()
+
+
 async def test_the_same_block_twice_stops_recommending_try_again(factory: Factory):
     """`contas`: three "tentar de novo" in a row, three identical blocks, and the founder's
     written guidance thrown away each time. Now the guidance reaches the agents, and a block

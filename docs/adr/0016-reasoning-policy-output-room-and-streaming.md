@@ -87,13 +87,16 @@ A call pays only for what it writes, so the budget only decides when a call is c
 
 OpenAI-compatible providers (OpenRouter, the preset) are called with `stream: true` and
 `stream_options.include_usage`. Content, reasoning and tool-call deltas are assembled as they
-arrive (Gemini's `extra_content` signatures included), the final chunk carries the usage and the
-billed cost, and a mid-stream error is an `LLMError`. A server that answers with plain JSON is still
+arrive, the final chunk carries the usage and the billed cost, and a mid-stream error is an
+`LLMError`. Gemini's endpoint is not streamed yet: its streamed thought signatures were never
+checked with a real key, and a broken one fails every tool call (`providers.<x>.stream` turns
+streaming off for any provider). A server that answers with plain JSON is still
 read as before. The call fails as retryable when no token arrives for `models.stream_idle_s` (300);
 keep-alive comments prove the connection, not progress. There is no wall-clock limit on a streamed
 call: the output room ends a runaway. Providers without streaming here keep `call_timeout_s`.
 
-While a call streams, `llm.progress` (throttled to one every 30 s, with the tokens so far) feeds
+While a call streams, `llm.progress` (one every 30 s, with ~tokens so far: characters / 4, since a
+chunk carries several tokens) feeds
 the stall watchdog, so a long, progressing call is never taken for a hang, and the card can read
 "pensando · 12k tokens".
 
@@ -121,11 +124,17 @@ the tier it was on, then two on the tier above** (all three on tier 1 when it al
   reintegrated up to three times. Found on the way: the resolver never used the tier it was given.
 - **The reproducer** of a bug fix: a test that does not fail gets three more rounds (one on the
   Worker's tier, two above) before the fix goes on without that proof (it never blocks).
-- **A git failure the Ops Loompa does not recognise** (merge, push, PR) gets a diagnosis by the
-  Deployer at the default: the model reads the command, its error and `git status`, and picks one
-  action from a closed list (retry, re-sync the story with its base, abort the merge and requeue
-  the story, ask the founder). The code runs it through `agent.git` only (ADR-0008); three
-  diagnoses at most, by the same rule, then the founder.
+- **An approved delivery whose merge into the base fails** used to come back to the founder as a
+  new delivery. The Deployer now diagnoses it at the default: the model reads the operation, its
+  error and `git status` of the main checkout and of the story, and picks one action from a closed
+  list (`retry`; `resync`, merging the base into the story first, conflicts resolved as above;
+  `clean_main_merge`, aborting a merge left half-done in the main checkout; `ask_founder`). The
+  code runs it through `agent.git` only (ADR-0008); anything outside the list, or no readable
+  answer, is `ask_founder`; uncommitted changes in the main checkout are the founder's and are
+  never discarded. Three diagnoses at most — the first on the Deployer's tier, the others above —
+  then the founder, without asking for a second approval when it works. Other git failures of a
+  step go through the Ops rule above; a push or PR that fails does not block (the delivery goes on
+  without a PR, as before).
 
 ### 6. The judge checks that tests call the product the way a user does
 

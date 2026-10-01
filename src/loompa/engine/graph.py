@@ -572,8 +572,65 @@ async def climb(
     )
 
 
+MERGE_FAILED_KEY = "approved_merge_failed"
+
+MERGE_FAILED_EXECUTIVE = (
+    "Você aprovou a entrega, mas não consegui integrá-la à versão principal do produto. "
+    "{tried}Preferi pedir sua orientação em vez de arriscar mexer em algo que é seu."
+)
+
+
+async def _merge_after_approval(
+    ctx: EngineContext, state: StoryState, wt: Worktree, error: str
+) -> StoryState:
+    """The founder approved and the merge into the base failed. The Deployer diagnoses the
+    failure and the code runs the action it picks (GIT_ACTIONS), three tries at most — the first
+    on its tier, the others on the tier above — before the founder hears of it (ADR-0016 §5)."""
+    deployer = DeployerAgent(ctx)
+    tried = 0
+    for n in range(ctx.config.schedule.ops_max_recoveries):
+        action = await deployer.diagnose(
+            state, wt, "merge the approved story into the base", error, attempt=n
+        )
+        if action == "ask_founder":
+            break
+        tried += 1
+        try:
+            if action == "clean_main_merge":
+                deployer.git.abort_base_merge()
+            elif action == "resync":
+                conflicts = deployer.sync_with_base(state, wt)
+                if conflicts and not await _resolve_with_retries(ctx, state, wt, conflicts):
+                    error = "merging the base into the story left conflicts unresolved"
+                    continue
+            deployer.merge(state, wt)
+        except GitError as exc:
+            error = str(exc)[-2000:]
+            continue
+        state.stage = Stage.DONE
+        state.phase = ""
+        return state
+    said = (
+        f"Tentei resolver sozinho {tried} vez(es)"
+        + (", incluindo com um modelo de IA mais forte. " if tried >= 2 else ". ")
+        if tried
+        else ""
+    )
+    return await block(
+        ctx,
+        state,
+        BlockedReason.PERSISTENT_FAILURE,
+        f"Approved, but merging into the base failed: {error}",
+        resume="review",
+        executive=MERGE_FAILED_EXECUTIVE.format(tried=said),
+    )
+
+
 async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     wt = _ensure_worktree(ctx, state)
+    failed = state.extra.pop(MERGE_FAILED_KEY, None)
+    if failed:
+        return await _merge_after_approval(ctx, state, wt, str(failed))
     KaizenAgent(ctx).capture(state)  # findings never get lost: sweep what no earlier phase filed
     res = await DeployerAgent(ctx).run(state, wt)
     if not res.ok:
@@ -749,7 +806,9 @@ def apply_founder_answer(
                 try:
                     DeployerAgent(ctx).merge(state, wt)
                 except GitError as exc:
+                    # approved: `review` diagnoses and merges without asking again (ADR-0016 §5)
                     state.note(f"Aprovado, mas a integração falhou: {exc}")
+                    state.extra[MERGE_FAILED_KEY] = str(exc)[-2000:]
                     goto(state, "review")
                     state.blocked_reason = None
                     return state
