@@ -321,8 +321,19 @@ class Store:
         return [self._hydrate(r) for r in self._q(sql, tuple(params))]
 
     def next_story_id(self, factory: str) -> str:
-        rows = self._q("SELECT COUNT(*) AS n FROM stories WHERE factory = ?", (factory,))
-        return f"S-{rows[0]['n'] + 1:03d}"
+        return f"S-{self._next_number('stories', 'S-', factory):03d}"
+
+    def _next_number(self, table: str, prefix: str, factory: str) -> int:
+        """The highest number already used + 1, never the row count: a deleted row would make
+        the count hand out an id that still exists. Compared as integers, because as text
+        "S-1000" sorts before "S-999". `:03d` is a minimum width, so S-1000 prints whole."""
+        start = len(prefix) + 1
+        rows = self._q(
+            f"SELECT MAX(CAST(SUBSTR(id, {start}) AS INTEGER)) AS n FROM {table} "
+            "WHERE factory = ? AND id LIKE ?",
+            (factory, f"{prefix}%"),
+        )
+        return (rows[0]["n"] or 0) + 1
 
     @staticmethod
     def _hydrate(row: dict[str, Any]) -> dict[str, Any]:
@@ -672,8 +683,7 @@ class Store:
 
     # ------------------------------------------------------------------ sprints
     def next_sprint_id(self, factory: str) -> str:
-        rows = self._q("SELECT COUNT(*) AS n FROM sprints WHERE factory = ?", (factory,))
-        return f"SP-{rows[0]['n'] + 1:03d}"
+        return f"SP-{self._next_number('sprints', 'SP-', factory):03d}"
 
     def put_sprint(self, sprint: dict[str, Any]) -> None:
         row = {**sprint, "story_ids_json": json.dumps(sprint["story_ids"])}
@@ -718,8 +728,7 @@ class Store:
 
     # ------------------------------------------------------------ conversations
     def next_conversation_id(self, factory: str) -> str:
-        rows = self._q("SELECT COUNT(*) AS n FROM conversations WHERE factory = ?", (factory,))
-        return f"C-{rows[0]['n'] + 1:03d}"
+        return f"C-{self._next_number('conversations', 'C-', factory):03d}"
 
     def put_conversation(self, conv: dict[str, Any]) -> None:
         """Insert or replace a chat session. `turns`, `draft`, `result`... travel as one JSON

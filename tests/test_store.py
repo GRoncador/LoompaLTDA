@@ -21,6 +21,44 @@ def test_story_roundtrip_and_updates():
     assert s.next_story_id("f") == "S-002"
 
 
+def test_ids_follow_the_highest_number_used_not_the_count():
+    """A deleted story must never hand its id out again, and S-999 is followed by S-1000."""
+    s = Store(":memory:")
+    for sid in ("S-001", "S-002", "S-003"):
+        s.upsert_story({"id": sid, "factory": "f", "title": sid, "stage": "BACKLOG"})
+    s._x("DELETE FROM stories WHERE id = ?", ("S-002",))
+    assert s.next_story_id("f") == "S-004"  # the count (2) would repeat S-003
+    s.upsert_story({"id": "S-999", "factory": "f", "title": "x", "stage": "BACKLOG"})
+    assert s.next_story_id("f") == "S-1000"  # as text, "S-1000" < "S-999"
+    s.upsert_story({"id": "S-1000", "factory": "f", "title": "y", "stage": "BACKLOG"})
+    assert s.next_story_id("f") == "S-1001"
+    assert s.next_story_id("other") == "S-001"  # numbered per factory
+    for n in (1, 2, 3):
+        s.put_sprint(
+            {
+                "id": f"SP-00{n}",
+                "factory": "f",
+                "goal": "",
+                "status": "closed",
+                "story_ids": [],
+                "created_at": "t",
+            }
+        )
+    s._x("DELETE FROM sprints WHERE id = ?", ("SP-001",))
+    assert s.next_sprint_id("f") == "SP-004"
+    s.put_sprint(
+        {
+            "id": "SP-999",
+            "factory": "f",
+            "goal": "",
+            "status": "open",
+            "story_ids": [],
+            "created_at": "t",
+        }
+    )
+    assert s.next_sprint_id("f") == "SP-1000"
+
+
 def test_checkpoints_and_events():
     s = Store(":memory:")
     s.upsert_story({"id": "S-1", "factory": "f", "title": "t", "stage": "SPEC"})
