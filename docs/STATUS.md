@@ -557,6 +557,15 @@ Decided 2026-09-29:
   planned/left, comparison across sprints, per-story table, the markdown), card chip with its sprint
   (read from `Sprint.story_ids`), drawer lists every sprint. Checked on a copy of `contas`
   (SP-002 vs SP-001) in headless Chrome. The summary prompt is unseen with a real model.
+- **2026-10-01 (later) — The brainstorm led by the Master, with two OKs (ADR-0020, plan item 5: 10.4).**
+  The Master keeps the direction and its ideas and consults only the roles the idea needs (Analyst:
+  research and outside data, with the web; Architect: architecture and code); opinions are preliminary
+  (attention, cost, benefit, counterpoints), sources checked in code, failures recorded as failed
+  opinions. The founder asks a role directly ("Pedir parecer", `/consultar`) and sets opinions aside.
+  First OK approves the direction and the Product Owner proposes the split (new cards, additions to
+  waiting cards via `Backlog.amend`, held ideas); the second OK files it; talking again takes the first
+  OK back. `admit_ideas` and the Analyst's chat are gone. Seen in headless Chrome (dry-run). The three
+  prompts are unseen with a real model.
 
 ## Known gaps / next steps
 
@@ -577,7 +586,7 @@ Decided 2026-09-29:
   stops the Architect re-thinking each round (a plan took 8.7 min); one experiment, inconclusive.
 - **Order revised 2026-09-30 (evening), see the plan's "Ordem de execução das Fases 8 a 11":** build
   everything that does not need Sprint 2 first, then run `contas` Sprint 2 once to validate it all.
-  Done: 10.1–10.3/10.5/10.6 + 11.2/11.4 (ADR-0017, 2026-10-01). Next: 8.2 sprint report + 10.8 Sprints tab → 10.4 brainstorm → ADR + 10.7/10.9 dependencies →
+  Done: 10.1–10.3/10.5/10.6 + 11.2/11.4 (ADR-0017), 8.2 + 10.8 (ADR-0019), 10.4 (ADR-0020), all 2026-10-01. Next: ADR + 10.7/10.9 dependencies →
   8.3/8.4 self-diagnosis (thresholds from Sprint 1 data in `contas`' state.db; trace-based signals
   provisional until Sprint 2) → 11.1/11.3 → OTLP export to Phoenix (off by default) → Sprint 2 →
   Fase 9 (model changes before Sprint 2 would confound the Sprint 1 × 2 speed comparison).
