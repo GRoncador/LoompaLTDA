@@ -544,6 +544,19 @@ Decided 2026-09-29:
   runs. Found on the way: a story sent back to the backlog stayed in its sprint and kept it open
   forever; it now leaves the running sprint. Seen in headless Chrome (choice, adjust and apply,
   pre-assemble, "próximo: SP-002" chip).
+- **2026-10-01 (later) — Sprint report and the Sprints tab (ADR-0019, plan item 4: 8.2 + 10.8).**
+  `loompa/sprint_report.py` measures a sprint in code from the events and usage of its window: per
+  story (result, wall/model time, time per stage, calls, tokens, real cost, attempts vs Ops recoveries,
+  escalations, blocks, founder answers, deliveries, changes asked, tasks by origin, cuts), what was not
+  planned (stories that joined, tasks added after the plan, extra review rounds), what was left for
+  later, totals and the previous sprint. Pre-trace sprints say "não medido" instead of zero. On close
+  (now async) the Master words a `low` executive summary (audited, code fallback), saves
+  `.loompa/reports/SP-00X.md/.json` (own `.gitignore`) and the inbox note carries the summary and
+  `sprint_id` → "📊 Ver o relatório". `loompa sprint report [SP] [--rewrite|--json|--dry-run]`.
+  Panel: "🏁 Sprints" (list, tiles vs previous, burn-up, cost/time per story, time per stage, not
+  planned/left, comparison across sprints, per-story table, the markdown), card chip with its sprint
+  (read from `Sprint.story_ids`), drawer lists every sprint. Checked on a copy of `contas`
+  (SP-002 vs SP-001) in headless Chrome. The summary prompt is unseen with a real model.
 
 ## Known gaps / next steps
 
