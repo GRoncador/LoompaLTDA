@@ -157,6 +157,9 @@ class LLMResponse:
 
 class LLMProvider:
     name: str = "base"
+    # A streamed provider has no wall-clock limit: it fails when nothing arrives for a while,
+    # and reports progress (`on_progress`) while it writes (ADR-0016 §4).
+    streams: bool = False
 
     async def complete(
         self,
@@ -324,6 +327,109 @@ def _parse_openai_response(data: Any, model: str, provider: str, duration_ms: in
     )
 
 
+class _StreamedAnswer:
+    """An OpenAI-shaped answer assembled from its server-sent chunks: content, reasoning and
+    tool-call deltas (merged by index), the finish reason, and the usage of the last chunk."""
+
+    def __init__(self) -> None:
+        self.content: list[str] = []
+        self.reasoning: list[str] = []
+        self.calls: dict[int, dict[str, Any]] = {}
+        self.finish = ""
+        self.usage: dict[str, Any] = {}
+        self.model = ""
+        self.provider = ""
+        self.error: Any = None
+        self.done = False
+        # characters written so far (content, reasoning, tool arguments): a chunk carries several
+        # tokens, so counting chunks read 7k for a call that wrote 18k (live, 2026-10-01)
+        self.chars = 0
+
+    @property
+    def tokens(self) -> int:
+        """Roughly the tokens written so far (four characters each)."""
+        return self.chars // 4
+
+    def feed(self, line: str) -> bool:
+        """Read one line of the stream; True when it carried tokens (progress)."""
+        line = line.strip()
+        if not line.startswith("data:"):  # blank separators and ": keep-alive" comments
+            return False
+        data = line[5:].strip()
+        if data == "[DONE]":
+            self.done = True
+            return False
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(chunk, dict):
+            return False
+        if chunk.get("error"):
+            self.error, self.done = chunk["error"], True
+            return False
+        self.model = chunk.get("model") or self.model
+        if isinstance(chunk.get("provider"), str):
+            self.provider = chunk["provider"]
+        if isinstance(chunk.get("usage"), dict):
+            self.usage = chunk["usage"]
+        got = False
+        for choice in chunk.get("choices") or []:
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                self.content.append(delta["content"])
+                self.chars += len(delta["content"])
+                got = True
+            thought = delta.get("reasoning") or delta.get("reasoning_content")
+            if isinstance(thought, str) and thought:
+                self.reasoning.append(thought)
+                self.chars += len(thought)
+                got = True
+            for tc in delta.get("tool_calls") or []:
+                got = self._merge_call(tc) or got
+            if choice.get("finish_reason"):
+                self.finish = choice["finish_reason"]
+        return got
+
+    def _merge_call(self, tc: dict[str, Any]) -> bool:
+        cur = self.calls.setdefault(
+            int(tc.get("index", len(self.calls))),
+            {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
+        )
+        if tc.get("id"):
+            cur["id"] = tc["id"]
+        fn = tc.get("function") or {}
+        name = fn.get("name") or ""
+        if name:
+            have = cur["function"]["name"]
+            # most servers send the name once; one that repeats it whole must not double it
+            cur["function"]["name"] = name if not have or name.startswith(have) else have + name
+        if fn.get("arguments"):
+            cur["function"]["arguments"] += fn["arguments"]
+            self.chars += len(fn["arguments"])
+        if isinstance(tc.get("extra_content"), dict):  # Gemini's thought signature
+            cur["extra_content"] = tc["extra_content"]
+        return bool(name or fn.get("arguments"))
+
+    def as_response(self) -> dict[str, Any]:
+        """The same shape a non-streamed call returns, so one parser reads both."""
+        msg: dict[str, Any] = {"role": "assistant", "content": "".join(self.content) or None}
+        if self.reasoning:
+            msg["reasoning"] = "".join(self.reasoning)
+        if self.calls:
+            msg["tool_calls"] = [
+                {**c, "id": c["id"] or f"call_{i}"} for i, c in sorted(self.calls.items())
+            ]
+        data: dict[str, Any] = {
+            "model": self.model,
+            "choices": [{"message": msg, "finish_reason": self.finish}],
+            "usage": self.usage,
+        }
+        if self.provider:
+            data["provider"] = self.provider
+        return data
+
+
 class OpenAICompatibleProvider(LLMProvider):
     def __init__(
         self,
@@ -333,6 +439,7 @@ class OpenAICompatibleProvider(LLMProvider):
         client: httpx.AsyncClient | None = None,
         timeout: float = 180.0,
         secrets: Mapping[str, str] | None = None,
+        idle_s: float = 300.0,
     ):
         self.name = name
         self.cfg = cfg
@@ -341,6 +448,13 @@ class OpenAICompatibleProvider(LLMProvider):
         self.api_key = resolve_key(cfg.api_key_env, secrets)
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._owned = client is None
+        self.idle_s = idle_s
+
+    @property
+    def streams(self) -> bool:  # type: ignore[override]
+        # Gemini's endpoint stays whole: its streamed thought signatures were never checked
+        # against a real key, and a broken signature fails every tool call (ADR-0016 §4).
+        return self.cfg.stream and not self.google
 
     def available(self) -> bool:
         return bool(self.api_key) or not self.cfg.api_key_env
@@ -355,6 +469,7 @@ class OpenAICompatibleProvider(LLMProvider):
         max_tokens=4096,
         json_mode=False,
         reasoning_effort="",
+        on_progress: Callable[[int], None] | None = None,
     ) -> LLMResponse:
         try:
             return await self._complete(
@@ -366,6 +481,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 json_mode,
                 reasoning_effort,
                 dummy_signature=False,
+                on_progress=on_progress,
             )
         except LLMError as exc:
             # Gemini 3 refuses a function call in the history that it did not sign. That happens
@@ -387,6 +503,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 json_mode,
                 reasoning_effort,
                 dummy_signature=True,
+                on_progress=on_progress,
             )
 
     async def _complete(
@@ -400,6 +517,7 @@ class OpenAICompatibleProvider(LLMProvider):
         reasoning_effort,
         *,
         dummy_signature: bool,
+        on_progress: Callable[[int], None] | None = None,
     ) -> LLMResponse:
         if not self.available():
             raise LLMError(f"chave de API ausente: defina {self.cfg.api_key_env}", retryable=True)
@@ -421,6 +539,10 @@ class OpenAICompatibleProvider(LLMProvider):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         start = time.monotonic()
+        if self.streams:
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
+            return await self._streamed(model, payload, headers, start, on_progress)
         try:
             resp = await self._client.post(
                 f"{self.base_url}/chat/completions", json=payload, headers=headers
@@ -430,6 +552,71 @@ class OpenAICompatibleProvider(LLMProvider):
                 f"{self.name}: falha de rede ({type(exc).__name__})", retryable=True
             ) from exc
         duration = int((time.monotonic() - start) * 1000)
+        self._raise_for_status(resp, model)
+        return self._parse(resp.json(), model, duration)
+
+    async def _streamed(
+        self,
+        model: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        start: float,
+        on_progress: Callable[[int], None] | None,
+    ) -> LLMResponse:
+        """A streamed call: no wall-clock limit, only silence. No byte at all for `idle_s` (the
+        read timeout) or bytes without a token for as long (keep-alive comments prove the
+        connection, not progress) fail it as retryable. A server answering with plain JSON is
+        read whole, as before."""
+        idle = self.idle_s
+        answer = _StreamedAnswer()
+        try:
+            async with self._client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=httpx.Timeout(connect=30.0, read=idle, write=60.0, pool=30.0),
+            ) as resp:
+                if resp.status_code >= 400:
+                    await resp.aread()
+                    self._raise_for_status(resp, model)
+                if "text/event-stream" not in resp.headers.get("content-type", ""):
+                    body = await resp.aread()
+                    duration = int((time.monotonic() - start) * 1000)
+                    return self._parse(json.loads(body or b"{}"), model, duration)
+                last_token = time.monotonic()
+                async for line in resp.aiter_lines():
+                    now = time.monotonic()
+                    if answer.feed(line):
+                        last_token = now
+                        if on_progress is not None:
+                            on_progress(answer.tokens)
+                    elif now - last_token > idle:
+                        raise LLMError(
+                            f"{self.name}/{model}: nenhum token por {idle:.0f}s", retryable=True
+                        )
+                    if answer.done:
+                        break
+        except httpx.TimeoutException as exc:
+            raise LLMError(
+                f"{self.name}/{model}: nada recebido por {idle:.0f}s", retryable=True
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise LLMError(
+                f"{self.name}: falha de rede ({type(exc).__name__})", retryable=True
+            ) from exc
+        if answer.error is not None:
+            err = answer.error if isinstance(answer.error, dict) else {"message": answer.error}
+            code = err.get("code")
+            raise LLMError(
+                f"{self.name}/{model}: erro no meio da resposta: {str(err.get('message'))[:200]}",
+                status=code if isinstance(code, int) else None,
+                retryable=True,
+            )
+        duration = int((time.monotonic() - start) * 1000)
+        return self._parse(answer.as_response(), model, duration)
+
+    def _raise_for_status(self, resp: httpx.Response, model: str) -> None:
         if resp.status_code == 429 or resp.status_code in (402, 503):
             raise QuotaExhausted(
                 f"{self.name}/{model}: cota/limite ({resp.status_code})",
@@ -444,7 +631,8 @@ class OpenAICompatibleProvider(LLMProvider):
             )
         if resp.status_code >= 400:
             raise LLMError(f"{self.name}/{model}: {resp.text[:300]}", status=resp.status_code)
-        data = resp.json()
+
+    def _parse(self, data: Any, model: str, duration: int) -> LLMResponse:
         try:
             return _parse_openai_response(data, model, self.name, duration)
         except (AttributeError, TypeError, KeyError, IndexError) as exc:
@@ -667,12 +855,13 @@ def build_provider(
     *,
     client: httpx.AsyncClient | None = None,
     secrets: Mapping[str, str] | None = None,
+    idle_s: float = 300.0,
 ) -> LLMProvider:
     if cfg.kind == "anthropic":
         return AnthropicProvider(name, cfg, client=client, secrets=secrets)
     if cfg.kind == "mock":
         return MockProvider(name)
-    return OpenAICompatibleProvider(name, cfg, client=client, secrets=secrets)
+    return OpenAICompatibleProvider(name, cfg, client=client, secrets=secrets, idle_s=idle_s)
 
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.S)

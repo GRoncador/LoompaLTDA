@@ -60,6 +60,8 @@ LIGHT_EFFORTS = ("low", "minimal")
 # on the tier above; tier 1 has nothing above it and stays).
 TIER_ABOVE = {"tier3": "tier2", "tier2": "tier1", "tier1": "tier1"}
 
+PROGRESS_EVERY_S = 30.0  # how often a streaming call says it is still writing
+
 
 @dataclass
 class RoutedCall:
@@ -134,7 +136,11 @@ class ModelRouter:
             if cfg is None:
                 raise LLMError(f"provedor não configurado: {name}")
             self._providers[name] = build_provider(
-                name, cfg, client=self._client, secrets=self.secrets
+                name,
+                cfg,
+                client=self._client,
+                secrets=self.secrets,
+                idle_s=self.config.models.stream_idle_s,
             )
         return self._providers[name]
 
@@ -364,6 +370,30 @@ class ModelRouter:
             room = min(room, cand.max_output_tokens)
         return max(1, min(room, m.max_output_ceiling))
 
+    def _progress(
+        self, story_id: str | None, agent: str, key: str, role: str, started: float
+    ) -> Callable[[int], None]:
+        """While a call streams, one `llm.progress` every PROGRESS_EVERY_S with the tokens so
+        far: the stall watchdog hears the story is alive, and the card shows it thinking."""
+        loop = asyncio.get_running_loop()
+        last = [started]
+
+        def report(tokens: int) -> None:
+            now = loop.time()
+            if now - last[0] >= PROGRESS_EVERY_S:
+                last[0] = now
+                self._event(
+                    "llm.progress",
+                    story_id,
+                    agent,
+                    model=key,
+                    role=role,
+                    tokens=tokens,
+                    seconds=int(now - started),
+                )
+
+        return report
+
     def _event(self, type_: str, story_id: str | None, agent: str, **payload: Any) -> None:
         if self.on_event is None:
             return
@@ -419,7 +449,15 @@ class ModelRouter:
                     attempt["effort"] = effort
                 calls.attempts.append(attempt)
                 started = loop.time()
+                streamed = bool(getattr(prov, "streams", False))
+                extra = (
+                    {"on_progress": self._progress(story_id, who, key, role, started)}
+                    if streamed
+                    else {}
+                )
                 try:
+                    # A streamed call has no wall-clock limit: it fails on silence and its output
+                    # room ends a runaway (ADR-0016 §4); the others keep `call_timeout_s`.
                     resp = await asyncio.wait_for(
                         prov.complete(
                             cand.model,
@@ -431,8 +469,9 @@ class ModelRouter:
                             max_tokens=budget,
                             json_mode=json_mode,
                             reasoning_effort=effort,
+                            **extra,
                         ),
-                        timeout=self.config.models.call_timeout_s,
+                        timeout=None if streamed else self.config.models.call_timeout_s,
                     )
                 except TimeoutError:
                     limit = self.config.models.call_timeout_s

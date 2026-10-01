@@ -372,6 +372,9 @@ class ProviderConfig(BaseModel):
     # means the founder has to name a model first: guessing an id would make a working key look
     # broken, which is worse than asking.
     probe_model: str = ""
+    # OpenAI-compatible providers stream their answers (ADR-0016 §4): no wall-clock limit, only
+    # silence, and progress while the model writes. Off reads each answer whole.
+    stream: bool = True
 
     @field_validator("api_key_env")
     @classmethod

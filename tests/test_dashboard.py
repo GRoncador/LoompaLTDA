@@ -418,9 +418,15 @@ def test_a_story_at_work_shows_what_it_is_doing_on_its_card(client: TestClient):
     a = card()["activity"]
     assert a["task"] == 2 and a["origin"] == "plan" and a["calls"] == 2
     assert a["last_tool"] == "search" and a["last_target"] == "def add" and not a["stalled"]
+    assert "thinking" not in a
+    # ADR-0016: a streamed call still writing says how much it has written
+    ctx.emit("llm.progress", story_id=sid, agent="Worker Loompa", tokens=12000, seconds=90)
+    assert card()["activity"]["thinking"] == 12000
     ctx.emit("story.stalled", story_id=sid, agent="Ops Loompa", silent_min=21.0)
     stalled = card()["activity"]
-    assert stalled["stalled"] and stalled["last_event"] == "tool.call"  # the stall is not activity
+    assert (
+        stalled["stalled"] and stalled["last_event"] == "llm.progress"
+    )  # the stall is not activity
     ctx.emit(
         "worker.task_finished", story_id=sid, agent="Worker Loompa", task=2, outcome="finished"
     )

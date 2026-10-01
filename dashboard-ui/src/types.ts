@@ -50,6 +50,7 @@ export interface StoryActivity {
   calls?: number | null;
   last_tool?: string | null;
   last_target?: string | null;
+  thinking?: number | null; // tokens a streamed call has written so far
 }
 
 export interface Column { key: string; label: string; stories: StoryCard[] }

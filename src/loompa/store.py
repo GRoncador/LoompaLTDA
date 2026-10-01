@@ -575,6 +575,8 @@ class Store:
             "last_agent": last[0]["agent"],
             "last_at": last[0]["created_at"],
         }
+        if last[0]["type"] == "llm.progress":  # a streamed call still writing (ADR-0016 §4)
+            out["thinking"] = json.loads(last[0]["payload_json"] or "{}").get("tokens")
         started = self._q(
             "SELECT id, payload_json FROM events WHERE story_id = ? AND type = 'worker.task_started' "
             "ORDER BY id DESC LIMIT 1",

@@ -138,6 +138,10 @@ function latest(a?: StoryActivity | null, b?: StoryActivity): StoryActivity | nu
   return Date.parse(b.last_at) >= Date.parse(a.last_at) ? b : a;
 }
 
+function tokens(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+
 function ago(seconds: number): string {
   if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
@@ -148,9 +152,11 @@ function Activity({ a, now }: { a: StoryActivity; now: number }) {
   const silent = Math.max(0, (now - Date.parse(a.last_at)) / 1000);
   const quiet = silent > 300; // five minutes without a word: worth a look, not yet an alarm
   const target = a.last_target ? ` ${a.last_target.split("/").pop()}` : "";
+  // a streamed call still writing: how much it has written so far (ADR-0016)
+  const thinking = a.thinking ? `pensando · ${tokens(a.thinking)} tokens` : "";
   const what = a.task
-    ? `T${a.task} · ${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}${a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`
-    : `${a.last_agent || "fábrica"} · ${HAPPENING[a.last_event] ?? "trabalhando"}`;
+    ? `T${a.task} · ${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}${thinking ? ` · ${thinking}` : a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`
+    : `${a.last_agent || "fábrica"} · ${thinking || (HAPPENING[a.last_event] ?? "trabalhando")}`;
   return (
     <div className="mt-1 flex items-center gap-1 text-[10px]" title={a.task_text ? `T${a.task}: ${a.task_text}` : undefined}>
       {a.stalled ? (
