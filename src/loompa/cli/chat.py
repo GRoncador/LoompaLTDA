@@ -25,6 +25,7 @@ from loompa.conversations import (
     ConversationError,
     ConversationKind,
     ConversationStatus,
+    MeetingMode,
 )
 from loompa.engine import EngineContext
 from loompa.sprints import SprintError
@@ -54,11 +55,26 @@ HELP_COMMON = (
     "/descartar         encerra a conversa sem salvar nada\n"
     "/sair              guarda a conversa para retomar depois"
 )
+MODE_HELP = (
+    "/atual             ajustar o sprint em andamento\n"
+    "/proxima           pré-montar o próximo sprint (não recomendado)"
+)
+CURRENT_HELP = (
+    "/incluir S-004     o card entra no sprint (o Product Owner avalia antes)\n"
+    "/excluir S-002     o card sai do sprint e volta ao backlog\n"
+    "/recomecar S-002 [motivo]  a história recomeça do zero\n"
+    "/cancelar-sprint [motivo]  cancela o sprint (as histórias voltam ao backlog)\n"
+    "/proposta          o Product Owner avalia o que entraria\n"
+    "/aplicar           aplica as mudanças no sprint\n"
+    "/descartar         encerra sem mudar nada\n"
+    "/sair              guarda a conversa para retomar depois"
+)
 HELP = {
     ConversationKind.MEETING: (
         "/incluir D1 S-004  põe cards no sprint (e /excluir tira do sprint)\n"
         "/proposta          o Product Owner propõe o sprint (vem antes de /sprint)\n"
         "/sprint [meta]     salva no backlog e começa o sprint\n"
+        "/montar [meta]     salva e deixa o sprint montado, esperando o atual terminar\n"
         "/backlog           só salva no backlog\n" + HELP_COMMON
     ),
     ConversationKind.BRAINSTORM: (
@@ -74,8 +90,13 @@ HELP = {
 
 def print_draft(conv: Conversation) -> None:
     draft = conv.draft
+    if conv.kind == ConversationKind.MEETING and conv.mode is None:
+        console.print(MODE_HELP)
+        return
     if draft.goal:
         console.print(f"[bold]Meta do sprint:[/bold] {draft.goal}")
+    if draft.cancel_sprint:
+        console.print(f"[red]O {draft.sprint_id} será cancelado ao aplicar.[/red]")
     if not draft.items:
         console.print("[dim]O rascunho está vazio.[/dim]")
         return
@@ -84,6 +105,8 @@ def print_draft(conv: Conversation) -> None:
         table.add_column(col)
     for i in draft.items:
         obs = i.note or ("já no backlog" if i.story_id else "")
+        if i.story_id in draft.members:
+            obs = i.stage + (" · recomeça" if i.restart else "") + ("" if i.in_sprint else " · sai")
         table.add_row(i.key, i.title, f"P{i.priority}", "✔" if i.in_sprint else "", obs)
     console.print(table)
 
@@ -121,17 +144,21 @@ async def session(
 ) -> None:
     convs = Conversations(ctx)
     title, hint = INTRO[conv.kind]
-    console.print(Panel.fit(f"[bold]{title}[/bold] · {conv.id}\n{hint}\n\n{HELP[conv.kind]}"))
+    console.print(Panel.fit(f"[bold]{title}[/bold] · {conv.id}\n{hint}\n\n{_help(conv)}"))
     if conv.turns:
         say_aloud(convs, conv)
     text = first
     while True:
         if text:
-            await convs.say(conv.id, text)
-            conv = convs.board.require(conv.id, open_only=False)
-            say_aloud(convs, conv)
-            if not conv.open:  # the Product Owner approved the request and filed it
-                return
+            try:
+                await convs.say(conv.id, text)
+            except ConversationError as exc:  # e.g. the meeting's subject is not chosen yet
+                console.print(f"[yellow]{exc}[/yellow]")
+            else:
+                conv = convs.board.require(conv.id, open_only=False)
+                say_aloud(convs, conv)
+                if not conv.open:  # the Product Owner approved the request and filed it
+                    return
         try:
             text = typer.prompt("Você", default="", show_default=False).strip()
         except typer.Abort:  # Ctrl-D / end of piped input: keep the session for later
@@ -160,11 +187,32 @@ async def handle(
 ) -> bool:
     """Run one slash command. True ends the session."""
     meeting = conv.kind == ConversationKind.MEETING
+    current = meeting and conv.mode == MeetingMode.CURRENT
     if command in ("/sair", "/quit", "/q"):
         console.print(f"Conversa guardada. Retome com [bold]loompa chat resume {conv.id}[/bold]")
         return True
     if command in ("/ajuda", "/help"):
-        console.print(HELP[conv.kind])
+        console.print(_help(conv))
+    elif command in ("/atual", "/proxima") and meeting and conv.mode is None:
+        mode = MeetingMode.CURRENT if command == "/atual" else MeetingMode.NEXT
+        say_aloud(convs, convs.choose(conv.id, mode))
+    elif command == "/recomecar" and current and args:
+        _show(
+            convs.edit(conv.id, [{"op": "restart", "ref": args[0], "reason": " ".join(args[1:])}])
+        )
+    elif command == "/cancelar-sprint" and current:
+        if typer.confirm(f"Cancelar o {conv.draft.sprint_id} ao aplicar?", default=False):
+            _show(convs.edit(conv.id, [{"op": "cancel_sprint", "reason": rest}]))
+    elif command == "/aplicar" and current:
+        result = await convs.commit(conv.id)
+        say_aloud(convs, convs.board.require(conv.id, open_only=False))
+        if run_after and (result.joined or result.restarted):
+            await _run(ctx, until_idle=True)
+        return True
+    elif command == "/montar" and meeting and not current:
+        result = await convs.commit(conv.id, plan_next=True, goal=rest)
+        say_aloud(convs, convs.board.require(conv.id, open_only=False))
+        return True
     elif command in ("/rascunho", "/draft"):
         print_draft(convs.board.require(conv.id))
     elif command in ("/tirar", "/drop") and args:
@@ -184,7 +232,7 @@ async def handle(
         say_aloud(convs, convs.board.require(conv.id, open_only=False))
         console.print(f"[green]✔[/green] {', '.join(result.created or result.existing)}")
         return True
-    elif command == "/sprint" and meeting:
+    elif command == "/sprint" and meeting and not current:
         result = await convs.commit(conv.id, start_sprint=True, goal=rest)
         console.print(
             f"[green]✔[/green] {result.sprint_id} iniciado · "
@@ -195,7 +243,7 @@ async def handle(
         else:
             console.print("Para executar: [bold]loompa run[/bold]")
         return True
-    elif command == "/backlog" and conv.kind != ConversationKind.REVIEW:
+    elif command == "/backlog" and conv.kind != ConversationKind.REVIEW and not current:
         result = await convs.commit(conv.id)
         made = ", ".join(result.created) or "nenhuma nova"
         console.print(f"[green]✔[/green] backlog atualizado ({made})")
@@ -209,6 +257,14 @@ async def handle(
     else:
         console.print("[yellow]Comando desconhecido.[/yellow] /ajuda lista os comandos.")
     return False
+
+
+def _help(conv: Conversation) -> str:
+    if conv.kind == ConversationKind.MEETING and conv.mode is None:
+        return MODE_HELP
+    if conv.kind == ConversationKind.MEETING and conv.mode == MeetingMode.CURRENT:
+        return CURRENT_HELP
+    return HELP[conv.kind]
 
 
 def _show(report) -> None:

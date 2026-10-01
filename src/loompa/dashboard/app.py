@@ -39,12 +39,13 @@ from loompa.conversations import (
     ConversationKind,
     ConversationNotFound,
     ConversationStatus,
+    MeetingMode,
 )
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column, load_state
 from loompa.engine.lock import EngineBusy, EngineLock
 from loompa.factory import Factory
 from loompa.finance import period_start_iso, today_start_iso
-from loompa.sprints import SprintBoard, SprintError, SprintStatus
+from loompa.sprints import SprintBoard, SprintError
 
 log = logging.getLogger("loompa.dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -98,12 +99,17 @@ class ChatSayBody(BaseModel):
     text: str
 
 
+class ModeBody(BaseModel):
+    mode: MeetingMode
+
+
 class DraftBody(BaseModel):
     ops: list[dict[str, Any]]
 
 
 class CommitBody(BaseModel):
     start_sprint: bool = False
+    plan_next: bool = False  # assemble the next sprint to wait for the running one (ADR-0018)
     goal: str = ""
     run: bool = True
     force: bool = False  # a review: the founder files the card over the Product Owner's objection
@@ -237,11 +243,21 @@ def _period_start(ctx: EngineContext) -> str:
 def _sprint_summary(ctx: EngineContext) -> dict[str, Any] | None:
     """The sprint the founder cares about now: the running one, else the one being planned."""
     board = SprintBoard(ctx.store, ctx.slug)
-    active = [sp for sp in board.sprints() if sp.status != SprintStatus.CLOSED]
-    if not active:
-        return None
-    sprint = next((sp for sp in active if sp.status == SprintStatus.RUNNING), active[-1])
-    return {**sprint.model_dump(), "progress": board.progress(sprint)}
+    sprint = board.running() or board.open_sprint()
+    return {**sprint.model_dump(), "progress": board.progress(sprint)} if sprint else None
+
+
+def _sprint_context(ctx: EngineContext) -> dict[str, Any]:
+    """What a meeting needs to offer the right commands (ADR-0018): is a sprint running, and is
+    the next one already assembled."""
+    board = SprintBoard(ctx.store, ctx.slug)
+    running, planned = board.running(), board.open_sprint()
+    return {
+        "running": {**running.model_dump(), "progress": board.progress(running)}
+        if running
+        else None,
+        "planned": planned.model_dump() if planned and planned.story_ids else None,
+    }
 
 
 def _board(ctx: EngineContext):
@@ -254,6 +270,7 @@ def _conversation_summary(conv: Conversation) -> dict[str, Any]:
     return {
         "id": conv.id,
         "kind": conv.kind.value,
+        "mode": conv.mode.value if conv.mode else None,
         "status": conv.status.value,
         "title": conv.title,
         "turns": len(conv.turns),
@@ -404,6 +421,7 @@ def create_app(
             },
             "kaizen_today": len(ctx.store.list_learnings(since_iso=today_start_iso())),
             "sprint": _sprint_summary(ctx),
+            "next_sprint": _sprint_context(ctx)["planned"],
             "conversations": [
                 _conversation_summary(c)
                 for c in _board(ctx).list(ConversationStatus.OPEN)
@@ -530,11 +548,8 @@ def create_app(
             "conversation": out.conversation.model_dump(mode="json") if out.conversation else None,
         }
 
-    @app.post("/api/factories/{slug}/stories/{story_id}/promote")
-    def promote(slug: str, story_id: str) -> dict[str, Any]:
-        ctx = hub.get(slug).ctx
-        Scheduler(ctx).promote(story_id)
-        return {"id": story_id, "stage": ctx.store.get_story(story_id)["stage"]}
+    # No `/promote` (ADR-0018): a Kaizen fix runs inside a sprint, prioritized by the Product
+    # Owner, like any other card.
 
     # ------------------------------------------------------------------ inbox
     @app.get("/api/factories/{slug}/inbox")
@@ -594,7 +609,11 @@ def create_app(
         return rt, Conversations(rt.ctx)
 
     def _payload(conv: Conversation, **extra: Any) -> dict[str, Any]:
-        return {"conversation": conv.model_dump(mode="json"), **extra}
+        return {
+            "conversation": conv.model_dump(mode="json"),
+            "sprints": _sprint_context(hub.get(conv.factory).ctx),
+            **extra,
+        }
 
     @contextlib.contextmanager
     def _chat_errors():
@@ -642,6 +661,14 @@ def create_app(
                 conv = chats.board.require(conversation_id, open_only=False)
                 return _payload(conv, turn=asdict(turn))
 
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/mode")
+    async def meeting_mode(slug: str, conversation_id: str, body: ModeBody) -> dict[str, Any]:
+        """With a sprint running: adjust it, or pre-assemble the next one (ADR-0018)."""
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                return _payload(chats.choose(conversation_id, body.mode))
+
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/propose")
     async def propose_sprint(slug: str, conversation_id: str) -> dict[str, Any]:
         """The Product Owner's sprint proposal; "Começar Sprint" waits for one (ADR-0017)."""
@@ -666,12 +693,22 @@ def create_app(
         rt, chats = _chat(slug)
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
-                result = await chats.commit(
-                    conversation_id,
-                    start_sprint=body.start_sprint,
-                    goal=body.goal,
-                    force=body.force,
-                )
+                # taking out, restarting or cancelling a story that may be executing needs the
+                # engine stopped; this dashboard's own engine is paused and resumed around it
+                paused = chats.touches_work_in_flight(conversation_id) and hub.engine_running(slug)
+                if paused:
+                    await hub.stop_engine(slug)
+                try:
+                    result = await chats.commit(
+                        conversation_id,
+                        start_sprint=body.start_sprint,
+                        plan_next=body.plan_next,
+                        goal=body.goal,
+                        force=body.force,
+                    )
+                finally:
+                    if paused:
+                        await hub.start_engine(slug)
                 conv = chats.board.require(conversation_id, open_only=False)
         if body.start_sprint and body.run:
             await hub.start_engine(slug)

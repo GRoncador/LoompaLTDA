@@ -92,9 +92,13 @@ async def test_a_blocked_story_waits_alone_and_does_not_hold_the_batch(factory: 
     board = SprintBoard(ctx.store, factory.slug)
     assert board.get("SP-001").status == SprintStatus.RUNNING
     assert board.progress(board.get("SP-001"))["waiting"] == 2
-    # a second sprint can start while the first still waits on its blocked story
-    po.add_item("Perfil do usuário")
-    assert master.start_sprint().id == "SP-002"
+    # one sprint at a time (ADR-0018): the next one is assembled and waits for this one
+    nxt = po.add_item("Perfil do usuário").story_id
+    with pytest.raises(SprintError, match="só um sprint roda por vez"):
+        master.start_sprint()
+    assert ctx.store.get_story(nxt)["stage"] == Stage.BACKLOG  # checked before anything moved
+    board.add(nxt)
+    assert board.open_sprint().story_ids == [nxt] and board.running().id == "SP-001"
     await ctx.aclose()
 
 
@@ -118,6 +122,12 @@ async def test_draft_sprint_is_built_then_started(factory: Factory):
     assert ctx.store.get_story(b)["stage"] == Stage.SPEC
     assert ctx.store.get_story(a)["stage"] == Stage.BACKLOG
 
+    def finish(sprint_id: str) -> None:  # the sprint's stories end; the next one may start
+        for sid in board.get(sprint_id).story_ids:
+            ctx.store.update_story(sid, stage=Stage.DONE.value)
+        master.close_finished_sprints()
+
+    finish(sprint.id)
     # default pick: the founder's cards in priority order, never the Kaizen findings
     second = master.start_sprint(limit=1)
     assert second.story_ids == [a]
@@ -125,8 +135,10 @@ async def test_draft_sprint_is_built_then_started(factory: Factory):
     board.add(kaizen)
     with pytest.raises(SprintError, match="já está no"):
         board.add(kaizen, sprint_id=second.id)
+    finish(second.id)
     third = master.start_sprint([c])
     assert third.story_ids == [kaizen, c]
+    finish(third.id)
     with pytest.raises(SprintError, match="não há histórias"):
         master.start_sprint()
     with pytest.raises(SprintError, match="não está esperando"):
@@ -167,10 +179,13 @@ async def test_epic_children_join_the_parents_sprint_and_run(factory: Factory):
     await ctx.aclose()
 
 
-async def test_promote_is_a_lane_outside_the_sprints(factory: Factory):
+async def test_a_fix_runs_only_inside_a_sprint(factory: Factory):
+    """No "run it now" lane (ADR-0018): a Kaizen fix waits in the backlog, prioritized by the
+    Product Owner, until a sprint takes it."""
     ctx = make_ctx(factory, dry_run=True)
-    sid = ProductOwnerAgent(ctx).add_item("Correção urgente").story_id
-    Scheduler(ctx).promote(sid)
+    sid = ProductOwnerAgent(ctx).add_item("[Bug colateral] total errado", origin="kaizen").story_id
+    assert not hasattr(Scheduler(ctx), "promote")
+    assert await Scheduler(ctx).run() == []
+    MasterAgent(ctx).start_sprint([sid])
     assert await Scheduler(ctx).run() == [sid]
-    assert SprintBoard(ctx.store, factory.slug).sprints() == []
     await ctx.aclose()

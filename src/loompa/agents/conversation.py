@@ -26,13 +26,16 @@ from loompa.conversations import (
     ConversationKind,
     ConversationStatus,
     DraftItem,
+    MeetingMode,
     OpsReport,
     Turn,
     apply_ops,
     render_backlog,
     render_draft,
     render_transcript,
+    to_scale,
 )
+from loompa.engine.state import Stage
 from loompa.sprints import SprintBoard
 
 if TYPE_CHECKING:
@@ -41,6 +44,8 @@ if TYPE_CHECKING:
     from loompa.engine.context import EngineContext
 
 log = logging.getLogger(__name__)
+
+AT_WORK = (Stage.SPEC, Stage.PLAN, Stage.DEV, Stage.TEST, Stage.REVIEW)  # a runner may hold it
 
 MAX_REPLY_CHARS = 2400
 CHAT_TOOL_ROUNDS = 4  # a chat turn should answer quickly; research is what takes many rounds
@@ -167,7 +172,9 @@ async def run_turn(
         reply, ops, questions = parse_turn(data)
         failed, consult = False, data.get("consult_po") is True
 
-    report = apply_ops(conv.draft, ops, board.cards(), origin=origin)
+    report = apply_ops(
+        conv.draft, ops, board.cards(), origin=origin, current=conv.mode == MeetingMode.CURRENT
+    )
     reply = founder_text(polish(reply) if polish else reply) or (
         "Atualizei o rascunho." if report.changes else "Certo. O que mais você quer ajustar?"
     )
@@ -226,22 +233,78 @@ class Conversations:
 
     def open(self, kind: ConversationKind, title: str = "") -> Conversation:
         """A new session. A review conversation is never opened by hand: it is born from a
-        quick story the Product Owner did not file (`quick_story`). A meeting starts with the
-        cards already planned for the next sprint (an inbox decision puts them there), so the
-        meeting sees, and can drop, everything the sprint would start with."""
+        quick story the Product Owner did not file (`quick_story`). With a sprint running, a
+        meeting waits for the founder to choose what it is about (`choose`, ADR-0018);
+        otherwise it plans the next sprint, starting from the cards already planned for it (an
+        inbox decision puts them there), so it sees, and can drop, everything that sprint would
+        start with."""
         if kind == ConversationKind.REVIEW:
             raise ConversationError("a revisão do Product Owner nasce de uma história rápida")
         conv = self.board.create(kind, title)
-        if kind == ConversationKind.MEETING:
-            planned = SprintBoard(self.ctx.store, self.ctx.slug).open_sprint()
-            ops = [
-                {"op": "update", "ref": sid, "in_sprint": True}
-                for sid in (planned.story_ids if planned else [])
-            ]
-            if ops:
-                apply_ops(conv.draft, ops, self.board.cards())
-                self.board.save(conv)
+        if (
+            kind == ConversationKind.MEETING
+            and SprintBoard(self.ctx.store, self.ctx.slug).running() is None
+        ):
+            self._plan_next(conv)
+            self.board.save(conv)
         self.ctx.emit("conversation.opened", conversation_id=conv.id, kind=conv.kind.value)
+        return conv
+
+    def _plan_next(self, conv: Conversation) -> None:
+        conv.mode = MeetingMode.NEXT
+        planned = SprintBoard(self.ctx.store, self.ctx.slug).open_sprint()
+        if planned is None:
+            return
+        conv.draft.sprint_id = planned.id
+        conv.draft.goal = conv.draft.goal or planned.goal
+        ops = [{"op": "update", "ref": sid, "in_sprint": True} for sid in planned.story_ids]
+        if ops:
+            apply_ops(conv.draft, ops, self.board.cards())
+
+    def choose(self, conversation_id: str, mode: MeetingMode) -> Conversation:
+        """With a sprint running, the founder says what the meeting is about: the running
+        sprint (its cards come into the draft as they are now) or the next one, assembled to
+        wait for the running one (not recommended: what this sprint teaches is not in yet)."""
+        conv = self.board.require(conversation_id)
+        if conv.kind != ConversationKind.MEETING or conv.mode is not None:
+            raise ConversationError("esta reunião já sabe do que trata")
+        mode = MeetingMode(mode)
+        running = SprintBoard(self.ctx.store, self.ctx.slug).running()
+        if mode == MeetingMode.CURRENT:
+            if running is None:
+                raise ConversationError("não há sprint em andamento")
+            conv.mode = mode
+            conv.draft.sprint_id, conv.draft.goal = running.id, running.goal
+            conv.draft.members = list(running.story_ids)
+            for sid in running.story_ids:
+                row = self.ctx.store.get_story(sid)
+                if row is None:
+                    continue
+                conv.draft.items.append(
+                    DraftItem(
+                        key=sid,
+                        title=row["title"],
+                        epic=row.get("epic", ""),
+                        priority=to_scale(row["priority"]),
+                        in_sprint=True,
+                        story_id=sid,
+                        origin=row.get("origin", "founder"),
+                        stage=row["stage"],
+                    )
+                )
+            text = _current_intro(running.id)
+        else:
+            self._plan_next(conv)
+            text = (
+                f"Certo: vamos pré-montar o próximo sprint. Ele fica esperando o {running.id} "
+                "terminar; para disparar, abra uma nova reunião depois e eu mostro como revisar "
+                "e iniciar."
+                if running
+                else "Certo: vamos montar o próximo sprint."
+            )
+        conv.turns.append(Turn(who="agent", name=self.agent_for(conv.kind).name, text=text))
+        self.board.save(conv)
+        self.ctx.emit("meeting.mode", conversation_id=conv.id, mode=mode.value)
         return conv
 
     async def brief(self, conversation_id: str) -> str:
@@ -255,6 +318,10 @@ class Conversations:
 
     async def say(self, conversation_id: str, text: str) -> TurnResult:
         conv = self.board.require(conversation_id)
+        if conv.kind == ConversationKind.MEETING and conv.mode is None:
+            raise ConversationError(
+                "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
+            )
         turn = await self.agent_for(conv.kind).converse(conv, text)
         if conv.kind == ConversationKind.REVIEW and not turn.failed:
             conv = self.board.require(conversation_id)
@@ -269,6 +336,10 @@ class Conversations:
         conv = self.board.require(conversation_id)
         if conv.kind != ConversationKind.MEETING:
             raise ConversationError("só a reunião de sprint tem proposta de sprint")
+        if conv.mode is None:
+            raise ConversationError(
+                "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
+            )
         turn = await ProductOwnerAgent(self.ctx).propose_sprint(conv)
         self.board.save(conv)
         return turn
@@ -327,34 +398,70 @@ class Conversations:
         conv = self.board.require(conversation_id)
         if conv.kind == ConversationKind.REVIEW:
             raise ConversationError("o pedido em revisão muda pela conversa com o Product Owner")
-        report = apply_ops(conv.draft, ops, self.board.cards())
+        if conv.kind == ConversationKind.MEETING and conv.mode is None:
+            raise ConversationError(
+                "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
+            )
+        report = apply_ops(
+            conv.draft, ops, self.board.cards(), current=conv.mode == MeetingMode.CURRENT
+        )
         self.board.save(conv)
         self.ctx.emit("conversation.edited", conversation_id=conv.id, changes=len(report.changes))
         return report
+
+    def touches_work_in_flight(self, conversation_id: str) -> bool:
+        """Committing this meeting would take out, restart or cancel a story that may be
+        executing right now: the engine has to stop first (the dashboard pauses it)."""
+        conv = self.board.require(conversation_id)
+        if conv.mode != MeetingMode.CURRENT:
+            return False
+        moving = {
+            i.story_id
+            for i in conv.draft.items
+            if i.story_id in conv.draft.members
+            and (conv.draft.cancel_sprint or i.restart or not i.in_sprint)
+        }
+        return any(
+            (row := self.ctx.store.get_story(sid)) is not None and row["stage"] in AT_WORK
+            for sid in moving
+        )
 
     async def commit(
         self,
         conversation_id: str,
         *,
         start_sprint: bool = False,
+        plan_next: bool = False,
         goal: str = "",
         force: bool = False,
     ) -> CommitResult:
-        """End the session. A meeting sends its cards to the backlog through the Product Owner
-        and, with `start_sprint`, starts the sprint. A brainstorm asks the Product Owner to admit
-        the ideas; whatever it holds back stays in the draft for another round. A review files
-        the request once the Product Owner approves it, or with `force` when the founder has the
+        """End the session. A meeting about the next sprint sends its cards to the backlog
+        through the Product Owner and, with `start_sprint`, starts the sprint or, with
+        `plan_next`, assembles it to wait for the running one. A meeting about the running
+        sprint applies its changes to it. A brainstorm asks the Product Owner to admit the
+        ideas; whatever it holds back stays in the draft for another round. A review files the
+        request once the Product Owner approves it, or with `force` when the founder has the
         last word."""
         from loompa.agents.product_owner import ProductOwnerAgent
 
         conv = self.board.require(conversation_id)
-        if start_sprint and conv.kind != ConversationKind.MEETING:
+        if (start_sprint or plan_next) and conv.kind != ConversationKind.MEETING:
             raise ConversationError("só uma reunião de sprint pode começar um sprint")
+        if conv.kind == ConversationKind.MEETING and conv.mode is None:
+            raise ConversationError(
+                "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
+            )
         try:
-            if conv.kind == ConversationKind.MEETING:
+            if conv.kind == ConversationKind.MEETING and conv.mode == MeetingMode.CURRENT:
                 master = self.agent_for(conv.kind)
-                result = await master.commit_meeting(conv, start_sprint=start_sprint, goal=goal)
-                closing = master.name, _meeting_summary(result, start_sprint)
+                result = await master.commit_sprint_changes(conv)
+                closing = master.name, _changes_summary(result, conv)
+            elif conv.kind == ConversationKind.MEETING:
+                master = self.agent_for(conv.kind)
+                result = await master.commit_meeting(
+                    conv, start_sprint=start_sprint, plan_next=plan_next, goal=goal
+                )
+                closing = master.name, _meeting_summary(result, start_sprint, plan_next)
             elif conv.kind == ConversationKind.REVIEW:
                 po = ProductOwnerAgent(self.ctx)
                 result = po.commit_review(conv, force=force)
@@ -389,12 +496,48 @@ def _plural(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
 
 
-def _meeting_summary(result: CommitResult, started: bool) -> str:
+def _current_intro(sprint_id: str) -> str:
+    return (
+        f"Certo: vamos olhar o {sprint_id}. Os cards dele estão no rascunho como estão agora. "
+        "Posso tirar um card do sprint (ele volta ao backlog), incluir outro (o Product Owner "
+        "avalia antes), recomeçar uma história do zero ou cancelar o sprint; também podemos "
+        "discutir alternativas, dependências e bloqueios. Nada muda até você aplicar."
+    )
+
+
+def _changes_summary(result: CommitResult, conv: Conversation) -> str:
+    if conv.draft.cancel_sprint:
+        back = ", ".join(result.withdrawn) or "nenhuma"
+        return (
+            f"O {conv.draft.sprint_id} foi cancelado. Voltaram ao backlog: {back}. "
+            "O Product Owner reordenou o backlog."
+        )
+    parts = []
+    if result.joined:
+        parts.append(f"entraram no sprint: {', '.join(result.joined)}")
+    if result.withdrawn:
+        parts.append(f"voltaram ao backlog: {', '.join(result.withdrawn)}")
+    if result.restarted:
+        parts.append(f"recomeçam do zero: {', '.join(result.restarted)}")
+    if not parts:
+        return f"Nada mudou no {conv.draft.sprint_id}."
+    return f"Pronto, {conv.draft.sprint_id} ajustado: " + "; ".join(parts) + "."
+
+
+def _meeting_summary(result: CommitResult, started: bool, planned: bool = False) -> str:
     cards = len(result.created) + len(result.existing)
     text = f"Pronto: {_plural(cards, 'história', 'histórias')} no backlog"
     if result.created and result.existing:
         text += f" ({_plural(len(result.created), 'nova', 'novas')})"
-    text += f" e o sprint {result.sprint_id} começou." if started else "."
+    if started:
+        text += f" e o sprint {result.sprint_id} começou."
+    elif planned:
+        text += (
+            f" e o sprint {result.sprint_id} está montado. Ele espera o sprint em andamento "
+            "terminar; para disparar, abra uma reunião de sprint e revise com o Product Owner."
+        )
+    else:
+        text += "."
     if result.skipped:
         text += " Ficaram fora do sprint por já estarem em andamento: " + ", ".join(result.skipped)
     return text

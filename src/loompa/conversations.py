@@ -46,6 +46,13 @@ class ConversationKind(StrEnum):
     REVIEW = "review"  # the Product Owner refused a quick story; the founder can clarify (ADR-0017)
 
 
+class MeetingMode(StrEnum):
+    """What a Sprint Meeting is about (ADR-0018). With a sprint running the founder chooses."""
+
+    CURRENT = "current"  # adjust the running sprint: cards in or out, restarts, cancel it
+    NEXT = "next"  # plan the next sprint: started now, or assembled to wait for the running one
+
+
 class ConversationStatus(StrEnum):
     OPEN = "open"
     COMMITTED = "committed"
@@ -75,6 +82,9 @@ class DraftItem(BaseModel):
     origin: str = "founder"
     note: str = ""  # e.g. why the Product Owner held the idea back
     unpin: bool = False  # hand the founder's pinned place back to the Product Owner on commit
+    stage: str = ""  # a card of the running sprint: where it is now
+    restart: bool = False  # a card of the running sprint starts over from scratch on commit
+    restart_reason: str = ""
 
 
 class Proposal(BaseModel):
@@ -92,6 +102,14 @@ class Draft(BaseModel):
     next_key: int = 1
     proposal: Proposal | None = None  # meetings
     review: Triage | None = None  # review conversations: the Product Owner's latest reading
+    sprint_id: str = ""  # the sprint the meeting is about (running, or the one being assembled)
+    members: list[str] = Field(default_factory=list)  # the running sprint's cards when it opened
+    cancel_sprint: bool = False  # a meeting about the running sprint: call it off on commit
+    cancel_reason: str = ""
+
+    def joining(self) -> list[DraftItem]:
+        """Cards that would join the running sprint (it had them not when the meeting opened)."""
+        return [i for i in self.in_sprint() if i.story_id not in self.members]
 
     def find(self, ref: str) -> DraftItem | None:
         ref = ref.strip().lower()
@@ -106,6 +124,7 @@ class Conversation(BaseModel):
     factory: str
     kind: ConversationKind
     status: ConversationStatus = ConversationStatus.OPEN
+    mode: MeetingMode | None = None  # meetings only; None until the founder chooses
     title: str = ""
     turns: list[Turn] = Field(default_factory=list)
     draft: Draft = Field(default_factory=Draft)
@@ -128,6 +147,10 @@ class CommitResult:
     held: list[dict[str, str]] = field(default_factory=list)  # ideas the Product Owner kept out
     skipped: list[str] = field(default_factory=list)  # sprint picks that could not join
     sprint_id: str | None = None
+    # a meeting about the running sprint (ADR-0018)
+    joined: list[str] = field(default_factory=list)
+    withdrawn: list[str] = field(default_factory=list)
+    restarted: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -136,6 +159,9 @@ class CommitResult:
             "held": self.held,
             "skipped": self.skipped,
             "sprint_id": self.sprint_id,
+            "joined": self.joined,
+            "withdrawn": self.withdrawn,
+            "restarted": self.restarted,
         }
 
 
@@ -202,9 +228,11 @@ def apply_ops(
     cards: Mapping[str, OpenCard],
     *,
     origin: str = "founder",
+    current: bool = False,
 ) -> OpsReport:
     """Validate and apply edits to `draft`. Nothing here raises for bad input from a model: a
-    malformed or unknown operation is reported in `ignored` and skipped."""
+    malformed or unknown operation is reported in `ignored` and skipped. `current` is a meeting
+    about the running sprint, the only draft where a card restarts or the sprint is cancelled."""
     report = OpsReport()
     by_title = {normalize_title(c.title): c for c in cards.values()}
     for raw in ops:
@@ -217,6 +245,18 @@ def apply_ops(
             _update(draft, raw, cards, report)
         elif op in ("drop", "remove"):
             _drop(draft, raw, report)
+        elif op in ("restart", "cancel_sprint", "keep_sprint") and not current:
+            report.ignored.append("isso só vale numa reunião sobre o sprint em andamento")
+        elif op == "restart":
+            _restart(draft, raw, report)
+        elif op == "cancel_sprint":
+            draft.cancel_sprint = True
+            draft.cancel_reason = (_text(raw, "reason", 300) or "").strip()
+            report.changes.append("o sprint em andamento será cancelado ao aplicar")
+        elif op == "keep_sprint":
+            if draft.cancel_sprint:
+                report.changes.append("o sprint em andamento continua")
+            draft.cancel_sprint, draft.cancel_reason = False, ""
         elif op == "goal":
             goal = (_text(raw, "text", 200) or _text(raw, "goal", 200) or "").strip()
             draft.goal = goal
@@ -333,10 +373,29 @@ def _update(
     report.changes.append(f"ajustei “{item.title}”")
 
 
+def _restart(draft: Draft, raw: dict[str, Any], report: OpsReport) -> None:
+    item = draft.find(_ref(raw))
+    if item is None or item.story_id not in draft.members:
+        report.ignored.append(f"{_ref(raw) or 'a história citada'} não está no sprint em andamento")
+        return
+    flag = _bool(raw.get("restart"))
+    item.restart = flag is not False
+    item.restart_reason = (_text(raw, "reason", 400) or "").strip() if item.restart else ""
+    report.changes.append(
+        f"“{item.title}” recomeça do zero ao aplicar"
+        if item.restart
+        else f"“{item.title}” segue de onde está"
+    )
+
+
 def _drop(draft: Draft, raw: dict[str, Any], report: OpsReport) -> None:
     item = draft.find(_ref(raw))
     if item is None:
         report.ignored.append(f"não encontrei {_ref(raw) or 'a história citada'} no rascunho")
+        return
+    if item.story_id in draft.members:
+        item.in_sprint = False  # a running card leaves the sprint, never the meeting's view
+        report.changes.append(f"“{item.title}” sai do sprint ao aplicar (volta ao backlog)")
         return
     draft.items.remove(item)
     report.changes.append(
@@ -351,8 +410,22 @@ def render_draft(draft: Draft) -> str:
     if not draft.items and not draft.goal:
         return "(empty)"
     lines = [f"Sprint goal: {draft.goal or '(not set)'}"]
+    if draft.members:
+        lines[0] += f" · this is sprint {draft.sprint_id}, running now"
+        if draft.cancel_sprint:
+            lines.append(f"THE SPRINT WILL BE CANCELLED: {draft.cancel_reason or '(no reason)'}")
     for i in draft.items:
+        if i.story_id in draft.members:
+            where = f"running ({i.stage})" if i.in_sprint else f"LEAVES THE SPRINT ({i.stage})"
+            if i.restart:
+                where += " · RESTARTS FROM SCRATCH"
+            lines.append(f'- {i.key} · P{i.priority} · {where} · "{i.title}"')
+            if i.note:
+                lines.append(f"    Product Owner: {i.note[:300]}")
+            continue
         where = "IN SPRINT" if i.in_sprint else "backlog only"
+        if i.in_sprint and draft.members:
+            where = "JOINS THE RUNNING SPRINT"
         existing = " · existing backlog card" if i.story_id else ""
         epic = f" · epic: {i.epic}" if i.epic else ""
         lines.append(f'- {i.key} · P{i.priority} · {where}{existing}{epic} · "{i.title}"')

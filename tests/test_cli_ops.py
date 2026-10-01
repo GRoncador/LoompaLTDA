@@ -18,8 +18,8 @@ def test_meeting_run_inbox_dry_run(git_repo: Path, hub, monkeypatch):
     assert r.exit_code == 0 and "0 histórias processadas" in r.stdout, r.stdout
     r = runner.invoke(app, ["sprint", "start", "--dry-run", "--goal", "Primeira entrega"])
     assert r.exit_code == 0 and "SP-001 iniciado" in r.stdout, r.stdout
-    r = runner.invoke(app, ["sprint", "start", "--dry-run"])  # nothing left to start
-    assert r.exit_code == 1 and "não há histórias" in r.stdout
+    r = runner.invoke(app, ["sprint", "start", "--dry-run"])  # one sprint at a time (ADR-0018)
+    assert r.exit_code == 1 and "só um sprint roda por vez" in " ".join(r.stdout.split())
     r = runner.invoke(app, ["run", "--dry-run"])
     assert r.exit_code == 0, r.stdout
     assert "2 histórias processadas" in r.stdout

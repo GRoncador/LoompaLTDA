@@ -283,7 +283,12 @@ def sprint_status(factory: str | None = typer.Option(None, "--factory", "-f")) -
     sprints = board.sprints()
     if not sprints:
         console.print("Nenhum sprint ainda. Comece com [bold]loompa sprint start[/bold].")
-    label = {"open": "aberto", "running": "rodando", "closed": "encerrado"}
+    label = {
+        "open": "montado",
+        "running": "rodando",
+        "closed": "encerrado",
+        "cancelled": "cancelado",
+    }
     for sp in sprints:
         counts = board.progress(sp)
         console.print(
@@ -291,7 +296,7 @@ def sprint_status(factory: str | None = typer.Option(None, "--factory", "-f")) -
             + (f" · {counts['waiting']} aguardando você" if counts["waiting"] else "")
             + (f" · meta: {sp.goal}" if sp.goal else "")
         )
-        if sp.status == SprintStatus.CLOSED:
+        if sp.status in (SprintStatus.CLOSED, SprintStatus.CANCELLED):
             continue
         table = Table(show_header=True, box=None)
         for col in ("id", "título", "etapa"):

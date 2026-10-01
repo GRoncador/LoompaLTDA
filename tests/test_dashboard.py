@@ -121,11 +121,12 @@ def _start_sprint_as_the_cli_does(client: TestClient):
     return MasterAgent(client.app.state.hub.get("demo-hq").ctx).start_sprint()
 
 
-def test_create_story_promote_and_memory(client: TestClient):
+def test_create_story_and_memory(client: TestClient):
     sid = client.post(
         "/api/factories/demo-hq/stories", json={"title": "Nova ideia", "priority": 1}
     ).json()["id"]
-    assert client.post(f"/api/factories/demo-hq/stories/{sid}/promote").json()["stage"] == "SPEC"
+    # no "run it now" lane in the panel: a card runs inside a sprint (ADR-0018)
+    assert client.post(f"/api/factories/demo-hq/stories/{sid}/promote").status_code in (404, 405)
     hits = client.get(
         "/api/factories/demo-hq/memory/search", params={"q": "constituição regras"}
     ).json()

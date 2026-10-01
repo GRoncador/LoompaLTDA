@@ -55,6 +55,14 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                     "reason": "simulação",
                 }
             )
+        if "review of the running sprint" in messages[0].content:
+            return json.dumps(
+                {
+                    "reply": "Simulação: anotei. Nada muda no sprint até você aplicar.",
+                    "ops": [],
+                    "questions": [],
+                }
+            )
         if "Sprint Meeting" in messages[0].content:
             said = _founder_message(messages)
             parts = [p.strip(" -•*") for p in re.split(r"[;\n]+", said) if p.strip(" -•*")]

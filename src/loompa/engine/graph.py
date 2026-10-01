@@ -64,6 +64,7 @@ from loompa.hygiene import is_test_path
 from loompa.llm import LLMError
 from loompa.llm.router import TIER_ABOVE
 from loompa.risk import needs_preflight
+from loompa.sprints import SprintBoard
 from loompa.worktrees import GitError, Worktree
 
 Node = Callable[[EngineContext, StoryState], Awaitable[StoryState]]
@@ -780,6 +781,35 @@ NODES: dict[Stage, Node] = {  # legacy view kept for callers that index by stage
 # ----------------------------------------------------------------------------- resume
 
 
+def back_to_backlog(
+    ctx: EngineContext,
+    state: StoryState,
+    *,
+    priority: int | None = None,
+    leave_sprint: bool = True,
+) -> None:
+    """The story leaves the pipeline and waits in the backlog again ("deixar para depois", or
+    taken out of a sprint in a meeting). Its branch stays; when a sprint admits it again it
+    starts over at its first phase. It leaves the running sprint too: a card waiting in the
+    backlog would hold that sprint open forever, and only one sprint runs at a time. A
+    cancelled sprint keeps its list as the record of what it held (`leave_sprint=False`)."""
+    if leave_sprint:
+        board = SprintBoard(ctx.store, ctx.slug)
+        running = board.running()
+        if running is not None and state.story_id in running.story_ids:
+            board.withdraw(state.story_id)
+    po = ProductOwnerAgent(ctx)
+    po.set_status(state.story_id, Stage.BACKLOG)
+    if priority is not None:
+        po.set_priority(state.story_id, priority)
+    goto(state, "intake" if not state.route else state.route[0])
+    state.stage = Stage.BACKLOG
+    state.blocked_reason = None
+    state.blocked_message_id = None
+    state.resume_stage = None
+    state.resume_phase = None
+
+
 def apply_founder_answer(
     ctx: EngineContext, state: StoryState, msg: FounderMessage, answer: FounderAnswer
 ) -> StoryState:
@@ -800,11 +830,7 @@ def apply_founder_answer(
         state.phase = ""
         ctx.worktrees.remove(state.story_id)
     elif key == "skip":
-        po = ProductOwnerAgent(ctx)
-        po.set_status(state.story_id, Stage.BACKLOG)
-        po.set_priority(state.story_id, SKIPPED_PRIORITY)
-        goto(state, "intake" if not state.route else state.route[0])
-        state.stage = Stage.BACKLOG
+        back_to_backlog(ctx, state, priority=SKIPPED_PRIORITY)
     elif reason == BlockedReason.DELIVERY:
         if key in ("approve", "approved", "ok", "yes", "sim"):
             wt = ctx.worktrees.get(state.story_id)

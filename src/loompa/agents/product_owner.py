@@ -182,6 +182,11 @@ founder approves or adjusts your proposal, and only then does the sprint start.
 - Pick the cards that go into this sprint, from the draft and from the cards waiting in the
   backlog (reference those by id). Favour what serves the sprint goal and what the founder asked
   for today; leave out what is not ready to build (vague, waiting on a decision) and say why.
+- Fixes the factory found itself (origin `kaizen`: bugs and debt it met while building) only run
+  inside a sprint, so weigh them like the founder's cards: a bug users would meet belongs in the
+  sprint ahead of polish, and debt the next cards would trip on goes in before them.
+- When the draft is about a sprint that is already running, its running cards stay as they are:
+  judge only the cards that would join it now, and what that costs the work in flight.
 - Give each card a priority, 1 (build first) to 5 (last), in the order it should be built.
 - Say how the picked cards relate, in their notes: which one must come first because another
   builds on it, which ones touch the same area. Judge from the text; you do not read code here.
@@ -541,6 +546,8 @@ class ProductOwnerAgent(LoompaAgent):
         what order, and how they relate. Applied to the draft as edits the founder can still
         change; the sprint starts only after one. Advisory when the model is unavailable: the
         draft stands as it is, and the founder is told so."""
+        from loompa.agents.master import render_running
+
         if not conv.draft.items:
             raise ConversationError("o rascunho está vazio")
         board = ConversationBoard(self.ctx.store, self.ctx.slug)
@@ -548,7 +555,12 @@ class ProductOwnerAgent(LoompaAgent):
         user = (
             f"## Constitution (excerpt)\n{self.constitution(2000)}\n\n"
             f"## Backlog\n{render_backlog(cards)}\n\n"
-            f"## Current draft\n{render_draft(conv.draft)}\n\n"
+            + (
+                f"{render_running(self.ctx, conv.draft.sprint_id)}\n\n"
+                if conv.draft.members
+                else ""
+            )
+            + f"## Current draft\n{render_draft(conv.draft)}\n\n"
             f"## Conversation so far\n{render_transcript(conv)}\n\n"
             f"## Capacity\n{self.ctx.config.schedule.max_parallel} stories are built at the same time."
         )
@@ -570,9 +582,11 @@ class ProductOwnerAgent(LoompaAgent):
             )
         else:
             picks = [p for p in data.get("picks") or [] if isinstance(p, dict) and p.get("ref")]
+            members = set(conv.draft.members)
             ops = [
                 {"op": "update", **{k: p[k] for k in ("ref", "in_sprint", "priority") if k in p}}
                 for p in picks
+                if str(p["ref"]).upper() not in members  # the founder decides what leaves a sprint
             ]
             report = apply_ops(conv.draft, ops, cards, origin="product_owner")
             for p in picks:

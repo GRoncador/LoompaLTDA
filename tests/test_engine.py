@@ -814,9 +814,9 @@ async def test_worker_question_pauses_and_resumes_with_guidance(factory: Factory
         and cards[0]["priority"] == 500
         and cards[0]["title"].startswith("[Débito técnico]")
     )
-    # kaizen cards wait for the founder; once promoted they run like any story
+    # kaizen cards wait for a sprint; inside one they run like any story
     assert Scheduler(ctx).runnable() == []
-    Scheduler(ctx).promote(cards[0]["id"])
+    MasterAgent(ctx).start_sprint([cards[0]["id"]])
     await Scheduler(ctx).run()
     assert load_state(ctx, cards[0]["id"]).stage == Stage.AWAITING_FOUNDER
     assert ctx.store.list_learnings()[0]["created_story_id"] == cards[0]["id"]

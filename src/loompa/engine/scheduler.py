@@ -28,7 +28,7 @@ from typing import Any
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent, StoryStalled, triage
 from loompa.comms import FounderAnswer, FounderMessage, MessageKind
 from loompa.engine.context import EngineContext
-from loompa.engine.graph import BlockedReason, apply_founder_answer, block
+from loompa.engine.graph import BlockedReason, apply_founder_answer, back_to_backlog, block
 from loompa.engine.langgraph_engine import GraphRuntime
 from loompa.engine.lock import EngineLock
 from loompa.engine.phases import goto
@@ -113,13 +113,13 @@ class Scheduler:
             if s["stage"] not in TERMINAL
             and s["stage"] not in PAUSED
             and s["id"] not in self.running
-            and s["stage"] != Stage.BACKLOG  # cards wait for a sprint (or the founder's promote)
+            and s["stage"] != Stage.BACKLOG  # cards wait for a sprint
         ]
 
     def runnable(self) -> list[dict[str, Any]]:
         """Stories ready to execute: the ones the Product Owner admitted out of the backlog
-        (a sprint start, an epic split, an explicit promote). A story whose runner just crashed
-        waits out its Ops backoff first."""
+        (a sprint start, a card joining the running sprint, an epic split). A story whose runner
+        just crashed waits out its Ops backoff first."""
         now = time.monotonic()
         return [s for s in self._eligible() if self.not_before.get(s["id"], 0.0) <= now]
 
@@ -132,12 +132,6 @@ class Scheduler:
             if self.not_before.get(s["id"], 0.0) > now
         ]
         return max(min(waits), 0.0) if waits else None
-
-    def promote(self, story_id: str) -> None:
-        """Founder sends one backlog card straight to work, outside any sprint (a hotfix lane)."""
-        from loompa.agents.product_owner import ProductOwnerAgent
-
-        ProductOwnerAgent(self.ctx).admit(story_id)
 
     def close_sprints(self) -> None:
         """Close sprints whose stories all finished (the Master tells the founder)."""
@@ -457,6 +451,23 @@ class Scheduler:
         save_state(self.ctx, state, "restart")
         await runtime_for(self.ctx).inject_founder_answer(state)
         self.ctx.emit("story.restarted", story_id=story_id, from_stage=old.stage.value)
+        return state
+
+    async def withdraw_story(self, story_id: str, *, leave_sprint: bool = True) -> StoryState:
+        """The founder takes a story out of the running sprint (ADR-0018): it waits in the
+        backlog again, like "deixar para depois", and any question it had for the founder is
+        withdrawn with it. Never while this engine is running it."""
+        if story_id in self.running:
+            raise RuntimeError(f"{story_id} está rodando agora; pare a esteira antes")
+        state = load_state(self.ctx, story_id)
+        if state.stage in TERMINAL:
+            raise ValueError(f"{story_id} já está encerrada")
+        if state.blocked_message_id:
+            self.ctx.store.archive_message(state.blocked_message_id)
+        back_to_backlog(self.ctx, state, leave_sprint=leave_sprint)
+        save_state(self.ctx, state, "withdrawn")
+        await runtime_for(self.ctx).inject_founder_answer(state)
+        self.ctx.emit("story.withdrawn", story_id=story_id)
         return state
 
     def answer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:

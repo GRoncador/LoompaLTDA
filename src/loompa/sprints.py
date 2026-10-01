@@ -1,10 +1,12 @@
 """Sprints: a named batch of stories the factory works through together (ADR-0008).
 
-A sprint is `open` while the founder and the Master are still choosing what goes in, `running`
-once it has started (its stories were admitted by the Product Owner and the Scheduler works on
-them) and `closed` when every story reached a terminal state. A story blocked on the founder
-waits alone; the rest of the batch keeps going. Sprints only group stories: admitting a card
-into the pipeline is the Product Owner's call (`Backlog.admit`).
+A sprint is `open` while the founder and the Master are still choosing what goes in (the next
+sprint, possibly already assembled while another runs), `running` once it has started (its
+stories were admitted by the Product Owner and the Scheduler works on them), `closed` when every
+story reached a terminal state and `cancelled` when the founder called it off in a meeting. One
+sprint runs at a time (ADR-0018). A story blocked on the founder waits alone; the rest of the
+batch keeps going. Sprints only group stories: admitting a card into the pipeline is the Product
+Owner's call (`Backlog.admit`).
 """
 
 from __future__ import annotations
@@ -25,6 +27,10 @@ class SprintStatus(StrEnum):
     OPEN = "open"
     RUNNING = "running"
     CLOSED = "closed"
+    CANCELLED = "cancelled"
+
+
+ACTIVE = (SprintStatus.OPEN, SprintStatus.RUNNING)
 
 
 class Sprint(BaseModel):
@@ -53,14 +59,19 @@ class SprintBoard:
         return [Sprint.model_validate(r) for r in rows]
 
     def open_sprint(self) -> Sprint | None:
-        """The sprint being planned, if any."""
+        """The sprint being planned, if any: the next one, waiting for a meeting to start it."""
         opened = self.sprints(SprintStatus.OPEN)
         return opened[-1] if opened else None
+
+    def running(self) -> Sprint | None:
+        """The sprint the factory is working through. There is at most one (ADR-0018)."""
+        running = self.sprints(SprintStatus.RUNNING)
+        return running[-1] if running else None
 
     def sprint_of(self, story_id: str) -> Sprint | None:
         """The open or running sprint a story belongs to."""
         for sprint in self.sprints():
-            if sprint.status != SprintStatus.CLOSED and story_id in sprint.story_ids:
+            if sprint.status in ACTIVE and story_id in sprint.story_ids:
                 return sprint
         return None
 
@@ -92,7 +103,7 @@ class SprintBoard:
         sprint = self.get(sprint_id) if sprint_id else self.draft()
         if sprint is None:
             raise SprintError(f"sprint {sprint_id} não existe")
-        if sprint.status == SprintStatus.CLOSED:
+        if sprint.status not in ACTIVE:
             raise SprintError(f"{sprint.id} já foi encerrado")
         row = self.store.get_story(story_id)
         if row is None:
@@ -114,23 +125,51 @@ class SprintBoard:
         sprint.story_ids.remove(story_id)
         self.store.put_sprint(sprint.model_dump())
 
+    def set_goal(self, sprint_id: str, goal: str) -> Sprint:
+        sprint = self.get(sprint_id)
+        if sprint is None:
+            raise SprintError(f"sprint {sprint_id} não existe")
+        if goal.strip():
+            sprint.goal = goal.strip()
+            self.store.put_sprint(sprint.model_dump())
+        return sprint
+
+    def withdraw(self, story_id: str) -> Sprint:
+        """Take a story out of the running sprint (the founder's call in a meeting)."""
+        sprint = self.running()
+        if sprint is None or story_id not in sprint.story_ids:
+            raise SprintError(f"{story_id} não está no sprint em andamento")
+        sprint.story_ids.remove(story_id)
+        self.store.put_sprint(sprint.model_dump())
+        return sprint
+
     def start(self, sprint_id: str, goal: str = "") -> Sprint:
         sprint = self.get(sprint_id)
         if sprint is None or sprint.status != SprintStatus.OPEN:
             raise SprintError(f"{sprint_id} não está aberto")
         if not sprint.story_ids:
             raise SprintError("um sprint precisa de pelo menos uma história")
+        busy = self.running()
+        if busy is not None:
+            raise SprintError(running_message(busy))
         sprint.status = SprintStatus.RUNNING
         sprint.started_at = now_iso()
         sprint.goal = goal.strip() or sprint.goal
         self.store.put_sprint(sprint.model_dump())
         return sprint
 
-    def close(self, sprint_id: str) -> Sprint:
+    def close(self, sprint_id: str, *, cancelled: bool = False) -> Sprint:
         sprint = self.get(sprint_id)
         if sprint is None:
             raise SprintError(f"sprint {sprint_id} não existe")
-        sprint.status = SprintStatus.CLOSED
+        sprint.status = SprintStatus.CANCELLED if cancelled else SprintStatus.CLOSED
         sprint.closed_at = now_iso()
         self.store.put_sprint(sprint.model_dump())
         return sprint
+
+
+def running_message(sprint: Sprint) -> str:
+    return (
+        f"o {sprint.id} ainda está rodando e só um sprint roda por vez: ele precisa terminar, "
+        "ou ser cancelado numa reunião de sprint, antes de outro começar"
+    )
