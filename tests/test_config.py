@@ -149,3 +149,36 @@ def test_turning_clusters_off_points_the_flat_tiers_at_the_general_list():
     )
     assert [c.model for c in cfg.models.tiers["tier1"]] == ["so/geral"]
     assert cfg.models.cluster_for_role("worker") == "general"
+
+
+def test_a_config_written_before_adr_0016_gets_the_new_room_and_tries(tmp_path: Path):
+    """Every save writes the whole config, so `contas` carried the old 32k ceiling and the single
+    tier-1 attempt word for word: kept, they would cap the 96k room and cut a try."""
+    import yaml
+
+    from loompa.config.store import CONFIG_FILE, LOOMPA_DIR, load_config
+
+    cfg = default_config().model_dump(mode="json")
+    for key in (
+        "full_output_tokens",
+        "light_output_tokens",
+        "stream_idle_s",
+        "stream_token_idle_s",
+    ):
+        cfg["models"].pop(key)
+    cfg["models"]["max_output_ceiling"] = 32768
+    cfg["schedule"]["tier1_max_attempts"] = 1
+    (tmp_path / LOOMPA_DIR).mkdir()
+    (tmp_path / LOOMPA_DIR / CONFIG_FILE).write_text(yaml.safe_dump(cfg))
+    old = load_config(tmp_path)
+    assert old.models.max_output_ceiling == 96000 and old.models.full_output_tokens == 96000
+    assert old.schedule.tier1_max_attempts == 2
+    # a value someone changed on purpose stays, and a file written after ADR-0016 is left alone
+    cfg["models"]["max_output_ceiling"] = 20000
+    cfg["schedule"]["tier1_max_attempts"] = 3
+    (tmp_path / LOOMPA_DIR / CONFIG_FILE).write_text(yaml.safe_dump(cfg))
+    kept = load_config(tmp_path)
+    assert kept.models.max_output_ceiling == 20000 and kept.schedule.tier1_max_attempts == 3
+    cfg["models"].update(full_output_tokens=96000, max_output_ceiling=32768)
+    (tmp_path / LOOMPA_DIR / CONFIG_FILE).write_text(yaml.safe_dump(cfg))
+    assert load_config(tmp_path).models.max_output_ceiling == 32768

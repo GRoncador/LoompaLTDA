@@ -33,9 +33,29 @@ def find_factory_root(start: Path | None = None) -> Path | None:
     return None
 
 
+# Defaults a file written before ADR-0016 carries word for word (every save writes the whole
+# config): kept, they would override the new policy — a 32k ceiling under the 96k room, a single
+# tier-1 attempt under the three tries before the founder. A value someone changed stays.
+_PRE_ADR16_DEFAULTS = {
+    ("models", "max_output_ceiling"): 32768,
+    ("schedule", "tier1_max_attempts"): 1,
+}
+
+
+def _upgrade(data: dict) -> dict:
+    models = data.get("models")
+    if not isinstance(models, dict) or "full_output_tokens" in models:
+        return data
+    for (section, key), old in _PRE_ADR16_DEFAULTS.items():
+        block = data.get(section)
+        if isinstance(block, dict) and block.get(key) == old:
+            del block[key]
+    return data
+
+
 def load_config(root: Path) -> LoompaConfig:
     path = root / LOOMPA_DIR / CONFIG_FILE
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = _upgrade(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
     # Layer user config over defaults so new keys get sane values after upgrades.
     merged = _deep_merge(yaml.safe_load(_defaults_text()), data)
     return LoompaConfig.model_validate(merged)
