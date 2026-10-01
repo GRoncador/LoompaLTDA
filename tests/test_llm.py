@@ -550,26 +550,48 @@ def _cut_until(budget_needed: int, provider: str = "deepseek"):
     return Needy(provider)
 
 
-async def test_the_output_budget_grows_with_the_storys_complexity():
+async def test_the_output_room_is_a_backstop_set_by_the_effort():
+    """ADR-0016: a call pays only for what it writes, so the room only decides when it is cut.
+    The smoke run's plan needed ~20k tokens and was cut at 4k, 8k and 16k."""
     cfg = single_provider_config()
-    cfg.models.max_output_tokens = 4000
     prov = MockProvider("deepseek", script=scripted)
     router = ModelRouter(cfg, providers={"deepseek": prov})
-    for complexity, expected in (("SIMPLE", 4000), ("STANDARD", 6000), ("COMPLEX", 12000)):
+    for complexity in ("SIMPLE", "STANDARD", "COMPLEX"):  # the story's size no longer sizes it
         await router.complete("architect", [Message("user", "x")], complexity=complexity)
-        assert prov.calls[-1]["max_tokens"] == expected, complexity
-    await router.complete("deployer", [Message("user", "x")], max_tokens=400, complexity="COMPLEX")
-    assert prov.calls[-1]["max_tokens"] == 1200  # an explicit cap scales the same way
+        assert prov.calls[-1]["max_tokens"] == 128000, complexity
+    await router.complete(
+        "deployer", [Message("user", "x")], max_tokens=400, reasoning_effort="low"
+    )
+    assert prov.calls[-1]["max_tokens"] == 16384  # an old small cap is a floor, not the room
+    await router.complete(
+        "worker", [Message("user", "x")], max_tokens=40000, reasoning_effort="low"
+    )
+    assert prov.calls[-1]["max_tokens"] == 40000  # a call that writes whole files asks for more
+    capped = ModelCandidate(provider="deepseek", model="deepseek-chat", max_output_tokens=32768)
+    for cluster in cfg.models.matrix:
+        cfg.models.matrix[cluster]["tier2"] = [capped]
+    await router.complete("worker", [Message("user", "x")])
+    assert prov.calls[-1]["max_tokens"] == 32768  # the founder's cap for a model
+    for cluster in cfg.models.matrix:
+        cfg.models.matrix[cluster]["tier2"] = [
+            capped.model_copy(update={"max_output_tokens": None})
+        ]
     cfg.models.max_output_ceiling = 5000
-    await router.complete("architect", [Message("user", "x")], complexity="COMPLEX")
+    await router.complete("worker", [Message("user", "x")])
     assert prov.calls[-1]["max_tokens"] == 5000  # never past the ceiling
+
+
+def _small_rooms(cfg, full: int = 4096, ceiling: int = 32768):
+    cfg.models.full_output_tokens = full
+    cfg.models.light_output_tokens = full
+    cfg.models.max_output_ceiling = ceiling
+    return cfg
 
 
 async def test_a_cut_answer_is_retried_with_more_room_and_every_call_is_metered():
     """S-002 in `contas`: the Architect stopped at exactly 4096 tokens twice and the story
-    died as 'not valid JSON'. A cut answer is now retried with twice the room."""
-    cfg = single_provider_config()
-    cfg.models.max_output_tokens = 4096
+    died as 'not valid JSON'. A cut answer is retried with twice the room."""
+    cfg = _small_rooms(single_provider_config())
     store = Store(":memory:")
     prov = _cut_until(9000)
     router = ModelRouter(cfg, tracker=CostTracker(store, cfg, "f"), providers={"deepseek": prov})
@@ -582,102 +604,63 @@ async def test_a_cut_answer_is_retried_with_more_room_and_every_call_is_metered(
 
 
 async def test_the_budget_that_fitted_after_a_cut_is_where_the_next_call_starts():
-    """`contas`, 2026-09-30: the Worker's 900-token self-check was cut on every task and only
-    fitted at 1800-3600, paying for one or two discarded calls each time."""
-    cfg = single_provider_config()
+    """`contas`, 2026-09-30: the Worker's self-check was cut on every task and only fitted at
+    twice or four times the room, paying for one or two discarded calls each time."""
+    cfg = _small_rooms(single_provider_config(), full=900)
     prov = _cut_until(3000)
     router = ModelRouter(cfg, providers={"deepseek": prov})
-    await router.complete("worker", [Message("user", "x")], max_tokens=900, complexity="SIMPLE")
+    await router.complete("worker", [Message("user", "x")], complexity="SIMPLE")
     assert [c["max_tokens"] for c in prov.calls] == [900, 1800, 3600]
-    await router.complete("worker", [Message("user", "y")], max_tokens=900, complexity="SIMPLE")
+    await router.complete("worker", [Message("user", "y")], complexity="SIMPLE")
     assert prov.calls[-1]["max_tokens"] == 3600 and len(prov.calls) == 4
-    await router.complete("architect", [Message("user", "z")], max_tokens=900, complexity="SIMPLE")
+    await router.complete("architect", [Message("user", "z")], complexity="SIMPLE")
     assert prov.calls[4]["max_tokens"] == 900  # another role learns on its own
 
 
-async def test_at_the_ceiling_a_cut_answer_thinks_less_then_gives_up_plainly():
-    cfg = single_provider_config()
-    cfg.models.max_output_tokens = 1000
-    cfg.models.max_output_ceiling = 1000
-    prov = _cut_until(10**9)
-    router = ModelRouter(cfg, providers={"deepseek": prov})
-    with pytest.raises(LLMError, match="resposta cortada") as exc:
-        await router.complete("architect", [Message("user", "x")], complexity="SIMPLE")
-    assert exc.value.retryable is False  # waiting would not make the answer fit
-    assert [c["reasoning_effort"] for c in prov.calls] == ["", "low", "minimal"]
-    assert all(c["max_tokens"] == 1000 for c in prov.calls)
-
-
 class _Overthinker(MockProvider):
-    """Thinks through any budget at the default effort (smoke run, 2026-09-30: the Architect's
-    plan for a SIMPLE story, every token reasoning about Click's source); answers at `low`."""
+    """Thinks through any room it is given (the smoke run's Architect, 2026-09-30)."""
 
     async def complete(self, model, messages, **kw):  # type: ignore[override]
         self.calls.append({"model": model, **kw})
-        low = kw.get("reasoning_effort") in ("low", "minimal")
         return LLMResponse(
-            content='{"ok": true}' if low else "",
+            content="",
             tool_calls=[],
             model=model,
             provider=self.name,
             input_tokens=100,
-            output_tokens=400 if low else kw["max_tokens"],
-            reasoning_tokens=100 if low else kw["max_tokens"],
-            finish_reason="stop" if low else "length",
+            output_tokens=kw["max_tokens"],
+            reasoning_tokens=kw["max_tokens"],
+            finish_reason="length",
         )
 
 
-async def test_an_answer_cut_while_still_thinking_thinks_less_instead_of_getting_more_room():
-    cfg = single_provider_config()
-    cfg.models.max_output_tokens = 4096
+async def test_a_cut_never_lowers_the_effort_and_gives_up_plainly_at_the_ceiling():
+    """ADR-0016: the effort was chosen for what the call decides; a cut gets room, never less
+    thinking. At the ceiling the call falls through, and the founder hears it plainly."""
+    cfg = _small_rooms(single_provider_config(), full=1000, ceiling=4000)
     prov = _Overthinker("deepseek")
     events: list[tuple[str, dict]] = []
     router = ModelRouter(
         cfg, providers={"deepseek": prov}, on_event=lambda t, **kw: events.append((t, kw))
     )
-    rc = await router.complete("architect", [Message("user", "x")], complexity="SIMPLE")
-    assert rc.response.text == '{"ok": true}'
+    with pytest.raises(LLMError, match="resposta cortada") as exc:
+        await router.complete("architect", [Message("user", "x")], complexity="SIMPLE")
+    assert exc.value.retryable is False  # waiting would not make the answer fit
     assert [(c["max_tokens"], c["reasoning_effort"]) for c in prov.calls] == [
-        (4096, ""),
-        (4096, "low"),  # same room, less thinking: doubling it bought only more thinking
+        (1000, ""),
+        (2000, ""),
+        (4000, ""),
     ]
-    assert events == [
-        (
-            "llm.cut",
-            {
-                "story_id": None,
-                "agent": "architect",
-                "model": "deepseek/deepseek-chat",
-                "role": "architect",
-                "max_tokens": 4096,
-                "next_max_tokens": 4096,
-                "effort": "low",
-                "thinking": True,
-            },
-        )
-    ]
-    # the next call of that role starts at the effort that answered; another role does not
-    await router.complete("architect", [Message("user", "y")], complexity="SIMPLE")
-    assert prov.calls[-1]["reasoning_effort"] == "low" and len(prov.calls) == 3
-    await router.complete("product", [Message("user", "z")], complexity="SIMPLE")
-    assert prov.calls[3]["reasoning_effort"] == ""
-    # an explicit lower effort is kept, never raised back
-    await router.complete(
-        "architect", [Message("user", "w")], complexity="SIMPLE", reasoning_effort="minimal"
-    )
-    assert prov.calls[-1]["reasoning_effort"] == "minimal"
+    assert [t for t, _ in events] == ["llm.cut", "llm.cut", "llm.fallthrough"]
 
 
-async def test_a_cut_with_visible_output_still_gets_more_room():
-    cfg = single_provider_config()
-    cfg.models.max_output_tokens = 4096
-    prov = _cut_until(6000)  # reports no reasoning: the answer itself was long
+async def test_a_low_call_stays_low_when_it_is_cut():
+    cfg = _small_rooms(single_provider_config(), full=1000, ceiling=2000)
+    prov = _Overthinker("deepseek")
     router = ModelRouter(cfg, providers={"deepseek": prov})
-    await router.complete("architect", [Message("user", "x")], complexity="SIMPLE")
-    assert [(c["max_tokens"], c["reasoning_effort"]) for c in prov.calls] == [
-        (4096, ""),
-        (8192, ""),
-    ]
+    with pytest.raises(LLMError):
+        await router.complete("worker", [Message("user", "x")], reasoning_effort="low")
+    assert {c["reasoning_effort"] for c in prov.calls} == {"low"}
 
 
 def test_ops_does_not_wait_out_a_cut_answer_and_says_why_in_plain_words():

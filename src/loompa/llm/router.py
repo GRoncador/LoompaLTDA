@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from loompa.config.schema import REASONING_EFFORTS, LoompaConfig, ModelCandidate
+from loompa.config.schema import LoompaConfig, ModelCandidate
 from loompa.finance import CostTracker, UsageRecord
 from loompa.llm.providers import (
     LLMError,
@@ -51,30 +51,10 @@ def _cut_tail(resp: LLMResponse) -> dict[str, str]:
     return tail
 
 
-# A cut answer that spent at least this share of its output thinking wrote nothing usable: more
-# room buys more thinking (smoke run 2026-09-30: an Architect plan cut at 4k, 8k and 16k tokens on
-# two models, every token reasoning; the same call at `low` answered in 1.8k).
-THINKING_SHARE = 0.9
-
-
-def _thought_only(resp: LLMResponse) -> bool:
-    return bool(resp.reasoning_tokens) and resp.reasoning_tokens >= THINKING_SHARE * max(
-        resp.output_tokens, 1
-    )
-
-
-def _lighter_of(a: str, b: str) -> str:
-    """The one that thinks less; the provider default counts as `medium`."""
-    order = REASONING_EFFORTS
-    rank = {e: order.index(e) if e in order else order.index("medium") for e in (a, b)}
-    return a if rank[a] <= rank[b] else b
-
-
-def _lower_effort(effort: str) -> str:
-    """One step less thinking; the provider default counts as `medium`."""
-    order = REASONING_EFFORTS
-    current = order.index(effort) if effort in order else order.index("medium")
-    return order[max(current - 1, 0)]
+# The only effort label the factory sends (ADR-0016): `low` to think less. Everything else is the
+# provider's default (or the founder's per-model setting). On glm-5.3-flash `medium` and `high`
+# thought as little as `low`, and `max` as much as the default: the labels are not a scale.
+LIGHT_EFFORTS = ("low", "minimal")
 
 
 @dataclass
@@ -133,9 +113,6 @@ class ModelRouter:
         # that needed 3600 tokens for a self-check will need them next time too: starting
         # there saves a paid, discarded call (52 cuts in one hour of `contas`, 2026-09-30).
         self._fitted: dict[tuple[str, str], int] = {}
-        # (model key, role) -> the lower effort a call had to drop to after thinking through its
-        # whole budget: the next call of that role starts there instead of paying the cut again.
-        self._settled_effort: dict[tuple[str, str], str] = {}
         self._budget_downgrade = False
         # When every candidate of a tier is merely cooling down (typical with a single-model
         # tier on a free-tier rate limit), wait up to this long for the earliest one instead
@@ -367,11 +344,16 @@ class ModelRouter:
             "todos os modelos do tier falharam: " + "; ".join(errors[-4:]), retryable=True
         )
 
-    def _scaled(self, base: int, complexity: str | None) -> int:
-        """The call's base budget scaled by the story's complexity, within the ceiling."""
+    def _room(self, effort: str, asked: int | None, cand: ModelCandidate) -> int:
+        """Output room for a call (ADR-0016): a backstop, not an estimate. A call pays only for
+        what it writes; room that is too small cuts it and pays for the discarded attempt (the
+        smoke run's plan needed ~20k and was cut at 4k, 8k and 16k)."""
         m = self.config.models
-        factor = m.output_scale.get(str(complexity or "STANDARD").upper(), 1.0)
-        return max(1, min(int(base * factor), m.max_output_ceiling))
+        room = m.light_output_tokens if effort in LIGHT_EFFORTS else m.full_output_tokens
+        room = max(room, asked or 0)  # a call that knows it writes more (whole files) says so
+        if cand.max_output_tokens:  # the founder's cap for a model that cannot take more
+            room = min(room, cand.max_output_tokens)
+        return max(1, min(room, m.max_output_ceiling))
 
     def _event(self, type_: str, story_id: str | None, agent: str, **payload: Any) -> None:
         if self.on_event is None:
@@ -414,18 +396,11 @@ class ModelRouter:
             if hasattr(prov, "available") and not prov.available():  # type: ignore[attr-defined]
                 calls.errors.append(f"{key}: sem chave de API")
                 continue
-            budget = self._scaled(
-                max_tokens or cand.max_output_tokens or self.config.models.max_output_tokens,
-                complexity,
-            )
+            effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
             budget = min(
-                max(budget, self._fitted.get((key, role), 0)),
+                max(self._room(effort, max_tokens, cand), self._fitted.get((key, role), 0)),
                 self.config.models.max_output_ceiling,
             )
-            effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
-            if (key, role) in self._settled_effort:
-                effort = _lighter_of(self._settled_effort[(key, role)], effort)
-            lowered = False
             cuts = 0
             retry = 0
             while True:
@@ -530,21 +505,12 @@ class ModelRouter:
                 if not resp.truncated:
                     if cuts:
                         self._fitted[(key, role)] = budget
-                    if lowered:
-                        self._settled_effort[(key, role)] = effort
                     break
-                # Cut mid-answer: the text or tool call is unusable. More room first; at the
-                # ceiling, less thinking (on a reasoning model the budget pays for both). An
-                # answer that was all thinking gets less thinking at once, in the same room.
-                thinking = _thought_only(resp) and _lower_effort(effort) != effort
-                if thinking:
-                    bigger, lighter = budget, _lower_effort(effort)
-                else:
-                    bigger = min(budget * 2, self.config.models.max_output_ceiling)
-                    lighter = _lower_effort(effort) if bigger == budget else effort
-                if cuts >= self.config.models.truncation_retries or (
-                    bigger == budget and lighter == effort
-                ):
+                # Cut mid-answer: the text or tool call is unusable. More room, never less
+                # thinking (ADR-0016): the effort was chosen for what the call decides. At the
+                # ceiling the next candidate gets the same call.
+                bigger = min(budget * 2, self.config.models.max_output_ceiling)
+                if cuts >= self.config.models.truncation_retries or bigger == budget:
                     calls.errors.append(f"{key}: {budget} tokens{TRUNCATED_SUFFIX}")
                     self._event(
                         "llm.fallthrough",
@@ -558,11 +524,7 @@ class ModelRouter:
                     resp = None
                     break
                 log.warning(
-                    "%s cortou a resposta em %d tokens; nova tentativa com %d (esforço %r)",
-                    key,
-                    budget,
-                    bigger,
-                    lighter or "padrão",
+                    "%s cortou a resposta em %d tokens; nova tentativa com %d", key, budget, bigger
                 )
                 self._event(
                     "llm.cut",
@@ -572,13 +534,11 @@ class ModelRouter:
                     role=role,
                     max_tokens=budget,
                     next_max_tokens=bigger,
-                    effort=lighter or None,
-                    thinking=thinking or None,
+                    effort=effort or None,
                 )
                 cuts += 1
                 calls.cuts += 1
-                lowered = lowered or lighter != effort
-                budget, effort = bigger, lighter
+                budget = bigger
             if resp is not None:
                 return RoutedCall(
                     response=resp,

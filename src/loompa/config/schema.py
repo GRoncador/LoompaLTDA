@@ -220,20 +220,24 @@ class ModelsConfig(BaseModel):
     # default. A key that is absent uses the task's `default_tier`.
     role_tasks: dict[str, str] = Field(default_factory=dict)
     temperature: float = 0.2
+    # Output room is a backstop, not an estimate (ADR-0016): a call pays only for what it writes,
+    # and room that is too small cuts it and pays for the discarded attempt. `low` calls get the
+    # light room, every other call the full one; a cut doubles it up to the ceiling, then the next
+    # candidate at the same effort, `truncation_retries` times per model.
+    light_output_tokens: int = Field(16384, ge=256)
+    full_output_tokens: int = Field(128000, ge=256)
+    max_output_ceiling: int = Field(128000, ge=256)
+    truncation_retries: int = Field(2, ge=0, le=5)
+    # Legacy, no longer used to size calls (ADR-0016); kept so older config files still load.
     max_output_tokens: int = 4096
-    # Output budget by story complexity, as a multiplier on the call's base budget. The budget is
-    # a ceiling, not a price: a call pays for what it writes, so a complex story starts roomy
-    # instead of being cut and paid twice. A cut answer is retried with twice the room, up to
-    # `max_output_ceiling`, `truncation_retries` times per model.
     output_scale: dict[str, float] = Field(
         default_factory=lambda: {"SIMPLE": 1.0, "STANDARD": 1.5, "COMPLEX": 3.0}
     )
-    max_output_ceiling: int = Field(32768, ge=256)
-    truncation_retries: int = Field(2, ge=0, le=5)
-    # Wall-clock limit for one model call. The HTTP timeout is per read: a server that keeps a
-    # long non-streamed request alive (OpenRouter sends keep-alive comments) never trips it.
-    # A guard, not a fix for an observed case: the `contas` stalls of 2026-09-30 turned out to be
-    # the Mac asleep on battery, which no in-process timer can see.
+    # A streamed call fails (retryable) after this long without a single token; keep-alive
+    # comments prove the connection, not progress. There is no wall-clock limit on a streamed
+    # call: its output room ends a runaway.
+    stream_idle_s: float = Field(300.0, ge=10)
+    # Wall-clock limit for a call to a provider that is not streamed.
     call_timeout_s: float = Field(600.0, ge=10)
     # Off: every role shares the `general` cluster, one 3-tier list instead of three.
     clusters_enabled: bool = True

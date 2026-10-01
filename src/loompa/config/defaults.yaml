@@ -145,16 +145,16 @@ models:
     master.exec_options: tier2
     deployer.summary: tier2
   temperature: 0.2
-  max_output_tokens: 4096
-  # Budget by story complexity (x the call's base) and what happens when an answer is cut:
-  # retried with twice the room, up to the ceiling. Only what a model writes is billed.
-  output_scale:
-    SIMPLE: 1.0
-    STANDARD: 1.5
-    COMPLEX: 3.0
-  max_output_ceiling: 32768
+  # Output room is a backstop (ADR-0016): only what a model writes is billed. `low` calls get
+  # the light room, every other call the full one; a cut doubles it up to the ceiling, then the
+  # next model is tried at the same effort.
+  light_output_tokens: 16384
+  full_output_tokens: 128000
+  max_output_ceiling: 128000
   truncation_retries: 2
-  # Wall-clock limit per model call (s); past it the next model is tried.
+  # A streamed call fails after this long (s) without a token; no wall-clock limit otherwise.
+  stream_idle_s: 300
+  # Wall-clock limit (s) for a provider that is not streamed.
   call_timeout_s: 600
 
 # Providers. `api_key_env` is the NAME of a variable; its value lives in ~/.loompa/secrets.env

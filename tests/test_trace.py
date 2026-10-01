@@ -115,6 +115,8 @@ def _one_model_config(model: str = "m1") -> object:
     cfg = default_config()
     cfg.models.tiers = {"tier2": [ModelCandidate(provider="p", model=model)]}
     cfg.models.matrix = {}
+    cfg.models.full_output_tokens = cfg.models.light_output_tokens = 900  # room to double
+    cfg.models.max_output_ceiling = 32768
     return cfg
 
 
