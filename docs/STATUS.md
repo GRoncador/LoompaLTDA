@@ -654,6 +654,20 @@ Decided 2026-09-29:
   shows its own changes; founder options are audited and rewritten (no file names, no git
   commands); a Kaizen card's kind label is no longer doubled.
 
+- **2026-10-02 — A chain's spec checked against what its dependencies delivered; retiring a card
+  in a meeting.** contas S-049's spec was written before S-047 and S-051 were delivered (ADR-0021:
+  all specs of a chain first) and undid what the founder had approved in them (decimal point, old
+  data files), as "assumptions". `dependencies.delivered_brief` gives the Architect (and the Spec
+  Loompa and the Product Owner's review) the criteria, the founder's guidance and the summary of
+  every delivered dependency; a spec that removes or changes that behaviour is sent back once
+  (`blocker`), and the review calls removing existing behaviour without the founder's notes
+  invented scope. Meetings get `{"op": "retire"}` (`/aposentar S-010 motivo` in the CLI): a backlog
+  card leaves for good on commit, cancelled by the Product Owner (`backlog.retired`), refused while
+  another open card depends on it. Also: a meeting reply now says which of its edits were refused
+  (the Master had claimed "removi o S-010"); the sprint report counts an epic split into parts as
+  "dividida em épico", not a delivery, and its summary translates "story". Not built: a retire
+  button in the panel's meeting (the chat there already accepts the op through the Master).
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then

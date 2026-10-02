@@ -72,7 +72,10 @@ Never say a card was created or a sprint started. Operations:
    the draft; for a card that already exists only `priority` and `in_sprint` can change, and
    `"pinned": false` hands a card the founder pinned by dragging back to the Product Owner's
    ranking, only when the founder asks for it)
-- {{"op": "drop", "ref": "D1"}}
+- {{"op": "drop", "ref": "D1"}}  (takes a card out of the DRAFT only; the backlog keeps it)
+- {{"op": "retire", "ref": "S-010", "reason": str}}  (a backlog card the founder calls obsolete or
+   unwanted leaves the backlog for good when the meeting is applied; only when the founder asks;
+   {{"op": "unretire", "ref": "S-010"}} undoes it)
 - {{"op": "goal", "text": str}}  (the sprint goal, one sentence)
 `priority` is 1 (urgent) to 5 (nice to have). `questions` repeats any question you asked in the
 reply (at most two), or is empty. Return "ops": [] when the message needs no change to the draft.

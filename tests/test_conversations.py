@@ -888,3 +888,31 @@ async def test_a_chat_turn_asks_for_low_reasoning_effort(factory: Factory):
     finally:
         ctx.close()
     assert provider.calls and all(c["reasoning_effort"] == "low" for c in provider.calls)
+
+
+async def test_a_meeting_retires_an_obsolete_backlog_card(factory: Factory):
+    """tamagotchi SP-002: the founder said S-010 was obsolete and the meeting had no way to
+    cancel a backlog card. `retire` marks it; the Product Owner cancels it on commit."""
+    ctx = make_ctx(factory, dry_run=True)
+    po = ProductOwnerAgent(ctx)
+    old, keep, needs = (po.add_item(t).story_id for t in ("Configurar teste", "Login", "Relatório"))
+    po.set_dependencies(needs, [keep])
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    report = chats.edit(
+        conv.id,
+        [
+            {"op": "retire", "ref": old, "reason": "já configurado à mão"},
+            {"op": "retire", "ref": keep},  # another card depends on it: refused
+            {"op": "retire", "ref": "S-999"},
+        ],
+    )
+    assert len(report.changes) == 1 and len(report.ignored) == 2
+    assert any("depende de" in n for n in report.ignored)
+    assert chats.board.require(conv.id).draft.retire == {old: "já configurado à mão"}
+    result = await chats.commit(conv.id)  # retiring alone is enough to save the meeting
+    assert result.retired == [old]
+    assert ctx.store.get_story(old)["stage"] == Stage.CANCELLED
+    assert ctx.store.get_story(keep)["stage"] == Stage.BACKLOG
+    assert events(ctx, "backlog.retired")[0]["payload"]["reason"] == "já configurado à mão"
+    await ctx.aclose()

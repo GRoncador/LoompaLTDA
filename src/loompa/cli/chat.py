@@ -75,6 +75,7 @@ CURRENT_HELP = (
 HELP = {
     ConversationKind.MEETING: (
         "/incluir D1 S-004  põe cards no sprint (e /excluir tira do sprint)\n"
+        "/aposentar S-010 [motivo]  cancela um card do backlog ao salvar\n"
         "/proposta          o Product Owner propõe o sprint (vem antes de /sprint)\n"
         "/sprint [meta]     salva no backlog e começa o sprint\n"
         "/montar [meta]     salva e deixa o sprint montado, esperando o atual terminar\n"
@@ -282,6 +283,9 @@ async def handle(
         split = brainstorm and all(a.upper().startswith("C") for a in args)
         report = convs.edit(conv.id, [{"op": "drop", "ref": a} for a in args], split=split)
         _show(report)
+    elif command == "/aposentar" and args and meeting:
+        reason = rest.partition(" ")[2]
+        _show(convs.edit(conv.id, [{"op": "retire", "ref": args[0], "reason": reason}]))
     elif command in ("/incluir", "/excluir") and args and meeting:
         flag = command == "/incluir"
         report = convs.edit(conv.id, [{"op": "update", "ref": a, "in_sprint": flag} for a in args])

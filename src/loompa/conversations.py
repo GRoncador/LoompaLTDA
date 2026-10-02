@@ -143,6 +143,9 @@ class Draft(BaseModel):
     members: list[str] = Field(default_factory=list)  # the running sprint's cards when it opened
     cancel_sprint: bool = False  # a meeting about the running sprint: call it off on commit
     cancel_reason: str = ""
+    # backlog cards the founder wants gone (obsolete, unwanted): story id -> reason. The Product
+    # Owner cancels them on commit (tamagotchi SP-002: "S-010 is obsolete" had no op at all)
+    retire: dict[str, str] = Field(default_factory=dict)
     # a brainstorm (ADR-0020): the ideas are `items` until the founder approves the direction,
     # then the Product Owner's split into cards waits in `split` for the second OK
     direction: str = ""
@@ -207,6 +210,7 @@ class CommitResult:
     withdrawn: list[str] = field(default_factory=list)
     restarted: list[str] = field(default_factory=list)
     amended: list[str] = field(default_factory=list)  # waiting cards a brainstorm added to
+    retired: list[str] = field(default_factory=list)  # backlog cards cancelled by the meeting
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -219,6 +223,7 @@ class CommitResult:
             "withdrawn": self.withdrawn,
             "restarted": self.restarted,
             "amended": self.amended,
+            "retired": self.retired,
         }
 
 
@@ -340,6 +345,10 @@ def apply_ops(
             if draft.cancel_sprint:
                 report.changes.append("o sprint em andamento continua")
             draft.cancel_sprint, draft.cancel_reason = False, ""
+        elif op in ("retire", "unretire") and brainstorm:
+            report.ignored.append("um brainstorm não aposenta cards; isso é na reunião de sprint")
+        elif op in ("retire", "unretire"):
+            _retire(draft, raw, cards, op == "retire", report)
         elif op == "goal":
             goal = (_text(raw, "text", 200) or _text(raw, "goal", 200) or "").strip()
             draft.goal = goal
@@ -347,6 +356,42 @@ def apply_ops(
         else:
             report.ignored.append(f"operação desconhecida: {op or '(vazia)'}")
     return report
+
+
+def _retire(
+    draft: Draft,
+    raw: dict[str, Any],
+    cards: Mapping[str, OpenCard],
+    retire: bool,
+    report: OpsReport,
+) -> None:
+    """A backlog card leaves for good when the meeting is applied (cancelled by the Product
+    Owner). Only a card waiting in the backlog: work in progress leaves a sprint another way."""
+    ref = _ref(raw).upper()
+    if not retire:
+        if draft.retire.pop(ref, None) is not None:
+            report.changes.append(f"{ref} continua no backlog")
+        return
+    card = cards.get(ref)
+    if card is None:
+        report.ignored.append(f"não encontrei o card {ref or 'citado'} no backlog")
+        return
+    if not card.waiting:
+        report.ignored.append(
+            f"{ref} já está em andamento; só um card que espera no backlog sai assim"
+        )
+        return
+    needed = sorted(
+        c.id for c in cards.values() if ref in c.depends_on and c.id not in draft.retire
+    )
+    if needed:
+        report.ignored.append(f"{', '.join(needed)} depende de {ref}: aposente as duas ou nenhuma")
+        return
+    draft.retire[ref] = (_text(raw, "reason", 300) or "").strip()
+    item = next((i for i in draft.items if i.story_id == ref), None)
+    if item is not None:
+        draft.items.remove(item)
+    report.changes.append(f"“{card.title}” ({ref}) sai do backlog ao aplicar (cancelado)")
 
 
 def _dismiss(draft: Draft, raw: dict[str, Any], dismissed: bool, report: OpsReport) -> None:

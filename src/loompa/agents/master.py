@@ -526,6 +526,19 @@ class MasterAgent(LoompaAgent):
         self.ctx.emit("meeting.briefed", agent=self.name, conversation_id=conv.id)
         return text
 
+    def _retire_cards(self, draft: Any, result: CommitResult) -> None:
+        """The cards the meeting retired, cancelled by the Product Owner. A card that left the
+        backlog meanwhile (it started, or someone else cancelled it) is skipped, not an error."""
+        po = ProductOwnerAgent(self.ctx)
+        for sid, reason in draft.retire.items():
+            row = self.ctx.store.get_story(sid)
+            if row is None or row["stage"] != Stage.BACKLOG:
+                result.skipped.append(sid)
+                continue
+            po.set_status(sid, Stage.CANCELLED)
+            result.retired.append(sid)
+            self.ctx.emit("backlog.retired", story_id=sid, agent=po.name, reason=reason)
+
     async def commit_meeting(
         self, conv: Conversation, *, start_sprint: bool, goal: str = "", plan_next: bool = False
     ) -> CommitResult:
@@ -537,7 +550,7 @@ class MasterAgent(LoompaAgent):
         store, po = self.ctx.store, ProductOwnerAgent(self.ctx)
         draft = conv.draft
         board = SprintBoard(store, self.ctx.slug)
-        if not draft.items:
+        if not draft.items and not draft.retire:
             raise ConversationError("o rascunho está vazio")
         sprinting = start_sprint or plan_next
         if sprinting and not draft.in_sprint():
@@ -566,6 +579,7 @@ class MasterAgent(LoompaAgent):
                 also=set(running.story_ids) if plan_next and running else set(),
             )
         result = CommitResult()
+        self._retire_cards(draft, result)
         picks: list[str] = []
         for item in draft.items:
             if item.story_id:  # already a card: at most its priority changes
@@ -676,6 +690,7 @@ class MasterAgent(LoompaAgent):
                 "pause a esteira antes de tirar, recomeçar ou cancelar histórias em andamento"
             )
         sched, result = Scheduler(self.ctx), CommitResult(sprint_id=running.id)
+        self._retire_cards(draft, result)
         for item in leaving:
             if stage[item.story_id] not in TERMINAL:
                 await sched.withdraw_story(item.story_id, leave_sprint=not draft.cancel_sprint)
