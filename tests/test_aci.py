@@ -303,3 +303,36 @@ async def test_aci_apply_patch_takes_openais_begin_patch_format(aci: ACI):
     gone = "*** Begin Patch\n*** Delete File: src/money.py\n*** End Patch"
     res = await aci.call("apply_patch", {"patch": gone})
     assert not res.ok and "delete_file" in res.output
+
+
+async def test_branch_diff_shows_what_the_story_changed(tmp_path: Path):
+    """`contas` S-047: the Worker reformatted a line, could not see what it was before, and
+    asked the founder to run git for it."""
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    (tmp_path / "app.py").write_text("print('a', 'b')\n")
+    (tmp_path / "keep.py").write_text("x = 1\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "base")
+    git("checkout", "-q", "-b", "story")
+    (tmp_path / "keep.py").write_text("x = 2\n")
+    git("commit", "-q", "-am", "task 1")  # committed in the branch
+    (tmp_path / "app.py").write_text("print(\n    'a', 'b'\n)\n")  # uncommitted
+    (tmp_path / "new.py").write_text("y = 1\n")  # untracked
+
+    aci = ACI(tmp_path, diff_base="main")
+    summary = await aci.call("branch_diff", {})
+    assert summary.ok
+    assert "app.py" in summary.output and "keep.py" in summary.output
+    assert "new files: new.py" in summary.output
+    one = await aci.call("branch_diff", {"path": "app.py"})
+    assert "-print('a', 'b')" in one.output  # the original form of the reformatted line
+    assert "is new in this branch" in (await aci.call("branch_diff", {"path": "new.py"})).output
+    nothing = ACI(tmp_path)  # outside a story branch there is no base to compare with
+    assert not (await nothing.call("branch_diff", {})).ok

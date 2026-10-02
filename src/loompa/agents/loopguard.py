@@ -27,7 +27,7 @@ from typing import Any
 
 from loompa.aci import ACI
 from loompa.aci.tools import ToolResult
-from loompa.agents.toolbox import PRUNED, READ_TOOLS, RUN_TOOLS, WRITE_TOOLS
+from loompa.agents.toolbox import LOOKUP_TOOLS, PRUNED, RUN_TOOLS, WRITE_TOOLS
 from loompa.llm import Message
 
 REPEAT_PREFIX = "[repeated]"
@@ -102,7 +102,7 @@ class LoopGuard:
 
     def before(self, name: str, args: dict[str, Any]) -> ToolResult | None:
         """A result to use instead of running the tool, when running it would change nothing."""
-        if name not in READ_TOOLS and name not in RUN_TOOLS:
+        if name not in LOOKUP_TOOLS and name not in RUN_TOOLS:
             return None
         prev = self._seen.get(call_key(name, args))
         if prev is None or prev.version != self._version:
@@ -172,14 +172,14 @@ class LoopGuard:
             self.streak = 0
             self._rereads.clear()  # the code changed: reading it again is new information
         repeated = result.output.startswith(REPEAT_PREFIX)
-        if (name in READ_TOOLS or name in RUN_TOOLS) and not repeated and result.ok:
+        if (name in LOOKUP_TOOLS or name in RUN_TOOLS) and not repeated and result.ok:
             self._seen[call_key(name, args)] = _Seen(
                 self._version, result.output, message, self.calls
             )
         notes: list[str] = []
-        if name in READ_TOOLS and self._rereads.get(call_key(name, args), 0) >= REREAD_LIMIT:
+        if name in LOOKUP_TOOLS and self._rereads.get(call_key(name, args), 0) >= REREAD_LIMIT:
             notes.append(REREAD_NOTE.format(n=self._rereads[call_key(name, args)] + 1))
-        if name in READ_TOOLS:
+        if name in LOOKUP_TOOLS:
             self.reads_in_a_row += 1
             if self.explore_nudge and self.reads_in_a_row % self.explore_nudge == 0:
                 self.nudges += 1

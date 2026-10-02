@@ -40,6 +40,8 @@ EXTERNAL = "<external_data"  # how `loompa/mcp` wraps what web tools return
 # results "were not available to read".
 KEEP_EXTERNAL_CHARS = 24_000
 READ_TOOLS = frozenset({"read_file", "list_dir", "search", "find_symbol"})
+DIFF_TOOLS = frozenset({"branch_diff"})  # needs a story branch: the Worker's worktree only
+LOOKUP_TOOLS = READ_TOOLS | DIFF_TOOLS  # what the loop guard counts as exploring
 WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file", "fix_lint"})
 RUN_TOOLS = frozenset({"run_tests", "run_lint"})
 SIGNAL_TOOLS = frozenset({"done", "blocked", "note_learning"})
@@ -60,7 +62,9 @@ class ToolProfile:
 _DOC_ROLE_TOOLS = READ_TOOLS | {"write_file", "edit_file"}
 
 PROFILES: dict[str, ToolProfile] = {
-    "worker": ToolProfile("worker", READ_TOOLS | WRITE_TOOLS | RUN_TOOLS | SIGNAL_TOOLS, None),
+    "worker": ToolProfile(
+        "worker", READ_TOOLS | DIFF_TOOLS | WRITE_TOOLS | RUN_TOOLS | SIGNAL_TOOLS, None
+    ),
     "inspector": ToolProfile("inspector", READ_TOOLS | RUN_TOOLS | {"note_learning"}, ()),
     **{
         role: ToolProfile(role, _DOC_ROLE_TOOLS, SPEC_DIRS, WORKTREE_DOCS)

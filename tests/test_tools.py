@@ -33,6 +33,7 @@ def test_profiles_by_role():
     worker, inspector = profile_for("worker"), profile_for("inspector")
     assert {"write_file", "run_tests", "done", "blocked"} <= worker.tools
     assert worker.write_paths is None  # the story's own plan decides where it may write
+    assert "branch_diff" in worker.tools and "branch_diff" not in inspector.tools
     assert "run_tests" in inspector.tools and not {"write_file", "edit_file"} & inspector.tools
     for role in ("architect", "product", "product_owner", "analyst", "master"):
         p = profile_for(role)

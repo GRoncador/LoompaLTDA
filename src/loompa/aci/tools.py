@@ -101,6 +101,14 @@ TOOL_SPECS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "branch_diff",
+        "description": "Show what this story's branch changed against the main branch, committed or not: one file with `path`, otherwise a summary per file. Use it to see your own earlier edits, or the original form of a line you changed.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+        },
+    },
+    {
         "name": "write_file",
         "description": "Create a file, or replace a whole file. Use it for new or small files; prefer edit_file for changes to an existing one.",
         "parameters": {
@@ -214,8 +222,11 @@ class ACI:
         format_command: str = "",
         allowed_paths: list[str] | None = None,
         max_read_lines: int = 200,
+        diff_base: str | None = None,
     ):
         self.root = Path(root).resolve()
+        # the ref a story branch grew from (`Worktree.base`); `branch_diff` compares against it
+        self.diff_base = diff_base
         self.test_command = test_command
         self.lint_command = lint_command
         self.format_command = format_command
@@ -340,6 +351,44 @@ class ACI:
         return "\n".join(
             f"{s.kind} {s.name} — {s.path}:{s.line}\n    {s.signature}" for s in syms[:20]
         )
+
+    async def tool_branch_diff(self, path: str | None = None) -> str:
+        """`contas` S-047: a Worker saw a line it had reformatted, could not tell what it was
+        before, and asked the founder to run git for it."""
+        if not self.diff_base:
+            raise ToolError("branch_diff works only inside a story branch")
+        base = await run_command(
+            shlex.join(["git", "merge-base", self.diff_base, "HEAD"]), self.root, timeout=60
+        )
+        if base.returncode != 0:
+            raise ToolError("could not find where this branch started")
+        ref = base.stdout.strip().splitlines()[-1]
+        if path:
+            rel = self._rel(self._resolve(path))
+            res = await run_command(
+                shlex.join(["git", "diff", ref, "--", rel]), self.root, timeout=60
+            )
+            text = res.stdout.strip()
+            if not text and (self.root / rel).is_file():
+                tracked = await run_command(
+                    shlex.join(["git", "ls-files", "--error-unmatch", rel]), self.root, timeout=60
+                )
+                if tracked.returncode != 0:
+                    return f"{rel} is new in this branch (not in the main branch); read it with read_file"
+            if not text:
+                return f"no changes to {rel} against the main branch"
+            return (
+                text if len(text) <= 20_000 else text[:20_000] + "\n… (diff truncated; narrow it)"
+            )
+        stat = await run_command(shlex.join(["git", "diff", "--stat", ref]), self.root, timeout=60)
+        new = await run_command("git ls-files --others --exclude-standard", self.root, timeout=60)
+        untracked = [
+            f for f in new.stdout.split() if not is_protected(f) and "__pycache__" not in f
+        ]
+        out = stat.stdout.strip() or "no changes to tracked files against the main branch"
+        if untracked:
+            out += "\nnew files: " + ", ".join(untracked[:50])
+        return out + "\nCall branch_diff with `path` to see one file's changes."
 
     def tool_write_file(self, path: str, content: str) -> str:
         p = self._resolve(path, for_write=True)

@@ -31,7 +31,8 @@ checklist inside an isolated git worktree, with the tools provided and no shell.
 How to work:
 1. Read before you write. Read the file you will change and the tests that cover it; an edit to a
    file you have not read in this task is refused. Locate names with `find_symbol`/`search` and the
-   repository outline below rather than listing directories. Read each thing once: results stay in
+   repository outline below rather than listing directories; `branch_diff` shows what this story
+   already changed, and the original form of anything you changed. Read each thing once: results stay in
    your history, and a lookup or test run repeated with nothing changed is answered from it. A few
    reads are enough for most tasks; then decide.
 2. Implement exactly the task, with its tests, inside the allowed paths (anything else is refused).
@@ -43,7 +44,8 @@ How to work:
    findings (import order, spacing, formatting) call `fix_lint` instead of editing by hand.
 4. When the task is complete and its checks are green, call `done` with a one-sentence summary.
 5. When only a person can decide (an ambiguous requirement, a missing credential, a destructive
-   change), call `blocked` with a plain, non-technical reason in {language} and 2-3 options.
+   change), call `blocked` with a plain, non-technical reason in {language} and 2-3 options. Never
+   offer an option that asks the founder to run a command or edit a file: the team does that.
    Asking is cheaper than guessing: a wrong guess is built, tested and reviewed before anyone sees it.
 
 Keep the diff minimal: no unrelated rewrites and no new dependencies (the constitution admits new
@@ -172,7 +174,7 @@ class WorkerAgent(LoompaAgent):
             return AgentResult(ok=True, summary="todas as tarefas já concluídas")
         spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
         plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
-        aci = self.ctx.aci_for(wt.path, allowed_paths=self._fence(state, wt))
+        aci = self.ctx.aci_for(wt.path, allowed_paths=self._fence(state, wt), diff_base=wt.base)
         outline = repo_outline(wt.path)  # once per run: the same text keeps the prefix cached
         summaries: list[str] = []
         tier_label = self.tier_override or "tier2"
@@ -273,7 +275,7 @@ class WorkerAgent(LoompaAgent):
         task_aci = aci
         if reproducer:  # 7.7: tests only, and the code proves them red before the fix
             fence = writable_tests(state.allowed_paths) or ["tests/"]
-            task_aci = self.ctx.aci_for(wt.path, allowed_paths=fence)
+            task_aci = self.ctx.aci_for(wt.path, allowed_paths=fence, diff_base=wt.base)
         result = await self._run_task(
             state,
             task_aci,
@@ -441,7 +443,7 @@ class WorkerAgent(LoompaAgent):
         spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
         plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
         tasks_md = paths.tasks.read_text(encoding="utf-8") if paths.tasks.is_file() else ""
-        aci = self.ctx.aci_for(wt.path, allowed_paths=self._fence(state, wt))
+        aci = self.ctx.aci_for(wt.path, allowed_paths=self._fence(state, wt), diff_base=wt.base)
         tier_label = self.tier_override or "tier2"
         self.set_state(
             "WORKING", state, model=tier_label, detail="corrigindo falhas apontadas pelo Inspector"

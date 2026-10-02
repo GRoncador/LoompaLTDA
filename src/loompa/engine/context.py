@@ -270,7 +270,9 @@ class EngineContext:
         return msg
 
     # ------------------------------------------------------------------- misc
-    def aci_for(self, root: Path, allowed_paths: list[str] | None = None) -> ACI:
+    def aci_for(
+        self, root: Path, allowed_paths: list[str] | None = None, *, diff_base: str | None = None
+    ) -> ACI:
         q = self.config.quality
         return ACI(
             root,
@@ -279,6 +281,7 @@ class EngineContext:
             typecheck_command=q.typecheck_command,
             format_command=q.format_command,
             allowed_paths=allowed_paths,
+            diff_base=diff_base,
         )
 
     def index_memory(self) -> dict[str, int]:

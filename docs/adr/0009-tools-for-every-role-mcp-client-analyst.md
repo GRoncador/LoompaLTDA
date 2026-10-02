@@ -21,7 +21,7 @@ tool outside the profile, so a model that invents a call is stopped in code, not
 
 | Role | Reads | Writes | Runs tests |
 | --- | --- | --- | --- |
-| worker | repo | the story's `allowed_paths` (its plan) | yes |
+| worker | repo, and its own branch against the base (`branch_diff`) | the story's `allowed_paths` (its plan) | yes |
 | inspector | repo | nothing | yes |
 | architect, product, product_owner, analyst, master | repo | `.loompa/specs/`; `docs/` only inside a story worktree | no |
 | anyone else | repo | nothing | no |
@@ -31,6 +31,11 @@ root is a worktree: the factory runs in the founder's own checkout, and an agent
 `docs/` there would dirty a tree that Deployer merges later have to cope with. Story artifacts
 (`.loompa/specs/<id>/`) are the factory's own state and stay writable everywhere the profile says
 so. `offered` can narrow a profile for one call; it can never widen it.
+
+*Amendment (2026-10-02, founder's decision):* the Worker also gets `branch_diff`, read only: the
+story branch against the merge-base with its base, committed or not, one file or a summary. In
+`contas` S-047 a Worker reformatted a line, could not see its original form, and blocked to the
+founder asking them to run git. It needs a story branch, so no other role has it.
 
 ### 2. One tool loop, in `LoompaAgent`
 
