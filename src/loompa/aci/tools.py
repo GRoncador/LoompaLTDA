@@ -19,7 +19,10 @@ from typing import Any
 from loompa.aci.filters import summarize_lint, summarize_tests, summarize_typecheck
 from loompa.aci.runner import run_command
 from loompa.hygiene import RESIDUE_NOTE, new_files, run_residue
-from loompa.memory.lexical import CodeSearch, SymbolIndex
+from loompa.memory.lexical import CodeSearch, SymbolIndex, file_symbols
+
+HEAD_LINES = 80  # what a large file read without a range shows after its outline
+OUTLINE_SYMBOLS = 120
 
 
 class ToolError(Exception):
@@ -63,13 +66,13 @@ class ToolResult:
 TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "read_file",
-        "description": "Read a file by line range (at most 200 lines per call). Line numbers are shown; continue with `start`.",
+        "description": "Read a file with line numbers. Without `lines`, a file of up to 400 lines comes whole in one call; a larger one returns its outline (functions and classes with their lines) and its first lines, so you read the part you need with `start` and `lines` (at most 400).",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
                 "start": {"type": "integer", "default": 1},
-                "lines": {"type": "integer", "default": 120},
+                "lines": {"type": "integer"},
             },
             "required": ["path"],
         },
@@ -221,7 +224,7 @@ class ACI:
         typecheck_command: str = "",
         format_command: str = "",
         allowed_paths: list[str] | None = None,
-        max_read_lines: int = 200,
+        max_read_lines: int = 400,
         diff_base: str | None = None,
     ):
         self.root = Path(root).resolve()
@@ -318,20 +321,38 @@ class ACI:
             return ToolResult(False, f"invalid arguments for {name}: {exc}")
 
     # -------------------------------------------------------------------- tools
-    def tool_read_file(self, path: str, start: int = 1, lines: int = 120) -> str:
+    def tool_read_file(self, path: str, start: int = 1, lines: int | None = None) -> str:
+        """A whole file when it fits, in one call: contas Sprint 2 paged an 815-line test file in
+        120-line windows, 386 reads in 34 tasks, and every extra call re-sends the whole history.
+        A larger file read from the top without a range gets its outline first."""
         p = self._resolve(path)
         if not p.is_file():
             raise ToolError(f"no such file: {path}")
-        lines = max(1, min(int(lines), self.max_read_lines))
         start = max(1, int(start))
         content = p.read_text(encoding="utf-8", errors="replace").splitlines()
         self._known.add(self._rel(p))
         total = len(content)
+        outline = ""
+        if lines is None:
+            lines = self.max_read_lines
+            if start == 1 and total > self.max_read_lines:
+                lines = HEAD_LINES
+                symbols = file_symbols("\n".join(content), self._rel(p))
+                if symbols:
+                    shown = "\n".join(
+                        f"  {s.line:5d}  {s.kind} {s.name}" for s in symbols[:OUTLINE_SYMBOLS]
+                    )
+                    more = len(symbols) - OUTLINE_SYMBOLS
+                    outline = (
+                        f"Outline of {path} ({total} lines; read the part you need with start/lines):\n"
+                        f"{shown}" + (f"\n  … {more} more" if more > 0 else "") + "\n\n"
+                    )
+        lines = max(1, min(int(lines), self.max_read_lines))
         chunk = content[start - 1 : start - 1 + lines]
         body = "\n".join(f"{start + i:5d}| {line}" for i, line in enumerate(chunk))
         end = start + len(chunk) - 1
         more = f"\n… ({total - end} more lines; use start={end + 1})" if end < total else ""
-        return f"{path} [{start}-{end} of {total}]\n{body}{more}"
+        return f"{outline}{path} [{start}-{end} of {total}]\n{body}{more}"
 
     def tool_list_dir(self, path: str = ".") -> str:
         p = self._resolve(path)

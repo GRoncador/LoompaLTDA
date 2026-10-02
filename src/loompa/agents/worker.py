@@ -32,7 +32,10 @@ How to work:
 1. Read before you write. Read the file you will change and the tests that cover it; an edit to a
    file you have not read in this task is refused. Locate names with `find_symbol`/`search` and the
    repository outline below rather than listing directories; `branch_diff` shows what this story
-   already changed, and the original form of anything you changed. Read each thing once: results stay in
+   already changed, and the original form of anything you changed. `read_file` without `lines`
+   returns a file of up to 400 lines whole: one call is cheaper than several partial ones, because
+   every call sends your whole history again. A larger file comes as an outline: read the part you
+   need, located with the outline, `search` or `find_symbol`. Read each thing once: results stay in
    your history, and a lookup or test run repeated with nothing changed is answered from it. A few
    reads are enough for most tasks; then decide.
 2. Implement exactly the task, with its tests, inside the allowed paths (anything else is refused).

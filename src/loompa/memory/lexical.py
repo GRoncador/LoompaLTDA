@@ -187,14 +187,7 @@ class SymbolIndex:
                 text = file.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-            if file.suffix == ".py":
-                idx.symbols.extend(_python_symbols(text, rel))
-            elif file.suffix in (".ts", ".tsx", ".js", ".jsx"):
-                idx.symbols.extend(_regex_symbols(text, rel, _JS_SYMBOL))
-            elif file.suffix == ".go":
-                idx.symbols.extend(_regex_symbols(text, rel, _GO_SYMBOL, kind_group=None))
-            elif file.suffix == ".rs":
-                idx.symbols.extend(_regex_symbols(text, rel, _RS_SYMBOL))
+            idx.symbols.extend(file_symbols(text, rel))
         return idx
 
     def find(self, name: str, *, exact: bool = True, kind: str | None = None) -> list[Symbol]:
@@ -209,6 +202,20 @@ class SymbolIndex:
 
     def outline(self, path: str) -> list[Symbol]:
         return [s for s in self.symbols if s.path == path]
+
+
+def file_symbols(text: str, rel: str) -> list[Symbol]:
+    """The symbols of one file's text, by its extension ([] for a language without a parser)."""
+    suffix = Path(rel).suffix
+    if suffix == ".py":
+        return _python_symbols(text, rel)
+    if suffix in (".ts", ".tsx", ".js", ".jsx"):
+        return _regex_symbols(text, rel, _JS_SYMBOL)
+    if suffix == ".go":
+        return _regex_symbols(text, rel, _GO_SYMBOL, kind_group=None)
+    if suffix == ".rs":
+        return _regex_symbols(text, rel, _RS_SYMBOL)
+    return []
 
 
 def _python_symbols(text: str, rel: str) -> list[Symbol]:

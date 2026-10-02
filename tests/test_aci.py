@@ -336,3 +336,26 @@ async def test_branch_diff_shows_what_the_story_changed(tmp_path: Path):
     assert "is new in this branch" in (await aci.call("branch_diff", {"path": "new.py"})).output
     nothing = ACI(tmp_path)  # outside a story branch there is no base to compare with
     assert not (await nothing.call("branch_diff", {})).ok
+
+
+async def test_read_file_returns_a_file_whole_or_its_outline(tmp_path: Path):
+    """contas Sprint 2 paged an 815-line test file in 120-line windows: 386 reads in 34 tasks,
+    each one a model round that sends the whole history again."""
+    small = "\n".join(f"x{i} = {i}" for i in range(300))
+    big = "\n".join(
+        f"def f{i}():\n" + "\n".join(f"    y = {j}" for j in range(8)) + "\n" for i in range(60)
+    )
+    (tmp_path / "small.py").write_text(small)
+    (tmp_path / "big.py").write_text(big)
+    aci = ACI(tmp_path)
+    out = (await aci.call("read_file", {"path": "small.py"})).output
+    assert out.startswith("small.py [1-300 of 300]") and "more lines" not in out
+    out = (await aci.call("read_file", {"path": "big.py"})).output
+    total = len(big.splitlines())
+    assert out.startswith(f"Outline of big.py ({total} lines")
+    assert "      1  function f0" in out and "function f59" in out
+    assert f"big.py [1-80 of {total}]" in out and "use start=81" in out
+    out = (await aci.call("read_file", {"path": "big.py", "start": 100, "lines": 50})).output
+    assert out.startswith(f"big.py [100-149 of {total}]")  # a range never gets the outline
+    out = (await aci.call("read_file", {"path": "big.py", "start": 1, "lines": 1000})).output
+    assert out.startswith(f"big.py [1-400 of {total}]")  # 400 lines at most per call
