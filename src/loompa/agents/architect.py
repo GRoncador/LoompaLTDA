@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import date
 
@@ -281,8 +282,16 @@ class ArchitectAgent(LoompaAgent):
         tasks_md = paths.tasks.read_text(encoding="utf-8") if paths.tasks.is_file() else ""
         # The same guidance is applied once: a run stopped mid-`dev` replays the node from its
         # checkpoint, and `contas` S-031 got the same two tasks appended twice.
-        mark = f"<!-- amend:{hashlib.sha1(guidance.encode()).hexdigest()[:12]} -->"
-        if mark in tasks_md:
+        key = f"<!-- amend:{hashlib.sha1(guidance.encode()).hexdigest()[:12]}"
+        done = next((ln for ln in tasks_md.splitlines() if ln.startswith(key)), None)
+        if done is not None:
+            # the paths the amendment opened live in the state, which a stopped run lost: they
+            # come back from the marker (contas Sprint 2, S-047: cli.py added, then refused)
+            found = re.search(r"files=(\[.*?\])", done)
+            again = json.loads(found.group(1)) if found else []
+            state.allowed_paths = list(dict.fromkeys([*state.allowed_paths, *again]))
+            numbers = [t.number for t in tasks_from_markdown(tasks_md)]
+            state.tasks_total = max(numbers, default=state.tasks_total)
             return AgentResult(ok=True, summary="orientação já aplicada ao plano")
         self.set_state("WORKING", state, detail="ajustando o plano ao pedido do Founder")
         user = (
@@ -308,6 +317,7 @@ class ArchitectAgent(LoompaAgent):
             state.tasks_total = start - 1 + len(tasks)
             origins = state.extra.setdefault(TASK_ORIGIN_KEY, {})
             origins.update({str(start + i): "founder" for i in range(len(tasks))})
+        mark = f"{key} files={json.dumps(files, ensure_ascii=False)} -->"
         paths.tasks.write_text(tasks_md.rstrip("\n") + "\n" + mark + "\n", encoding="utf-8")
         if files or tasks:
             with paths.plan.open("a", encoding="utf-8") as fh:
