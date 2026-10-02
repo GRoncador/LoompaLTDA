@@ -7,6 +7,7 @@ card (ADR-0017): nothing enters the backlog unread.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from loompa.agents.base import LoompaAgent
@@ -21,6 +22,19 @@ KIND_LABEL = {
     "opportunity": "Oportunidade",
     "architecture": "Inconsistência de arquitetura",
 }
+
+
+_LEADING_LABEL = re.compile(r"^\s*\[([^\]]{1,60})\]\s*")
+
+
+def without_label(title: str) -> str:
+    """The title with any kind label it already carries removed: the Product Owner sees the label
+    and echoed it in its rewrite, and the card read "[Inconsistência de arquitetura]
+    [Inconsistência de arquitetura] …" (contas Sprint 2, S-054)."""
+    labels = {v.lower() for v in KIND_LABEL.values()} | {k.lower() for k in KIND_LABEL}
+    while (m := _LEADING_LABEL.match(title)) and m.group(1).strip().lower() in labels:
+        title = title[m.end() :]
+    return title.strip()
 
 
 class KaizenAgent(LoompaAgent):
@@ -75,7 +89,7 @@ class KaizenAgent(LoompaAgent):
                 after = filed.get(verdict.after or "", verdict.after)
                 text = (verdict.description or detail).strip()
                 new_id = po.add_item(
-                    f"[{label}] {(verdict.title or title).strip()}",
+                    f"[{label}] {without_label(verdict.title or title)}",
                     f"{text}\n\nDescoberto durante {state.story_id} ({state.title}).",
                     epic="kaizen",
                     priority=500 if kind != "bug" else 250,
