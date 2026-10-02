@@ -97,7 +97,7 @@ class ModelSync:
         for tier, picks in p.summary.items():
             lines.append(f"\n{TIER_LABEL.get(tier, tier)}:")
             lines += [
-                f"- {m['name']}: nota {m['quality']:.0f}, {_usd(m['price'])} por milhão de tokens"
+                f"- {m['name']}: nota {m['score']:.0f}, {_usd(m['price'])} por milhão de tokens"
                 for m in picks
             ]
         if p.added:

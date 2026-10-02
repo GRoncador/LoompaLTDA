@@ -441,7 +441,7 @@ function recommendedFor(all: ModelPick[], cluster: ClusterName, tier: TierKey, c
 
 function sortModels(list: ModelPick[], by: SortKey, cluster: ClusterName | null): ModelPick[] {
   const ranked = [...list];
-  const score = (m: ModelPick) => (cluster ? clusterScore(m, cluster) : m.quality) ?? -1;
+  const score = (m: ModelPick) => (cluster ? clusterScore(m, cluster) : m.score ?? m.quality) ?? -1;
   const value = (m: ModelPick) => (cluster ? clusterValue(m, cluster) : m.cost_benefit) ?? -1;
   ranked.sort((a, b) => {
     switch (by) {
@@ -896,8 +896,8 @@ function ModelsPanel({
             <span className="font-medium text-slate-200">Separar modelos por cluster de agentes (recomendado)</span>
             <span className="mt-0.5 block text-slate-400">
               Ligado, cada grupo de Loompas tem a sua lista, pesada para o que ele faz. Desligado, todos usam um
-              <strong className="text-slate-300"> cluster geral</strong> com os mesmos três tiers, ranqueado pela média simples
-              das três notas — menos escolhas para fazer.
+              <strong className="text-slate-300"> cluster geral</strong> com os mesmos três tiers, ranqueado só pela nota de
+              inteligência — a que existe para mais modelos, então nenhum bom modelo fica de fora por falta das outras notas.
             </span>
           </span>
         </label>

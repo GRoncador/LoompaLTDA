@@ -52,6 +52,7 @@ def entry(
     cache: float | None = None,
     alias: str | None = None,  # slug of the model an alias points to
     outputs: tuple[str, ...] = ("text",),
+    intelligence: float | None = None,
 ) -> dict[str, Any]:
     """One catalogue row; prices are USD per 1M tokens here and per token, as strings, in the payload."""
     pricing = {"prompt": str(prompt / 1e6), "completion": str(completion / 1e6)}
@@ -67,9 +68,13 @@ def entry(
         "expiration_date": expires,
         "reasoning": {"mandatory": mandatory, "supported_efforts": efforts or []},
     }
-    if coding is not None or agentic is not None:
+    if coding is not None or agentic is not None or intelligence is not None:
         row["benchmarks"] = {
-            "artificial_analysis": {"coding_index": coding, "agentic_index": agentic}
+            "artificial_analysis": {
+                "coding_index": coding,
+                "agentic_index": agentic,
+                **({"intelligence_index": intelligence} if intelligence is not None else {}),
+            }
         }
     if alias:
         row["alias_target"] = {"slug": alias, "name": alias.title()}
@@ -821,3 +826,48 @@ async def test_a_model_that_left_the_air_is_reported_once(factory: Factory):
     watch.forget("openrouter", "z-ai/gone-5")  # it answered again: a later outage is news again
     watch.model_gone("openrouter", "z-ai/gone-5")
     assert len(ctx.store.list_messages(factory.slug, status="pending")) == 2
+
+
+# ----------------------------------------------------------- one cluster: intelligence alone
+
+SMART = [
+    # only the intelligence index, as many models have in the API: the composite leaves it out
+    entry("n/smart", 1, 3, coding=None, agentic=None, intelligence=75),
+    entry("b/strong", 2, 6, coding=76, agentic=56, intelligence=60),
+    entry("c/mid", 1, 3, coding=70, agentic=54, intelligence=50),
+    entry("f/unrated", 0.01, 0.01, coding=None, agentic=None),  # no score at all
+]
+
+
+def test_with_the_clusters_off_the_intelligence_index_alone_ranks_and_lets_more_models_in():
+    models = parse_catalog({"data": SMART})
+    composite = rank(models, POLICY, TODAY)
+    assert "n/smart" not in {m.id for m in composite.eligible}  # no coding/agentic: unrated
+    alone = rank(models, POLICY, TODAY, composite=False)
+    assert {m.id for m in alone.eligible} == {"n/smart", "b/strong", "c/mid"}
+    assert alone.excluded["unrated"] == 1 and alone.best_quality == pytest.approx(75)
+    assert [m.id for m in alone.tier1] == ["n/smart", "b/strong"]  # by intelligence
+
+    config = openrouter_config()
+    config.models.clusters_enabled = False
+    proposal = build_proposal(config, models, POLICY, TODAY)
+    assert set(proposal.clusters) == {"general"}  # no composite clusters without the split
+    t1 = proposal.summary["tier1"]
+    assert t1[0]["id"] == "n/smart" and t1[0]["score"] == 75.0 and t1[0]["quality"] is None
+    row = next(r for r in proposal.all_models if r["id"] == "n/smart")
+    assert row["eligible"] and row["scores"]["general"] == 75.0
+
+    config.models.clusters_enabled = True  # three clusters: the composite, as before
+    proposal = build_proposal(config, models, POLICY, TODAY)
+    assert {"strategy", "engineering", "routine"} <= set(proposal.clusters)
+    assert "n/smart" not in {m["id"] for m in proposal.summary["tier1"]}
+
+
+def test_applying_a_one_cluster_proposal_keeps_the_other_clusters_lists():
+    config = openrouter_config()
+    config.models.clusters_enabled = False
+    proposal = build_proposal(config, parse_catalog({"data": SMART}), POLICY, TODAY)
+    assert apply_proposal(config, proposal)
+    general = [c.model for c in config.models.matrix["general"]["tier1"]]
+    assert general[0] == "n/smart"
+    assert {"strategy", "engineering", "routine", "general"} <= set(config.models.matrix)

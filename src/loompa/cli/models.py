@@ -62,7 +62,7 @@ def models_sync(
         table.add_column("nota", justify="right")
         table.add_column("US$/mi tokens", justify="right")
         for m in picked:
-            table.add_row(m["id"], f"{m['quality']:.1f}", f"{m['price']:.2f}")
+            table.add_row(m["id"], f"{m['score']:.1f}", f"{m['price']:.2f}")
         console.print(table)
     for label, ids in (("saem", proposal.removed), ("já fora do catálogo", proposal.gone)):
         if ids:

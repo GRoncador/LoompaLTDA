@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from loompa.config.schema import LoompaConfig, ModelCandidate, Price
+from loompa.config.schema import GENERAL_CLUSTER, LoompaConfig, ModelCandidate, Price
 
 PROVIDER = "openrouter"
 FREE_ROUTER = (
@@ -140,14 +140,17 @@ class CatalogModel:
         return round(0.55 * self.agentic + 0.30 * intel + 0.15 * self.coding, 1)
 
     def score_general(self) -> float | None:
-        """One cluster for everyone: the plain mean of the three indices, with no profile in it.
-        A factory that turns clusters off is saying it does not want the three-way distinction."""
-        if self.coding is None or self.agentic is None:
-            return None
-        intel = self.intelligence if self.intelligence is not None else self.quality
-        if intel is None:
-            return None
-        return round((intel + self.coding + self.agentic) / 3, 1)
+        """One cluster for everyone, used when a factory turns the clusters off: the intelligence
+        index alone. No composite without the three-way split — the composite needs coding and
+        agentic scores that many good models do not have in the API."""
+        return round(self.intelligence, 1) if self.intelligence is not None else None
+
+    def rating(self, composite: bool = True) -> float | None:
+        """The one number a model is ranked by. With the three clusters on, the composite of
+        coding and agentic (what a Worker and a tool-using planner do); with them off, the
+        intelligence index alone — the benchmark the API publishes for far more models, so good
+        models without coding/agentic scores are not left out."""
+        return self.quality if composite else self.intelligence
 
     @property
     def blended(self) -> float | None:
@@ -392,7 +395,9 @@ def unavailable_reason(m: CatalogModel, policy: Policy, today: date) -> str | No
     return None
 
 
-def exclusion_reason(m: CatalogModel, policy: Policy, today: date) -> str | None:
+def exclusion_reason(
+    m: CatalogModel, policy: Policy, today: date, *, composite: bool = True
+) -> str | None:
     """Why a model is not ranked. An alias is always one of those reasons.
 
     A `~vendor/x-latest` id follows whatever the vendor ships next: the model behind it can get
@@ -409,7 +414,7 @@ def exclusion_reason(m: CatalogModel, policy: Policy, today: date) -> str | None
         return "bad_price"
     if reason := unavailable_reason(m, policy, today):
         return reason
-    if m.quality is None:
+    if m.rating(composite) is None:
         return "unrated"
     return None
 
@@ -436,26 +441,33 @@ def _one_per_vendor(ordered: list[CatalogModel], n: int) -> list[CatalogModel]:
     return picked
 
 
-def rank(models: list[CatalogModel], policy: Policy, today: date) -> Ranking:
-    """tier1 is "best quality under a price ceiling"; tier2 is "cheapest above a quality floor".
-    A plain quality/price ratio would put the cheapest acceptable model first in both."""
+def rank(
+    models: list[CatalogModel], policy: Policy, today: date, *, composite: bool = True
+) -> Ranking:
+    """tier1 is "best rating under a price ceiling"; tier2 is "cheapest above a rating floor".
+    A plain rating/price ratio would put the cheapest acceptable model first in both. The rating
+    is the composite with the clusters on and the intelligence index with them off."""
     excluded: Counter[str] = Counter()
     eligible: list[CatalogModel] = []
     for m in models:
-        reason = exclusion_reason(m, policy, today)
+        reason = exclusion_reason(m, policy, today, composite=composite)
         if reason:
             excluded[reason] += 1
         else:
             eligible.append(m)
-    best = max((m.quality or 0.0 for m in eligible), default=0.0)
+
+    def r(m: CatalogModel) -> float:
+        return m.rating(composite) or 0.0
+
+    best = max((r(m) for m in eligible), default=0.0)
     ranking = Ranking(len(models), eligible, excluded, best)
     under = [m for m in eligible if (m.blended or 0.0) <= policy.tier1_ceiling]
     ranking.tier1 = _one_per_vendor(
-        sorted(under, key=lambda m: (-(m.quality or 0.0), m.blended or 0.0, m.id)), policy.picks
+        sorted(under, key=lambda m: (-r(m), m.blended or 0.0, m.id)), policy.picks
     )
-    good = [m for m in eligible if (m.quality or 0.0) >= policy.tier2_floor * best]
+    good = [m for m in eligible if r(m) >= policy.tier2_floor * best]
     ranking.tier2 = _one_per_vendor(
-        sorted(good, key=lambda m: (m.blended or 0.0, -(m.quality or 0.0), m.id)), policy.picks
+        sorted(good, key=lambda m: (m.blended or 0.0, -r(m), m.id)), policy.picks
     )
     return ranking
 
@@ -560,7 +572,9 @@ def rank_cluster(
     score_fn: Callable[[CatalogModel], float | None],
     policy: Policy,
 ) -> dict[str, list[dict[str, Any]]]:
-    # Paid scored models (cost > 0)
+    # Paid scored models (cost > 0); a model without this cluster's score is not ranked in it
+    eligible = [m for m in eligible if score_fn(m) is not None]
+    free_eligible = [m for m in free_eligible if score_fn(m) is not None]
     paid_scored = [
         (m, score_fn(m) or 0.0) for m in eligible if not is_free(m.id) and (m.blended or 0.0) > 0.0
     ]
@@ -610,7 +624,9 @@ def _same_price(a: Price | None, b: Price) -> bool:
 def build_proposal(
     config: LoompaConfig, models: list[CatalogModel], policy: Policy, today: date
 ) -> Proposal:
-    ranking = rank(models, policy, today)
+    # three clusters: composite scores per cluster; one cluster: the intelligence index alone
+    composite = config.models.clusters_enabled
+    ranking = rank(models, policy, today, composite=composite)
     by_id = {m.id: m for m in models}
     configured = {
         c.model for cands in config.models.tiers.values() for c in cands if c.provider == PROVIDER
@@ -646,7 +662,12 @@ def build_proposal(
                 placed = True
         tiers[tier] = merged
         summary[tier] = [
-            _model_summary(m, m.score_tier1() if tier == "tier1" else m.score_tier2())
+            _model_summary(
+                m,
+                (m.score_tier1() if tier == "tier1" else m.score_tier2())
+                if composite
+                else m.score_general(),
+            )
             for m in picked[tier]
         ]
 
@@ -656,12 +677,12 @@ def build_proposal(
         if (is_free(m.id) or (m.blended is not None and m.blended == 0.0))
         and m.tools
         and not unavailable_reason(m, policy, today)
-        and m.quality is not None
+        and m.rating(composite) is not None
     ]
     if free_eligible:
         summary["tier3_free"] = [
-            _model_summary(m, m.score_routine())
-            for m in sorted(free_eligible, key=lambda m: (-(m.quality or 0.0), m.id))[
+            _model_summary(m, m.score_routine() if composite else m.score_general())
+            for m in sorted(free_eligible, key=lambda m: (-(m.rating(composite) or 0.0), m.id))[
                 : policy.picks
             ]
         ]
@@ -680,13 +701,14 @@ def build_proposal(
     clusters = {
         name: rank_cluster(ranking.eligible, free_eligible, score_fn, policy)
         for name, score_fn in CLUSTER_SCORES.items()
+        if composite or name == GENERAL_CLUSTER
     }
     # Everything the catalogue has, recommended or not: the extended search lets the founder pick
     # a model the filters rejected, so each row carries why it is not in the ranking.
     all_models = []
-    for m in sorted(models, key=lambda m: (-(m.quality or -1.0), m.id)):
-        row = _model_summary(m, m.quality)
-        reason = exclusion_reason(m, policy, today)
+    for m in sorted(models, key=lambda m: (-(m.rating(composite) or -1.0), m.id)):
+        row = _model_summary(m, m.rating(composite))
+        reason = exclusion_reason(m, policy, today, composite=composite)
         row["eligible"] = reason is None
         row["excluded"] = REASONS.get(reason, reason) if reason else ""
         all_models.append(row)
@@ -729,7 +751,12 @@ def apply_proposal(config: LoompaConfig, proposal: Proposal) -> bool:
         t: [ModelCandidate.model_validate(c) for c in cands] for t, cands in proposal.tiers.items()
     }
     if proposal.clusters:
-        matrix: dict[str, dict[str, list[ModelCandidate]]] = {}
+        # a proposal made with the clusters off ranks only `general`: the other clusters keep what
+        # the tiers above just mirrored into them
+        matrix: dict[str, dict[str, list[ModelCandidate]]] = {
+            name: {t: list(c) for t, c in tiers.items()}
+            for name, tiers in (config.models.matrix or {}).items()
+        }
         for cluster_name, tier_map in proposal.clusters.items():
             matrix[cluster_name] = {}
             for t_name, cands_list in tier_map.items():
