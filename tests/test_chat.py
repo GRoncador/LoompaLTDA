@@ -68,8 +68,11 @@ def test_a_sprint_meeting_over_the_api(client: TestClient):
         "D3",
     ]
     assert r.json()["conversation"]["turns"][-1]["name"] == "Product Owner Loompa"
-    r = client.post(f"{BASE}/conversations/{cid}/commit", json={"start_sprint": True, "run": False})
+    # `run` defaults to true, but a panel opened with --no-engine never starts an engine by itself
+    # (contas Sprint 2: the sprint ran inside the panel and `loompa run` found the factory busy)
+    r = client.post(f"{BASE}/conversations/{cid}/commit", json={"start_sprint": True})
     assert r.status_code == 200
+    assert client.get(f"{BASE}/overview").json()["factory"]["engine"] is False
     result = r.json()["result"]
     assert result["created"] == ["S-001", "S-002", "S-003"] and result["sprint_id"] == "SP-001"
     assert r.json()["conversation"]["status"] == "committed"

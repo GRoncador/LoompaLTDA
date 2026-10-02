@@ -848,7 +848,9 @@ def create_app(
                     if paused:
                         await hub.start_engine(slug)
                 conv = chats.board.require(conversation_id, open_only=False)
-        if body.start_sprint and body.run:
+        # `--no-engine` means the panel runs no stories: the sprint starts and waits for an engine
+        # (a `loompa run`, or the panel's own start button), it does not start one by itself
+        if body.start_sprint and body.run and hub.run_engine:
             await hub.start_engine(slug)
         return _payload(conv, result=result.as_dict())
 
