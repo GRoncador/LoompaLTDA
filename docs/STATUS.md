@@ -632,6 +632,13 @@ Decided 2026-09-29:
   catalogue ranks by the intelligence index alone (`CatalogModel.rating(composite=False)`,
   `score_general`): models without coding/agentic indices are no longer "unrated"; only the `general`
   cluster is proposed and applying keeps the other clusters' lists. With clusters on, unchanged.
+- **2026-10-02 — Tool history grows whole, compacted only past a budget (ADR-0014 amended).** contas
+  Worker calls stayed on one OpenRouter provider within a task, yet cached 0 tokens between hits:
+  pruning rewrote an old message every round, so the prompt cache stopped there. Every tool loop now
+  leaves its history untouched up to `schedule.context_compact_chars` (200k chars) and compacts once
+  past it, keeping a quarter of that in current file reads; `worker_keep_file_chars` is gone (old
+  configs that still set it are ignored). Each tool loop also sends OpenRouter an `x-session-id`, so
+  its rounds stay on the provider holding the cache.
 
 ## Known gaps / next steps
 

@@ -710,7 +710,6 @@ class WorkerAgent(LoompaAgent):
             terminal=("done", "blocked"),
             nudge="Continue with the tools, or call `done` if the task is complete and its checks are green.",
             keep_tool_results=sched.worker_keep_tool_results,
-            keep_files_chars=sched.worker_keep_file_chars,
             guard=guard,
             label=label,
             reasoning_effort="low" if light else None,

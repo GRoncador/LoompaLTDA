@@ -142,6 +142,23 @@ def test_pruning_keeps_the_latest_read_of_each_file_while_it_is_current():
     assert tools[2].content.startswith("[pruned]")  # without the budget: as before
 
 
+def test_the_history_only_grows_until_it_passes_the_budget():
+    """Rewriting an old result each round cut the provider's prompt cache there (contas
+    Sprint 2): under the budget the history is left alone, past it it is compacted once."""
+    body = "x" * 800
+    messages = [Message("system", "s"), Message("user", "u")]
+    for i in range(8):
+        tc = ToolCall(f"c{i}", "run_tests", {})
+        messages += [
+            Message("assistant", "", tool_calls=[tc]),
+            Message("tool", body, tool_call_id=f"c{i}", name="run_tests"),
+        ]
+    size = sum(len(m.content) for m in messages)
+    assert prune_tool_history(messages, keep_last=2, budget_chars=size) == 0
+    assert prune_tool_history(messages, keep_last=2, budget_chars=size - 1) == 6
+    assert sum(len(m.content) for m in messages) < size // 2
+
+
 async def test_re_reading_a_pruned_unchanged_result_again_and_again_counts_and_says_write(
     tmp_path: Path,
 ):

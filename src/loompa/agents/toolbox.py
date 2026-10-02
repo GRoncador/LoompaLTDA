@@ -201,10 +201,21 @@ def normalize_url(url: str) -> str:
 
 
 def prune_tool_history(
-    messages: list[Message], *, keep_last: int = 6, max_chars: int = 300, keep_files_chars: int = 0
+    messages: list[Message],
+    *,
+    keep_last: int = 6,
+    max_chars: int = 300,
+    keep_files_chars: int = 0,
+    budget_chars: int = 0,
 ) -> int:
     """Collapse old tool results into one-line stubs so long tasks stop re-paying for every file
     read. The model keeps a trace of what it did; only the last `keep_last` results stay verbatim.
+
+    With `budget_chars`, nothing happens while the whole history fits in it: the history only
+    grows, so every round re-sends the previous one unchanged and the provider's prompt cache
+    hits. Rewriting an old message each round cut the cache there (contas Sprint 2: Worker calls
+    on one provider with 0 cached tokens between hits). Past the budget it is compacted once,
+    keeping `keep_files_chars` of current file reads, and grows again from there.
 
     With `keep_files_chars`, older `read_file` results also stay verbatim, newest first and up to
     that many characters, while they are still the latest read of their file and nothing wrote
@@ -213,6 +224,8 @@ def prune_tool_history(
 
     Results of web tools (`<external_data>`) stay verbatim too, newest first, up to
     `KEEP_EXTERNAL_CHARS`."""
+    if budget_chars and sum(len(m.content) for m in messages) <= budget_chars:
+        return 0
     tool_idx = [i for i, m in enumerate(messages) if m.role == "tool"]
     older = tool_idx[:-keep_last] if keep_last else tool_idx
     keep: set[int] = set()

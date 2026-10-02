@@ -196,7 +196,10 @@ async def test_loop_nudges_once_and_reports_the_limit(factory: Factory):
     await ctx.aclose()
 
 
-async def test_loop_prunes_old_tool_results(factory: Factory):
+@pytest.mark.parametrize("budget, pruned", [(200_000, False), (1_000, True)])
+async def test_loop_prunes_old_tool_results_only_past_the_budget(
+    factory: Factory, budget: int, pruned: bool
+):
     (factory.root / "app" / "big.py").write_text("\n".join(f"x{i} = {i}" for i in range(150)))
     script, _ = scripted_loop(
         [
@@ -205,12 +208,13 @@ async def test_loop_prunes_old_tool_results(factory: Factory):
         ]
     )
     ctx = make_ctx(factory, script)
+    ctx.config.schedule.context_compact_chars = budget
     agent = Prober(ctx)
     messages = [Message("system", "s"), Message("user", "u")]
     await agent.tool_loop(messages, agent.explore_tools(), max_iterations=4, keep_tool_results=1)
     tools = [m for m in messages if m.role == "tool"]
     assert tools[-1].content.startswith("app/big.py [")
-    assert all(t.content.startswith("[pruned]") for t in tools[:-1])
+    assert all(t.content.startswith("[pruned]") == pruned for t in tools[:-1])
     await ctx.aclose()
 
 

@@ -9,7 +9,9 @@ import os
 import re
 import time
 import zlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -213,6 +215,26 @@ SKIP_SIGNATURE_VALIDATION = "skip_thought_signature_validator"
 
 def is_google_endpoint(base_url: str) -> bool:
     return "googleapis.com" in base_url
+
+
+# The conversation a call belongs to (one tool loop). OpenRouter routes every call of a session to
+# the provider that served the first one, so the provider's prompt cache keeps hitting; without
+# it the key is a hash of the first two messages, which a rewritten opening would change.
+_session: ContextVar[str] = ContextVar("loompa_llm_session", default="")
+
+
+@contextmanager
+def llm_session(key: str) -> Iterator[None]:
+    """Calls made inside belong to the session `key` (at most 256 characters)."""
+    token = _session.set(key[:256])
+    try:
+        yield
+    finally:
+        _session.reset(token)
+
+
+def is_openrouter_endpoint(base_url: str) -> bool:
+    return "openrouter.ai" in base_url
 
 
 def _openai_tool_call(tc: ToolCall, *, google: bool, dummy_signature: bool) -> dict[str, Any]:
@@ -626,6 +648,8 @@ class OpenAICompatibleProvider(LLMProvider):
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
         headers = {"Content-Type": "application/json", **self.cfg.extra_headers}
+        if _session.get() and is_openrouter_endpoint(self.base_url):
+            headers["x-session-id"] = _session.get()
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         start = time.monotonic()

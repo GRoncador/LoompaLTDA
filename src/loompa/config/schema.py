@@ -57,9 +57,11 @@ class ScheduleConfig(BaseModel):
     tier1_max_attempts: int = Field(2, ge=1)
     worker_max_iterations: int = Field(40, ge=1)
     worker_keep_tool_results: int = Field(6, ge=1)
-    # Older file reads kept verbatim (newest first, while still current), in characters, and the
-    # streak of reads without a change after which the Worker is told to stop exploring.
-    worker_keep_file_chars: int = Field(16000, ge=0)
+    # A tool loop's history stays whole up to this many characters (~4 per token), so the prompt
+    # cache hits on every round; past it the old results are compacted once. 0 = compact every
+    # round, as before (contas Sprint 2: the 16k file budget sent the Worker back to re-read).
+    context_compact_chars: int = Field(200_000, ge=0)
+    # The streak of reads without a change after which the Worker is told to stop exploring.
     worker_explore_nudge: int = Field(10, ge=0)  # 0 = never
     # Lookups answered from memory (nothing changed since the same call) after which the task
     # stops with a diagnosis instead of running to the tool-call limit (Fase 8.5); 0 = never.

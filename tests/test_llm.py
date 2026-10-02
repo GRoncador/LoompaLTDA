@@ -23,6 +23,7 @@ from loompa.llm.providers import (
     LLMResponse,
     _retry_after_seconds,
     extract_json,
+    llm_session,
 )
 from loompa.store import Store
 
@@ -95,6 +96,34 @@ def gemini_reply(tool_calls: list[dict] | None = None, text: str = "") -> httpx.
             "usage": {"prompt_tokens": 10, "completion_tokens": 2},
         },
     )
+
+
+@respx.mock
+async def test_a_session_keeps_openrouter_on_one_provider_and_stays_off_other_endpoints(
+    monkeypatch,
+):
+    """OpenRouter routes every call with the same `x-session-id` to the provider that served the
+    first, so its prompt cache holds the tool loop's history. Other endpoints never get it."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+    cfg = default_config()
+    router = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=OPENAI_OK)
+    )
+    direct = respx.post("https://api.deepseek.com/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=OPENAI_OK)
+    )
+    opr = OpenAICompatibleProvider("openrouter", cfg.providers["openrouter"])
+    ds = OpenAICompatibleProvider("deepseek", cfg.providers["deepseek"])
+    history = [Message("user", "u")]
+    with llm_session("S-001:worker:abc"):
+        await opr.complete("z-ai/glm-5.3-flash", history)
+        await opr.complete("z-ai/glm-5.3-flash", history)
+        await ds.complete("deepseek-chat", history)
+    await opr.complete("z-ai/glm-5.3-flash", history)
+    sent = [c.request.headers.get("x-session-id") for c in router.calls]
+    assert sent == ["S-001:worker:abc", "S-001:worker:abc", None]
+    assert "x-session-id" not in direct.calls[0].request.headers
 
 
 def sent_tool_calls(route: respx.Route, call: int = -1) -> list[dict]:

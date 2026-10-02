@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,7 +15,7 @@ from loompa.agents.toolbox import READ_TOOLS, Toolbox, prune_tool_history
 from loompa.engine.context import EngineContext
 from loompa.engine.state import StoryState
 from loompa.llm import LLMError, LLMResponse, Message
-from loompa.llm.providers import extract_json
+from loompa.llm.providers import extract_json, llm_session
 from loompa.worktrees import WorktreeManager
 
 if TYPE_CHECKING:
@@ -164,7 +165,15 @@ class LoompaAgent:
         """Read-only repository tools, for roles that specify or plan before answering."""
         return self.toolbox(root, offered=READ_TOOLS)
 
-    async def tool_loop(
+    async def tool_loop(self, messages: list[Message], toolbox: Toolbox, **kw: Any) -> LoopResult:
+        """`_tool_loop` as one session: a router keeps every round on the provider that served the
+        first, whose prompt cache holds the history so far."""
+        story = kw.get("story")
+        key = f"{story.story_id if story else '-'}:{self.name}:{uuid.uuid4().hex[:12]}"
+        with llm_session(key):
+            return await self._tool_loop(messages, toolbox, **kw)
+
+    async def _tool_loop(
         self,
         messages: list[Message],
         toolbox: Toolbox,
@@ -176,7 +185,6 @@ class LoompaAgent:
         nudge: str | None = None,
         final_prompt: str | None = None,
         keep_tool_results: int = 6,
-        keep_files_chars: int = 0,
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
         guard: LoopGuard | None = None,
@@ -290,8 +298,12 @@ class LoompaAgent:
                         )
                     if guard.stuck:  # going in circles: stop here, the caller reads the guard
                         return LoopResult("loop", last_text, tool_calls=calls, raised=raised)
+                budget = self.ctx.config.schedule.context_compact_chars
                 prune_tool_history(
-                    messages, keep_last=keep_tool_results, keep_files_chars=keep_files_chars
+                    messages,
+                    keep_last=keep_tool_results,
+                    keep_files_chars=budget // 4,
+                    budget_chars=budget,
                 )
         if final_prompt:
             messages.append(Message("user", final_prompt))

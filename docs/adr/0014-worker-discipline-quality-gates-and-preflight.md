@@ -35,6 +35,11 @@ their cost; specialised Workers only with evidence.
   Notes ride on the tool result, never as an extra user turn (every provider accepts that shape).
 - **Pruning keeps the latest read of each file** (`schedule.worker_keep_file_chars`, 16k chars)
   while nothing wrote to it since: pruning it was what sent the Worker back to read it again.
+  *Amended 2026-10-02:* the history is no longer pruned every round. It grows untouched up to
+  `schedule.context_compact_chars` (200k chars, every tool loop) and is compacted once past it,
+  keeping a quarter of that in current file reads; `worker_keep_file_chars` is gone. Rewriting an
+  old message each round cut the provider's prompt cache there, and the 16k budget still sent the
+  Worker back to re-read (contas Sprint 2). Each tool loop sends OpenRouter its own `x-session-id`.
 - **Diagnosis with the first edit.** On a fix pass and on bugfix stories the write tools take a
   `reason`; the first write without one is refused. The root cause is stated in the same call that
   changes the code, so it costs no extra round when given.
