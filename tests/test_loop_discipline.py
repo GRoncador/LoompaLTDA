@@ -161,3 +161,14 @@ async def test_re_reading_a_pruned_unchanged_result_again_and_again_counts_and_s
     await aci.call("write_file", {"path": "app/other.py", "content": "z = 1\n"})
     guard.after("write_file", {"path": "app/other.py"}, ToolResult(True, "ok"), None)
     assert guard.before("read_file", args) is None and guard.repeats == 2  # changed: fair again
+
+
+def test_three_ignored_explore_nudges_end_the_task_as_a_loop():
+    """contas Sprint 2, S-047 T3: 52 reads and four nudges, no write, 40 rounds."""
+    guard = LoopGuard(None, explore_nudge=2)
+    for i in range(6):
+        guard.after("read_file", {"path": f"a{i}.py"}, ToolResult(True, "x"), None)
+        assert guard.stuck == (i == 5)
+    assert guard.summary().startswith("6 lookups in a row without writing")
+    guard.after("write_file", {"path": "a.py"}, ToolResult(True, "ok"), None)
+    assert not guard.stuck  # writing resets the count

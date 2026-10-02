@@ -39,6 +39,7 @@ REREAD_NOTE = (
     "missing."
 )
 
+EXPLORE_NUDGES_TO_STOP = 3  # ignored explore nudges in a row that end the task as a loop
 EXPLORE_NUDGE = (
     "[guidance] You made {n} lookups in a row without changing anything. What you read is in "
     "your history: stop exploring. State in one sentence the cause or what you will change, and "
@@ -139,12 +140,26 @@ class LoopGuard:
 
     @property
     def stuck(self) -> bool:
-        """The task should stop: `repeat_limit` lookups answered from memory with no change."""
-        return bool(self.repeat_limit) and self.streak >= self.repeat_limit
+        """The task should stop: `repeat_limit` lookups answered from memory with no change, or
+        three explore nudges ignored in a row (contas Sprint 2, S-047 T3: 52 reads, 4 nudges and
+        no write in 40 rounds; the nudges had no consequence and the round limit ended it 12
+        minutes later)."""
+        repeated = bool(self.repeat_limit) and self.streak >= self.repeat_limit
+        return repeated or self.exploring
+
+    @property
+    def exploring(self) -> bool:
+        return bool(self.explore_nudge) and self.reads_in_a_row >= EXPLORE_NUDGES_TO_STOP * (
+            self.explore_nudge
+        )
 
     def summary(self, limit: int = 4) -> str:
         """The calls repeated most, for the diagnosis the next attempt reads."""
-        return ", ".join(f"{call} (x{n})" for call, n in self.repeated.most_common(limit))
+        repeated = ", ".join(f"{call} (x{n})" for call, n in self.repeated.most_common(limit))
+        if self.exploring:
+            lead = f"{self.reads_in_a_row} lookups in a row without writing anything"
+            return f"{lead}; {repeated}" if repeated else lead
+        return repeated
 
     def after(
         self, name: str, args: dict[str, Any], result: ToolResult, message: Message | None
