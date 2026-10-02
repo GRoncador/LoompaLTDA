@@ -216,6 +216,18 @@ def test_the_smoke_runs_loop_is_caught_and_real_reasoning_is_not():
     )
     assert repetition(prose.read_text()) == ""
     assert repetition(LOOP[:3000]) == ""  # too little text to call it a loop
+    # contas Sprint 2: the Product Owner cycled over three sentences for 96k tokens; a period
+    # inside the quotes splits each in two, so no single pattern reached half the lines
+    cycle = "".join(
+        f'Need maybe "description" for C1 "{d}." Good.\n\n'
+        for d in [
+            "A normalização fica isolada para ser usada pelos leitores de CSV e OFX",
+            "Não altera os helpers atuais parse_valor/parse_data nem o modelo",
+            "Converte a data para AAAA-MM-DD e garante valor positivo",
+        ]
+        * 40
+    )
+    assert "a cycle of 3 sentence patterns" in repetition("Let me write the cards.\n" + cycle)
     # the false positive of the calibration run: a converging plan that deliberated, re-writing
     # the same code snippet a few times between varied ideas, compressed 17x and was cut
     snippet = (

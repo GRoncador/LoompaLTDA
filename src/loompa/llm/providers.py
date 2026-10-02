@@ -348,10 +348,15 @@ def _parse_openai_response(data: Any, model: str, provider: str, duration_ms: in
 # in 99% of its lines and compressed 38x. A compression rule for all text was tried and dropped the
 # same day: it cut a converging plan at 17x (it had re-written the same code snippet a few times
 # while deliberating). Deliberation is thinking; the output room bounds it.
+# A loop can also be a cycle of a few sentences: `contas` Sprint 2's Product Owner wrote 96k tokens
+# of 'Need maybe "description" for C1 "…". Good.' over three alternating lines (a period inside the
+# quotes also splits one sentence in two), each ~33% of the window, so no single pattern passed
+# the share. The rule counts every line whose pattern repeats LOOP_CYCLE_MIN times or more.
 LOOP_WINDOW = 12000
 LOOP_CHECK_EVERY = 4000
 LOOP_MIN_REPEATS = 30
 LOOP_MIN_SHARE = 0.5
+LOOP_CYCLE_MIN = 8  # a pattern counts toward a cycle from this many repeats in the window
 LOOP_FEW_SENTENCES = 5  # below this, the text has too few sentences for the pattern rule
 LOOP_MIN_RATIO = 30.0
 _SENTENCES = re.compile(r"[\n.!?]+")
@@ -383,9 +388,17 @@ def repetition(text: str) -> str:
         return ""
     lines = [x for x in _SENTENCES.split(window) if len(x.strip()) >= 20]
     if len(lines) >= LOOP_FEW_SENTENCES:
-        pattern, n = collections.Counter(_pattern(x) for x in lines).most_common(1)[0]
+        counts = collections.Counter(_pattern(x) for x in lines)
+        pattern, n = counts.most_common(1)[0]
         if n >= LOOP_MIN_REPEATS and n / len(lines) >= LOOP_MIN_SHARE:
             return f"one sentence pattern {n} times in {len(lines)}: {pattern[:120]}"
+        cycle = [(p, k) for p, k in counts.most_common() if k >= LOOP_CYCLE_MIN]
+        looped = sum(k for _, k in cycle)
+        if looped >= LOOP_MIN_REPEATS and looped / len(lines) >= LOOP_MIN_SHARE:
+            return (
+                f"a cycle of {len(cycle)} sentence patterns, {looped} of {len(lines)} lines: "
+                f"{pattern[:120]}"
+            )
         return ""
     raw = window.encode()
     ratio = len(raw) / max(1, len(zlib.compress(raw, 6)))
