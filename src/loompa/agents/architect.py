@@ -95,6 +95,21 @@ def ensure_reproducer(tasks: list[str], files: list[str]) -> tuple[list[str], li
     return tasks, files
 
 
+def tests_named(tasks: list[str], fence: list[str]) -> list[str]:
+    """Test files the tasks name that the fence does not cover yet: a task that says "create
+    tests/test_x.py" may write it. contas Sprint 2, S-045: twice a task's own test file was refused
+    (once a pre-flight task, once a plan task) and the Worker asked the founder where tests go.
+    Only test files: a task cannot widen the product code the plan allows."""
+    covered = [p for p in fence if p.endswith("/")]
+    out = [
+        p
+        for t in tasks
+        for p in PATH_REF.findall(t)
+        if is_test_path(p) and p not in fence and not any(p.startswith(d) for d in covered)
+    ]
+    return list(dict.fromkeys(out))
+
+
 def writable_tests(paths: list[str]) -> list[str]:
     """The part of a plan's fence a reproducer task may write: test files and directories."""
     return [p for p in paths if is_test_path(p) or p.rstrip("/").split("/")[-1] in TEST_DIRS]
@@ -242,6 +257,7 @@ class ArchitectAgent(LoompaAgent):
         if adr and adr.lower() not in ("", "none", "nenhum", "n/a", "null"):
             self.write_adr(f"{state.story_id}: {state.title}", adr, status="proposed")
         state.allowed_paths = files + [f".loompa/specs/{state.story_id}/"]
+        state.allowed_paths += tests_named(tasks, state.allowed_paths)
         state.tasks_total = len(tasks)
         state.tasks_done = []
         set_task_origins(
@@ -345,13 +361,7 @@ class ArchitectAgent(LoompaAgent):
             # the test files these tasks create join the fence: with one test file already in
             # the plan, `tests/test_caracterizacao_s045.py` was refused to the very task that
             # names it, and the founder was asked where tests may go (contas Sprint 2, S-045)
-            named = [
-                p
-                for t in extra
-                for p in PATH_REF.findall(t)
-                if is_test_path(p) and p not in state.allowed_paths
-            ]
-            state.allowed_paths = [*state.allowed_paths, *dict.fromkeys(named)]
+            state.allowed_paths = [*state.allowed_paths, *tests_named(extra, state.allowed_paths)]
             if not writable_tests(state.allowed_paths):
                 state.allowed_paths = [*state.allowed_paths, "tests/"]
         paths.risk.write_text(

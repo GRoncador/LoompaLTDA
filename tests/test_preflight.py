@@ -240,7 +240,7 @@ async def test_a_plan_touching_a_migration_gets_a_preflight(factory: Factory):
     assert "listar gastos antigos" in risk
     tasks = (factory.paths.specs / sid / "tasks.md").read_text()
     assert "[x] T1: Escrever teste de caracterização" in tasks and "[x] T2: Ajustar" in tasks
-    assert "tests/" in state.allowed_paths
+    assert any(p.startswith("tests/") for p in state.allowed_paths)  # its tests are writable
     await ctx.aclose()
 
 
