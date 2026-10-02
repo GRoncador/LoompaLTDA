@@ -208,3 +208,31 @@ class GreenfieldInitializer:
             ["git", "init", "-q", "-b", default_branch, str(self.root)], check=True, timeout=30
         )
         return True
+
+
+def detect_test_command(root: Path) -> str:
+    """The command that runs the tests a repository has today, or "" when it has none.
+
+    A factory started from the `custom` preset knows no stack, so its quality gate has no test
+    command and the judge never runs tests (tamagotchi-retro, Sprint 1: every story merged with
+    the gate skipped while the stories themselves wrote pytest and node tests). Read once the
+    first tests exist: pytest for `tests/test_*.py` (through uv when the project uses it), the
+    `test` script of package.json, both when the product has both."""
+    root = Path(root)
+    parts: list[str] = []
+    tests = root / "tests"
+    if tests.is_dir() and any(tests.rglob("test_*.py")):
+        uv = (root / "uv.lock").is_file() or (root / "pyproject.toml").is_file()
+        parts.append("uv run pytest -q" if uv else "python3 -m pytest -q")
+    pkg = root / "package.json"
+    if pkg.is_file():
+        import json
+
+        try:
+            scripts = json.loads(pkg.read_text(encoding="utf-8")).get("scripts") or {}
+        except (OSError, ValueError):
+            scripts = {}
+        test = str(scripts.get("test") or "")
+        if test and "no test specified" not in test:
+            parts.append("npm test --silent")
+    return " && ".join(parts)

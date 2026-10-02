@@ -190,7 +190,23 @@ class DeployerAgent(LoompaAgent):
             branch=wt.branch,
             **({"pruned": pruned} if pruned else {}),
         )
+        self._learn_test_command()
         return sha
+
+    def _learn_test_command(self) -> None:
+        """A factory without a test command (a `custom` greenfield) gets one as soon as the
+        product has tests, so the judge's gate stops being skipped (tamagotchi-retro)."""
+        q = self.ctx.config.quality
+        if q.test_command:
+            return
+        from loompa.onboarding.greenfield import detect_test_command
+
+        found = detect_test_command(self.ctx.root)
+        if not found:
+            return
+        q.test_command = found
+        self.ctx.factory.save()
+        self.ctx.emit("quality.test_command", agent=self.name, command=found)
 
     async def diagnose(
         self, state: StoryState, wt: Worktree, operation: str, error: str, *, attempt: int = 0

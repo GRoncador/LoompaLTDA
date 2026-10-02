@@ -112,6 +112,7 @@ ignore = ["E501", "B008", "SIM102", "SIM105"]
 "tests/test_dependencies.py" = ["F811"]
 "tests/test_factory_health.py" = ["F811"]
 "tests/test_trace_export.py" = ["F811"]
+"tests/test_test_command.py" = ["F811"]
 
 [tool.mypy]
 python_version = "3.11"
