@@ -30,7 +30,7 @@ from loompa.agents import (
 from loompa.agents.architect import REPLANNED_KEY
 from loompa.agents.base import AgentResult
 from loompa.agents.inspector import test_origin
-from loompa.agents.product_owner import CRITERIA_REVIEW_KEY
+from loompa.agents.product_owner import CRITERIA_ALIGNED_KEY, CRITERIA_REVIEW_KEY
 from loompa.agents.worker import FOUNDER_CHANGES, unfinished
 from loompa.backlog import TRIAGE_KEY
 from loompa.comms import (
@@ -203,6 +203,7 @@ async def gate_plan(ctx: EngineContext, state: StoryState) -> StoryState | None:
 _RETRYABLE_BLOCKS = (BlockedReason.PERSISTENT_FAILURE, BlockedReason.CONFLICT)
 LAST_BLOCK_KEY = "last_block"
 AMEND_KEY = "amend_plan"
+ALIGN_KEY = "align_criteria"  # the founder's request for changes, for the Product Owner first
 FENCE_AMEND_KEY = (
     "fence_amend"  # files the Worker asked for once; the Architect widens the plan once
 )
@@ -460,6 +461,12 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
                 state.extra["baseline"] = await InspectorAgent(ctx).baseline(
                     state, wt, at=base_path
                 )
+    if align := state.extra.pop(ALIGN_KEY, None):
+        revised = await ProductOwnerAgent(ctx).align_criteria(state, align)
+        if revised.ok:
+            log_ = state.extra.setdefault(CRITERIA_ALIGNED_KEY, [])
+            log_.extend((revised.data or {}).get("changes") or [])
+            state.failure_history.append(revised.summary)
     guidance = state.extra.pop(AMEND_KEY, None)
     if guidance:
         try:
@@ -991,6 +998,8 @@ def apply_founder_answer(
             state.note(guidance or "Founder pediu ajustes na entrega.")
             goto(state, "dev")
             state.failure_history.append(f"{FOUNDER_CHANGES}: " + (guidance or "(no details)"))
+            if guidance and state.acceptance:
+                state.extra[ALIGN_KEY] = guidance
             if guidance and "plan" in state.route:
                 # the request may need files the plan never listed: the Architect amends it and
                 # the Worker does the new tasks, not the whole story again

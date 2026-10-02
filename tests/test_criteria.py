@@ -211,3 +211,83 @@ async def test_a_test_the_base_already_had_failing_is_the_product_breaking(facto
     assert "test_add" in state.failure_history[-1]
     assert git("log", "--oneline", "-1", cwd=factory.root).endswith("feat: calc")  # nothing merged
     await ctx.aclose()
+
+
+async def test_a_request_for_changes_aligns_the_criteria_before_the_work(factory: Factory):
+    """contas S-049: the founder asked to accept "12.50"; criterion "rejeita 10.99" stayed, and
+    the Inspector failed the corrected work twice ("the guidance wins", pass=false). The Product
+    Owner now rewrites the criterion first, and `overridden` passes only a criterion it changed."""
+    from loompa.agents.product_owner import CRITERIA_ALIGNED_KEY
+    from loompa.comms import FounderAnswer
+
+    aligned: list[str] = []
+    judged: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role, last = role_of(messages), messages[-1].content
+        if role == "product":
+            spec = json.loads(dry_run_script(model, messages, tools))
+            return json.dumps({**spec, "acceptance": ["rejeita 10.99", "aceita 12,50"]})
+        if role == "product_owner" and "## The founder's request for changes" in last:
+            aligned.append(last)
+            return json.dumps(
+                {
+                    "criteria": [
+                        {
+                            "n": 1,
+                            "action": "rewrite",
+                            "new_text": "aceita 10.99",
+                            "reason": "pedido",
+                        }
+                    ]
+                }
+            )
+        if role == "inspector" and "## Diff" in last:
+            judged.append(last)
+            if len(judged) > 1:  # after the changes: the judge marks the rewritten one overridden
+                return json.dumps(
+                    {
+                        "criteria": [
+                            {
+                                "text": "aceita 10.99",
+                                "pass": False,
+                                "overridden": True,
+                                "reason": "a orientação prevalece",
+                            },
+                            {"text": "aceita 12,50", "pass": True, "reason": "ok"},
+                        ],
+                        "findings": [],
+                        "summary": "ok",
+                    }
+                )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Valor com ponto")
+    await Scheduler(ctx).run()
+    delivery = ctx.store.get_message(load_state(ctx, sid).blocked_message_id)
+    await Scheduler(ctx).aanswer(
+        delivery.id, FounderAnswer(option_key="changes", text="aceite 12.50 com ponto também")
+    )
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert len(aligned) == 1 and "aceite 12.50 com ponto" in aligned[0]
+    assert state.acceptance == ["aceita 10.99", "aceita 12,50"]
+    assert state.extra[CRITERIA_ALIGNED_KEY][0]["criterion"] == "rejeita 10.99"
+    assert state.blocked_reason == "delivery", state.failure_history  # overridden counted as pass
+    assert "rewritten: rejeita 10.99 -> aceita 10.99" in judged[-1]
+    await ctx.aclose()
+
+
+def test_overridden_passes_only_a_criterion_the_product_owner_changed():
+    from loompa.agents.inspector import _norm, _revised_texts
+    from loompa.agents.product_owner import CRITERIA_ALIGNED_KEY
+    from loompa.engine.state import StoryState
+
+    st = StoryState(story_id="S-1", title="t")
+    st.extra[CRITERIA_ALIGNED_KEY] = [
+        {"action": "rewrite", "criterion": "rejeita 10.99", "new": "aceita 10.99"}
+    ]
+    revised = _revised_texts(st)
+    assert _norm("aceita  10.99") in revised and _norm("rejeita 10.99") in revised
+    assert _norm("aceita 12,50") not in revised
