@@ -599,6 +599,24 @@ Decided 2026-09-29:
   with the file's own ids, GenAI + OpenInference attributes, story = session, same redaction;
   `loompa trace S --otlp <url|config>` replays a file; doctor warns. Live: tamagotchi S-006, 1,298/1,298
   spans in a local Phoenix, messages and tokens readable.
+- **2026-10-02 — contas Sprint 2 (live, in progress) and the tamagotchi-retro Sprint 1 review.**
+  First real-model run of the brainstorm, opinions, the Product Owner's split and sprint proposal with
+  dependencies, the chain gate and the Ops hypothesis. Worked: the Master leading the brainstorm, the
+  Analyst's web research with checked sources, the No-Invention question (S-043 recurring limit), the
+  "A S-044 depende desta" line, stories parked at the gate without inbox, the bugfix skipping spec
+  review, the live OTLP export. Fixed on the way (each a commit on `dev`): web results pruned before
+  the Analyst answered; the 10-source cap read as invented sources; a 3-sentence reasoning cycle the
+  loop detector missed; the split making one card per idea; the rerank at low effort; long or cut
+  reasoning kept (12k) in the trace; `--no-engine` panels starting an engine; a dependent spec now
+  reads its dependencies' specs; test files a plan or pre-flight task names join the fence; T1 as
+  founder jargon; a retried provider error is an `llm.retry` event; a candidate that ran away for a
+  role (cut at the ceiling or looped) is tried last for that role for an hour, across restarts.
+  From tamagotchi-retro: a pasted path with quotes created the factory under `~/'…'`; network
+  failures right after a Mac wake spent Ops recoveries (now 30 s, uncounted) and the sleep note
+  repeated (now one, summed); a `custom` greenfield never had a test command (now learned on the
+  first merge and detected from the checkout until then).
+  Measured: as Product Owner, deepseek-v4-flash-0731 averaged 8m22s per call (p90 30 min, one spec
+  review 44 min) against ~1 min for ling-3.0-flash in the same tier — the main input for Fase 9.
 
 ## Known gaps / next steps
 
