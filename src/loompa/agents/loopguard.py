@@ -31,6 +31,13 @@ from loompa.agents.toolbox import PRUNED, READ_TOOLS, RUN_TOOLS, WRITE_TOOLS
 from loompa.llm import Message
 
 REPEAT_PREFIX = "[repeated]"
+REREAD_LIMIT = 3  # from the third re-read of a pruned, unchanged result it counts as a repeat
+REREAD_NOTE = (
+    "You have now read this same unchanged content {n} times in this task: it keeps leaving "
+    "your context because you read more than fits. Stop exploring. Write the change with what "
+    "you know now (edit the smallest part you are sure of), or call `blocked` saying what is "
+    "missing."
+)
 
 EXPLORE_NUDGE = (
     "[guidance] You made {n} lookups in a row without changing anything. What you read is in "
@@ -85,6 +92,8 @@ class LoopGuard:
         self._fails: dict[str, int] = {}
         self._seen: dict[str, _Seen] = {}
         self._version_seen = self._version
+        # re-reads of a lookup whose result was pruned, with nothing changed (per call key)
+        self._rereads: Counter[str] = Counter()
 
     @property
     def _version(self) -> int:
@@ -113,7 +122,15 @@ class LoopGuard:
                 f"{REPEAT_PREFIX} You made this exact lookup {ago} call(s) ago and nothing changed "
                 "since: the full result is still above in your history. Use it.",
             )
-        return None  # the earlier result was pruned from the history: reading again is fair
+        # The earlier result was pruned from the history: reading again is fair, once or twice.
+        # Past that it is the loop of contas Sprint 2 (S-045 T3: 40 rounds, no write, the same
+        # 200-line blocks read 5-6 times each because they never fit the pruning budget): it
+        # counts as a repeat, and `after` tells the model to write.
+        key = call_key(name, args)
+        self._rereads[key] += 1
+        if self._rereads[key] >= REREAD_LIMIT:
+            self._count_repeat(name, args)
+        return None
 
     def _count_repeat(self, name: str, args: dict[str, Any]) -> None:
         self.repeats += 1
@@ -138,12 +155,15 @@ class LoopGuard:
         if self._version != self._version_seen:  # the call changed the tree: a fresh start
             self._version_seen = self._version
             self.streak = 0
+            self._rereads.clear()  # the code changed: reading it again is new information
         repeated = result.output.startswith(REPEAT_PREFIX)
         if (name in READ_TOOLS or name in RUN_TOOLS) and not repeated and result.ok:
             self._seen[call_key(name, args)] = _Seen(
                 self._version, result.output, message, self.calls
             )
         notes: list[str] = []
+        if name in READ_TOOLS and self._rereads.get(call_key(name, args), 0) >= REREAD_LIMIT:
+            notes.append(REREAD_NOTE.format(n=self._rereads[call_key(name, args)] + 1))
         if name in READ_TOOLS:
             self.reads_in_a_row += 1
             if self.explore_nudge and self.reads_in_a_row % self.explore_nudge == 0:

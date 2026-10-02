@@ -140,3 +140,24 @@ def test_pruning_keeps_the_latest_read_of_each_file_while_it_is_current():
     assert [t.content.startswith("[pruned]") for t in tools] == [True, True, False, True, False]
     prune_tool_history(messages, keep_last=1, keep_files_chars=0)
     assert tools[2].content.startswith("[pruned]")  # without the budget: as before
+
+
+async def test_re_reading_a_pruned_unchanged_result_again_and_again_counts_and_says_write(
+    tmp_path: Path,
+):
+    """contas Sprint 2, S-045 T3: 40 rounds and no write, the same 200-line blocks read 5-6
+    times each because they never fit the pruning budget, and the guard counted 0 repeats."""
+    aci = ACI(_repo(tmp_path))
+    guard = LoopGuard(aci, repeat_limit=6)
+    args = {"path": "app/calc.py"}
+    notes = []
+    for _ in range(5):
+        assert guard.before("read_file", args) is None  # pruned each time: it does run
+        res = await aci.call("read_file", args)
+        msg = Message("tool", "[pruned] earlier read_file result ...", tool_call_id="1")
+        notes.append(guard.after("read_file", args, res, msg))
+    assert guard.repeats == 2  # the 3rd and 4th re-reads (reads 4 and 5)
+    assert not notes[2] and "read this same unchanged content 4 times" in notes[3]
+    await aci.call("write_file", {"path": "app/other.py", "content": "z = 1\n"})
+    guard.after("write_file", {"path": "app/other.py"}, ToolResult(True, "ok"), None)
+    assert guard.before("read_file", args) is None and guard.repeats == 2  # changed: fair again
