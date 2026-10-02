@@ -53,6 +53,10 @@ DUPLICATE_FINDINGS = 2  # the same Kaizen finding met again (gastos.json: 4)
 COST_SHARE = 0.70  # one role's share of the window's cost (the Worker: 78%)
 TOOL_SHARE = 0.60  # one tool's share of what tools put in the context (read_file: 69%)
 STALL_EVENTS = 1
+RUNAWAYS_PER_MODEL_ROLE = 2  # loops or ceiling cuts of one model in one role (PO: 6 of 9 calls)
+SLOW_MODEL_S = 120.0  # a model's mean seconds per call in a role, to be called slow…
+SLOW_MODEL_RATIO = 3.0  # …and this many times the fastest model in the same role
+SLOW_MIN_CALLS = 3
 # provisional: read from the trace, no Sprint 1 data (calibrate with Sprint 2)
 REREADS = 3  # the same read or search, same arguments, in one task
 CONTEXT_GROWTH = 4.0  # last round's prompt over the first, in one task
@@ -324,6 +328,72 @@ def slow_roles(w: Window) -> list[Finding]:
                 stories=sorted({e["story_id"] for e in long_tasks if e["story_id"]}),
             )
         )
+    return out
+
+
+def runaways(w: Window) -> list[Finding]:
+    """A model that ran away in a role (looped, or thought to the output ceiling) and a model
+    much slower than another in the same role. contas Sprint 2: as Product Owner,
+    deepseek-v4-flash-0731 looped or hit the 96k ceiling on 6 of 9 calls (mean 8 min, one spec
+    review 44 min) while ling-3.0-flash answered in about a minute; no signal said so."""
+    out: list[Finding] = []
+    ran: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for e in w.of("llm.loop"):
+        ran[(e["payload"].get("model", "?"), e["payload"].get("role", "?"))].append(e)
+    for e in w.of("llm.fallthrough"):
+        if e["payload"].get("reason") == "cut":  # cut at the ceiling, not a retried cut
+            ran[(e["payload"].get("model", "?"), e["payload"].get("role", "?"))].append(e)
+    for (model, role), evs in ran.items():
+        if len(evs) < RUNAWAYS_PER_MODEL_ROLE:
+            continue
+        out.append(
+            Finding(
+                signal="llm.runaway",
+                key=f"{model}/{role}",
+                title=f"Raciocínio sem fim: {model} no papel {role}",
+                detail=(
+                    f"{len(evs)} chamadas entraram em laço ou pensaram até o teto e foram "
+                    "refeitas por outro modelo."
+                ),
+                area="router",
+                severity="high",
+                impact={"calls": len(evs)},
+                evidence=[
+                    {"story": e["story_id"], "event": e["id"], "command": _trace_cmd(e["story_id"])}
+                    for e in evs[:6]
+                ],
+                stories=sorted({e["story_id"] for e in evs if e["story_id"]}),
+            )
+        )
+    secs: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for u in w.usage:
+        if u.get("duration_ms"):
+            secs[u["role"]][u["model"]].append(u["duration_ms"] / 1000)
+    for role, models in secs.items():
+        means = {m: sum(v) / len(v) for m, v in models.items() if len(v) >= SLOW_MIN_CALLS}
+        if len(means) < 2:
+            continue
+        fastest = min(means, key=means.get)
+        for model, mean in means.items():
+            if mean >= SLOW_MODEL_S and mean >= SLOW_MODEL_RATIO * means[fastest]:
+                out.append(
+                    Finding(
+                        signal="llm.slow_model",
+                        key=f"{model}/{role}",
+                        title=f"Modelo lento no papel {role}: {model}",
+                        detail=(
+                            f"{mean:.0f} s por chamada em média ({len(models[model])} chamadas), "
+                            f"contra {means[fastest]:.0f} s de {fastest} no mesmo papel."
+                        ),
+                        area="router",
+                        severity="medium",
+                        impact={"minutes": round(sum(models[model]) / 60, 1)},
+                        evidence=[
+                            {"model": m, "calls": len(models[m]), "mean_s": round(means[m], 1)}
+                            for m in sorted(means, key=means.get)
+                        ],
+                    )
+                )
     return out
 
 
@@ -821,6 +891,7 @@ def trace_signals(w: Window) -> list[Finding]:
 
 SIGNALS: tuple[Callable[[Window], list[Finding]], ...] = (
     cuts,
+    runaways,
     task_limits,
     slow_roles,
     stalls,

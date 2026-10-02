@@ -250,3 +250,30 @@ def test_the_api_serves_the_factory_tab_and_product_findings(client: TestClient,
     found = client.get(f"{BASE}/product-findings").json()
     assert sorted(f["title"] for f in found) == ["Validar datas", "gastos.json deixado na raiz"]
     assert client.get(f"{BASE}/overview").json()["kaizen_today"] == 2
+
+
+def test_a_runaway_and_a_slow_model_in_a_role_are_found(tmp_path: Path):
+    """contas Sprint 2: as Product Owner, deepseek-v4-flash-0731 looped or hit the ceiling on most
+    calls (mean ~9 min) while ling-3.0-flash answered in about a minute."""
+    events = [
+        ev(1, "llm.loop", "S-044", model="ds", role="product_owner"),
+        ev(2, "llm.fallthrough", "S-044", model="ds", role="product_owner", reason="cut"),
+        ev(3, "llm.fallthrough", "S-045", model="ds", role="worker", reason="error"),
+    ]
+    usage = [
+        {"story_id": "S-044", "role": "product_owner", "model": m, "duration_ms": s * 1000}
+        for m, s in [
+            ("ds", 600),
+            ("ds", 500),
+            ("ds", 640),
+            ("ling", 60),
+            ("ling", 80),
+            ("ling", 70),
+        ]
+    ]
+    found = by_signal(detect(window(tmp_path, events, usage)))
+    assert (
+        found["llm.runaway"].key == "ds/product_owner" and found["llm.runaway"].impact["calls"] == 2
+    )
+    slow = found["llm.slow_model"]
+    assert slow.key == "ds/product_owner" and "contra 70 s de ling" in slow.detail
