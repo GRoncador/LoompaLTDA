@@ -9,6 +9,7 @@ how a tier-2 model is compared with another on the same work before a preset cha
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -236,6 +237,32 @@ def _stats(store: Store, slug: str, story: str | None, since: str | None) -> Non
     console.print(table)
 
 
+def _send_otlp(f: Any, path: Path, endpoint: str) -> None:
+    """Replay a story's trace file to an OTLP viewer (Phoenix), with the factory's redaction."""
+    from loompa.config.secrets import Secrets, redact_secrets
+    from loompa.trace_export import OtlpExporter, OtlpUnavailable
+
+    cfg = f.config.trace.otlp
+    if endpoint != "config":
+        cfg = cfg.model_copy(update={"endpoint": endpoint})
+    if not cfg.endpoint:
+        console.print("[red]Nenhum endpoint: passe a URL ou configure trace.otlp.endpoint.[/red]")
+        raise typer.Exit(code=1)
+    secrets = Secrets.load(f.root)
+    values = secrets.values_for_redaction()
+    try:
+        exporter = OtlpExporter.from_config(
+            cfg, factory=f.slug, secrets=secrets, redact=lambda t: redact_secrets(t, values)
+        )
+    except OtlpUnavailable as exc:
+        console.print(f"[red]Exportação não instalada:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    assert exporter is not None
+    sent = exporter.export_file(path)
+    exporter.close()
+    console.print(f"{sent} spans de {path.stem} enviados para {cfg.endpoint}.")
+
+
 @app.command()
 def trace(
     story: str | None = typer.Argument(None, help="História (ex.: S-031)."),
@@ -248,6 +275,12 @@ def trace(
     ),
     since: str | None = typer.Option(None, "--since", help="Com --stats: desde (ISO, UTC)."),
     as_json: bool = typer.Option(False, "--json", help="Saída em JSON."),
+    otlp: str | None = typer.Option(
+        None,
+        "--otlp",
+        help="Envia o rastro desta história por OTLP (ex.: http://localhost:6006/v1/traces); "
+        "'config' usa o trace.otlp da fábrica.",
+    ),
     factory: str | None = typer.Option(None, "--factory", "-f"),
 ) -> None:
     """Rastro de uma história: rodadas, modelo, tokens, motivo do fim e ferramentas.
@@ -270,6 +303,9 @@ def trace(
     if not path.is_file():
         console.print(f"[red]Sem rastro para {story}[/red] ({path})")
         raise typer.Exit(code=1)
+    if otlp:
+        _send_otlp(f, path, otlp)
+        return
     data = read_trace(path)
     if span:
         found = data.find(span)

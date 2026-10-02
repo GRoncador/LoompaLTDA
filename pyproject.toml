@@ -39,7 +39,9 @@ dependencies = [
 embeddings = ["fastembed>=0.3"]
 voice = ["faster-whisper>=1.0"]
 anthropic = ["anthropic>=0.30"]
-all = ["loompa-core[embeddings,voice,anthropic]"]
+# export the per-story trace by OTLP (Phoenix, Langfuse…); off until `trace.otlp.endpoint` is set
+trace = ["opentelemetry-sdk>=1.30", "opentelemetry-exporter-otlp-proto-http>=1.30"]
+all = ["loompa-core[embeddings,voice,anthropic,trace]"]
 
 [project.scripts]
 loompa = "loompa.cli.main:app"
@@ -66,6 +68,8 @@ dev = [
     "mypy>=1.10",
     "respx>=0.21",
     "pytest-timeout>=2.4.0",
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
 ]
 
 [tool.pytest.ini_options]
@@ -107,6 +111,7 @@ ignore = ["E501", "B008", "SIM102", "SIM105"]
 "tests/test_models_sync.py" = ["F811"]
 "tests/test_dependencies.py" = ["F811"]
 "tests/test_factory_health.py" = ["F811"]
+"tests/test_trace_export.py" = ["F811"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -160,6 +160,32 @@ def setup(
     print_providers(f, console)
 
 
+def _check_trace_export(f: Factory) -> None:
+    """The optional OTLP copy of the trace: a warning, never a block (the local trace goes on)."""
+    endpoint = f.config.trace.otlp.endpoint.strip()
+    if not endpoint:
+        return
+    try:
+        import opentelemetry.exporter.otlp.proto.http  # noqa: F401
+    except ImportError:
+        console.print(
+            "[yellow]![/yellow] Rastro por OTLP configurado, mas a exportação não está instalada: "
+            "pip install 'loompa-core[trace]'."
+        )
+        return
+    import httpx
+
+    try:
+        httpx.get(endpoint, timeout=3)
+    except httpx.HTTPError:
+        console.print(
+            f"[yellow]![/yellow] O visor do rastro não responde em {endpoint} "
+            "(o rastro local continua; suba o Phoenix com `phoenix serve`)."
+        )
+        return
+    console.print(f"[green]✓[/green] Rastro também enviado por OTLP para {endpoint}.")
+
+
 @app.command()
 def doctor(
     factory: str | None = typer.Option(None, "--factory", "-f"),
@@ -177,6 +203,7 @@ def doctor(
             for r in asyncio.run(_probe_all(f, keyed)):
                 probes[r.name] = (r.ok, r.detail)
     print_checklist(services, console, probes)
+    _check_trace_export(f)
     failing = [
         s
         for s in services

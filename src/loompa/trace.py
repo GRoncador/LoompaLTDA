@@ -137,6 +137,7 @@ class Tracer:
         self._seen: dict[Path, set[str]] = {}  # file -> message hashes it already holds
         self._ready = False
         self._warned = False
+        self.exporter: Any = None  # trace_export.OtlpExporter when `trace.otlp` is on
 
     @property
     def enabled(self) -> bool:
@@ -210,6 +211,8 @@ class Tracer:
             "attrs": _cap(sp.attrs),
         }
         self._append(path, [self._line(record)])
+        if self.exporter is not None:
+            self.exporter.export(record)
 
     # --------------------------------------------------------------- messages
     def messages(self, story_id: str | None, messages: Sequence[Any]) -> list[str]:
@@ -226,6 +229,8 @@ class Tracer:
                 doc = message_doc(m)
                 h = message_hash(doc)
                 hashes.append(h)
+                if self.exporter is not None:
+                    self.exporter.remember(h, _cap(doc, MAX_MESSAGE_CHARS))
                 if h in seen:
                     continue
                 seen.add(h)
@@ -276,6 +281,12 @@ class Tracer:
         if not ignore.exists():
             ignore.write_text("# Loompa traces carry product code: never committed\n*\n")
         self._ready = True
+
+    def close(self) -> None:
+        """Send what the export still holds (the local file is already written)."""
+        if self.exporter is not None:
+            self.exporter.close()
+            self.exporter = None
 
     def prune(self, retention_days: int) -> int:
         """Remove trace files untouched for `retention_days`. Returns how many went."""

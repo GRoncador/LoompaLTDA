@@ -300,6 +300,10 @@ dashboard:
 
 trace:                      # per-story record of every model and tool call (.loompa/traces/)
   retention_days: 30        # files untouched this long are removed; read with `loompa trace`
+  otlp:                     # optional copy to an OpenTelemetry viewer (pip install 'loompa-core[trace]')
+    endpoint: ""            # e.g. http://localhost:6006/v1/traces for Arize Phoenix; empty = off
+    headers: {}             # header -> NAME of a variable in the secrets files (never the value)
+    project: ""             # the viewer's project; the factory slug when empty
 
 stack:                      # filled by the onboarding scanner
   languages: []

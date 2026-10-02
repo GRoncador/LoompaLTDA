@@ -498,11 +498,22 @@ class DashboardConfig(BaseModel):
     port: int = Field(8765, ge=1, le=65535)
 
 
+class OtlpConfig(BaseModel):
+    """Optional export of the trace by OTLP/HTTP (`loompa/trace_export.py`). Off while
+    `endpoint` is empty. `headers` maps a header to the NAME of a variable in the secrets files,
+    never to its value."""
+
+    endpoint: str = ""  # e.g. http://localhost:6006/v1/traces (Phoenix)
+    headers: dict[str, str] = Field(default_factory=dict)
+    project: str = ""  # the viewer's project; the factory slug when empty
+
+
 class TraceConfig(BaseModel):
     """The per-story trace (`loompa/trace.py`). Always on; only how long it is kept is a choice:
     long enough to compare a sprint with the one before it."""
 
     retention_days: int = Field(30, ge=1)
+    otlp: OtlpConfig = Field(default_factory=OtlpConfig)
 
 
 class StackProfile(BaseModel):

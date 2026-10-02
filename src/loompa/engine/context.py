@@ -98,6 +98,7 @@ class EngineContext:
             tracer=Tracer(factory.paths.traces),
         )
         ctx._redact_traces()
+        ctx._export_traces()
         ctx.tracer.prune(factory.config.trace.retention_days)
         if not ctx.router.tracer.enabled:
             ctx.router.tracer = ctx.tracer
@@ -126,6 +127,24 @@ class EngineContext:
         anything shaped like one that a file or a tool result carried in."""
         values = self.secrets.values_for_redaction()
         self.tracer.set_redaction(lambda text: redact_secrets(text, values))
+        if self.tracer.exporter is not None:
+            self.tracer.exporter.redact = lambda text: redact_secrets(text, values)
+
+    def _export_traces(self) -> None:
+        """The optional OTLP copy of the trace (`trace.otlp`, off by default). Without the
+        `trace` extra it says so once in the log and the local trace goes on."""
+        from loompa.trace_export import OtlpExporter, OtlpUnavailable
+
+        values = self.secrets.values_for_redaction()
+        try:
+            self.tracer.exporter = OtlpExporter.from_config(
+                self.config.trace.otlp,
+                factory=self.slug,
+                secrets=self.secrets,
+                redact=lambda text: redact_secrets(text, values),
+            )
+        except OtlpUnavailable as exc:
+            log.warning("trace.otlp.endpoint is set but the export is not installed: %s", exc)
 
     def _on_llm_call(self, role: str, agent: str, routed: Any) -> None:
         self._watch_aliases(role, agent, routed)
@@ -262,6 +281,7 @@ class EngineContext:
         if self.closed:
             return
         self.closed = True
+        self.tracer.close()  # what the OTLP export still holds
         rt = getattr(self, "_graph_runtime", None)
         if rt is not None:
             import asyncio
