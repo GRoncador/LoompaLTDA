@@ -120,6 +120,7 @@ Write `tasks` and `reason` in {language}; paths as they are.
 
 TASK_PREFIX = re.compile(r"^\s*T\d+\s*[:.-]\s*")  # the model numbering its own tasks
 FILE_REF = re.compile(r"[\w.-]+/|\b[\w-]+\.[a-z]{1,5}\b")
+PATH_REF = re.compile(r"(?<![\w/.-])(?:[\w.-]+/)+[\w.-]+\.[a-z]{1,5}\b")  # a/b/c.py
 
 PREFLIGHT_SYSTEM = """<!-- role:architect -->
 You are the Architect Loompa doing a Pre-flight review. The plan below changes existing code that
@@ -341,6 +342,16 @@ class ArchitectAgent(LoompaAgent):
                 encoding="utf-8",
             )
             state.tasks_total = len(tasks)
+            # the test files these tasks create join the fence: with one test file already in
+            # the plan, `tests/test_caracterizacao_s045.py` was refused to the very task that
+            # names it, and the founder was asked where tests may go (contas Sprint 2, S-045)
+            named = [
+                p
+                for t in extra
+                for p in PATH_REF.findall(t)
+                if is_test_path(p) and p not in state.allowed_paths
+            ]
+            state.allowed_paths = [*state.allowed_paths, *dict.fromkeys(named)]
             if not writable_tests(state.allowed_paths):
                 state.allowed_paths = [*state.allowed_paths, "tests/"]
         paths.risk.write_text(

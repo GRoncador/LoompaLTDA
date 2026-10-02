@@ -263,6 +263,34 @@ async def test_a_preflight_task_that_writes_no_file_is_left_out(factory: Factory
     await ctx.aclose()
 
 
+async def test_a_test_file_a_preflight_task_names_joins_the_fence(factory: Factory):
+    """contas Sprint 2, S-045: the plan already allowed one test file, so the pre-flight's
+    `tests/test_caracterizacao_s045.py` stayed outside the fence and the Worker asked the founder."""
+
+    def architect(messages):
+        if "Pre-flight" in messages[0].content:
+            return json.dumps(
+                {
+                    "risks": [],
+                    "extra_tasks": [
+                        "Criar tests/test_caracterizacao_s045.py fixando o total de app/calc.py"
+                    ],
+                }
+            )
+        if "## Founder's guidance" in messages[-1].content:
+            return None
+        files = ["app/", "migrations/", "tests/test_cli.py", "loompa_dryrun/"]
+        return json.dumps({**PLAN, "files": files, "traceability": []})
+
+    ctx = make_ctx(factory, _script({"architect": architect}))
+    sid = seed_story(ctx, "Nova coluna")
+    await Scheduler(ctx).run()
+    fence = load_state(ctx, sid).allowed_paths
+    assert "tests/test_caracterizacao_s045.py" in fence and "tests/test_cli.py" in fence
+    assert "tests/" not in fence and "app/calc.py" not in fence  # only the named test file joins
+    await ctx.aclose()
+
+
 async def test_an_irreversible_change_asks_the_founder_first(factory: Factory):
     architect = _schema_plan(
         {
