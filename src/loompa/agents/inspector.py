@@ -19,6 +19,7 @@ from pathlib import Path
 from loompa.aci import run_command, summarize_lint, summarize_tests, summarize_typecheck
 from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance
 from loompa.agents.product_owner import CRITERIA_REVIEW_KEY
+from loompa.callers import callers_of_diff
 from loompa.engine.state import StoryState
 from loompa.hygiene import (
     HygieneIssue,
@@ -66,10 +67,16 @@ cannot tell.
      code.
    - ARCH high: breaks an explicit rule of the constitution or the plan's contract (a dependency
      the constitution does not allow, code in a layer the plan forbids).
+   - ARCH high: a line listed under "Uses outside the diff" still relies on what the diff changed
+     (a unit, a type, a signature, a field's meaning) and now gives a wrong result. Anchor it on
+     the changed line in the diff and name the stale use in `text`. Why: `valor` moved from reais
+     to cents, and the summary, the export and the list total, untouched, showed every amount 100
+     times too big while every test passed. That list is a text search: skip a line that only
+     shares the name.
    - medium: a real defect risk to fix soon: an error path of a criterion left unhandled, a stated
      edge case untested, logic duplicated from an existing function.
    Style, naming, formatting, message wording, tests that "could be more explicit" and anything
-   outside the diff are not findings: each finding becomes work for someone. At most 3, most severe
+   outside the diff (other than a stale use as above) are not findings: each finding becomes work for someone. At most 3, most severe
    first; an empty list is the normal case for a clean change. Changes inside the paths the plan
    allows are in scope.
 
@@ -331,6 +338,13 @@ class InspectorAgent(LoompaAgent):
                 + "\n".join(f"- {p}" for p in state.allowed_paths)
                 + "\n\n"
                 if state.allowed_paths
+                else ""
+            )
+            + (
+                "## Uses outside the diff (lines that mention a name the diff changed)\n"
+                + callers[:6000]
+                + "\n\n"
+                if (callers := callers_of_diff(wt.path, full_diff or diff))
                 else ""
             )
             + f"## Diff\n```diff\n{diff}\n```"

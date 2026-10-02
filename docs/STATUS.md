@@ -639,6 +639,20 @@ Decided 2026-09-29:
   past it, keeping a quarter of that in current file reads; `worker_keep_file_chars` is gone (old
   configs that still set it are ignored). Each tool loop also sends OpenRouter an `x-session-id`, so
   its rounds stay on the provider holding the cache.
+- **2026-10-02 — What a change leaves behind, and a fence that follows the plan (contas S-047).**
+  S-047 moved `valor` to integer cents; 138 tests and the Inspector passed it while `resumo`,
+  `export` and the `list` total, untouched in `cli.py`, showed amounts 100× too big (found by hand
+  at the founder's review). `loompa/callers.py` lists, by a text search with no model call, every
+  line in product code that mentions a name the change defines or alters. The Inspector gets it as
+  "Uses outside the diff" with an ARCH-high rubric item for a stale use; the Pre-flight gets the
+  plan's version, uses outside the plan's paths marked, and must characterize every user-visible
+  use and give a broken one a task naming its file. The fence follows the plan's own tasks: a
+  product file a task asks to change (`files_named`: change verb, no "não altere") joins it at plan,
+  amend and pre-flight. When a write is still refused and the Worker stops, the Architect reviews
+  the plan once per story with the Worker's reason (`amend(source="worker")`, event
+  `plan.fence_review`) before the founder hears of it. The Worker's `branch_diff` (ADR-0009 amended)
+  shows its own changes; founder options are audited and rewritten (no file names, no git
+  commands); a Kaizen card's kind label is no longer doubled.
 
 ## Known gaps / next steps
 

@@ -6,8 +6,10 @@ import hashlib
 import json
 import re
 from datetime import date
+from pathlib import Path
 
 from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent, repo_outline
+from loompa.callers import callers_of_plan
 from loompa.engine.state import StoryKind, StoryState
 from loompa.hygiene import TEST_DIRS, is_test_path
 from loompa.risk import assess, render_matrix
@@ -115,6 +117,47 @@ def tests_named(tasks: list[str], fence: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# A clause that asks for a change (pt-BR and English verbs), and one that says to leave a file alone.
+_CHANGE = re.compile(
+    r"\b(?:ajust|alter|mud[ae]|mudar|troc|adicion|acrescent|cri(?:e|ar|ando)\b|remov|exclu(?:a|ir)\b"
+    r"|apag|convert|atualiz|implement|edit|corrij|corrig|substitu|renome|refator|mov(?:a|er|endo)\b"
+    r"|inclu(?:a|ir)\b|escrev|add|chang|updat|modif|fix|creat|delet|renam|refactor|replac|writ"
+    r"|move|extend)",
+    re.I,
+)
+_LEAVE = re.compile(
+    r"\b(não|nao|sem|nunca|jamais|apenas ler|só ler|somente ler|do not|don't|never|without|"
+    r"read[- ]only|leave|keep .* unchanged|untouched|intact)\b",
+    re.I,
+)
+
+
+def files_named(tasks: list[str], fence: list[str], root: Path) -> list[str]:
+    """Product files a task asks to change that the fence does not cover yet. contas Sprint 2,
+    S-047: task 4 said "Em src/contas/cli.py, ajustar formatar_reais…" while the plan's `files`
+    left cli.py out; the edit was refused and the Worker filed it as a finding. The Architect
+    wrote the task, so the fence follows it — but only for a clause that asks for a change and
+    does not say to leave the file alone, and only for a file that exists or a new one in a
+    folder that does (a typo is not a reason to widen anything)."""
+    covered = [p for p in fence if p.endswith("/")]
+    out: list[str] = []
+    for task in tasks:
+        for clause in re.split(r"(?<=[.;:])\s+|\n", task):
+            if not _CHANGE.search(clause) or _LEAVE.search(clause):
+                continue
+            for p in PATH_REF.findall(clause):
+                if (
+                    is_test_path(p)
+                    or p.startswith(".loompa/")
+                    or p in fence
+                    or any(p.startswith(d) for d in covered)
+                    or not ((root / p).is_file() or (root / p).parent.is_dir())
+                ):
+                    continue
+                out.append(p)
+    return list(dict.fromkeys(out))
+
+
 def writable_tests(paths: list[str]) -> list[str]:
     """The part of a plan's fence a reproducer task may write: test files and directories."""
     return [p for p in paths if is_test_path(p) or p.rstrip("/").split("/")[-1] in TEST_DIRS]
@@ -127,9 +170,10 @@ REPLAN_NOTE = (
 )
 
 AMEND_SYSTEM = """<!-- role:architect -->
-You are the Architect Loompa. The founder gave guidance on a story whose plan is already being
-executed, and the Worker can only touch the plan's `files`. Decide what the plan needs so the Worker
-can follow the guidance:
+You are the Architect Loompa. A story's plan is already being executed, and the Worker can only
+touch the plan's `files`. Guidance arrived: from the founder, or from the Worker when the plan's
+paths refused a file its task needs (then judge whether the task really needs it; a file the task
+does not need stays out). Decide what the plan needs so the Worker can follow the guidance:
 - `files`: extra paths (relative to the repo root) it must be allowed to create, edit or delete;
 - `tasks`: 0-3 extra atomic tasks (one commit each, with its check) that carry out the request.
 Add only what the guidance needs and never repeat a task already done. A plain clarification needs
@@ -152,7 +196,14 @@ and read the code it names with the read-only tools when a fact matters.
 - `regression_checks`: existing behaviour that must keep working, as checks a test can make.
 - `extra_tasks`: 0-3 atomic tasks to run BEFORE the change that make it safe (a characterization
   test for untested code about to change, a backup or a reversible migration step). Each names the
-  files it writes; nothing already in the plan. A characterization test pins behaviour the plan
+  files it writes; nothing already in the plan.
+- "Uses of what the plan changes" lists, from a text search, every line that mentions a name the
+  plan alters. When the change alters what a name means (a unit, a type, a signature), every use
+  that shows or exports it to the user must keep working: the characterization tests pin the
+  output of each such use, and a use marked "(outside the plan)" that the change would break gets
+  a task that names its file, so the Worker may change it. Why: `valor` moved from reais to cents
+  and three commands outside the plan showed amounts 100 times too big while every test passed.
+  Skip a line that only shares the name. A characterization test pins behaviour the plan
   KEEPS, never behaviour the plan changes on purpose: that test would fail by design. Do not add
   "run the suite" or "record the baseline": the engine already does both before the first commit.
 - `irreversible`: true only when the plan can destroy or corrupt existing data with no way back.
@@ -263,6 +314,7 @@ class ArchitectAgent(LoompaAgent):
             self.write_adr(f"{state.story_id}: {state.title}", adr, status="proposed")
         state.allowed_paths = files + [f".loompa/specs/{state.story_id}/"]
         state.allowed_paths += tests_named(tasks, state.allowed_paths)
+        self._follow_tasks(state, tasks, "plan")
         state.tasks_total = len(tasks)
         state.tasks_done = []
         set_task_origins(
@@ -274,7 +326,23 @@ class ArchitectAgent(LoompaAgent):
             ok=True, summary=f"plano com {len(tasks)} tarefas e {len(files)} caminhos", data=data
         )
 
-    async def amend(self, state: StoryState, guidance: str) -> AgentResult:
+    def _follow_tasks(self, state: StoryState, tasks: list[str], step: str) -> list[str]:
+        """The product files these tasks ask to change join the fence (see `files_named`)."""
+        named = files_named(tasks, state.allowed_paths, self.ctx.root)
+        if named:
+            state.allowed_paths = [*state.allowed_paths, *named]
+            self.ctx.emit(
+                "plan.fence_from_tasks",
+                story_id=state.story_id,
+                agent=self.name,
+                files=named,
+                step=step,
+            )
+        return named
+
+    async def amend(
+        self, state: StoryState, guidance: str, *, source: str = "founder"
+    ) -> AgentResult:
         """Widen the plan for the founder's guidance without re-planning the story: extra paths
         for the Worker's fence and extra tasks appended after the ones already done."""
         paths = story_dir(self.ctx.root, state.story_id)
@@ -295,7 +363,9 @@ class ArchitectAgent(LoompaAgent):
             return AgentResult(ok=True, summary="orientação já aplicada ao plano")
         self.set_state("WORKING", state, detail="ajustando o plano ao pedido do Founder")
         user = (
-            f"# Story {state.story_id}: {state.title}\n\n## Founder's guidance\n{guidance[:3000]}\n\n"
+            f"# Story {state.story_id}: {state.title}\n\n"
+            + ("## Founder's guidance\n" if source == "founder" else "## The Worker's request\n")
+            + f"{guidance[:3000]}\n\n"
             f"## Current plan\n{plan[:4000]}\n\n## Tasks\n{tasks_md[:3000]}\n\n"
             f"## Paths the Worker may touch now\n" + "\n".join(state.allowed_paths)
         )
@@ -309,6 +379,7 @@ class ArchitectAgent(LoompaAgent):
         files = [f for f in self._list(data, "files") if f not in state.allowed_paths]
         tasks = [TASK_PREFIX.sub("", t) for t in self._list(data, "tasks")[:3]]
         state.allowed_paths = state.allowed_paths + files
+        files += self._follow_tasks(state, tasks, "amend")
         if tasks:
             numbers = [t.number for t in tasks_from_markdown(tasks_md)]
             start = max(numbers, default=0) + 1
@@ -316,18 +387,27 @@ class ArchitectAgent(LoompaAgent):
             tasks_md = tasks_md.rstrip("\n") + "\n" + extra + "\n"
             state.tasks_total = start - 1 + len(tasks)
             origins = state.extra.setdefault(TASK_ORIGIN_KEY, {})
-            origins.update({str(start + i): "founder" for i in range(len(tasks))})
+            origins.update({str(start + i): source for i in range(len(tasks))})
         mark = f"{key} files={json.dumps(files, ensure_ascii=False)} -->"
         paths.tasks.write_text(tasks_md.rstrip("\n") + "\n" + mark + "\n", encoding="utf-8")
         if files or tasks:
             with paths.plan.open("a", encoding="utf-8") as fh:
                 fh.write(
-                    "\n## Ajuste pedido pelo Founder\n"
+                    (
+                        "\n## Ajuste pedido pelo Founder\n"
+                        if source == "founder"
+                        else "\n## Ajuste pedido na execução\n"
+                    )
                     + (str(data.get("reason") or "").strip() + "\n" if data.get("reason") else "")
                     + "".join(f"- {f}\n" for f in files)
                 )
         self.ctx.emit(
-            "plan.amended", story_id=state.story_id, agent=self.name, files=files, tasks=len(tasks)
+            "plan.amended",
+            story_id=state.story_id,
+            agent=self.name,
+            files=files,
+            tasks=len(tasks),
+            source=source,
         )
         self.set_state("IDLE")
         return AgentResult(ok=True, summary=f"{len(files)} caminhos e {len(tasks)} tarefas a mais")
@@ -342,10 +422,14 @@ class ArchitectAgent(LoompaAgent):
         matrix = render_matrix(facts)
         plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
         spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
+        tasks_md = paths.tasks.read_text(encoding="utf-8") if paths.tasks.is_file() else ""
+        product = [p for p in state.allowed_paths if not p.startswith(".loompa/")]
+        uses = callers_of_plan(self.ctx.root, f"{plan}\n{tasks_md}", product)
         data = await self.ask_json_with_tools(
             PREFLIGHT_SYSTEM.format(language=self.language) + EXPLORE_HINT,
             f"# Story {state.story_id}: {state.title}\n\n## Facts\n{matrix}\n\n"
-            f"## Plan\n{plan[:5000]}\n\n## Spec (excerpt)\n{spec[:2500]}",
+            + (f"## Uses of what the plan changes\n{uses[:5000]}\n\n" if uses else "")
+            + f"## Plan\n{plan[:5000]}\n\n## Spec (excerpt)\n{spec[:2500]}",
             self.explore_tools(),
             story=state,
             max_iterations=4,
@@ -376,6 +460,7 @@ class ArchitectAgent(LoompaAgent):
             # the plan, `tests/test_caracterizacao_s045.py` was refused to the very task that
             # names it, and the founder was asked where tests may go (contas Sprint 2, S-045)
             state.allowed_paths = [*state.allowed_paths, *tests_named(extra, state.allowed_paths)]
+            self._follow_tasks(state, extra, "preflight")
             if not writable_tests(state.allowed_paths):
                 state.allowed_paths = [*state.allowed_paths, "tests/"]
         paths.risk.write_text(

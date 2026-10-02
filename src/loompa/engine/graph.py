@@ -28,6 +28,7 @@ from loompa.agents import (
     WorkerAgent,
 )
 from loompa.agents.architect import REPLANNED_KEY
+from loompa.agents.base import AgentResult
 from loompa.agents.inspector import test_origin
 from loompa.agents.product_owner import CRITERIA_REVIEW_KEY
 from loompa.agents.worker import FOUNDER_CHANGES, unfinished
@@ -202,6 +203,9 @@ async def gate_plan(ctx: EngineContext, state: StoryState) -> StoryState | None:
 _RETRYABLE_BLOCKS = (BlockedReason.PERSISTENT_FAILURE, BlockedReason.CONFLICT)
 LAST_BLOCK_KEY = "last_block"
 AMEND_KEY = "amend_plan"
+FENCE_AMEND_KEY = (
+    "fence_amend"  # files the Worker asked for once; the Architect widens the plan once
+)
 CONFLICT_RETRIES_KEY = "conflict_retries"
 SELFHEAL_KEY = "self_healed"  # a WAIVED verdict already got its Worker round
 _VOLATILE = re.compile(r"[0-9a-f]{7,}|\d+")
@@ -399,6 +403,49 @@ async def _resolve_with_retries(
     return False
 
 
+async def _widen_fence(ctx: EngineContext, state: StoryState, res: AgentResult) -> bool:
+    """The Worker stopped because the plan's fence refused a file (contas Sprint 2, S-047: task 4
+    needed cli.py, the plan left it out, and it became a finding for the founder). The Architect,
+    who owns the plan, reviews it once per story with the Worker's reason; True when it opened a
+    file the Worker asked for, and the Worker runs again."""
+    refused = [
+        f for f in (res.data or {}).get("fence_refused") or [] if f not in state.allowed_paths
+    ]
+    if (
+        not refused
+        or not (res.blocked_reason or unfinished(res))
+        or state.extra.get(FENCE_AMEND_KEY)
+    ):
+        return False
+    state.extra[FENCE_AMEND_KEY] = refused
+    reason = res.blocked_reason or res.summary or ""
+    guidance = (
+        f"The plan's paths refused these files: {', '.join(refused)}. "
+        f"What the Worker said when it stopped: {reason[:1500]}"
+    )
+    try:
+        await ArchitectAgent(ctx).amend(state, guidance, source="worker")
+    except LLMError as exc:
+        ctx.emit("plan.amend_failed", story_id=state.story_id, error=str(exc)[:200])
+        return False
+    granted = [
+        f
+        for f in refused
+        if any(f == p or f.startswith(p.rstrip("/") + "/") for p in state.allowed_paths)
+    ]
+    ctx.emit("plan.fence_review", story_id=state.story_id, refused=refused, granted=granted)
+    if not granted:
+        return False
+    # the Worker's notes about a file it can now change are no longer findings
+    state.learnings = [
+        item
+        for item in state.learnings
+        if item.get("_captured")
+        or not any(f in f"{item.get('title')} {item.get('detail')}" for f in granted)
+    ]
+    return True
+
+
 async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     # A worktree that cannot be prepared raises: the Ops Loompa tries again (three times, ADR-0016
     # §5) before the founder hears of it, as with any other failure of a step.
@@ -427,6 +474,8 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     )
     worker = worker_cls(ctx, name=label, tier_override=tier)
     res = await worker.run(state, wt)
+    if await _widen_fence(ctx, state, res):
+        res = await worker.run(state, wt)
     await KaizenAgent(ctx).capture(state)
     if res.blocked_reason:
         return await block(

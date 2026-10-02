@@ -249,6 +249,8 @@ class ACI:
         # files a `run_tests` call created in the repository (a test writing to the working
         # directory, `contas` S-007): the Worker is told at once and they are never committed
         self.test_residue: set[str] = set()
+        # writes the plan's fence refused: the engine may ask the Architect to widen it once
+        self.fence_refused: list[str] = []
 
     # ------------------------------------------------------------------ helpers
     def _resolve(self, path: str, *, for_write: bool = False) -> Path:
@@ -263,8 +265,11 @@ class ACI:
                 rel == a or rel.startswith(a.rstrip("/") + "/") or Path(rel).match(a)
                 for a in self.allowed_paths
             ):
+                self.fence_refused.append(rel)
                 raise ToolError(
-                    f"outside the plan's paths: {rel}. If the task needs it, record why with note_learning."
+                    f"outside the plan's paths: {rel}. If the task cannot be done without it, call "
+                    "`blocked` saying which file and why: the Architect reviews the plan once "
+                    "before anyone else is asked."
                 )
         return p
 

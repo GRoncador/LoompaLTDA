@@ -36,7 +36,8 @@ How to work:
    your history, and a lookup or test run repeated with nothing changed is answered from it. A few
    reads are enough for most tasks; then decide.
 2. Implement exactly the task, with its tests, inside the allowed paths (anything else is refused).
-   If the task needs a file outside them, record why with `note_learning` and finish what you can.
+   If the task cannot be done without a file outside them, call `blocked` saying which file and
+   why: the Architect reviews the plan once before the founder is asked.
    When you fix a failure, the `reason` of your first edit states the root cause you found, not the
    symptom.
 3. Each write reports syntax errors and undefined names at once, under `[quick check]`: fix those
@@ -142,6 +143,17 @@ def unfinished(result: AgentResult) -> bool:
     return not result.ok and not result.blocked_reason and "unfinished" in (result.data or {})
 
 
+def _with_refusals(result: AgentResult, aci: ACI) -> AgentResult:
+    """A task that stopped after the fence refused a write says which files, so the engine can ask
+    the Architect to widen the plan before the founder hears of it."""
+    if aci.fence_refused:
+        result.data = {
+            **(result.data or {}),
+            "fence_refused": list(dict.fromkeys(aci.fence_refused)),
+        }
+    return result
+
+
 def _outcome(result: AgentResult) -> str:
     if result.blocked_reason:
         return "blocked"
@@ -190,7 +202,7 @@ class WorkerAgent(LoompaAgent):
             if result.blocked_reason:
                 self.set_state("BLOCKED", state, detail="aguardando decisão")
                 self._flush_learnings(state, aci)
-                return result
+                return _with_refusals(result, aci)
             if unfinished(result):
                 # 8.5: a task cut by the tool-call limit, or stopped going in circles, is not
                 # done. It stays pending for the next attempt, which reads the diagnosis, and a
@@ -199,7 +211,7 @@ class WorkerAgent(LoompaAgent):
                 self._flush_learnings(state, aci)
                 self.set_state("IDLE")
                 state.worker_summary = "\n".join([*summaries, f"T{task.number}: não concluída"])
-                return result
+                return _with_refusals(result, aci)
             state.tasks_done.append(task.number)
             tasks_md = mark_task_done(tasks_md, task.number)
             paths.tasks.write_text(tasks_md, encoding="utf-8")
