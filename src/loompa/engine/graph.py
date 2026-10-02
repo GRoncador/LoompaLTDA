@@ -566,6 +566,25 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
         )
         state.hand_off("Corrigir os apontamentos do Inspector: " + detail, phase="test")
         return await block(ctx, state, BlockedReason.WAIVER, res.summary, resume="dev", message=msg)
+    judged = [c for c in (res.data or {}).get("failed_criteria") or [] if c.get("text")]
+    if judged and not (res.data or {}).get("failing"):
+        texts = sorted(" ".join(c["text"].split()).lower()[:160] for c in judged)
+        again = state.extra.get(JUDGED_FAILURES_KEY) == texts
+        state.extra[JUDGED_FAILURES_KEY] = texts
+        if again and state.acceptance and not state.extra.get(JUDGED_REVIEW_KEY):
+            # The Inspector failed the same criteria twice with the tests green: before a stronger
+            # model is paid to meet it, the Product Owner looks at the criterion itself.
+            review = await ProductOwnerAgent(ctx).review_judged_criteria(state, judged)
+            state.extra[JUDGED_REVIEW_KEY] = True
+            if review.ok:
+                state.extra.setdefault(CRITERIA_ALIGNED_KEY, []).extend(
+                    (review.data or {}).get("changes") or []
+                )
+                state.failure_history.append(review.summary)
+                state.extra.pop(JUDGED_FAILURES_KEY, None)
+                return goto(state, "dev")
+    else:
+        state.extra.pop(JUDGED_FAILURES_KEY, None)
     failing = list((res.data or {}).get("failing") or [])
     origin = test_origin(ctx.worktrees, wt, failing) if failing else None
     own_only = bool(
@@ -598,6 +617,8 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
 
 
 OWN_FAILURES_KEY = "own_failures"  # the story's own failing tests at the last test run
+JUDGED_FAILURES_KEY = "judged_failures"  # the criteria the Inspector failed at the last run
+JUDGED_REVIEW_KEY = "judged_review"  # the Product Owner reviewed them once already
 GENERIC_EXECUTIVE = (
     "As verificações automáticas continuam falhando após várias tentativas, inclusive com o "
     "especialista sênior. O detalhe técnico ficou registrado para a equipe."

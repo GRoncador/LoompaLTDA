@@ -291,3 +291,61 @@ def test_overridden_passes_only_a_criterion_the_product_owner_changed():
     revised = _revised_texts(st)
     assert _norm("aceita  10.99") in revised and _norm("rejeita 10.99") in revised
     assert _norm("aceita 12,50") not in revised
+
+
+async def test_a_criterion_the_inspector_fails_twice_goes_to_the_product_owner(factory: Factory):
+    """tamagotchi S-015: "opens as file://" cannot hold with ES modules; the Inspector failed it
+    twice with the tests green and the story was escalated and re-planned. The Product Owner now
+    reviews that criterion first, and the story goes on without a stronger model."""
+    judged: list[str] = []
+    reviews: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role, last = role_of(messages), messages[-1].content
+        if role == "product":
+            spec = json.loads(dry_run_script(model, messages, tools))
+            return json.dumps({**spec, "acceptance": ["abre como file:// no navegador"]})
+        if role == "product_owner" and "## What the Inspector failed, twice" in last:
+            reviews.append(last)
+            return json.dumps(
+                {
+                    "criteria": [
+                        {
+                            "n": 1,
+                            "action": "rewrite",
+                            "new_text": "abre com npm start em localhost",
+                            "reason": "módulos ES",
+                        }
+                    ]
+                }
+            )
+        if role == "inspector" and "## Diff" in last:
+            judged.append(last)
+            ok = "abre com npm start" in last
+            return json.dumps(
+                {
+                    "criteria": [
+                        {
+                            "text": "abre com npm start em localhost"
+                            if ok
+                            else "abre como file:// no navegador",
+                            "pass": ok,
+                            "reason": "ok" if ok else "o navegador bloqueia os imports em file://",
+                        }
+                    ],
+                    "findings": [],
+                    "summary": "ok" if ok else "falha",
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Página do jogo")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert len(reviews) == 1 and "bloqueia os imports" in reviews[0]
+    assert state.acceptance == ["abre com npm start em localhost"]
+    assert state.blocked_reason == "delivery", state.failure_history
+    events = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
+    assert "story.escalated" not in events and len(judged) == 3
+    await ctx.aclose()

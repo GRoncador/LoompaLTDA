@@ -257,6 +257,7 @@ class InspectorAgent(LoompaAgent):
             )
         tooling_ok = ok
         criteria_ok = True
+        failed: list[dict] = []
         findings: list[dict[str, str]] = []
         if ok:
             findings = _numbered(weak_tests(full_diff))
@@ -307,6 +308,11 @@ class InspectorAgent(LoompaAgent):
                 # the tests new on this story's run, and whether they are all that failed
                 "failing": failing,
                 "tests_only": bool(failing) and others_ok,
+                # the criteria the judge failed, for a criterion review when the same one fails again
+                "failed_criteria": [
+                    {"text": str(c.get("text", "")), "reason": str(c.get("reason", ""))}
+                    for c in failed
+                ],
             },
         )
 
