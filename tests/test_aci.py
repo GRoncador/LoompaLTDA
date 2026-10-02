@@ -359,3 +359,17 @@ async def test_read_file_returns_a_file_whole_or_its_outline(tmp_path: Path):
     assert out.startswith(f"big.py [100-149 of {total}]")  # a range never gets the outline
     out = (await aci.call("read_file", {"path": "big.py", "start": 1, "lines": 1000})).output
     assert out.startswith(f"big.py [1-400 of {total}]")  # 400 lines at most per call
+
+
+def test_node_test_tap_output_is_summarised():
+    """tamagotchi Sprint 2: `npm test` (`node --test`) ran 82 tests and the gate read 0/0."""
+    out = (Path(__file__).parent / "node_tap_sample.txt").read_text()
+    s = summarize_tests("> test\n> node --test tests/\n\n" + out, 1, cwd_prefix="/repo")
+    assert (s.tool, s.ok, s.passed, s.failed) == ("node:test", False, 1, 2)
+    assert [(f.name, f.location) for f in s.failures] == [
+        ("soma", "tests/a.test.js:3:27"),
+        ("solto falha", "tests/a.test.js:4:1"),
+    ]  # the suite that failed only through its subtest is not a failure of its own
+    assert "2 !== 3" in s.failures[0].message and s.failures[1].message == "boom"
+    green = "TAP version 13\nok 1 - x\n1..1\n# tests 87\n# pass 87\n# fail 0\n"
+    assert (summarize_tests(green, 0).passed, summarize_tests(green, 0).ok) == (87, True)

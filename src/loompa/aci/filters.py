@@ -88,6 +88,8 @@ class CommandSummary:
 
 def summarize_tests(output: str, returncode: int, *, cwd_prefix: str = "") -> CommandSummary:
     text = _strip_ansi(output)
+    if "TAP version" in text or _TAP_COUNT.search(text):
+        return _summarize_tap(text, returncode, cwd_prefix=cwd_prefix)
     if "Tests:" in text or "●" in text or "✕" in text or "Test Files" in text:
         return _summarize_js(text, returncode)
     if (
@@ -103,6 +105,60 @@ def summarize_tests(output: str, returncode: int, *, cwd_prefix: str = "") -> Co
             Failure(name="(unrecognised output)", message="; ".join(tail)[:600])
         )
     return summary
+
+
+_TAP_COUNT = re.compile(r"^# (pass|fail|skipped|cancelled|tests) (\d+)\s*$", re.M)
+_TAP_NOT_OK = re.compile(r"^(\s*)not ok \d+ - (.+?)\s*$")
+
+
+def _summarize_tap(text: str, returncode: int, *, cwd_prefix: str = "") -> CommandSummary:
+    """`node --test` (TAP): the counts come from its footer, and each failing test from its
+    `not ok` line with the YAML block under it. A suite whose only error is that its subtests
+    failed is not a failure of its own. tamagotchi Sprint 2: `npm test` ran 82 tests and the
+    gate read "0 passed, 0 failed" because no summarizer knew this format."""
+    s = CommandSummary(tool="node:test", ok=returncode == 0)
+    for kind, n in _TAP_COUNT.findall(text):
+        if kind == "pass":
+            s.passed = int(n)
+        elif kind == "fail":
+            s.failed = int(n)
+        elif kind == "skipped":
+            s.skipped = int(n)
+        elif kind == "cancelled":
+            s.errors = int(n)
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        m = _TAP_NOT_OK.match(lines[i])
+        i += 1
+        if not m:
+            continue
+        indent, name = len(m.group(1)), m.group(2)
+        block: list[str] = []
+        while i < len(lines) and lines[i].strip() != "...":
+            if lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) <= indent and block:
+                break
+            block.append(lines[i])
+            i += 1
+        meta = "\n".join(block)
+        if "subtestsFailed" in meta:
+            continue
+        loc = re.search(r"location: '([^']+)'", meta)
+        location = loc.group(1) if loc else ""
+        if cwd_prefix and location.startswith(cwd_prefix):
+            location = location[len(cwd_prefix) :].lstrip("/")
+        err = re.search(
+            r"error: \|-?\n((?:\s+.*\n?)+?)\s+(?:code|name|stack|expected|failureType):", meta
+        )
+        message = (
+            " ".join(x.strip() for x in err.group(1).splitlines() if x.strip())
+            if err
+            else (
+                re.search(r"error: '(.*)'", meta) or re.search(r"error: (.*)", meta) or [None, ""]
+            )[1]
+        )
+        s.failures.append(Failure(name=name, location=location, message=str(message)[:300]))
+    return s
 
 
 def _summarize_pytest(text: str, returncode: int) -> CommandSummary:

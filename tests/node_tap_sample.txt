@@ -1,0 +1,54 @@
+TAP version 13
+# Subtest: Grupo
+    # Subtest: soma
+    not ok 1 - soma
+      ---
+      duration_ms: 1.634375
+      location: '/repo/tests/a.test.js:3:27'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        2 !== 3
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 3
+      actual: 2
+      operator: 'strictEqual'
+      stack: |-
+      ...
+    # Subtest: ok
+    ok 2 - ok
+      ---
+      duration_ms: 0.223542
+      ...
+    1..2
+not ok 1 - Grupo
+  ---
+  duration_ms: 2.583875
+  type: 'suite'
+  location: '/repo/tests/a.test.js:3:1'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: solto falha
+not ok 2 - solto falha
+  ---
+  duration_ms: 0.081959
+  location: '/repo/tests/a.test.js:4:1'
+  failureType: 'testCodeFailure'
+  error: 'boom'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+  ...
+1..2
+# tests 3
+# suites 1
+# pass 1
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 57.028166
