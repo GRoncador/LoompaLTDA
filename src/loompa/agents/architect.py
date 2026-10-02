@@ -26,7 +26,11 @@ Plan in this order:
    missing path blocks the story.
 3. Tasks. 2-8 atomic steps in build order; each becomes one commit, includes its tests and leaves
    the suite green. Each is {{"task": str, "verify": str}}: the task names the exact files it
-   touches, and `verify` the check that proves it done (a test, a command).
+   touches, and `verify` the check that proves it done (a test, a command). A task is what the
+   Worker finishes in one run of a few dozen tool calls: one concern, a few files. A change that
+   crosses many modules (a type or unit used everywhere, a rename) is several tasks, one module at
+   a time, kept compatible in between (accept the old and the new form until the last task drops
+   the old one) so each still leaves the suite green; never one task that rewrites everything.
 4. Traceability. For EACH acceptance criterion, by its number in the spec, the test file and test
    that will prove it.
 5. Impact and rollback. `impact`: when existing code changes, what else uses it and how
