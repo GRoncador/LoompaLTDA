@@ -172,7 +172,7 @@ class WorkerAgent(LoompaAgent):
             return AgentResult(ok=True, summary="todas as tarefas já concluídas")
         spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
         plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
-        aci = self.ctx.aci_for(wt.path, allowed_paths=state.allowed_paths or None)
+        aci = self.ctx.aci_for(wt.path, allowed_paths=self._fence(state, wt))
         outline = repo_outline(wt.path)  # once per run: the same text keeps the prefix cached
         summaries: list[str] = []
         tier_label = self.tier_override or "tier2"
@@ -441,7 +441,7 @@ class WorkerAgent(LoompaAgent):
         spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
         plan = paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else ""
         tasks_md = paths.tasks.read_text(encoding="utf-8") if paths.tasks.is_file() else ""
-        aci = self.ctx.aci_for(wt.path, allowed_paths=state.allowed_paths or None)
+        aci = self.ctx.aci_for(wt.path, allowed_paths=self._fence(state, wt))
         tier_label = self.tier_override or "tier2"
         self.set_state(
             "WORKING", state, model=tier_label, detail="corrigindo falhas apontadas pelo Inspector"
@@ -490,6 +490,18 @@ class WorkerAgent(LoompaAgent):
         self.set_state("IDLE")
         state.worker_summary = f"fix: {result.summary}"
         return AgentResult(ok=True, summary=state.worker_summary)
+
+    def _fence(self, state: StoryState, wt: Worktree) -> list[str] | None:
+        """The plan's paths plus what this story already changed on its branch: after a re-plan
+        a file an earlier plan of the same story broke was outside the fence, and the Worker
+        asked the founder who may fix it (tamagotchi-retro S-006, package.json)."""
+        if not state.allowed_paths:
+            return None
+        try:
+            mine = self.ctx.worktrees.changed_files(wt)
+        except Exception:  # noqa: BLE001 - the plan's fence still stands
+            mine = []
+        return list(dict.fromkeys([*state.allowed_paths, *mine]))
 
     async def autofix_lint(self, state: StoryState, wt: Worktree) -> bool:
         """Self-healing without a model (Fase 7, 7.2): the tests are green and only the linter

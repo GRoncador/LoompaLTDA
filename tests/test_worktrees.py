@@ -292,3 +292,25 @@ def test_merged_story_branches_without_a_worktree_are_pruned_by_the_deployer(git
     assert deployer.prune_merged_branches() == [old.branch]
     left = wm.git("branch", "--list", "loompa/*", "--format=%(refname:short)").split()
     assert sorted(left) == sorted([busy.branch, unmerged.branch])
+
+
+def test_a_story_may_keep_editing_what_its_branch_already_changed(git_repo: Path):
+    """tamagotchi-retro S-006: after a re-plan, package.json (broken by the story's earlier plan)
+    was outside the fence and the Worker asked the founder who may fix it."""
+    from types import SimpleNamespace
+
+    from loompa.agents.worker import WorkerAgent
+    from loompa.engine.state import StoryState
+
+    wm = WorktreeManager(git_repo)
+    wt = wm.create("S-006")
+    (wt.path / "package.json").write_text('{"a": 1}{"b": 2}\n')
+    wm.commit_all(wt, "wip: earlier plan")
+    (wt.path / "src_extra.js").write_text("x\n")  # not committed yet
+    assert {"package.json", "src_extra.js"} <= set(wm.changed_files(wt))
+    worker = WorkerAgent.__new__(WorkerAgent)
+    worker.ctx = SimpleNamespace(worktrees=wm)
+    state = StoryState(story_id="S-006", title="t", allowed_paths=["src/persistence.py"])
+    fence = worker._fence(state, wt)
+    assert fence[0] == "src/persistence.py" and "package.json" in fence
+    assert worker._fence(StoryState(story_id="S-006", title="t"), wt) is None  # no plan, no fence

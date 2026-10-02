@@ -523,6 +523,18 @@ class WorktreeManager:
             return False
         return True
 
+    def changed_files(self, wt: Worktree) -> list[str]:
+        """Files the story's branch changed since its base, committed or not."""
+        names = set(
+            self.git(
+                "diff", "--name-only", f"{wt.base}...HEAD", cwd=wt.path, check=False
+            ).splitlines()
+        )
+        for line in self.git("status", "--porcelain", cwd=wt.path, check=False).splitlines():
+            if len(line) > 3:
+                names.add(line[3:].split(" -> ")[-1].strip('"'))
+        return sorted(n for n in names if n.strip() and not n.startswith(".loompa/"))
+
     def merge_into_base(self, wt: Worktree, *, message: str | None = None) -> str:
         """Fast-forward or merge the story branch into base in the main checkout."""
         self._require_deployer("git merge")
