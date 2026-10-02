@@ -31,6 +31,17 @@ def client(git_repo: Path, hub):
         yield c
 
 
+def test_a_pasted_path_with_quotes_lands_in_the_folder_it_names(client: TestClient, tmp_path: Path):
+    """Finder copies a path with spaces in quotes; tamagotchi-retro was created under ~/'/Users/…'."""
+    folder = tmp_path / "Tamagotchi retrô"
+    r = client.post("/api/factories", json={"path": f"'{folder}'", "name": "Tama"})
+    assert r.status_code == 200 and (folder / ".loompa").is_dir()
+    listed = {f["slug"]: f["path"] for f in client.get("/api/factories").json()["factories"]}
+    assert listed[r.json()["slug"]] == str(folder.resolve())
+    r = client.post("/api/factories", json={"path": "projetos/novo", "name": "Rel"})
+    assert r.status_code == 400 and "caminho completo" in r.json()["detail"]
+
+
 def test_factories_and_overview(client: TestClient):
     r = client.get("/api/factories")
     assert r.status_code == 200 and r.json()["active"] == "demo-hq" and r.json()["dry_run"] is True

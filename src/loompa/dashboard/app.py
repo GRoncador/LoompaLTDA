@@ -346,10 +346,13 @@ def create_app(
 
     @app.post("/api/factories")
     def add_factory(body: FactoryBody) -> dict[str, Any]:
-        from loompa.factory import bootstrap_factory
+        from loompa.factory import bootstrap_factory, typed_path
 
+        root = typed_path(body.path)
+        if not root.is_absolute():  # relative to wherever the dashboard was started: never meant
+            raise HTTPException(400, "Use o caminho completo da pasta, começando por / ou ~.")
         result = bootstrap_factory(
-            Path(body.path).expanduser(),
+            root,
             name=body.name,
             preset=body.stack,
             mission=body.mission,

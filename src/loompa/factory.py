@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -162,6 +163,18 @@ def _ensure_gitignore(root: Path) -> None:
                 + "\n# Loompa LTDA runtime state\n"
                 + block
             )
+
+
+def typed_path(text: str) -> Path:
+    """A folder path as a person types or pastes it: Finder's "copy as pathname" wraps a name
+    with spaces in quotes, a terminal escapes spaces with a backslash, and `~` means home.
+    `Path("'/Users/a/b c'")` is a *relative* path: resolved against the dashboard's working
+    directory it created the tamagotchi-retro factory under `~/'/Users/…'` (2026-10-01)."""
+    raw = text.strip()
+    while len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"`":
+        raw = raw[1:-1].strip()
+    raw = re.sub(r"\\(.)", r"\1", raw)  # "Tamagotchi\ retrô" -> "Tamagotchi retrô"
+    return Path(raw).expanduser()
 
 
 def bootstrap_factory(
