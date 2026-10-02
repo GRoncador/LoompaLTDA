@@ -99,6 +99,11 @@ it filed.
   title and a description that carries every detail of the direction it covers and nothing the
   direction does not say (no invented scope). As many cards as the direction genuinely needs; when
   there are several, they share an `epic` name.
+- A card is something the founder can use or see working once it is delivered. The ideas are
+  aspects of the direction, not cards: an internal layer, a rule or a normalisation step is part
+  of the card whose behaviour needs it, never a card of its own, so one idea does not mean one
+  card. Tests belong to the card whose code they check; a card that only writes tests or only
+  prepares code for a later card delivers nothing by itself.
 - When a card waiting in the backlog already covers part of the direction, do not duplicate it:
   put that part `into` that card (its id), with a `description` that says only what this brainstorm
   adds to it. Only waiting cards can receive an addition; work in progress cannot.
@@ -108,8 +113,8 @@ it filed.
 - Weigh the opinions as advice: a counterpoint the conversation accepted shapes the cards; an
   opinion the founder set aside does not count.
 - `priority` is 1 (build first) to 5 (last), in the order the cards should be built; `kind` is
-  `bugfix` when the card repairs behaviour that already exists, `research` when it asks for
-  knowledge instead of code, otherwise `feature`.
+  `bugfix` when the card repairs behaviour that already exists, `research` when its result is a
+  report the founder reads instead of code (never for tests or code), otherwise `feature`.
 - Your cards are numbered C1, C2… in the order you list them. `depends_on` names the cards (C2, or
   the id of a waiting backlog card) a card needs delivered first, only when it builds on what they
   create; the factory then specifies the whole chain before planning any of it. Never a cycle.
