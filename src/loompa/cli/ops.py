@@ -173,10 +173,20 @@ def run(
             f"[bold]{f.config.factory.name}[/bold] · execução {'simulada' if dry_run else 'real'} · paralelismo {parallel or f.config.schedule.max_parallel}"
         )
     )
+    running = SprintBoard(ctx.store, f.slug).running()
     waiting = len(ctx.store.list_stories(f.slug, stage=Stage.BACKLOG))
-    if waiting:
+    if running is not None:  # one sprint at a time (ADR-0018): the backlog waits for the next
         console.print(
-            f"[dim]{waiting} histórias esperam no backlog; `loompa sprint start` as coloca para rodar.[/dim]"
+            f"[dim]{running.id} em andamento: {len(running.story_ids)} histórias. "
+            + (
+                "Use --watch para seguir rodando enquanto alguma espera você.[/dim]"
+                if not watch
+                else "[/dim]"
+            )
+        )
+    elif waiting:
+        console.print(
+            f"[dim]{waiting} histórias esperam no backlog; uma reunião de sprint as coloca para rodar.[/dim]"
         )
     try:
         done = asyncio.run(_run(ctx, until_idle=not watch, max_parallel=parallel))
