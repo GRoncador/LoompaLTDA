@@ -20,7 +20,7 @@ from loompa.cli.ops import build_context
 from loompa.factory_health import export_markdown, hub_book, scan
 from loompa.sprints import SprintBoard
 
-console = Console()
+console = Console(emoji=False)  # a signature like "trace.guard_ignored:guard" is not an emoji code
 health_app = typer.Typer(
     help="Autodiagnóstico da fábrica: achados sobre o próprio Loompa, com evidência.",
     invoke_without_command=True,
