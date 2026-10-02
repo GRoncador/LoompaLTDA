@@ -977,6 +977,11 @@ def apply_founder_answer(
         goto(state, "spec")
     elif reason == BlockedReason.DELIVERY:
         if key in ("approve", "approved", "ok", "yes", "sim"):
+            if answer.text:
+                # what the founder wrote on approving (an agreement, a part moved to another
+                # story) reaches the stories built on this one: tamagotchi S-017 was approved with
+                # "reabrir_app goes to S-018", and S-018 never heard of it
+                state.note(f"Ao aprovar: {answer.text.strip()}")
             wt = ctx.worktrees.get(state.story_id)
             if wt is not None:
                 try:

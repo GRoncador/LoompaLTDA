@@ -394,3 +394,25 @@ async def test_the_plan_sees_what_its_dependencies_delivered_and_can_send_the_sp
     assert not res.ok and st.extra[BOUNCED_KEY] and "ponto decimal" in st.handoff["plan"]
     assert "## What the stories this one builds on delivered" in seen[0]
     await ctx.aclose()
+
+
+async def test_what_the_founder_writes_on_approving_reaches_the_stories_built_on_it(
+    factory: Factory,
+):
+    """tamagotchi S-017 was approved with "reabrir_app goes to the persistence port"; S-018,
+    built on it, never saw that and deleted the function without porting it."""
+    from loompa.dependencies import delivered_brief
+
+    ctx = make_ctx(factory, dry_run=True)
+    MasterAgent(ctx).start_sprint([ProductOwnerAgent(ctx).add_item("Recálculo").story_id])
+    await Scheduler(ctx).run()
+    sid = "S-001"
+    delivery = ctx.store.get_message(load_state(ctx, sid).blocked_message_id)
+    await Scheduler(ctx).aanswer(
+        delivery.id, FounderAnswer(option_key="approve", text="o reabrir_app fica para a S-002")
+    )
+    po = ProductOwnerAgent(ctx)
+    later = po.add_item("Persistência").story_id
+    po.set_dependencies(later, [sid])
+    assert "Ao aprovar: o reabrir_app fica para a S-002" in delivered_brief(ctx.store, later)
+    await ctx.aclose()
