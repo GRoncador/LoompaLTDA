@@ -189,6 +189,14 @@ async def run_turn(
     reply = founder_text(polish(reply) if polish else reply) or (
         "Atualizei o rascunho." if report.changes else "Certo. O que mais você quer ajustar?"
     )
+    if report.ignored and not failed:
+        # the reply was written with the edits it asked for, before they were checked: the
+        # Master said "removi o card S-010" while the edit was refused (tamagotchi SP-002 meeting)
+        reply += (
+            " Ressalva: nem tudo o que descrevi entrou no rascunho — "
+            + "; ".join(report.ignored)
+            + "."
+        )
     conv.turns.append(
         Turn(
             who="agent",

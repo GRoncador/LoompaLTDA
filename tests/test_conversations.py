@@ -187,6 +187,27 @@ async def test_a_meeting_builds_a_draft_and_leaves_the_backlog_untouched(factory
     await ctx.aclose()
 
 
+async def test_a_reply_never_claims_an_edit_that_was_refused(factory: Factory):
+    """tamagotchi SP-002: the Master said "Removi o card S-010" while the edit was refused
+    ("não encontrei S-010 no rascunho"): the reply now says what did not go in."""
+    script = turn_script(
+        {
+            "reply": "Montei o login e removi o card S-010.",
+            "ops": [add("Login"), {"op": "drop", "ref": "S-010"}],
+        }
+    )
+    ctx = make_ctx(factory, script)
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    turn = await chats.say(conv.id, "Quero login; o S-010 está obsoleto")
+    assert turn.ignored == ["não encontrei S-010 no rascunho"]
+    assert turn.reply.endswith(
+        "Ressalva: nem tudo o que descrevi entrou no rascunho — não encontrei S-010 no rascunho."
+    )
+    assert chats.board.require(conv.id).turns[-1].text == turn.reply
+    await ctx.aclose()
+
+
 async def test_the_draft_evolves_over_turns_and_committing_starts_the_sprint(factory: Factory):
     seen: list[list[Message]] = []
     script = turn_script(
