@@ -376,7 +376,7 @@ class Policy:
     """The knobs of the ranking."""
 
     tier1_ceiling: float = 1.25  # blended USD per 1M tokens the reasoning tier may cost
-    tier2_floor: float = 0.80  # fraction of the best quality the execution tier must reach
+    tier2_floor: float = 0.75  # fraction of tier 1's best rating the execution tier must reach
     picks: int = 3  # candidates per tier (one per vendor, so a fallback is not the same outage)
     min_context: int = 128_000
     expiry_margin_days: int = 60
@@ -441,12 +441,39 @@ def _one_per_vendor(ordered: list[CatalogModel], n: int) -> list[CatalogModel]:
     return picked
 
 
+def _value_tier(
+    models: list[CatalogModel], score: Callable[[CatalogModel], float | None], policy: Policy
+) -> list[CatalogModel]:
+    """Tier 2: the best cost-benefit among the models that reach `tier2_floor` of tier 1's best.
+
+    The floor is anchored on the best rating under the tier 1 ceiling, whether that model is in
+    use or not: it is what money within the budget buys today. Anchoring on the best of the whole
+    catalogue (a US$ 20 model) let tier 2 propose models dearer than tier 1, and a plain
+    rating/price ratio with no floor put near-free models with half the rating first, because the
+    benchmark scale is compressed (a weak model scores ~25 where the best cheap one scores ~45).
+    Inside the band the ratio is safe: every model there is good enough."""
+    under = [
+        m
+        for m in models
+        if score(m) is not None and 0.0 < (m.blended or 0.0) <= policy.tier1_ceiling
+    ]
+    anchor = max((score(m) or 0.0 for m in under), default=0.0)
+    band = [m for m in under if (score(m) or 0.0) >= policy.tier2_floor * anchor]
+    return _one_per_vendor(
+        sorted(
+            band,
+            key=lambda m: (-(score(m) or 0.0) / (m.blended or 1.0), -(score(m) or 0.0), m.id),
+        ),
+        policy.picks,
+    )
+
+
 def rank(
     models: list[CatalogModel], policy: Policy, today: date, *, composite: bool = True
 ) -> Ranking:
-    """tier1 is "best rating under a price ceiling"; tier2 is "cheapest above a rating floor".
-    A plain rating/price ratio would put the cheapest acceptable model first in both. The rating
-    is the composite with the clusters on and the intelligence index with them off."""
+    """tier1 is "best rating under a price ceiling"; tier2 is "best cost-benefit among the models
+    within the ceiling that reach a fraction of tier 1's best" (`_value_tier`). The rating is the
+    composite with the clusters on and the intelligence index with them off."""
     excluded: Counter[str] = Counter()
     eligible: list[CatalogModel] = []
     for m in models:
@@ -465,10 +492,7 @@ def rank(
     ranking.tier1 = _one_per_vendor(
         sorted(under, key=lambda m: (-r(m), m.blended or 0.0, m.id)), policy.picks
     )
-    good = [m for m in eligible if r(m) >= policy.tier2_floor * best]
-    ranking.tier2 = _one_per_vendor(
-        sorted(good, key=lambda m: (m.blended or 0.0, -r(m), m.id)), policy.picks
-    )
+    ranking.tier2 = _value_tier(eligible, lambda m: m.rating(composite), policy)
     return ranking
 
 
@@ -586,19 +610,8 @@ def rank_cluster(
         policy.picks,
     )
 
-    # Tier 2: highest cost-benefit (score / cost) under ceiling
-    t2_candidates = [m for m, _ in paid_scored if (m.blended or 0.0) <= policy.tier1_ceiling]
-    t2_picks = _one_per_vendor(
-        sorted(
-            t2_candidates,
-            key=lambda m: (
-                -((score_fn(m) or 0.0) / (m.blended or 1.0)),
-                -(score_fn(m) or 0.0),
-                m.id,
-            ),
-        ),
-        policy.picks,
-    )
+    # Tier 2: best cost-benefit among those reaching the floor of tier 1's best
+    t2_picks = _value_tier([m for m, _ in paid_scored], score_fn, policy)
 
     # Tier 3: highest score among free models
     free_candidates = [m for m in free_eligible]

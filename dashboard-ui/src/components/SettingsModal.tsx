@@ -238,17 +238,14 @@ const CLUSTERS_CONFIG = [
   },
 ] as const;
 
-// What every role shares when the cluster split is off: the plain mean of the three indices.
+// What every role shares when the cluster split is off: the intelligence index alone, the one the
+// catalogue publishes for far more models (no weights to show).
 const GENERAL_CONFIG = {
   key: "general",
   label: "Cluster geral",
   icon: "🧩",
   roles: ["Todos os Loompas"],
-  weights: [
-    { label: "INTEL", pct: "⅓", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
-    { label: "CODE", pct: "⅓", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
-    { label: "AGENTIC", pct: "⅓", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
-  ],
+  weights: [],
 } as const;
 
 type ClusterConfig = {
@@ -278,7 +275,7 @@ const TIERS_CONFIG = [
     key: "tier2",
     label: "Tier 2",
     sublabel: "Custo-Benefício / Execução Ágil",
-    rankedBy: "melhor custo-benefício (pontos por US$ 1M de tokens)",
+    rankedBy: "melhor custo-benefício (pontos por US$ 1M de tokens) entre os que atingem o piso de nota",
     badgeColor: "text-cyan-300 border-cyan-800/60 bg-cyan-950/40",
   },
   {
@@ -392,8 +389,20 @@ function ClusterScore({ cluster, m, mode }: { cluster: ClusterName; m: ModelPick
   if (v == null) return null;
   return (
     <span
-      className={`flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[11px] font-semibold ${mode === "value" ? "border-cyan-800/60 bg-cyan-950/70 text-cyan-300" : "border-amber-800/60 bg-amber-950/60 text-amber-300"}`}
-      title={mode === "value" ? "Custo-benefício: pontos de benchmark por US$ 1M de tokens" : "Nota deste cluster"}
+      className={`flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[11px] font-semibold ${
+        mode === "value"
+          ? "border-cyan-800/60 bg-cyan-950/70 text-cyan-300"
+          : cluster === "general"
+            ? "border-purple-800/60 bg-purple-950/60 text-purple-300"
+            : "border-amber-800/60 bg-amber-950/60 text-amber-300"
+      }`}
+      title={
+        mode === "value"
+          ? "Custo-benefício: pontos de benchmark por US$ 1M de tokens"
+          : cluster === "general"
+            ? "Nota de inteligência"
+            : "Nota deste cluster"
+      }
     >
       <span aria-hidden="true">{CLUSTER_ICON[cluster]}</span>
       {mode === "value" ? `${v} pts/$` : v.toFixed(1)}
@@ -416,9 +425,11 @@ const SORTS: { key: SortKey; label: string }[] = [
 const RECOMMENDED_PER_TIER = 12;
 
 /** The list one tier of one cluster offers, ranked the way that tier is meant to be read:
- * Tier 1 by the cluster's score, Tier 2 by what a dollar buys, Tier 3 by score among the free
- * ones. The catalogue's own picks (one per vendor) are flagged, not the only thing offered. */
-function recommendedFor(all: ModelPick[], cluster: ClusterName, tier: TierKey, ceiling: number): ModelPick[] {
+ * Tier 1 by the cluster's score, Tier 2 by what a dollar buys among the models within the ceiling
+ * that reach `floor` of Tier 1's best (the same rule as `_value_tier` in the catalogue), Tier 3 by
+ * score among the free ones. The catalogue's own picks (one per vendor) are flagged, not the only
+ * thing offered. */
+function recommendedFor(all: ModelPick[], cluster: ClusterName, tier: TierKey, ceiling: number, floor: number): ModelPick[] {
   // `eligible === false` already excludes every alias; the explicit check says why out loud.
   const eligible = all.filter((m) => m.eligible !== false && !m.alias);
   if (tier === "tier3") {
@@ -427,14 +438,15 @@ function recommendedFor(all: ModelPick[], cluster: ClusterName, tier: TierKey, c
       .sort((a, b) => (clusterScore(b, cluster) ?? 0) - (clusterScore(a, cluster) ?? 0))
       .slice(0, RECOMMENDED_PER_TIER);
   }
-  const paid = eligible.filter((m) => !isFree(m) && m.price > 0);
+  const under = eligible.filter((m) => !isFree(m) && m.price > 0 && m.price <= ceiling);
   if (tier === "tier1") {
-    return paid
-      .filter((m) => m.price <= ceiling)
+    return under
       .sort((a, b) => (clusterScore(b, cluster) ?? 0) - (clusterScore(a, cluster) ?? 0))
       .slice(0, RECOMMENDED_PER_TIER);
   }
-  return paid
+  const best = Math.max(0, ...under.map((m) => clusterScore(m, cluster) ?? 0));
+  return under
+    .filter((m) => (clusterScore(m, cluster) ?? 0) >= floor * best)
     .sort((a, b) => (clusterValue(b, cluster) ?? 0) - (clusterValue(a, cluster) ?? 0))
     .slice(0, RECOMMENDED_PER_TIER);
 }
@@ -537,6 +549,7 @@ function ModelPickerModal({
   tierTarget,
   clusterTarget,
   tier1Ceiling,
+  tier2Floor,
   catalog,
   clusters,
 }: {
@@ -545,6 +558,7 @@ function ModelPickerModal({
   tierTarget: TierKey;
   clusterTarget: ClusterName;
   tier1Ceiling: number;
+  tier2Floor: number;
   catalog: ModelProposalDTO | null;
   clusters: ClusterConfig[];
 }) {
@@ -570,7 +584,7 @@ function ModelPickerModal({
     return m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || (m.vendor ?? "").toLowerCase().includes(q);
   };
 
-  const recommended = recommendedFor(all, clusterTarget, tierTarget, tier1Ceiling).filter(matches);
+  const recommended = recommendedFor(all, clusterTarget, tierTarget, tier1Ceiling, tier2Floor).filter(matches);
   const activeCluster: ClusterName | null = cluster === "all" ? null : cluster;
   const extendedList = sortModels(all.filter(matches), sort, activeCluster);
 
@@ -589,7 +603,7 @@ function ModelPickerModal({
             <p className="mt-0.5 text-xs text-slate-400">
               {extended
                 ? "O catálogo inteiro, inclusive apelidos -latest e o que a recomendação descartou. Filtre por cluster para ver a nota dele."
-                : `Ordenados por ${tier.rankedBy}. A recomendação usa só versões fixas — apelidos -latest ficam em “mais modelos”.`}
+                : `Ordenados por ${tier.rankedBy}${tierTarget === "tier2" ? ` (${Math.round(tier2Floor * 100)}% da maior nota do Tier 1)` : ""}. A recomendação usa só versões fixas — apelidos -latest ficam em “mais modelos”.`}
             </p>
           </div>
           <button className="btn-ghost py-1 text-xs" onClick={onClose}>✕ Fechar</button>
@@ -893,7 +907,7 @@ function ModelsPanel({
             onChange={(e) => setClustersEnabled(e.target.checked)}
           />
           <span>
-            <span className="font-medium text-slate-200">Separar modelos por cluster de agentes (recomendado)</span>
+            <span className="font-medium text-slate-200">Separar modelos por cluster de agentes</span>
             <span className="mt-0.5 block text-slate-400">
               Ligado, cada grupo de Loompas tem a sua lista, pesada para o que ele faz. Desligado, todos usam um
               <strong className="text-slate-300"> cluster geral</strong> com os mesmos três tiers, ranqueado só pela nota de
@@ -946,12 +960,14 @@ function ModelsPanel({
                 {col.label}
               </div>
               <div className="text-[10px] text-slate-400">Loompas: {col.roles.join(", ")}</div>
-              <div className="flex flex-wrap items-center gap-1 pt-0.5 text-[10px]">
-                <span className="font-sans text-slate-500">Peso:</span>
-                {col.weights.map((w) => (
-                  <span key={w.label} className={`rounded border px-1 font-mono text-[9px] ${w.color}`}>{w.pct} {w.label}</span>
-                ))}
-              </div>
+              {col.weights.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 pt-0.5 text-[10px]">
+                  <span className="font-sans text-slate-500">Peso:</span>
+                  {col.weights.map((w) => (
+                    <span key={w.label} className={`rounded border px-1 font-mono text-[9px] ${w.color}`}>{w.pct} {w.label}</span>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2.5">
@@ -1104,6 +1120,7 @@ function ModelsPanel({
           clusterTarget={pickerTarget.cluster}
           tierTarget={pickerTarget.tier}
           tier1Ceiling={ceiling}
+          tier2Floor={s.models?.tier2_floor ?? 0.75}
           catalog={catalog}
           clusters={activeClusters}
         />

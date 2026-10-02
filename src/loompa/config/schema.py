@@ -245,7 +245,7 @@ class ModelsConfig(BaseModel):
     # Off: every role shares the `general` cluster, one 3-tier list instead of three.
     clusters_enabled: bool = True
     tier1_ceiling: float = Field(1.25, ge=0.0)
-    tier2_floor: float = Field(0.80, ge=0.0, le=1.0)
+    tier2_floor: float = Field(0.75, ge=0.0, le=1.0)
 
     def _on_tier_updated(self, tier: str, cands: list[ModelCandidate]) -> None:
         if not hasattr(self, "matrix") or not self.matrix:

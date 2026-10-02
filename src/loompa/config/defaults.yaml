@@ -38,7 +38,7 @@ budget:
 models:
   clusters_enabled: true    # false: every role shares one "general" cluster with the same 3 tiers
   tier1_ceiling: 1.25       # blended USD per 1M tokens ceiling for Tier 1 reasoning models
-  tier2_floor: 0.80         # quality floor fraction for Tier 2 execution models
+  tier2_floor: 0.75         # Tier 2 must reach this fraction of the best Tier 1 rating (under the ceiling)
   # Candidates are tried in order; a quota error or a 5xx falls through to the next one. Three
   # per tier, one per maker, so one model going down is not the tier going down.
   #

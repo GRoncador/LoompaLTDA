@@ -214,13 +214,32 @@ def test_every_model_left_out_is_counted_with_its_reason():
     assert ranking.total == len(CATALOG) and len(ranking.eligible) == 7
 
 
-def test_tier1_is_best_under_the_ceiling_and_tier2_cheapest_above_the_floor():
+def test_tier1_is_best_under_the_ceiling_and_tier2_best_value_above_the_floor():
     ranking = rank(parse_catalog({"data": CATALOG}), POLICY, TODAY)
     assert ranking.best_quality == pytest.approx(70)
     assert [m.id for m in ranking.tier1] == ["b/strong", "c/mid"]  # a/best costs too much
-    # floor = 80% of 70 = 56; the cheapest above it, one per vendor: d/cheap is d/cheaper's twin
+    # floor = 80% of tier 1's best (b/strong, 66) = 52.8; best points per dollar above it, one per
+    # vendor: d/cheap is d/cheaper's twin, and e/weak is the cheapest of all but below the floor
     assert [m.id for m in ranking.tier2] == ["d/cheaper", "i/limited"]
     assert "e/weak" not in {m.id for m in ranking.tier2}
+
+
+def test_the_tier2_floor_follows_tier1s_best_not_a_model_over_the_ceiling():
+    """A US$ 20 model raising the bar used to push tier 2 above the tier 1 budget; now tier 2
+    stays under the ceiling and only tier 1's best sets how good it has to be."""
+    cat = [
+        entry("a/frontier", 40, 40, coding=99, agentic=99),  # quality 99, way over the ceiling
+        entry("b/good", 0.5, 0.5, coding=60, agentic=60),  # quality 60: tier 1's best
+        entry("c/fine", 0.2, 0.2, coding=48, agentic=48),  # 80% of 60, a better ratio than b
+        entry("d/weak", 0.01, 0.01, coding=40, agentic=40),  # huge ratio, below 80% of 60
+        entry("e/pricey", 4, 4, coding=90, agentic=90),  # would pass the old floor, over budget
+    ]
+    ranking = rank(parse_catalog({"data": cat}), Policy(tier1_ceiling=1.0, tier2_floor=0.8), TODAY)
+    assert [m.id for m in ranking.tier2] == ["c/fine", "b/good"]
+
+
+def test_the_default_floor_is_three_quarters_of_tier1s_best():
+    assert Policy().tier2_floor == default_config().models.tier2_floor == 0.75
 
 
 def test_a_mandatory_reasoning_model_stays_when_its_effort_can_be_lowered():
@@ -687,9 +706,11 @@ def test_clusters_tier1_score_tier2_cost_benefit_tier3_free():
     assert all(p["score"] is not None for p in eng["tier1"])
     assert all(p["cost_benefit"] is not None for p in eng["tier1"])
 
-    # Tier 2: under ceiling ($5.0), ranked by cost-benefit (score / cost)
+    # Tier 2: under ceiling ($5.0), at least 80% of tier 1's best, ranked by cost-benefit
     assert len(eng["tier2"]) > 0
     assert all(p["price"] <= POLICY.tier1_ceiling for p in eng["tier2"])
+    assert all(p["score"] >= POLICY.tier2_floor * scores_t1[0] for p in eng["tier2"])
+    assert "e/weak" not in {p["id"] for p in eng["tier2"]}  # the best ratio, but too weak
     cb_t2 = [p["cost_benefit"] for p in eng["tier2"]]
     assert cb_t2 == sorted(cb_t2, reverse=True)
 

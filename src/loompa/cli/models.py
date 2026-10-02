@@ -30,7 +30,7 @@ def models_sync(
     tier2_floor: float = typer.Option(
         Policy.tier2_floor,
         "--tier2-floor",
-        help="Execução: fração da melhor nota do catálogo que o modelo precisa atingir.",
+        help="Execução: fração da melhor nota do tier 1 (abaixo do teto) que o modelo precisa atingir.",
     ),
     picks: int = typer.Option(
         Policy.picks, "--picks", help="Modelos por tier (um por fabricante)."

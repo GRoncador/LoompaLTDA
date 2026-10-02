@@ -41,6 +41,15 @@ do). Cost is blended 3 input : 1 output per 1M tokens (a tool loop re-reads its 
 * tier2: lowest cost among models with quality ≥ `--tier2-floor` × the best in the catalogue
   (default 0.80).
 
+  *Amended 2026-10-02:* the floor is anchored on tier1's best (the best rating under the ceiling,
+  in use or not), not on the best of the whole catalogue, and the default is 0.75. Inside that band,
+  still under the ceiling, tier2 takes the best points per dollar. The old anchor (a US$ 20 model)
+  let tier2 propose models dearer than tier1; the per-cluster view had no floor at all and put
+  near-free models with half the rating first, because the benchmark scale is compressed (a weak
+  model scores ~25 where the best cheap one scores ~45). A ratio is only safe among models that
+  are all good enough. The rule lives in one place (`_value_tier`), used by the proposal and by
+  every cluster.
+
 A plain quality/price ratio was rejected: it always puts the cheapest acceptable model first, in
 both tiers, and the founder values developer quality over cost. The defaults were read off the
 real catalogue: tier1 lands on Qwen3.8 Max, Grok 4.6 and GLM 5.3 (the preset's own tier1 is in
