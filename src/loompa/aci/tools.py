@@ -380,7 +380,10 @@ class ACI:
         return "\n".join(list(diff)[2:20])
 
     def tool_apply_patch(self, patch: str) -> str:
-        files = _parse_unified_diff(patch)
+        # models trained on OpenAI's apply_patch write its "*** Begin Patch" format (contas
+        # Sprint 2: refused as "unknown format", a round lost each time); both are accepted
+        v4a = patch.lstrip().startswith("*** Begin Patch")
+        files = _parse_v4a_patch(patch) if v4a else _parse_unified_diff(patch)
         if not files:
             raise ToolError("empty patch or unknown format (use a unified diff)")
         applied = []
@@ -555,6 +558,45 @@ def _parse_unified_diff(patch: str) -> dict[str, list[tuple[int, list[str]]]]:
                 hunk_lines.append(line)
     if current is not None and hunk_lines:
         files[current].append((hunk_start, hunk_lines))
+    return {k: v for k, v in files.items() if v}
+
+
+def _parse_v4a_patch(patch: str) -> dict[str, list[tuple[int, list[str]]]]:
+    """OpenAI's apply_patch format: `*** Update File: path` / `*** Add File: path`, hunks after
+    `@@` lines, ` `/`-`/`+` lines without line numbers. Hunks are located by their content."""
+    files: dict[str, list[tuple[int, list[str]]]] = {}
+    current: str | None = None
+    hunk: list[str] = []
+
+    def flush() -> None:
+        nonlocal hunk
+        while hunk and hunk[-1] == " ":  # a blank line between hunks is not context
+            hunk.pop()
+        if current is not None and hunk:
+            files.setdefault(current, []).append((1, hunk))
+        hunk = []
+
+    for line in patch.splitlines():
+        if line.startswith("*** Delete File:"):
+            raise ToolError("to delete a file use `delete_file`, not a patch")
+        head = re.match(r"\*\*\* (?:Update|Add) File: (.+)$", line)
+        if head:
+            flush()
+            current = head.group(1).strip()
+            files.setdefault(current, [])
+            continue
+        if line.startswith("***"):  # Begin/End Patch, End of File, Move to
+            if line.startswith("*** Move to:"):
+                raise ToolError("moving a file is not supported in a patch; write the new one")
+            continue
+        if line.startswith("@@"):
+            flush()
+            continue
+        if current is not None and line[:1] in (" ", "+", "-"):
+            hunk.append(line)
+        elif current is not None and line == "":
+            hunk.append(" ")  # an empty context line lost its leading space
+    flush()
     return {k: v for k, v in files.items() if v}
 
 

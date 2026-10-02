@@ -281,3 +281,25 @@ async def test_commands_never_run_with_colour_forced(tmp_path, monkeypatch):
     code = "import os; print(sorted(k for k in ('FORCE_COLOR', 'NO_COLOR') if k in os.environ))"
     res = await run_command(f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}", tmp_path)
     assert res.output.strip() == "['NO_COLOR']"
+
+
+async def test_aci_apply_patch_takes_openais_begin_patch_format(aci: ACI):
+    """contas Sprint 2: glm-5.3-flash wrote its patch as '*** Begin Patch' and it was refused
+    as an unknown format, a round lost each time."""
+    patch = """*** Begin Patch
+*** Update File: src/calc.py
+@@ def add(a, b):
+ def add(a, b):
+-    return a + b
++    return int(a) + int(b)
+
+*** Add File: src/money.py
++CENTS = 100
+*** End Patch"""
+    res = await aci.call("apply_patch", {"patch": patch})
+    assert res.ok, res.output
+    assert "int(a) + int(b)" in (aci.root / "src" / "calc.py").read_text()
+    assert (aci.root / "src" / "money.py").read_text() == "CENTS = 100\n"
+    gone = "*** Begin Patch\n*** Delete File: src/money.py\n*** End Patch"
+    res = await aci.call("apply_patch", {"patch": gone})
+    assert not res.ok and "delete_file" in res.output
