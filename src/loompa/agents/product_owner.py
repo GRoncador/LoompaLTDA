@@ -710,7 +710,12 @@ class ProductOwnerAgent(LoompaAgent):
         self.set_state("WORKING", detail="repriorizando o backlog")
         try:
             data = await self.ask_json(
-                RERANK_SYSTEM.format(language=self.language), user, max_tokens=1500
+                RERANK_SYSTEM.format(language=self.language),
+                user,
+                max_tokens=1500,
+                # ADR-0016: ordering titles whose facts are given; at the provider's deep default
+                # a 23-card rerank thought for 10+ min and held the founder's commit (contas Sprint 2)
+                reasoning_effort="low",
             )
         except Exception:  # noqa: BLE001
             return []
