@@ -350,3 +350,47 @@ async def test_an_epic_split_hands_its_dependents_to_the_children_and_never_spli
     assert child.stage != Stage.DONE and "children" not in child.extra  # not split again
     assert len([s for s in ctx.store.list_stories(factory.slug) if s["origin"] == "epic"]) == 2
     await ctx.aclose()
+
+
+async def test_the_plan_sees_what_its_dependencies_delivered_and_can_send_the_spec_back(
+    factory: Factory,
+):
+    """contas Sprint 2, S-049: its spec was written before S-047 and S-051 were delivered and
+    undid what the founder approved there; the Architect now sees those deliveries and sends a
+    spec that contradicts them back to the Spec Loompa."""
+    from loompa.agents import ArchitectAgent
+    from loompa.agents.architect import BOUNCED_KEY
+    from loompa.dependencies import delivered_brief
+
+    seen: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect":
+            seen.append(messages[-1].content)
+            return json.dumps(
+                {"blocker": "a spec deixa de aceitar ponto decimal, que S-001 entrega"}
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    po = ProductOwnerAgent(ctx)
+    a, b = (po.add_item(t).story_id for t in ("Centavos", "Testes legados"))
+    po.set_dependencies(b, [a])
+    assert delivered_brief(ctx.store, b) == ""  # nothing delivered yet: nothing to show
+    row = ctx.store.get_story(a)
+    state = {
+        **row["state"],
+        "acceptance": ["aceita '12.50' e '12,50'"],
+        "founder_notes": ["arquivo antigo continua sendo lido"],
+        "worker_summary": "T1: centavos",
+    }
+    ctx.store.update_story(a, stage=Stage.DONE.value, state=state)
+    brief = delivered_brief(ctx.store, b)
+    assert "S-001: Centavos" in brief and "aceita '12.50' e '12,50'" in brief
+    assert "arquivo antigo continua sendo lido" in brief and "T1: centavos" in brief
+
+    st = load_state(ctx, b)
+    res = await ArchitectAgent(ctx).run(st)
+    assert not res.ok and st.extra[BOUNCED_KEY] and "ponto decimal" in st.handoff["plan"]
+    assert "## What the stories this one builds on delivered" in seen[0]
+    await ctx.aclose()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent
+from loompa.dependencies import delivered_brief
 from loompa.engine.state import StoryState
 from loompa.speckit import SpecArtifacts, story_dir
 
@@ -95,6 +96,7 @@ class ProductAgent(LoompaAgent):
                 else ""
             )
             + self._builds_on(state)
+            + delivered_brief(self.ctx.store, state.story_id)
             + f"## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
         )
         data = await self.ask_json_with_tools(

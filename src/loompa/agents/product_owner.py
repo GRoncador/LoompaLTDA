@@ -42,6 +42,7 @@ from loompa.conversations import (
     render_transcript,
     to_scale,
 )
+from loompa.dependencies import delivered_brief
 from loompa.engine.state import Stage, StoryKind, StoryState
 from loompa.risk import declared_dependencies
 from loompa.speckit import story_dir
@@ -59,7 +60,11 @@ engineering starts: what you let through is what gets built. Apply the "No Inven
 - Dependencies: a criterion that needs a library neither declared by the project nor allowed by
   the constitution cannot be built as specified.
 - Regression: when the story changes existing behaviour, the spec says what stays as it is.
-  Behaviour changed without saying so is missing.
+  Behaviour changed without saying so is missing. Removing or changing behaviour the product
+  already has (in the code, or delivered by a story this one builds on) is the founder's
+  decision: a spec that does it as an assumption or by putting it out of scope, without the
+  founder's notes asking for it, is invented scope. Why: a spec dropped the decimal point and
+  the reading of old data files that the founder had just approved, as "assumptions".
 - Assumptions: a reasonable default the request left open is fine when it is listed under
   assumptions; one that changes what the founder asked for is invented scope.
 - When the story handles user input, money, personal data or security, its non-functional
@@ -854,6 +859,7 @@ class ProductOwnerAgent(LoompaAgent):
                 if state.founder_notes
                 else ""
             )
+            + delivered_brief(self.ctx.store, state.story_id)
             + f"## Spec under review\n{spec[:6000]}\n\n"
             + f"## Declared dependencies\n{declared_dependencies(self.ctx.root) or '(none)'}\n\n"
             + f"## Constitution (excerpt)\n{self.constitution(3000)}"

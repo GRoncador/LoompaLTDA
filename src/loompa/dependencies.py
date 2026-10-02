@@ -222,3 +222,34 @@ def note_dependents(store: Any, slug: str, msg: Any) -> None:
     )
     if line not in msg.impact:
         msg.impact = f"{msg.impact} {line}".strip()
+
+
+def delivered_brief(store: Any, story_id: str, *, limit: int = 4000) -> str:
+    """What the stories `story_id` depends on delivered and the founder approved: their criteria,
+    the founder's guidance on them and the Worker's summary. contas Sprint 2, S-049: its spec was
+    written before S-047 and S-051 were delivered (all specs of a chain come first), and it undid
+    what the founder had approved in them (a decimal point, reading old data files)."""
+    parts: list[str] = []
+    for dep in deps_of(store.get_story(story_id)):
+        row = store.get_story(dep) or {}
+        if row.get("stage") != Stage.DONE:
+            continue
+        st = row.get("state") or {}
+        lines = [f"### {dep}: {row.get('title', '')}"]
+        if st.get("acceptance"):
+            lines.append("Acceptance criteria it met:")
+            lines += [f"- {c}" for c in st["acceptance"][:15]]
+        if st.get("founder_notes"):
+            lines.append("The founder's guidance on it, which its delivery follows:")
+            lines += [f"- {n[:600]}" for n in st["founder_notes"][-5:]]
+        if st.get("worker_summary"):
+            lines.append(f"What was built:\n{str(st['worker_summary'])[:1200]}")
+        parts.append("\n".join(lines))
+    if not parts:
+        return ""
+    text = "\n\n".join(parts)
+    return (
+        "## What the stories this one builds on delivered (approved by the founder)\n"
+        + (text if len(text) <= limit else text[:limit] + "\n…")
+        + "\n\n"
+    )
