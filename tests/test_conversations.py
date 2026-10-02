@@ -912,6 +912,8 @@ async def test_a_meeting_retires_an_obsolete_backlog_card(factory: Factory):
     assert chats.board.require(conv.id).draft.retire == {old: "já configurado à mão"}
     result = await chats.commit(conv.id)  # retiring alone is enough to save the meeting
     assert result.retired == [old]
+    closing = chats.board.require(conv.id, open_only=False).turns[-1].text
+    assert f"Saíram do backlog (cancelados): {old}." in closing
     assert ctx.store.get_story(old)["stage"] == Stage.CANCELLED
     assert ctx.store.get_story(keep)["stage"] == Stage.BACKLOG
     assert events(ctx, "backlog.retired")[0]["payload"]["reason"] == "já configurado à mão"

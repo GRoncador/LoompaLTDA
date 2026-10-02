@@ -646,6 +646,8 @@ def _changes_summary(result: CommitResult, conv: Conversation) -> str:
         parts.append(f"voltaram ao backlog: {', '.join(result.withdrawn)}")
     if result.restarted:
         parts.append(f"recomeçam do zero: {', '.join(result.restarted)}")
+    if result.retired:
+        parts.append(f"saíram do backlog (cancelados): {', '.join(result.retired)}")
     if not parts:
         return f"Nada mudou no {conv.draft.sprint_id}."
     return f"Pronto, {conv.draft.sprint_id} ajustado: " + "; ".join(parts) + "."
@@ -667,6 +669,8 @@ def _meeting_summary(result: CommitResult, started: bool, planned: bool = False)
         text += "."
     if result.skipped:
         text += " Ficaram fora do sprint por já estarem em andamento: " + ", ".join(result.skipped)
+    if result.retired:
+        text += f" Saíram do backlog (cancelados): {', '.join(result.retired)}."
     return text
 
 
