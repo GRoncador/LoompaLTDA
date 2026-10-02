@@ -307,7 +307,7 @@ async def test_the_router_traces_a_loop_and_tries_the_next_model(tmp_path):
     )
     rc = await router.complete("inspector", [Message("user", "u")], story_id="S-1")
     assert rc.response.text == "veredito" and rc.candidate.model == "ok"
-    assert [t for t, _ in events] == ["llm.loop", "llm.fallthrough"]
+    assert [t for t, _ in events] == ["llm.loop", "llm.fallthrough", "llm.rested"]
     assert events[1][1]["reason"] == "loop"
     (span,) = [s for s in read_trace(tmp_path / "S-1.jsonl").spans if s.get("kind") == "llm"]
     first = span["attrs"]["attempts"][0]

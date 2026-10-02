@@ -41,6 +41,7 @@ CUT_TAIL_CHARS = 600
 LONG_REASONING_TOKENS = 16384
 
 
+RUNAWAY_REST_S = 3600.0  # a candidate that ran away for a role goes last for that role this long
 REASONING_KEEP_CHARS = 12_000  # the loop detector's window: enough to tell a loop from thinking
 
 
@@ -143,6 +144,19 @@ class ModelRouter:
         self._cooldown: dict[
             str, float
         ] = {}  # "provider/model" -> loop time until which it's skipped
+        # ("provider/model", role) -> loop time until which that role tries it last: it ran away
+        # there (cut at the ceiling or looped). contas Sprint 2: the Product Owner's first
+        # candidate thought to the 96k ceiling or looped on 6 of 9 calls (mean 8 min, one review
+        # 44 min) while the next one in the same tier answered in about a minute.
+        self._rested: dict[tuple[str, str], float] = {}
+
+    def _rest(self, key: str, role: str, story_id: str | None, who: str, why: str) -> None:
+        """`key` ran away for `role`: that role tries it last for RUNAWAY_REST_S. The model list
+        is untouched (ADR-0011); only the order within the tier changes, as cooldown does."""
+        loop = asyncio.get_running_loop()
+        if self._rested.get((key, role), 0) <= loop.time():
+            self._event("llm.rested", story_id, who, model=key, role=role, reason=why)
+        self._rested[(key, role)] = loop.time() + RUNAWAY_REST_S
 
     def provider(self, name: str) -> LLMProvider:
         if name not in self._providers:
@@ -444,6 +458,11 @@ class ModelRouter:
             refs = self.tracer.messages(trace_story, [Message("assistant", text)])
             return refs[0] if refs else None
 
+        # same candidates, same tier: one that ran away for this role is tried last for a while
+        cands = sorted(
+            cands,
+            key=lambda c: self._rested.get((f"{c.provider}/{c.model}", role), 0) > loop.time(),
+        )
         for cand in cands:
             key = f"{cand.provider}/{cand.model}"
             if self._cooldown.get(key, 0) > loop.time():
@@ -557,6 +576,7 @@ class ModelRouter:
                     self._event(
                         "llm.fallthrough", story_id, who, model=key, role=role, reason="loop"
                     )
+                    self._rest(key, role, story_id, who, "loop")
                     resp = None
                     break  # next candidate, same effort
                 except LLMError as exc:
@@ -635,6 +655,7 @@ class ModelRouter:
                         reason="cut",
                         max_tokens=budget,
                     )
+                    self._rest(key, role, story_id, who, "cut")
                     resp = None
                     break
                 log.warning(

@@ -651,7 +651,7 @@ async def test_a_cut_never_lowers_the_effort_and_gives_up_plainly_at_the_ceiling
         (2000, ""),
         (4000, ""),
     ]
-    assert [t for t, _ in events] == ["llm.cut", "llm.cut", "llm.fallthrough"]
+    assert [t for t, _ in events] == ["llm.cut", "llm.cut", "llm.fallthrough", "llm.rested"]
 
 
 async def test_a_low_call_stays_low_when_it_is_cut():
@@ -704,3 +704,24 @@ async def test_a_retried_error_is_an_event_not_a_silent_restart():
     (retry,) = [kw for t, kw in seen if t == "llm.retry"]
     assert retry["story_id"] == "S-44" and "encerrada" in retry["error"] and "lost_s" in retry
     await router.aclose()
+
+
+async def test_a_candidate_that_ran_away_for_a_role_goes_last_for_that_role():
+    """contas Sprint 2: the Product Owner's first candidate thought to the ceiling on most calls
+    (one spec review took 44 min) while the next one in the tier answered in about a minute."""
+    cfg = _small_rooms(two_provider_matrix(), full=1000, ceiling=2000)
+    runaway = _Overthinker("gemini")
+    good = MockProvider("deepseek", script=lambda *a: '{"ok": true}')
+    events: list[tuple[str, dict]] = []
+    router = ModelRouter(
+        cfg,
+        providers={"gemini": runaway, "deepseek": good},
+        on_event=lambda t, **kw: events.append((t, kw)),
+    )
+    await router.complete("product_owner", [Message("user", "a")])
+    tried = len(runaway.calls)
+    assert tried and [kw["role"] for t, kw in events if t == "llm.rested"] == ["product_owner"]
+    rc = await router.complete("product_owner", [Message("user", "b")])
+    assert rc.candidate.provider == "deepseek" and len(runaway.calls) == tried  # tried last now
+    await router.complete("worker", [Message("user", "c")])
+    assert len(runaway.calls) > tried  # another role keeps the tier's order
