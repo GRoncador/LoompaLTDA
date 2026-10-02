@@ -90,7 +90,35 @@ async def test_a_sleeping_machine_is_told_once_and_is_not_a_stall(factory: Facto
     assert "computador" in note.title and note.executive_audit() == []
     sched._watch()  # the next tick sees no new sleep: nothing more is said
     assert event_types(ctx) == ["engine.slept", "inbox.new"]
+    # another sleep while the note is unread adds to it (tamagotchi-retro got four in an hour)
+    sched._tick = (time.time() - 600, time.monotonic())
+    sched._watch()
+    (note,) = ctx.store.list_messages(ctx.slug, status="pending")
+    assert "2 vezes, somando cerca de 25 minutos" in note.context and note.executive_audit() == []
     task.cancel()
+    await ctx.aclose()
+
+
+async def test_a_network_failure_right_after_a_wake_does_not_spend_a_recovery(factory: Factory):
+    """tamagotchi-retro: three wakes in a row, the network still down each time, three
+    recoveries spent and the story sent to the founder as a persistent failure."""
+    from loompa.agents.ops import RETRY_AFTER_WAKE_S, OpsAgent
+    from loompa.engine.state import StoryState
+    from loompa.llm import LLMError
+
+    ctx = make_ctx(factory, dry_run=True)
+    ops, state = OpsAgent(ctx), StoryState(story_id="S-1", title="t")
+    down = LLMError(
+        "todos os modelos do tier falharam: openrouter: falha de rede (ConnectError)",
+        retryable=True,
+    )
+    ctx.woke_at = time.monotonic()
+    for _ in range(5):
+        assert ops.on_failure(state, "dev", down) == RETRY_AFTER_WAKE_S
+    assert not state.extra.get("ops_incident")
+    ctx.woke_at = time.monotonic() - 3600  # long awake: a network failure is an incident again
+    assert ops.on_failure(state, "dev", down) is not None
+    assert state.extra["ops_incident"]["recoveries"] == 1
     await ctx.aclose()
 
 

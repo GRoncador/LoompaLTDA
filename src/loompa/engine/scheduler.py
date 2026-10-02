@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import time
 import traceback
@@ -43,6 +44,28 @@ log = logging.getLogger("loompa.scheduler")
 SLEPT_S = 60.0
 # ...and a sleep this long, with stories running, is worth one note to the founder.
 SLEEP_NOTE_S = 300.0
+SLEEP_TITLE = "A fábrica ficou parada enquanto o computador dormia"
+
+
+def _sleep_counts(context: str) -> tuple[float, int]:
+    """Minutes and times a pending sleep note already counts (read back from its own text)."""
+    times = re.search(r"(\d+) vezes", context)
+    minutes = re.search(r"cerca de (\d+) minutos", context)
+    return (float(minutes.group(1)) if minutes else 0.0, int(times.group(1)) if times else 1)
+
+
+def _sleep_context(minutes: float, times: int) -> str:
+    when = (
+        f"por cerca de {minutes:.0f} minutos"
+        if times == 1
+        else f"{times} vezes, somando cerca de {minutes:.0f} minutos"
+    )
+    return (
+        f"O computador entrou em repouso {when} e as entregas em andamento pararam nesse tempo. "
+        "Elas retomaram sozinhas quando ele voltou."
+    )
+
+
 _WATCHDOG_EVENTS = frozenset({"story.stalled"})  # never count as the story moving
 
 
@@ -260,20 +283,32 @@ class Scheduler:
         """The machine slept: stories stopped with it (`contas`, 2026-09-30, twice). Told once per
         sleep, and only when there was work in flight."""
         running = sorted(self.running)
+        self.ctx.woke_at = time.monotonic()  # the network may still be down: see OpsAgent
         self.ctx.emit("engine.slept", minutes=round(slept / 60, 1), running=running)
         if not running or slept < SLEEP_NOTE_S:
+            return
+        # one note while the founder has not read it, with the minutes added up: a Mac that
+        # dark-wakes for a moment and sleeps again sent four of these in an hour (tamagotchi-retro)
+        pending = next(
+            (
+                m
+                for m in self.ctx.store.list_messages(self.ctx.slug, "pending")
+                if m.title == SLEEP_TITLE
+            ),
+            None,
+        )
+        if pending is not None:
+            before_min, before_times = _sleep_counts(pending.context)
+            pending.context = _sleep_context(before_min + slept / 60, before_times + 1)
+            self.ctx.store.put_message(pending)
             return
         self.ctx.inbox(
             FounderMessage(
                 factory=self.ctx.slug,
                 kind=MessageKind.INFO,
                 sender=OpsAgent.display,
-                title="A fábrica ficou parada enquanto o computador dormia",
-                context=(
-                    f"O computador entrou em repouso por cerca de {slept / 60:.0f} minutos e as "
-                    "entregas em andamento pararam nesse tempo. Elas retomaram sozinhas quando ele "
-                    "voltou."
-                ),
+                title=SLEEP_TITLE,
+                context=_sleep_context(slept / 60, 1),
                 impact=(
                     "Nada se perdeu. Para a fábrica trabalhar sem pausas, deixe o computador na "
                     "tomada e sem repouso automático enquanto ela roda."

@@ -8,6 +8,7 @@ backoff and self-healing. It consumes zero LLM tokens.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -34,6 +35,11 @@ class StoryStalled(RuntimeError):
 
 # A failure that is not an instability is tried again without waiting: time will not change it.
 RETRY_AT_ONCE_S = 1.0
+# Right after the machine wakes the network is often still down (a dark wake may last seconds):
+# a network failure then is the sleep, not the story. tamagotchi-retro (2026-10-01) spent its
+# three recoveries on three wakes in a row and went to the founder as a persistent failure.
+WAKE_GRACE_S = 300.0
+RETRY_AFTER_WAKE_S = 30.0
 
 
 @dataclass
@@ -42,6 +48,7 @@ class Triage:
     cause: str  # plain pt-BR sentence fragment, e.g. "o serviço de IA atingiu o limite de uso"
     # A setup problem (no API key): trying again cannot fix it, the founder must.
     setup: bool = False
+    network: bool = False  # the connection itself failed (no answer at all)
 
 
 def triage(exc: BaseException) -> Triage:
@@ -67,10 +74,12 @@ def triage(exc: BaseException) -> Triage:
         if any(k in text for k in ("cooldown", "cota", "limite", "429")):
             return Triage(True, "o serviço de IA atingiu o limite de uso por alguns minutos")
         if "rede" in text:
-            return Triage(True, "houve instabilidade de rede ao falar com o serviço de IA")
+            return Triage(
+                True, "houve instabilidade de rede ao falar com o serviço de IA", network=True
+            )
         return Triage(True, "o serviço de IA ficou instável por alguns minutos")
     if isinstance(exc, httpx.HTTPError | ConnectionError | TimeoutError):
-        return Triage(True, "houve instabilidade de rede")
+        return Triage(True, "houve instabilidade de rede", network=True)
     if "locked" in text or "busy" in text:
         return Triage(True, "o banco de dados local estava ocupado")
     return Triage(False, "aconteceu um problema inesperado nesta etapa")
@@ -98,6 +107,18 @@ class OpsAgent(LoompaAgent):
         cut even at full room, an unexpected answer or error) is tried again at once."""
         t = triage(exc)
         incident = dict(state.extra.get(INCIDENT_KEY) or {})
+        woke = getattr(self.ctx, "woke_at", None)
+        if t.network and woke is not None and time.monotonic() - woke < WAKE_GRACE_S:
+            self.ctx.emit(
+                "story.retry",
+                story_id=state.story_id,
+                node=node,
+                wait_s=RETRY_AFTER_WAKE_S,
+                recoveries=int(incident.get("recoveries", 0)),
+                cause=t.cause,
+                after_sleep=True,
+            )
+            return RETRY_AFTER_WAKE_S  # not counted: the sleep took the network, not the story
         recoveries = int(incident.get("recoveries", 0)) + 1
         incident.update(node=node, cause=t.cause, recoveries=recoveries, transient=t.transient)
         state.extra[INCIDENT_KEY] = incident

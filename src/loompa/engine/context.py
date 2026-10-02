@@ -39,6 +39,7 @@ class EngineContext:
     secrets: Secrets = field(default_factory=Secrets)
     tracer: Tracer = field(default_factory=Tracer)
     closed: bool = False
+    woke_at: float | None = None  # time.monotonic() when the engine last saw the machine wake
     _mcp: McpHub | None = field(default=None, repr=False)
 
     @property
