@@ -287,3 +287,22 @@ async def test_a_meeting_cannot_take_out_a_dependency_and_leave_its_dependent(fa
     result = await chats.commit(conv.id)
     assert sorted(result.withdrawn) == [a, b]
     await ctx.aclose()
+
+
+async def test_a_dependent_spec_reads_what_its_dependency_decided(factory: Factory):
+    """contas Sprint 2: the spec of the budget-in-summary story asked the founder where the
+    limits are stored, a decision already in the spec of the story it builds on."""
+    from loompa.agents.product import ProductAgent
+    from loompa.speckit import story_dir
+
+    ctx = make_ctx(factory, dry_run=True)
+    po = ProductOwnerAgent(ctx)
+    a, b = (po.add_item(t).story_id for t in ("Definir limite", "Mostrar orçamento"))
+    po.set_dependencies(b, [a])
+    spec = story_dir(ctx.root, a).spec
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text("# Spec\nOs limites ficam em limites.json, um por categoria.\n", "utf-8")
+    text = ProductAgent(ctx)._builds_on(load_state(ctx, b))
+    assert f"### {a}: Definir limite" in text and "limites.json" in text
+    assert ProductAgent(ctx)._builds_on(load_state(ctx, a)) == ""  # no dependency, no section
+    await ctx.aclose()

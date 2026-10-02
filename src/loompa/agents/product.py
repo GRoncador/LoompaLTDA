@@ -25,6 +25,10 @@ Rules:
 - `assumptions`: every default you chose because the request did not say (a format, a limit, who
   uses it). State them here instead of hiding them in criteria: the Product Owner checks them
   against what the founder asked.
+- When the story builds on others (their specs are below), what those specs decide (data, where
+  it is stored, commands, formats) is given: build on it and never ask the founder about it. When a
+  story it builds on has no spec yet, take the simplest reading of its request and write that
+  choice in `assumptions`; it is technical, not the founder's decision.
 - `needs_decision`: true only for a genuinely blocking product decision (two viable paths with
   business impact); then `question`, `context` and 2-3 short `options` in plain, non-technical
   {language} for the founder. Otherwise false, and open points go to `questions` as information.
@@ -41,6 +45,25 @@ Write the text values in {language}.
 class ProductAgent(LoompaAgent):
     role = "product"
     display = "Spec Loompa"
+
+    def _builds_on(self, state: StoryState) -> str:
+        """The stories this one depends on (ADR-0021), with their specs when written. Without
+        them the spec of S-044 (budget in the monthly summary) asked the founder where the limits
+        are stored, a decision of S-043's spec (contas Sprint 2)."""
+        row = self.ctx.store.get_story(state.story_id) or {}
+        parts = []
+        for dep in row.get("depends_on") or []:
+            other = self.ctx.store.get_story(dep) or {}
+            spec = story_dir(self.ctx.root, dep).spec
+            text = spec.read_text(encoding="utf-8")[:6000] if spec.is_file() else "(no spec yet)"
+            parts.append(f"### {dep}: {other.get('title', '')}\n{text}")
+        if not parts:
+            return ""
+        return (
+            "## Stories this one builds on (their decisions are given)\n"
+            + "\n\n".join(parts)
+            + "\n\n"
+        )
 
     async def run(self, state: StoryState) -> AgentResult:
         self.set_state("WORKING", state, detail="escrevendo spec.md")
@@ -71,6 +94,7 @@ class ProductAgent(LoompaAgent):
                 if state.handoff.get("plan")
                 else ""
             )
+            + self._builds_on(state)
             + f"## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
         )
         data = await self.ask_json_with_tools(
