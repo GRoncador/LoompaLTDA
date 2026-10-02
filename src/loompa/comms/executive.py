@@ -132,6 +132,10 @@ _JARGON: dict[str, str] = {
     r"\bdeadlock\b": "travamento",
     r"\bOOM\b": "falta de memória",
     r"\b5\d\d\b(?= error)": "erro do servidor",
+    # a plan's task ids ("T1") are the factory's bookkeeping, not the founder's (contas Sprint 2:
+    # "Bloqueio na criação de arquivo de testes para a tarefa T1")
+    r"\btarefa T(\d{1,3})\b": r"tarefa \1",
+    r"\bT(\d{1,3})\b": r"tarefa \1",
 }
 
 _FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -143,6 +147,7 @@ _FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("file_line_ref", _FILE_LINE),
     ("absolute_path", re.compile(r"(?<![\w/])/(Users|home|var|tmp|opt)/[\w./\-]+")),
     ("hex_identifier", _HEX_ID),
+    ("task_id", re.compile(r"\bT\d{1,3}\b")),
     ("terminal_noise", re.compile(r"\$ (pytest|npm|pip|uv|ruff|git) ")),
     ("shell_prompt", re.compile(r"^\s*[\$#>] ", re.M)),
     ("ansi_escape", _ANSI),
