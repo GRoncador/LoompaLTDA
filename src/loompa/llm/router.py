@@ -150,6 +150,19 @@ class ModelRouter:
         # 44 min) while the next one in the same tier answered in about a minute.
         self._rested: dict[tuple[str, str], float] = {}
 
+    def remember_rested(self, events: list[dict[str, Any]], now_iso_: str) -> None:
+        """Rests still running from `llm.rested` events (a restarted engine keeps them): each
+        lasts RUNAWAY_REST_S from when it was recorded."""
+        from datetime import datetime
+
+        now = datetime.fromisoformat(now_iso_)
+        mono = time.monotonic()
+        for e in events:
+            p = e.get("payload") or {}
+            age = (now - datetime.fromisoformat(e["created_at"])).total_seconds()
+            if p.get("model") and p.get("role") and age < RUNAWAY_REST_S:
+                self._rested[(p["model"], p["role"])] = mono + RUNAWAY_REST_S - age
+
     def _rest(self, key: str, role: str, story_id: str | None, who: str, why: str) -> None:
         """`key` ran away for `role`: that role tries it last for RUNAWAY_REST_S. The model list
         is untouched (ADR-0011); only the order within the tier changes, as cooldown does."""

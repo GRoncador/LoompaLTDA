@@ -725,3 +725,25 @@ async def test_a_candidate_that_ran_away_for_a_role_goes_last_for_that_role():
     assert rc.candidate.provider == "deepseek" and len(runaway.calls) == tried  # tried last now
     await router.complete("worker", [Message("user", "c")])
     assert len(runaway.calls) > tried  # another role keeps the tier's order
+
+
+def test_a_rest_survives_an_engine_restart():
+    from datetime import UTC, datetime, timedelta
+
+    router = ModelRouter(two_provider_matrix(), providers={})
+    now = datetime.now(UTC)
+    router.remember_rested(
+        [
+            {
+                "created_at": (now - timedelta(minutes=10)).isoformat(),
+                "payload": {"model": "gemini/gemini-3.5-flash-lite", "role": "product_owner"},
+            },
+            {
+                "created_at": (now - timedelta(hours=2)).isoformat(),
+                "payload": {"model": "deepseek/deepseek-chat", "role": "worker"},
+            },
+        ],
+        now.isoformat(),
+    )
+    assert ("gemini/gemini-3.5-flash-lite", "product_owner") in router._rested
+    assert ("deepseek/deepseek-chat", "worker") not in router._rested  # an old rest is over

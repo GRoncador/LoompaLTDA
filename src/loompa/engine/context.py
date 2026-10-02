@@ -100,6 +100,7 @@ class EngineContext:
         )
         ctx._redact_traces()
         ctx._export_traces()
+        ctx._remember_rested()
         ctx.tracer.prune(factory.config.trace.retention_days)
         if not ctx.router.tracer.enabled:
             ctx.router.tracer = ctx.tracer
@@ -130,6 +131,22 @@ class EngineContext:
         self.tracer.set_redaction(lambda text: redact_secrets(text, values))
         if self.tracer.exporter is not None:
             self.tracer.exporter.redact = lambda text: redact_secrets(text, values)
+
+    def _remember_rested(self) -> None:
+        """A candidate rested for a role (it ran away there) stays rested across an engine
+        restart: contas Sprint 2 restarted and the Product Owner went back to its runaway."""
+        from datetime import UTC, datetime, timedelta
+
+        from loompa.store import now_iso
+
+        since = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        rested = [
+            e
+            for e in self.store.events_between(self.slug, since, now_iso())
+            if e["type"] == "llm.rested"
+        ]
+        if rested and hasattr(self.router, "remember_rested"):
+            self.router.remember_rested(rested, now_iso())
 
     def _export_traces(self) -> None:
         """The optional OTLP copy of the trace (`trace.otlp`, off by default). Without the
