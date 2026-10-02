@@ -33,6 +33,12 @@ if TYPE_CHECKING:
     from loompa.mcp import McpSession
 
 PRUNED = "[pruned]"
+EXTERNAL = "<external_data"  # how `loompa/mcp` wraps what web tools return
+# Web results kept verbatim through pruning, newest first: fetching them again costs a round and a
+# paid search, and they are what a research question is for. Seen on `contas` Sprint 2: the
+# Analyst read code after four searches, the pruning dropped the searches, and it answered that the
+# results "were not available to read".
+KEEP_EXTERNAL_CHARS = 24_000
 READ_TOOLS = frozenset({"read_file", "list_dir", "search", "find_symbol"})
 WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file", "fix_lint"})
 RUN_TOOLS = frozenset({"run_tests", "run_lint"})
@@ -203,10 +209,18 @@ def prune_tool_history(
     With `keep_files_chars`, older `read_file` results also stay verbatim, newest first and up to
     that many characters, while they are still the latest read of their file and nothing wrote
     to it since. Pruning those is what sent the Worker back to read the same file again (`contas`,
-    Fase 7 item 7.11): a re-read costs a whole round, which re-sends the full history."""
+    Fase 7 item 7.11): a re-read costs a whole round, which re-sends the full history.
+
+    Results of web tools (`<external_data>`) stay verbatim too, newest first, up to
+    `KEEP_EXTERNAL_CHARS`."""
     tool_idx = [i for i, m in enumerate(messages) if m.role == "tool"]
     older = tool_idx[:-keep_last] if keep_last else tool_idx
     keep: set[int] = set()
+    web_budget = KEEP_EXTERNAL_CHARS
+    for i in reversed(older):
+        if messages[i].content.startswith(EXTERNAL) and len(messages[i].content) <= web_budget:
+            keep.add(i)
+            web_budget -= len(messages[i].content)
     if keep_files_chars and older:
         calls = _calls_by_id(messages)
         latest: set[str] = set()  # files whose latest read (or write) is newer than index i

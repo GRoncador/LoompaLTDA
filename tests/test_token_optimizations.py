@@ -31,6 +31,26 @@ def test_prune_collapses_old_tool_results_only():
     assert prune_tool_history(short, keep_last=1) == 0  # short outputs untouched
 
 
+def test_prune_keeps_web_results_the_research_is_for():
+    """contas Sprint 2: four searches, then code reads; the pruning dropped the searches and the
+    Analyst answered that the results "were not available to read"."""
+    web = '<external_data source="tavily/tavily_search">\n' + "r" * 5000 + "\n</external_data>"
+    msgs = [Message("system", "s"), Message("user", "u")]
+    for i, (name, content) in enumerate(
+        [("tavily_search", web)] * 4
+        + [("read_file", "f\n" + "x" * 3000)] * 8
+        + [("tavily_search", web)] * 2
+    ):
+        msgs.append(Message("assistant", "", tool_calls=[ToolCall(f"c{i}", name, {})]))
+        msgs.append(Message("tool", content, tool_call_id=f"c{i}", name=name))
+    prune_tool_history(msgs, keep_last=3)
+    tools = [m for m in msgs if m.role == "tool"]
+    searches = [t for t in tools if t.name == "tavily_search"]
+    assert all(t.content == web for t in searches)  # the 4 older ones fit the web budget
+    reads = [t for t in tools if t.name == "read_file"]
+    assert all(t.content.startswith("[pruned]") for t in reads[:-1])
+
+
 @respx.mock
 async def test_anthropic_marks_cached_system_block(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
