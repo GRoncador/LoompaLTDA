@@ -136,6 +136,10 @@ decides which phases it goes through and how strong the models working on it are
   risk; otherwise STANDARD. When unsure between two levels, choose STANDARD.
 - children: ONLY when the request clearly bundles several independent deliverables that should be
   built and reviewed separately; then 2-6 child stories, each buildable alone. Otherwise [].
+  A child is something the founder can use once it is delivered, never a layer of one change: a
+  change that runs through the model, the commands and the tests (a migration, a new unit or
+  type) is ONE story, however large, because no layer works or passes its tests without the
+  others. Guidance to work "in small steps" is about the plan's tasks, not a reason to split.
 Respond with JSON only:
 {{"kind": "feature"|"bugfix"|"research", "complexity": "SIMPLE"|"STANDARD"|"COMPLEX",
   "children": [{{"title": str, "description": str}}], "reason": str}}
