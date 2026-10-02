@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Drawer, Row } from "./AgentDrawer";
+import LoompaFigure, { ROLE_NAME } from "./LoompaFigure";
 
 type Tab = "spec" | "plan" | "tasks" | "research" | "diff" | "log";
 type Diff = { source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string };
@@ -52,15 +53,46 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint }: { slug:
         {tab === "diff" ? (
           <DiffView diff={diff} />
         ) : tab === "log" ? (
-          <ul className="space-y-1 text-xs text-slate-300">
-            {data.commits?.map((c: string, i: number) => <li key={`c${i}`}>✅ {c}</li>)}
-            {data.checkpoints?.map((c: any) => <li key={c.id} className="text-slate-500">{c.created_at.slice(11, 19)} · {c.node} → {c.stage}</li>)}
-          </ul>
+          <History history={data.history ?? []} commits={data.commits ?? []} />
         ) : (
           <pre className="whitespace-pre-wrap font-mono text-xs text-slate-300">{data.docs?.[tab] ?? "(ainda não gerado)"}</pre>
         )}
       </div>
     </Drawer>
+  );
+}
+
+type Step = { id: number; at: string; node: string; stage: string; role: string; summary: string };
+
+/** What happened at each step, said by who did it (11.3), oldest first; then the saved versions. */
+function History({ history, commits }: { history: Step[]; commits: string[] }) {
+  const day = (iso: string) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  const time = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="space-y-3 text-xs">
+      {history.length === 0 ? <p className="text-slate-400">Nada aconteceu ainda.</p> : (
+        <ol className="space-y-1.5">
+          {history.map((h, i) => (
+            <li key={h.id} className="flex gap-2">
+              <span className="w-16 shrink-0 text-right tabular-nums text-slate-500" title={new Date(h.at).toLocaleString("pt-BR")}>
+                {i === 0 || day(history[i - 1].at) !== day(h.at) ? `${day(h.at)} ` : ""}{time(h.at)}
+              </span>
+              <LoompaFigure role={h.role} />
+              <span className="min-w-0">
+                {h.role !== "founder" && <span className="text-slate-400">{ROLE_NAME[h.role] ?? h.role}: </span>}
+                <span className="text-slate-200">{h.summary}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {commits.length > 0 && (
+        <div>
+          <div className="mb-1 text-slate-500">Versões salvas</div>
+          <ul className="space-y-0.5 text-slate-300">{commits.map((c, i) => <li key={i}>✅ {c}</li>)}</ul>
+        </div>
+      )}
+    </div>
   );
 }
 

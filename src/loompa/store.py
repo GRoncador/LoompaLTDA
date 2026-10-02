@@ -383,7 +383,29 @@ class Store:
         )
         return rows
 
+    def checkpoint_states(self, story_id: str) -> list[dict[str, Any]]:
+        """Every checkpoint with the state it saved, oldest first (the history tab, 11.3)."""
+        rows = self._q(
+            "SELECT id, node, stage, state_json, created_at FROM checkpoints WHERE story_id = ? "
+            "ORDER BY id",
+            (story_id,),
+        )
+        for r in rows:
+            r["state"] = json.loads(r.pop("state_json") or "{}")
+        return rows
+
     # ------------------------------------------------------------------- events
+    def story_events(self, story_id: str, types: tuple[str, ...]) -> list[dict[str, Any]]:
+        """One story's events of the given types, oldest first."""
+        rows = self._q(
+            f"SELECT id, type, payload_json, created_at FROM events WHERE story_id = ? AND type IN "
+            f"({','.join('?' * len(types))}) ORDER BY id",
+            (story_id, *types),
+        )
+        for r in rows:
+            r["payload"] = json.loads(r.pop("payload_json") or "{}")
+        return rows
+
     def emit(
         self,
         factory: str,

@@ -116,7 +116,7 @@ export default function App() {
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
           <Kanban
             onOpenSprint={setSprintsAt}
-            columns={overview?.columns ?? []} sprint={overview?.sprint ?? null} nextSprint={overview?.next_sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now}
+            columns={overview?.columns ?? []} agents={overview?.factory.engine ? overview.agents : []} sprint={overview?.sprint ?? null} nextSprint={overview?.next_sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now}
             onChat={(kind, resumeId) => setChat({ kind, resumeId })} onOpen={setStoryId}
             onCreate={createStory}
             onReorder={async (ids, dragged) => { if (slug) { try { await api.reorderBacklog(slug, ids, dragged); } catch (e) { setError(String(e)); } refresh(); } }}

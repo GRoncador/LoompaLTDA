@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import git
+from loompa.comms import audit_executive_text
 from loompa.dashboard.app import create_app
 from loompa.factory import bootstrap_factory
 
@@ -88,6 +89,12 @@ def test_meeting_run_inbox_flow(client: TestClient):
         "node_intake",
         "node_spec",
     ]
+    # the history tab: one founder-safe sentence per step, by who did it (11.3)
+    steps = story["history"]
+    assert [h["node"] for h in steps] == [c["node"] for c in story["checkpoints"]]
+    assert steps[0]["role"] == "product_owner" and steps[1]["role"] == "master"
+    assert any(h["role"] == "inspector" and h["summary"] for h in steps)
+    assert all(not audit_executive_text(h["summary"]) for h in steps)
     diff = client.get("/api/factories/demo-hq/stories/S-001/diff").json()
     assert diff["source"] == "branch" and "loompa_dryrun" in diff["stat"]
     assert diff["diff"].startswith("diff --git")

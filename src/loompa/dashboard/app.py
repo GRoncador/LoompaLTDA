@@ -47,6 +47,7 @@ from loompa.engine.lock import EngineBusy, EngineLock
 from loompa.factory import Factory
 from loompa.finance import period_start_iso, today_start_iso
 from loompa.sprints import SprintBoard, SprintError
+from loompa.story_history import story_history
 
 log = logging.getLogger("loompa.dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -470,6 +471,7 @@ def create_app(
             "state": state.model_dump(mode="json"),
             "docs": docs,
             "checkpoints": ctx.store.checkpoints(story_id),
+            "history": story_history(ctx.store, story_id),  # one sentence per step (11.3)
             "usage": ctx.store.usage_totals(slug, story_id=story_id),
             "commits": ctx.worktrees.log(ctx.worktrees.get(story_id))
             if ctx.worktrees.get(story_id)
