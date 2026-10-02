@@ -82,3 +82,22 @@ def test_message_serialisation_roundtrip():
     msg = FounderMessage(title="t", context="c", options=[Option(key="a", label="A")])
     again = FounderMessage.model_validate_json(msg.model_dump_json())
     assert again.id == msg.id and again.options[0].label == "A"
+
+
+def test_audit_flags_project_files_and_git_commands_in_option_labels():
+    """`contas` Sprint 2: a founder option said "git checkout -- src/contas/cli.py"; the audit
+    only knew absolute paths and `file:line`, and it never read option labels."""
+    leaked = "Reverter você mesmo com git: git checkout -- src/contas/cli.py"
+    assert {v.rule for v in audit_executive_text(leaked)} == {"file_name", "git_command"}
+    clean = sanitize_for_founder(leaked)
+    assert "cli.py" not in clean and "git checkout" not in clean
+    # product words that look like files stay: money, domains, the CSV the founder exports
+    assert audit_executive_text("R$ 12.50 virou 1250 centavos em contas.app.br e gastos.csv") == []
+    msg = compose_blocked_message(
+        factory="contas",
+        story_id="S-1",
+        story_title="Centavos",
+        reason="Falta uma decisão.",
+        options=[Option(key="opt1", label=leaked)],
+    )
+    assert {v.rule for v in msg.executive_audit()} == {"file_name", "git_command"}

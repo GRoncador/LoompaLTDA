@@ -91,9 +91,9 @@ class FounderMessage(BaseModel):
                 self.title,
                 self.context,
                 self.impact,
-                *(o.description for o in self.options),
+                *(f"{o.label}\n{o.description}" for o in self.options),
                 *(f"{d.title}\n{d.context}" for d in self.decisions),
-                *(o.description for d in self.decisions for o in d.options),
+                *(f"{o.label}\n{o.description}" for d in self.decisions for o in d.options),
             ]
         )
         return audit_executive_text(text)
@@ -113,6 +113,14 @@ _ERROR_CLASS = re.compile(r"\b[A-Z][A-Za-z]+(Error|Exception|Warning)\b(:.*)?")
 _HEX_ID = re.compile(r"\b0x[0-9a-fA-F]{6,}\b|\b[0-9a-f]{32,}\b")
 _PATH = re.compile(r"(?<![\w/])(/[\w.\-]+){3,}(:\d+)?")
 _FILE_LINE = re.compile(r"\b[\w\-/]+\.(py|ts|tsx|js|jsx|go|rs|java|rb):\d+\b")
+# A project file named by path or name, without a line ("src/contas/cli.py", "package.json"): contas
+# Sprint 2 put "git checkout -- src/contas/cli.py" in a founder option and the audit let it through.
+_FILE_NAME = re.compile(
+    r"(?<![\w@.])[\w\-]+(?:/[\w.\-]+)*\.(?:py|pyi|ts|tsx|js|jsx|mjs|go|rs|java|rb|toml|json|ya?ml|cfg|ini|lock|sql|sh)\b"
+)
+_GIT_COMMAND = re.compile(
+    r"\bgit (?:checkout|diff|reset|revert|restore|commit|push|pull|merge|rebase|stash|add|log|status)\b"
+)
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _TRAILING_NOISE = re.compile(r"\n{3,}")
 
@@ -145,6 +153,8 @@ _FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     ("raw_exception", re.compile(r"\b[A-Z][A-Za-z]+(Error|Exception)\b:")),
     ("file_line_ref", _FILE_LINE),
+    ("file_name", _FILE_NAME),
+    ("git_command", _GIT_COMMAND),
     ("absolute_path", re.compile(r"(?<![\w/])/(Users|home|var|tmp|opt)/[\w./\-]+")),
     ("hex_identifier", _HEX_ID),
     ("task_id", re.compile(r"\bT\d{1,3}\b")),
@@ -166,6 +176,8 @@ def sanitize_for_founder(text: str, *, max_chars: int = MAX_FOUNDER_CHARS) -> st
         line = _ERROR_CLASS.sub("um erro técnico", line)
         line = _FILE_LINE.sub("um arquivo do sistema", line)
         line = _PATH.sub("um arquivo do sistema", line)
+        line = _FILE_NAME.sub("um arquivo do projeto", line)
+        line = _GIT_COMMAND.sub("um comando técnico", line)
         line = _HEX_ID.sub("(id)", line)
         for pattern, plain in _JARGON.items():
             line = re.sub(pattern, plain, line, flags=re.I)

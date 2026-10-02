@@ -119,10 +119,14 @@ when it has any.
 What the factory already established and the lines marked [facts] come from its own checks: keep
 them true and never contradict them (never say the product or its users are affected when they say
 the product's own tests pass or nothing was merged).
-Respond with JSON only: {{"title": str, "context": str, "impact": str}}
+The option labels were written by the team and may name files or commands: rewrite each one in
+plain words, keeping its meaning and its place in the list. Never ask the founder to run a command
+or edit a file themselves; say what the team will do with that choice instead.
+Respond with JSON only: {{"title": str, "context": str, "impact": str, "options": [str]}}
 - title: one sentence;
 - context: 2-3 plain sentences: what we were doing and what happened;
-- impact: what it means for the product and what keeps going normally.
+- impact: what it means for the product and what keeps going normally;
+- options: one short label per listed option, same order and count.
 """
 
 
@@ -809,8 +813,12 @@ class MasterAgent(LoompaAgent):
         executive: str | None = None,
     ) -> FounderMessage:
         """Compose a BLOCKED inbox message; LLM rewrite when possible, deterministic filter always."""
+        # Labels come from the team's own words; the filter keeps a file name or a command out of
+        # the inbox even when the rewrite below fails or skips them.
         opts = [
-            Option(key=f"opt{i + 1}", label=o[:120], recommended=i == 0)
+            Option(
+                key=f"opt{i + 1}", label=sanitize_for_founder(o, max_chars=120), recommended=i == 0
+            )
             for i, o in enumerate(options or [])
         ]
         if not self.ctx.dry_run:
@@ -835,6 +843,20 @@ class MasterAgent(LoompaAgent):
                     str(data.get("context") or ""),
                     str(data.get("impact") or ""),
                 )
+                labels = [
+                    str(x.get("label") or "") if isinstance(x, dict) else str(x)
+                    for x in data.get("options") or []
+                ]
+                labels = [lb.strip() for lb in labels if lb.strip()]
+                if (
+                    opts
+                    and len(labels) == len(opts)
+                    and not audit_executive_text("\n".join(labels))
+                ):
+                    opts = [
+                        o.model_copy(update={"label": lb[:120]})
+                        for o, lb in zip(opts, labels, strict=True)
+                    ]
                 if title and not audit_executive_text(f"{title}\n{context}\n{impact}"):
                     msg = compose_blocked_message(
                         factory=self.ctx.slug,

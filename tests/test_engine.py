@@ -1214,6 +1214,59 @@ async def test_a_rewritten_block_keeps_the_option_keys_the_engine_acts_on(factor
     await ctx.aclose()
 
 
+async def test_team_written_options_reach_the_founder_in_plain_words(factory: Factory):
+    """`contas` Sprint 2: the Worker's own options ("git checkout -- src/contas/cli.py") went to
+    the inbox verbatim, asking the founder to run git."""
+    team = [
+        "Reverter com git checkout -- src/contas/cli.py",
+        "Manter a mudança em src/contas/cli.py",
+    ]
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "master" and "Problem:" in messages[-1].content:
+            return json.dumps(
+                {
+                    "title": "Falta uma decisão pequena",
+                    "context": "A entrega está pronta e os testes passam.",
+                    "impact": "Nada muda para quem usa o produto.",
+                    "options": ["Desfazer o ajuste de formatação", "Manter o ajuste e concluir"],
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Centavos")
+    msg = await MasterAgent(ctx).blocked_message(
+        load_state(ctx, sid), "formatting drift", options=team
+    )
+    assert [o.label for o in msg.options] == [
+        "Desfazer o ajuste de formatação",
+        "Manter o ajuste e concluir",
+    ]
+    assert [o.key for o in msg.options] == ["opt1", "opt2"]
+
+    # a rewrite that drops an option keeps the team's labels, filtered
+    def short(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "master" and "Problem:" in messages[-1].content:
+            return json.dumps(
+                {
+                    "title": "Falta uma decisão",
+                    "context": "Pronta.",
+                    "impact": "Nada.",
+                    "options": ["Uma"],
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx2 = make_ctx(factory, short)
+    msg = await MasterAgent(ctx2).blocked_message(
+        load_state(ctx2, sid), "formatting drift", options=team
+    )
+    assert len(msg.options) == 2 and msg.executive_audit() == []
+    await ctx.aclose()
+    await ctx2.aclose()
+
+
 async def test_budget_exhaustion_pauses_dispatch(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     ctx.config.budget.cap_usd = 0.000001
