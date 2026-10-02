@@ -628,6 +628,10 @@ Decided 2026-09-29:
   `llm.runaway` and `llm.slow_model`. Experiment on contas only: worker_keep_file_chars 16k → 48k
   (from 40 rounds with no write to 28 edits in 5 min on the same task, n=1) and deepseek-0731 moved
   to last in tier 2 by the founder.
+- **2026-10-02 — Model rating without clusters (plan 9.7).** With `models.clusters_enabled` off the
+  catalogue ranks by the intelligence index alone (`CatalogModel.rating(composite=False)`,
+  `score_general`): models without coding/agentic indices are no longer "unrated"; only the `general`
+  cluster is proposed and applying keeps the other clusters' lists. With clusters on, unchanged.
 
 ## Known gaps / next steps
 
