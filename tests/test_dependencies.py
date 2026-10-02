@@ -306,3 +306,47 @@ async def test_a_dependent_spec_reads_what_its_dependency_decided(factory: Facto
     assert f"### {a}: Definir limite" in text and "limites.json" in text
     assert ProductAgent(ctx)._builds_on(load_state(ctx, a)) == ""  # no dependency, no section
     await ctx.aclose()
+
+
+async def test_an_epic_split_hands_its_dependents_to_the_children_and_never_splits_again(
+    factory: Factory,
+):
+    """contas Sprint 2: restarting the cents story turned it into an epic, the parent was DONE at
+    once and the import story that waited on it was planned on the old code; one child was then
+    split again into three that duplicated its siblings."""
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if "Classify the story" in messages[0].content:  # always wants to split, children too
+            return json.dumps(
+                {
+                    "kind": "feature",
+                    "complexity": "COMPLEX",
+                    "children": [
+                        {"title": "Modelo em centavos", "description": "parte 1"},
+                        {"title": "Comandos em centavos", "description": "parte 2"},
+                    ],
+                    "reason": "grande",
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    po = ProductOwnerAgent(ctx)
+    base, cents, imports = (
+        po.add_item(t).story_id for t in ("Base", "Migrar para centavos", "Importar fatura")
+    )
+    po.set_dependencies(cents, [base])
+    po.set_dependencies(imports, [cents])
+    MasterAgent(ctx).start_sprint([base, cents, imports])
+    from loompa.engine.graph import node_intake
+
+    await node_intake(ctx, load_state(ctx, cents))
+    kids = [s for s in ctx.store.list_stories(factory.slug) if s["origin"] == "epic"]
+    ids = [k["id"] for k in kids]
+    assert len(ids) == 2
+    assert ctx.store.get_story(imports)["depends_on"] == ids  # waits for every part now
+    assert all(k["depends_on"] == [base] for k in kids)  # the parts still wait for the base
+    child = await node_intake(ctx, load_state(ctx, ids[0]))
+    assert child.stage != Stage.DONE and "children" not in child.extra  # not split again
+    assert len([s for s in ctx.store.list_stories(factory.slug) if s["origin"] == "epic"]) == 2
+    await ctx.aclose()

@@ -223,6 +223,7 @@ class MasterAgent(LoompaAgent):
                     board.add(added.story_id, parent_sprint.id)
                 po.admit(added.story_id)
             ids.append(added.story_id)
+        self._carry_dependencies(parent.story_id, row, ids, po)
         self.ctx.inbox(
             FounderMessage(
                 factory=self.ctx.slug,
@@ -236,6 +237,33 @@ class MasterAgent(LoompaAgent):
             )
         )
         return ids
+
+    def _carry_dependencies(
+        self, parent_id: str, row: dict[str, Any], ids: list[str], po: ProductOwnerAgent
+    ) -> None:
+        """A split must not release what waited on the parent (ADR-0021). contas Sprint 2: the
+        parent of a split is DONE at once, so the stories that depended on it passed the gate and
+        were planned on the code before the change they waited for. The children inherit the
+        parent's own dependencies, and every unfinished story that depended on the parent now
+        depends on all of its children."""
+        from loompa.backlog import BacklogError
+
+        own = [d for d in (row.get("depends_on") or []) if d not in ids]
+        for cid in ids:
+            if own:
+                try:
+                    po.set_dependencies(cid, own)
+                except BacklogError as exc:
+                    log.warning("could not carry %s's dependencies to %s: %s", parent_id, cid, exc)
+        for other in self.ctx.store.list_stories(self.ctx.slug):
+            deps = other.get("depends_on") or []
+            if parent_id not in deps or other["id"] in ids or other["stage"] in TERMINAL:
+                continue
+            wanted = [d for d in deps if d != parent_id] + ids
+            try:
+                po.set_dependencies(other["id"], wanted)
+            except BacklogError as exc:
+                log.warning("could not move %s's dependency to %s: %s", other["id"], ids, exc)
 
     # ------------------------------------------------------------------- sprint
     def start_sprint(

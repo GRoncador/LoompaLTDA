@@ -270,7 +270,10 @@ async def node_intake(ctx: EngineContext, state: StoryState) -> StoryState:
     triaged = (state.extra.get(TRIAGE_KEY) or {}).get("kind")
     state.kind = StoryKind(triaged) if triaged in {k.value for k in StoryKind} else verdict.kind
     state.complexity = verdict.complexity
-    if len(verdict.children) > 1:
+    # a part of an epic is never split again: contas Sprint 2 split a
+    # child into three more that duplicated two of its siblings
+    is_part = (ctx.store.get_story(state.story_id) or {}).get("origin") == "epic"
+    if len(verdict.children) > 1 and not is_part:
         ids = master.split_epic(state, verdict.children)
         state.delivery_summary = f"Desmembrada em {len(ids)} histórias: {', '.join(ids)}"
         state.extra["children"] = ids
