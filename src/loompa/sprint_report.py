@@ -46,6 +46,7 @@ STAGE_LABEL = {
 }
 RESULT_LABEL = {
     "delivered": "entregue",
+    "split": "dividida em épico",
     "cancelled": "cancelada",
     "withdrawn": "devolvida ao backlog",
     "waiting": "aguardando você",
@@ -126,6 +127,7 @@ def _story(
     end: str,
     traced: bool,
     split_children: set[str],
+    split_parents: set[str] = frozenset(),
 ) -> dict[str, Any]:
     row = store.get_story(sid) or {}
     st = row.get("state") or {}
@@ -136,6 +138,10 @@ def _story(
     stage = row.get("stage", "CANCELLED")
     if sid not in sprint.story_ids:
         result = "withdrawn"
+    elif sid in split_parents:
+        # an epic is done when its parts are: the parts are the deliveries, the epic is not
+        # (tamagotchi SP-001 reported "4 de 5 entregues" counting S-002, which has no code)
+        result = "split"
     elif stage == "DONE":
         result = "delivered"
     elif stage == "CANCELLED":
@@ -270,6 +276,7 @@ def measure(store: Store, slug: str, sprint: Sprint, *, previous: bool = True) -
             end=end,
             traced=traced,
             split_children=split_children,
+            split_parents={e["story_id"] for e in events if e["type"] == "story.split"},
         )
         for sid in ids
     ]
@@ -374,6 +381,7 @@ def _totals(
         "planned": sum(1 for s in stories if s["planned"]),
         "joined": sum(1 for s in stories if not s["planned"]),
         "delivered": delivered,
+        "split": results.get("split", 0),
         "cancelled": results.get("cancelled", 0),
         "withdrawn": results.get("withdrawn", 0),
         "waiting": results.get("waiting", 0),
@@ -709,7 +717,13 @@ def summary_facts(report: dict[str, Any]) -> str:
         f"## Sprint {sp['id']} ({sp['status']})",
         f"Goal: {sp['goal'] or '(none)'}",
         f"Stories: {t['stories']} ({t['planned']} planned, {t['joined']} joined mid-sprint); "
-        f"delivered {t['delivered']}, cancelled {t['cancelled']}, back to backlog "
+        f"delivered {t['delivered']}"
+        + (
+            f", split into an epic whose parts are counted instead {t['split']}"
+            if t.get("split")
+            else ""
+        )
+        + f", cancelled {t['cancelled']}, back to backlog "
         f"{t['withdrawn']}, waiting for the founder {t['waiting']}, still in progress {t['working']}.",
         f"Duration: {duration(t['duration_s'])}. Cost of the stories: {usd(t['cost_usd'])}"
         + (f" ({usd(t['cost_per_delivered_usd'])} per delivered story)" if t["delivered"] else "")

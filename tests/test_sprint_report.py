@@ -123,6 +123,22 @@ async def test_the_report_measures_each_story_and_what_was_not_planned(factory: 
     await ctx.aclose()
 
 
+async def test_an_epic_is_not_counted_as_a_delivery(factory: Factory):
+    """tamagotchi SP-001: "4 de 5 entregues" counted S-002, split into an epic with no code of
+    its own; its parts are the deliveries."""
+    ctx = make_ctx(factory, dry_run=True)
+    a, b, c = sprint_with_history(ctx)
+    ctx.emit("story.split", story_id=a, children=[b])
+    await MasterAgent(ctx).close_finished_sprints()
+    report = sprint_report.load(factory.paths.reports, "SP-001")
+    t = report["totals"]
+    assert (t["stories"], t["delivered"], t["split"]) == (3, 2, 1)
+    assert next(s for s in report["stories"] if s["id"] == a)["result"] == "split"
+    assert "split into an epic" in sprint_report.summary_facts(report)
+    assert "dividida em épico" in (factory.paths.reports / "SP-001.md").read_text()
+    await ctx.aclose()
+
+
 async def test_a_sprint_before_the_trace_says_not_measured(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     sprint_with_history(ctx, traced=False)
