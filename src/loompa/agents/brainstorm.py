@@ -306,8 +306,11 @@ async def consult(
         opinion.benefit = founder_text(str(data.get("benefit") or ""), 500)
         opinion.counterpoints = _texts(data, "counterpoints", 4)
         sources = [str(s).strip() for s in data.get("sources") or [] if str(s).strip()]
-        opinion.sources = [s for s in sources if verified_source(ctx.root, s, seen)][:10]
-        dropped = len(sources) - len(opinion.sources)
+        checked = [s for s in sources if verified_source(ctx.root, s, seen)]
+        # only what failed the check is "dropped"; the cap below is length, not doubt (contas
+        # Sprint 2: 14 real sources, 4 cut by the cap, and the founder read they were invented)
+        dropped = len(sources) - len(checked)
+        opinion.sources = checked[:10]
         if dropped:
             opinion.attention.append(
                 f"{dropped} fonte(s) citada(s) não apareceram nas consultas e foram descartadas."

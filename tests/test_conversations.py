@@ -605,6 +605,24 @@ async def test_an_opinion_keeps_only_sources_that_were_checked(factory: Factory)
     await ctx.aclose()
 
 
+async def test_more_than_ten_good_sources_are_capped_without_calling_them_invented(
+    factory: Factory,
+):
+    """contas Sprint 2: 14 checked sources, 4 cut by the cap, and the note said they were not
+    found in the searches."""
+    no_web(factory)
+    for i in range(14):
+        (factory.root / f"doc{i}.md").write_text("x\n", encoding="utf-8")
+    opinion = {"summary": "s", "sources": [f"doc{i}.md" for i in range(14)]}
+    ctx = make_ctx(factory, brainstorm_script([], consult=lambda role, m: opinion))
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.BRAINSTORM)
+    await chats.consult(conv.id, "architect", "Isso mexe no cadastro?")
+    (op,) = chats.board.require(conv.id).draft.consults
+    assert len(op.sources) == 10 and not any("fonte(s)" in a for a in op.attention)
+    await ctx.aclose()
+
+
 async def test_the_founder_sets_an_opinion_aside_and_unknown_roles_are_refused(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     chats = Conversations(ctx)
