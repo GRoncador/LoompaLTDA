@@ -178,6 +178,9 @@ async def test_a_long_answer_keeps_the_tail_of_its_reasoning_even_when_it_finish
     await router.complete("inspector", [Message("user", "b")], story_id="S-1")
     first, second = (s["attrs"]["attempts"][0] for s in spans_of(tmp_path / "S-1.jsonl"))
     assert first["reasoning_tail"].endswith("and so, PASS") and "reasoning_tail" not in second
+    # the longer end is a message of the trace, by reference (a span attribute is capped at 2k)
+    kept = read_trace(tmp_path / "S-1.jsonl").messages[first["reasoning"]]
+    assert kept["content"] == "y" * 1000 + "and so, PASS"
 
 
 async def test_a_cut_answer_and_its_retry_are_one_call_with_two_attempts(tmp_path: Path):

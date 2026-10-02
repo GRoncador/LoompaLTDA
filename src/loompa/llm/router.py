@@ -41,7 +41,10 @@ CUT_TAIL_CHARS = 600
 LONG_REASONING_TOKENS = 16384
 
 
-def _cut_tail(resp: LLMResponse) -> dict[str, str]:
+REASONING_KEEP_CHARS = 12_000  # the loop detector's window: enough to tell a loop from thinking
+
+
+def _cut_tail(resp: LLMResponse, keep: Any = None) -> dict[str, str]:
     """The end of what a cut answer was writing, for the trace: a plan that runs past 16k
     tokens is either thinking in circles or repeating itself in the output, and only the tail
     tells which. The half-written tool call is read from the raw message: it never parses."""
@@ -53,6 +56,12 @@ def _cut_tail(resp: LLMResponse) -> dict[str, str]:
     tail = {"tail": text[-CUT_TAIL_CHARS:]} if text else {}
     if isinstance(reasoning, str) and reasoning:
         tail["reasoning_tail"] = reasoning[-CUT_TAIL_CHARS:]
+        if keep is not None:  # the longer end goes to the trace as a message, by reference: a
+            # span attribute is capped at 2k, and 600 chars could not say whether the Product
+            # Owner's 96k-token rerank was a loop (contas Sprint 2)
+            ref = keep(reasoning[-REASONING_KEEP_CHARS:])
+            if ref:
+                tail["reasoning"] = ref
     return tail
 
 
@@ -428,6 +437,13 @@ class ModelRouter:
         when none answered; `calls` keeps every attempt for the trace."""
         loop = asyncio.get_running_loop()
         who = agent or role
+        current = self.tracer.current()
+        trace_story = current.story_id if current is not None else story_id
+
+        def keep(text: str) -> str | None:
+            refs = self.tracer.messages(trace_story, [Message("assistant", text)])
+            return refs[0] if refs else None
+
         for cand in cands:
             key = f"{cand.provider}/{cand.model}"
             if self._cooldown.get(key, 0) > loop.time():
@@ -526,7 +542,7 @@ class ModelRouter:
                         cost_usd=round(cost, 6),
                         ms=int((loop.time() - started) * 1000),
                         loop=exc.sample[:300],
-                        **_cut_tail(exc.partial),
+                        **_cut_tail(exc.partial, keep),
                     )
                     log.warning("%s entrou em loop; cortado e próximo modelo", key)
                     self._event(
@@ -584,7 +600,7 @@ class ModelRouter:
                         {"reasoning_tokens": resp.reasoning_tokens} if resp.reasoning_tokens else {}
                     ),
                     **(
-                        _cut_tail(resp)
+                        _cut_tail(resp, keep)
                         if resp.truncated or resp.reasoning_tokens > LONG_REASONING_TOKENS
                         else {}
                     ),
