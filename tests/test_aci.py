@@ -373,3 +373,25 @@ def test_node_test_tap_output_is_summarised():
     assert "2 !== 3" in s.failures[0].message and s.failures[1].message == "boom"
     green = "TAP version 13\nok 1 - x\n1..1\n# tests 87\n# pass 87\n# fail 0\n"
     assert (summarize_tests(green, 0).passed, summarize_tests(green, 0).ok) == (87, True)
+
+
+async def test_write_file_never_wipes_or_guts_an_existing_file(tmp_path: Path):
+    """contas S-041: `write_file tests/test_cli.py ""` erased 1448 lines the Worker could not
+    get back."""
+    big = "\n".join(f"x{i} = {i}" for i in range(300))
+    (tmp_path / "big.py").write_text(big)
+    (tmp_path / "small.py").write_text("a = 1\nb = 2\n")
+    aci = ACI(tmp_path)
+    await aci.call("read_file", {"path": "big.py"})
+    await aci.call("read_file", {"path": "small.py"})
+    res = await aci.call("write_file", {"path": "big.py", "content": ""})
+    assert not res.ok and "use edit_file" in res.output
+    res = await aci.call("write_file", {"path": "big.py", "content": "x = 1\n" * 20})
+    assert not res.ok  # 300 lines down to 20: a gutted file, not a rewrite
+    assert (tmp_path / "big.py").read_text() == big
+    assert (await aci.call("write_file", {"path": "big.py", "content": "y = 0\n" * 150})).ok
+    assert (await aci.call("write_file", {"path": "small.py", "content": "a = 3\n"})).ok
+    assert not (await aci.call("write_file", {"path": "small.py", "content": "  \n"})).ok
+    assert (
+        await aci.call("write_file", {"path": "new.py", "content": ""})
+    ).ok  # a new file may start empty

@@ -21,6 +21,7 @@ from loompa.aci.runner import run_command
 from loompa.hygiene import RESIDUE_NOTE, new_files, run_residue
 from loompa.memory.lexical import CodeSearch, SymbolIndex, file_symbols
 
+SHRINK_MIN_LINES = 100  # a whole-file rewrite of a file this long may not drop below a fifth
 HEAD_LINES = 80  # what a large file read without a range shows after its outline
 OUTLINE_SYMBOLS = 120
 
@@ -419,6 +420,18 @@ class ACI:
     def tool_write_file(self, path: str, content: str) -> str:
         p = self._resolve(path, for_write=True)
         self._check_read(p, path)
+        if p.is_file():
+            # contas S-041: `write_file tests/test_cli.py ""` wiped 1448 lines, and the Worker,
+            # with no way to get them back, asked the founder to restore the file
+            before = len(p.read_text(encoding="utf-8", errors="replace").splitlines())
+            after = len(content.splitlines())
+            if before and (
+                not content.strip() or (before >= SHRINK_MIN_LINES and after * 5 < before)
+            ):
+                raise ToolError(
+                    f"refused: this would replace {path} ({before} lines) with {after} lines. To "
+                    "change part of it use edit_file or apply_patch; to remove it, delete_file."
+                )
         p.parent.mkdir(parents=True, exist_ok=True)
         existed = p.exists()
         p.write_text(content, encoding="utf-8")
