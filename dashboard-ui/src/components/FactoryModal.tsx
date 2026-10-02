@@ -82,7 +82,7 @@ function FindingCard({ f, slug, onChanged, onOpenSprint, onOpenStory }: {
           <span className="chip bg-slate-800 text-slate-400">{f.area}</span>
           {!!f.provisional && <span className="chip bg-indigo-900/50 text-indigo-200" title="Limiar ainda não calibrado: lê o rastro, que a Sprint 1 não tinha">provisório</span>}
           {resolved && <span className="chip bg-emerald-900/50 text-emerald-200">resolvido {f.resolved_commit}</span>}
-          <span className="text-slate-500">{f.factories.join(", ")} · desde {f.first_seen.slice(0, 10)}</span>
+          <span className="text-slate-500">visto em {f.seen_in}</span>
           <span className="ml-auto flex items-center gap-0.5" title="Varreduras, a mais recente à direita: ● visto · ○ ausente">
             {f.trend.map((t, i) => <span key={i} className={t.seen ? "text-amber-300" : "text-slate-600"} title={`${t.sprint_id ?? "período"} · ${t.factory}`}>{t.seen ? "●" : "○"}</span>)}
           </span>

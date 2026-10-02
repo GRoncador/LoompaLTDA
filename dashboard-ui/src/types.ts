@@ -351,7 +351,7 @@ export interface SprintListItem extends SprintSummary {
 export interface FactoryFinding {
   signature: string; signal: string; area: string; severity: "high" | "medium" | "low"; title: string; detail: string;
   status: "open" | "resolved"; provisional: number; hypothesis: string; fix: string; resolved_commit: string; resolved_at: string;
-  first_seen: string; last_seen: string; evidence: Record<string, unknown>[]; impact: Record<string, number>; stories: string[];
+  first_seen: string; last_seen: string; seen_in: string; evidence: Record<string, unknown>[]; impact: Record<string, number>; stories: string[];
   factories: string[]; trend: { factory: string; sprint_id: string | null; at: string; seen: boolean }[];
 }
 

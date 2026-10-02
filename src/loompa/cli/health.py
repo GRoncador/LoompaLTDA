@@ -80,7 +80,7 @@ def health_show(signature: str) -> None:
     console.print(f"[bold]{row['title']}[/bold]  ({row['signature']})")
     console.print(
         f"gravidade {SEVERITY.get(row['severity'], row['severity'])} · área {row['area']} · "
-        f"{row['status']} · de {row['first_seen'][:10]} a {row['last_seen'][:10]}"
+        f"{row['status']} · visto em {row['seen_in']}"
         + (" · limiar provisório" if row["provisional"] else "")
     )
     console.print(row["detail"])

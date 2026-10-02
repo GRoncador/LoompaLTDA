@@ -107,6 +107,9 @@ def test_signals_measure_what_sprint_one_found(tmp_path: Path):
     assert found["llm.cuts"].key == "m1/worker" and found["llm.cuts"].impact["calls"] == 3
     assert found["worker.task_limit"].stories == ["S-030"]
     assert found["worker.task_limit"].evidence[0]["command"] == "loompa trace S-030 --task 3"
+    # the cut task emitted both events: counted once, with its calls
+    assert len(found["worker.task_limit"].evidence) == 1
+    assert found["worker.task_limit"].evidence[0]["calls"] == 47
     assert found["worker.repeats"].stories == ["S-030"]  # S-031's 4 repeats are normal
     assert found["inspector.slow"].stories == ["S-002"]
     assert found["worker.slow_task"].evidence[0]["minutes"] == 35.0
@@ -177,6 +180,7 @@ def test_the_hub_keeps_the_trend_and_confirms_a_fix(tmp_path: Path):
     assert row["factories"] == ["contas"] and row["evidence"]
     md = export_markdown(book.findings(status=None))
     assert "llm.cuts:m1/worker" in md and "loompa trace S-001" in md
+    assert "visto em: contas SP-001, contas SP-003" in md  # the sprints, not the scan day
 
 
 async def test_a_sprint_close_scans_the_factory_and_the_report_points_to_it(factory: Factory):
