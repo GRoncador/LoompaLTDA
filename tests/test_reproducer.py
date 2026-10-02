@@ -145,3 +145,32 @@ async def test_a_reproducer_that_never_fails_is_recorded_not_blocking(factory: F
     cards = [s["title"] for s in ctx.store.list_stories(factory.slug) if s["origin"] == "kaizen"]
     assert any("reprodução" in t for t in cards)
     await ctx.aclose()
+
+
+async def test_a_replanned_bugfix_whose_branch_has_the_fix_needs_no_reproducer(factory: Factory):
+    """contas S-049: re-planned after its fix was already on the branch, the plan opened with a
+    reproducer again; it could only pass, and the Worker blocked asking whether to undo the fix."""
+    from loompa.agents import ArchitectAgent
+    from loompa.agents.architect import REPRO_KEY
+    from loompa.engine.state import StoryKind
+
+    seen: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect":
+            seen.append(messages[-1].content)
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Corrigir soma")
+    st = load_state(ctx, sid)
+    st.kind = StoryKind.BUGFIX
+    st.commits = ["abc123"]  # the branch already carries work, the fix among it
+    (factory.paths.specs / sid).mkdir(parents=True, exist_ok=True)
+    res = await ArchitectAgent(ctx).run(st)
+    assert res.ok and st.extra[REPRO_KEY] == {"status": "branch_has_fix"}
+    assert "reproducer first" not in seen[-1]
+    tasks = (factory.paths.specs / sid / "tasks.md").read_text()
+    assert REPRODUCER_TASK.strip()[:40] not in tasks
+    assert any(p.rstrip("/") == "tests" or p.startswith("tests") for p in st.allowed_paths)
+    await ctx.aclose()

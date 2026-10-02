@@ -258,7 +258,7 @@ class ArchitectAgent(LoompaAgent):
                 else ""
             )
             + delivered_brief(self.ctx.store, state.story_id)
-            + (REPRODUCER_NOTE if state.kind == StoryKind.BUGFIX else "")
+            + (REPRODUCER_NOTE if state.kind == StoryKind.BUGFIX and not state.commits else "")
             + f"## Repository outline\n{outline}\n\n## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
         )
         # The plan's `files` are the only paths the Worker may touch: let the Architect check
@@ -281,7 +281,13 @@ class ArchitectAgent(LoompaAgent):
             f"Implementar '{state.title}' com testes cobrindo os critérios de aceitação"
         ]
         files = self._list(data, "files")
-        if state.kind == StoryKind.BUGFIX:
+        if state.kind == StoryKind.BUGFIX and state.commits:
+            # a re-plan of a bugfix whose branch already carries the fix: a reproducer written now
+            # can only pass, and the Worker blocked asking whether to undo the fix (contas S-049)
+            state.extra[REPRO_KEY] = {"status": "branch_has_fix"}
+            if not any(is_test_path(f) or f.rstrip("/") in TEST_DIRS for f in files):
+                files = [*files, "tests/"]
+        elif state.kind == StoryKind.BUGFIX:
             tasks, files = ensure_reproducer(tasks, files)
             state.extra[REPRO_KEY] = {"task": 1, "status": "pending"}
         precedent_titles = [
