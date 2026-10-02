@@ -617,6 +617,17 @@ Decided 2026-09-29:
   first merge and detected from the checkout until then).
   Measured: as Product Owner, deepseek-v4-flash-0731 averaged 8m22s per call (p90 30 min, one spec
   review 44 min) against ~1 min for ling-3.0-flash in the same tier — the main input for Fase 9.
+  Later the same morning: the Worker re-read pruned files instead of writing (LoopGuard now counts
+  the third re-read of an unchanged result, and three ignored explore nudges end the task); plans
+  put a whole migration in one task (tasks now sized to one Worker run, a cross-module change staged
+  and kept compatible in between); a restart turned the cents story into an epic split by layers
+  (model / commands / tests), released its dependents and split a child again (dependents move to
+  the children, parts are never split, an epic splits only into usable deliverables); a replayed
+  amendment lost the path it opened; a story may edit what its own branch changed; apply_patch takes
+  the "*** Begin Patch" format; `loompa run` names the running sprint; factory-health gained
+  `llm.runaway` and `llm.slow_model`. Experiment on contas only: worker_keep_file_chars 16k → 48k
+  (from 40 rounds with no write to 28 edits in 5 min on the same task, n=1) and deepseek-0731 moved
+  to last in tier 2 by the founder.
 
 ## Known gaps / next steps
 
