@@ -572,6 +572,17 @@ class ModelRouter:
                         # founder hears about it once and the candidate is skipped meanwhile.
                         self.on_model_gone(cand, str(exc))
                     if exc.retryable and retry < self.max_retries:
+                        # said, not silent: a stream the provider dropped after 15 min of
+                        # reasoning restarted from zero with no trace of why (contas Sprint 2)
+                        self._event(
+                            "llm.retry",
+                            story_id,
+                            who,
+                            model=key,
+                            role=role,
+                            error=str(exc)[:200],
+                            lost_s=round(loop.time() - started, 1),
+                        )
                         await asyncio.sleep(0.5 * (2**retry))
                         retry += 1
                         continue

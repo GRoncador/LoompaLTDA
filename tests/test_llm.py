@@ -679,3 +679,28 @@ def test_ops_does_not_wait_out_a_cut_answer_and_says_why_in_plain_words():
     t = triage(LLMError("resposta cortada: deepseek/x: 32768 tokens (resposta cortada no limite)"))
     assert not t.transient and "tamanho máximo" in t.cause
     assert audit_executive_text(t.cause) == []
+
+
+async def test_a_retried_error_is_an_event_not_a_silent_restart():
+    """contas Sprint 2: a stream dropped after 15 min of the Product Owner's reasoning restarted
+    from zero on the same model, and nothing recorded why."""
+    cfg = single_provider_config()
+    seen: list[tuple[str, dict]] = []
+    flaky = iter([LLMError("deepseek: conexão encerrada no meio da resposta", retryable=True)])
+
+    def script(*_a):
+        err = next(flaky, None)
+        if err is not None:
+            raise err
+        return '{"ok": true}'
+
+    router = ModelRouter(
+        cfg,
+        providers={"deepseek": MockProvider("deepseek", script=script)},
+        on_event=lambda t, **kw: seen.append((t, kw)),
+    )
+    rc = await router.complete("product_owner", [Message("user", "x")], story_id="S-44")
+    assert rc.response.text == '{"ok": true}'
+    (retry,) = [kw for t, kw in seen if t == "llm.retry"]
+    assert retry["story_id"] == "S-44" and "encerrada" in retry["error"] and "lost_s" in retry
+    await router.aclose()
