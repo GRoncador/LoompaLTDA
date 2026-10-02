@@ -397,9 +397,14 @@ class ACI:
         return "patch applied to: " + ", ".join(applied)
 
     async def tool_run_tests(self, selector: str | None = None) -> str:
-        if not self.test_command:
-            return "[tests] no test command configured (quality.test_command)"
-        cmd = f"{self.test_command} {selector}".strip() if selector else self.test_command
+        from loompa.onboarding.greenfield import test_command_for
+
+        # none configured (a `custom` greenfield): the tests this checkout has decide, instead of
+        # a Worker asking the founder to edit the config (tamagotchi-retro S-006, twice)
+        command = test_command_for(self.test_command, self.root)
+        if not command:
+            return "[tests] no test command configured (quality.test_command) and no tests found"
+        cmd = f"{command} {selector}".strip() if selector else command
         before = new_files(self.root)
         res = await run_command(cmd, self.root, timeout=900)
         created = [p for p in run_residue(before, new_files(self.root)) if p not in self.touched]

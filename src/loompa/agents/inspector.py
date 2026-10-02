@@ -30,6 +30,7 @@ from loompa.hygiene import (
     scan_diff,
     weak_tests,
 )
+from loompa.onboarding.greenfield import test_command_for
 from loompa.speckit import story_dir
 from loompa.worktrees import Worktree, WorktreeManager
 
@@ -109,8 +110,9 @@ class InspectorAgent(LoompaAgent):
         q = self.ctx.config.quality
         where = at or wt.path
         base: dict = {"tests_ok": True, "failing": [], "lint_ok": True}
-        if q.test_command:
-            res = await run_command(q.test_command, where, timeout=900)
+        tests = test_command_for(q.test_command, where)
+        if tests:
+            res = await run_command(tests, where, timeout=900)
             summary = summarize_tests(res.output, res.returncode)
             base["tests_ok"] = summary.ok and not res.timed_out
             base["failing"] = sorted({f.name for f in summary.failures})
@@ -143,9 +145,10 @@ class InspectorAgent(LoompaAgent):
         others_ok = True  # every check but the test suite (lint, types, scanner, hygiene)
         failing: list[dict[str, str]] = []
         residue: list[str] = []
-        if q.test_command:
+        tests = test_command_for(q.test_command, wt.path)
+        if tests:
             before = new_files(wt.path)
-            res = await run_command(q.test_command, wt.path, timeout=900)
+            res = await run_command(tests, wt.path, timeout=900)
             residue = run_residue(before, new_files(wt.path))
             summary = summarize_tests(res.output, res.returncode)
             if res.timed_out:

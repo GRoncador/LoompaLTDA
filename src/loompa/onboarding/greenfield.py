@@ -236,3 +236,9 @@ def detect_test_command(root: Path) -> str:
         if test and "no test specified" not in test:
             parts.append("npm test --silent")
     return " && ".join(parts)
+
+
+def test_command_for(configured: str, root: Path) -> str:
+    """The configured test command, or the one the checkout's own tests call for when none is
+    configured yet (before the first merge teaches the factory one)."""
+    return configured or detect_test_command(root)

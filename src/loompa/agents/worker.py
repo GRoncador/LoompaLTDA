@@ -421,7 +421,9 @@ class WorkerAgent(LoompaAgent):
     async def _new_failures(self, state: StoryState, wt: Worktree) -> list[str] | None:
         """Tests failing now that were not failing on the base; None when that cannot be run.
         A test that breaks on an import or a typo does not reproduce anything."""
-        command = self.ctx.config.quality.test_command
+        from loompa.onboarding.greenfield import test_command_for
+
+        command = test_command_for(self.ctx.config.quality.test_command, wt.path)
         if not command or self.ctx.dry_run:
             return None
         res = await run_command(command, wt.path, timeout=900)

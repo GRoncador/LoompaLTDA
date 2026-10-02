@@ -40,3 +40,26 @@ async def test_a_merge_teaches_an_empty_quality_gate_its_test_command(factory: F
     deployer._learn_test_command()
     assert ctx.config.quality.test_command == "make test"  # a command already set is kept
     await ctx.aclose()
+
+
+async def test_run_tests_uses_the_checkouts_own_tests_when_none_is_configured(
+    tmp_path: Path, monkeypatch
+):
+    """tamagotchi-retro S-006: with no test command the Worker asked the founder, twice, to let
+    it edit the config; the tests it had written were right there."""
+    from loompa.aci import tools
+    from loompa.aci.runner import CommandResult
+
+    ran: list[str] = []
+
+    async def fake(cmd, cwd, timeout=0, **kw):
+        ran.append(cmd)
+        return CommandResult(cmd, 0, "1 passed", "")
+
+    monkeypatch.setattr(tools, "run_command", fake)
+    aci = tools.ACI(tmp_path)
+    assert "no tests found" in await aci.tool_run_tests()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text("def test_a():\n    pass\n")
+    await aci.tool_run_tests()
+    assert ran == ["python3 -m pytest -q"]
