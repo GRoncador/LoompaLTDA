@@ -53,9 +53,18 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
   const used = new Set(Object.values(s.matrix ?? {}).flatMap((t) => Object.values(t).flat()).map((c) => c.provider));
   const providers = onlyNeeded ? s.providers.filter((p) => used.has(p.name)) : s.providers;
 
+  /** A key typed in the row is saved first: "Testar" sat disabled until the "Guardar chaves" button
+   * at the end of the list was pressed, and a typed key looked ignored (2026-10-03). */
   const test = async (name: string) => {
     setProbe((p) => ({ ...p, [name]: "…" }));
-    try { const r = await api.testProvider(slug, name); setProbe((p) => ({ ...p, [name]: r })); }
+    try {
+      const typed = (name === "tavily" ? tavilyKey : keys[name] ?? "").trim();
+      if (typed) {
+        await onSave(name === "tavily" ? { tools: { tavily: { api_key: typed, scope } } } : { providers: { [name]: { api_key: typed, scope } } });
+        if (name === "tavily") setTavilyKey(""); else setKeys((k) => ({ ...k, [name]: "" }));
+      }
+      const r = await api.testProvider(slug, name); setProbe((p) => ({ ...p, [name]: r }));
+    }
     catch (e) { setProbe((p) => ({ ...p, [name]: { name, ok: false, detail: String(e), model: "", latency_ms: 0 } })); }
   };
   const saveKeys = async () => {
@@ -110,7 +119,7 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
         </div>
 
         <div className="flex items-center gap-1 md:justify-end">
-          <button className="btn-ghost whitespace-nowrap text-xs" onClick={() => test(opts.name)} disabled={opts.needsKey && !opts.configured}>Testar</button>
+          <button className="btn-ghost whitespace-nowrap text-xs" onClick={() => test(opts.name)} disabled={opts.needsKey && !opts.configured && !opts.value.trim()} title={opts.value.trim() ? "Guarda a chave digitada e testa a conexão" : undefined}>{opts.value.trim() ? "Guardar e testar" : "Testar"}</button>
           {opts.configured && opts.needsKey && opts.onClear && (
             <button className="btn-ghost px-2 text-xs text-rose-300 hover:text-rose-200" title="remover chave" onClick={opts.onClear}>✕</button>
           )}
