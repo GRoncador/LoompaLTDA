@@ -241,6 +241,8 @@ export interface ModelPick {
   /** score of every cluster, so a filter can change which number is shown without a round trip */
   scores?: Partial<Record<ClusterName, number | null>>;
   cost_benefits?: Partial<Record<ClusterName, number | null>>;
+  /** plan 9.5: what this factory's Worker measured with the model */
+  house?: { tasks: number; done_rate: number | null; enough: boolean; flagged: boolean; cost_per_done: number | null };
   /** only on the full catalogue list: whether the ranking would consider it, and why not */
   eligible?: boolean;
   excluded?: string;

@@ -1177,6 +1177,15 @@ function ModelsPanel({
                                   <span className={`font-mono ${info.price === 0 ? "font-semibold text-emerald-400" : "text-slate-300"}`}>
                                     {priceLabel(info.price)}
                                   </span>
+                                  {info.house && info.house.tasks > 0 && (
+                                    <span
+                                      className={`rounded border px-1 ${info.house.flagged ? "border-amber-700/60 bg-amber-950/40 text-amber-300" : "border-line text-slate-300"}`}
+                                      title={info.house.enough ? "Medido nesta fábrica; pesa na sugestão" : "Medido nesta fábrica; amostra pequena, ainda não pesa na sugestão"}
+                                    >
+                                      na casa: {Math.round((info.house.done_rate ?? 0) * 100)}% de {info.house.tasks} tarefas
+                                      {info.house.flagged ? " ▼" : ""}
+                                    </span>
+                                  )}
                                   {info.alias && (
                                     <span className="rounded border border-violet-700/60 bg-violet-950/50 px-1 text-violet-300" title="Apelido: troca de modelo sozinho quando o fabricante lança uma versão nova">
                                       apelido
