@@ -934,8 +934,8 @@ async def test_the_product_owner_reviews_old_cards_against_the_code_and_drafts_r
             return json.dumps(
                 {
                     "reply": "O Product Owner vai revisar os cards antigos.",
-                    "ops": [],
-                    "review_cards": [],
+                    # live, the model sent the request as an op instead of a top-level key
+                    "ops": [{"op": "review_cards", "refs": []}],
                 }
             )
         return script(model, messages, tools)

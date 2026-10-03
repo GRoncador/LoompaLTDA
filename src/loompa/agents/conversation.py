@@ -180,6 +180,11 @@ async def run_turn(
         reply, ops, questions = parse_turn(data)
         failed, consult = False, data.get("consult_po") is True
         extra = {k: v for k, v in data.items() if k not in ("reply", "ops", "questions")}
+        # a request the prompt puts at the top level, sent as an op instead (contas SP-004)
+        for raw in [o for o in ops if isinstance(o, dict) and o.get("op") == "review_cards"]:
+            ops.remove(raw)
+            refs = raw.get("refs") or raw.get("ids") or raw.get("review_cards") or []
+            extra["review_cards"] = list(refs) if isinstance(refs, list) else []
 
     report = apply_ops(
         conv.draft,
