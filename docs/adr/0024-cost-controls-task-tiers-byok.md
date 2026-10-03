@@ -34,8 +34,10 @@ line drawn on 2026-09-30 for subscription OAuth: official pay-as-you-go keys onl
    never runs above tier 2.
    - `architect.plan`: tier 2, tier 1 when COMPLEX. The re-plan of an escalated story stays on
      tier 1, as part of that attempt.
-   - Tier 2: `architect.preflight`, `.amend`, `.lesson` and `product_owner.spec_review`.
-   - Tier 3: `master.wording`, `master.exec_options`, `deployer.summary` and `worker.self_check`.
+   - Tier 2: `architect.preflight`, `.amend`, `.lesson`, `product_owner.spec_review` and
+     `worker.self_check`. The self-check was on tier 3 for a day: a free model's false "missing"
+     costs a whole Worker round (~17 tool calls), and it is the one task that reads product code.
+   - Tier 3: `master.wording`, `master.exec_options` and `deployer.summary`.
    - The Master's role default is tier 2.
    The founder's per-task choice in settings wins over all of this.
 2. **Free tier by choice falls back to paid.** A tier-3 call chosen by role or task makes one pass over

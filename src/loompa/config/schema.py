@@ -246,8 +246,8 @@ ROLE_TASKS: tuple[RoleTask, ...] = (
         key="worker.self_check",
         role="worker",
         label="Autoconferência do Worker",
-        hint="marca um checklist; o Inspector confere de novo",
-        default_tier="tier3",
+        hint="um falso 'faltando' custa uma rodada inteira do Worker; e lê código do produto",
+        default_tier="tier2",
     ),
     RoleTask(
         key="deployer.summary",

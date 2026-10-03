@@ -840,7 +840,8 @@ class WorkerAgent(LoompaAgent):
     async def _dod_check(
         self, state: StoryState, wt: Worktree, task: str, summary: str
     ) -> list[str]:
-        """One small tier2 call; empty list means done (or the check is unavailable)."""
+        """One small call (`worker.self_check`, tier 2: a false "missing" costs a whole round);
+        an empty list means done (or the check is unavailable)."""
         if self.ctx.dry_run:
             return []
         diff = self.ctx.worktrees.diff_working(wt, max_chars=8000)
