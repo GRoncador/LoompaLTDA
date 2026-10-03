@@ -555,6 +555,96 @@ def kaizen(factory: str | None = typer.Option(None, "--factory", "-f")) -> None:
 
 
 @app.command()
+def costs(
+    factory: str | None = typer.Option(None, "--factory", "-f"),
+    days: int = typer.Option(7, "--days", "-d", help="Janela em dias."),
+) -> None:
+    """Onde o dinheiro foi: papéis, tiers, modelos, escaladas e o experimento de esforço."""
+    from loompa.finance.cost_report import cost_report
+
+    f = resolve_factory(factory)
+    store = Store(f.paths.state_db)
+    r = cost_report(store, f.config.factory.slug, days)
+    store.close()
+    console.print(
+        Panel.fit(
+            f"US$ {r['cost_usd']:.2f} em {r['calls']} chamadas nos últimos {days} dias "
+            f"({r['real_cost_calls']} com custo informado pelo provedor ou pela tabela)",
+            title=f"Custos · {f.config.factory.name}",
+        )
+    )
+
+    def groups(title: str, items: list[dict], first: str, top: int = 12) -> None:
+        table = Table(title=title)
+        for col in (first, "US$", "%", "chamadas", "US$/chamada", "cache"):
+            table.add_column(col, justify="left" if col == first else "right")
+        for g in items[:top]:
+            table.add_row(
+                str(g["key"]),
+                f"{g['cost_usd']:.3f}",
+                f"{100 * g['share']:.1f}",
+                str(g["calls"]),
+                f"{g['per_call']:.4f}",
+                f"{100 * g['cache_hit']:.0f}%",
+            )
+        console.print(table)
+
+    groups("Por papel", r["by_role"], "papel")
+    groups("Por papel e tier", r["by_role_tier"], "papel · tier")
+    groups("Por modelo", r["by_model"], "modelo")
+    stories = Table(title="Histórias mais caras")
+    for col in ("história", "estágio", "US$", "chamadas"):
+        stories.add_column(col)
+    for s in r["by_story"]:
+        stories.add_row(
+            f"{s['key']} {s['title'][:40]}", s["stage"], f"{s['cost_usd']:.3f}", str(s["calls"])
+        )
+    console.print(stories)
+
+    sw = r["provider_switches"]
+    console.print(
+        f"Troca de provedor na OpenRouter: {sw['switched']['calls']} chamadas trocaram "
+        f"(cache {100 * sw['switched']['cache_hit']:.0f}%), {sw['stayed']['calls']} ficaram "
+        f"(cache {100 * sw['stayed']['cache_hit']:.0f}%)."
+    )
+    esc = r["escalations"]
+    rate = f"{100 * esc['rescue_rate']:.0f}%" if esc["rescue_rate"] is not None else "sem casos"
+    console.print(
+        f"Escaladas ao tier 1: {len(esc['stories'])} histórias, {esc['done']} entregues, "
+        f"{esc['cancelled']} canceladas, {esc['gave_up']} pediram orientação · resgate {rate} · "
+        f"US$ {esc['tier1_cost_usd']:.3f} no tier 1."
+    )
+    if r["effort_ab"]:
+        ab = Table(title="Experimento de esforço (tarefas principais em retentativa ou tier 1)")
+        for col in (
+            "braço",
+            "tarefas",
+            "concluídas",
+            "voltaram ao padrão",
+            "US$/tarefa",
+            "ferramentas",
+        ):
+            ab.add_column(col)
+        for arm, a in r["effort_ab"].items():
+            ab.add_row(
+                arm,
+                str(a["tasks"]),
+                f"{100 * a['done']:.0f}%",
+                f"{100 * a['raised']:.0f}%",
+                f"{a['cost_per_task']:.4f}",
+                f"{a['tool_calls']:.1f}",
+            )
+        console.print(ab)
+    else:
+        console.print("Experimento de esforço: nenhuma tarefa no período.")
+    console.print(
+        f"Teto por história atingido: {r['cost_caps']} · planos em outra linguagem: "
+        f"{r['foreign_plans']} · chamadas no tier grátis: {r['free_tier_calls']} "
+        f"({r['free_tier_fallbacks']} caíram para o tier 2)."
+    )
+
+
+@app.command()
 def ask(
     role: str = typer.Argument(..., help="compliance | metrics | storyteller"),
     request: list[str] = typer.Argument(..., help="Pedido em linguagem livre."),

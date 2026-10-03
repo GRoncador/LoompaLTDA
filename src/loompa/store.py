@@ -464,6 +464,14 @@ class Store:
             (factory, start, end),
         )
 
+    def usage_window(self, factory: str, start: str, end: str) -> list[dict[str, Any]]:
+        """Every model call of a factory in [start, end] with every column (`loompa costs`)."""
+        return self._q(
+            "SELECT * FROM usage WHERE factory = ? AND created_at >= ? AND created_at <= ? "
+            "ORDER BY id",
+            (factory, start, end),
+        )
+
     # -------------------------------------------------------------------- inbox
     def put_message(self, msg: FounderMessage) -> None:
         self._x(

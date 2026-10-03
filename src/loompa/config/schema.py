@@ -79,6 +79,10 @@ class ScheduleConfig(BaseModel):
     # How much ceremony a story gets (Fase 7, 7.5). `auto`: SIMPLE runs yolo, COMPLEX (or a plan
     # touching schemas, migrations or contracts) runs preflight, the rest standard.
     autonomy: Literal["auto", "yolo", "standard", "preflight"] = "auto"
+    # Experiment (cost review 2026-10-03): this share of the main tasks that run at the default
+    # effort today (a later attempt, or tier 1) runs at `low` instead, which goes back to the
+    # default on the first sign of trouble. `loompa costs` compares the two arms; 0 = off.
+    effort_ab_low_share: float = Field(0.5, ge=0, le=1)
 
 
 class WorkerConfig(BaseModel):

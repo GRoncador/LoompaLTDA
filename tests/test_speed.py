@@ -176,6 +176,8 @@ def types(ctx: EngineContext, sid: str) -> list[str]:
 async def test_a_task_going_in_circles_is_not_done_and_never_reaches_the_inspector(
     factory: Factory,
 ):
+    # the base policy: later attempts think at the default (the effort experiment is off here)
+    factory.config.schedule.effort_ab_low_share = 0.0
     ctx, sid, prompts = run_story(
         factory, lambda msgs: [ToolCall(f"c{len(msgs)}", "read_file", {"path": "app/calc.py"})]
     )

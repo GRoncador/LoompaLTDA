@@ -6,6 +6,7 @@ semantic commit. The Worker never sees raw terminal output — only ACI-compacte
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -18,7 +19,7 @@ from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance, lifte
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
 from loompa.engine.state import Autonomy, StoryKind, StoryState
-from loompa.finance.story_cap import over_cap
+from loompa.finance.story_cap import over_cap, story_spent
 from loompa.hygiene import new_files, scan_diff
 from loompa.llm import Message
 from loompa.llm.router import TIER_ABOVE
@@ -166,6 +167,17 @@ def _outcome(result: AgentResult) -> str:
 
 
 FOUNDER_CHANGES = "Founder asked for changes"  # how the engine files a delivery sent back
+
+
+def effort_arm(state: StoryState, number: int, share: float) -> str:
+    """The effort experiment's arm for one task of one attempt: `low` for `share` of them,
+    `default` for the rest, the same on a replay of the same attempt. Empty with the experiment
+    off."""
+    if share <= 0:
+        return ""
+    attempt = f"{state.story_id}:{state.attempts_tier2}:{state.attempts_tier1}:{number}"
+    draw = int(hashlib.sha1(attempt.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+    return "low" if draw < share else "default"
 
 
 class WorkerAgent(LoompaAgent):
@@ -708,6 +720,12 @@ class WorkerAgent(LoompaAgent):
         # first trouble; a repair (fix, self-check, reproducer retry) or any later attempt of the
         # story thinks at the default throughout.
         light = label == "main" and not state.failure_history and state.current_tier != "tier1"
+        arm = effort_arm(state, number, self.ctx.config.schedule.effort_ab_low_share)
+        if label == "main" and not light and arm:
+            light = arm == "low"
+        else:
+            arm = ""
+        spent_before = story_spent(self.ctx, state.story_id)
         retry_ctx = ""
         if state.failure_history:
             retry_ctx = (
@@ -785,6 +803,8 @@ class WorkerAgent(LoompaAgent):
             diagnosis=toolbox.diagnosis[:300],
             duration_s=round(time.monotonic() - started, 1),
             effort="low" if light else "default",
+            effort_ab=arm or None,  # the experiment's arm, when this task was in it
+            cost_usd=round(story_spent(self.ctx, state.story_id) - spent_before, 6),
             raised=loop.raised or None,
         )
         if loop.ended_by == "done":
