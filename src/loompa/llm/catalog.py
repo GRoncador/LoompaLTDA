@@ -441,6 +441,28 @@ def _one_per_vendor(ordered: list[CatalogModel], n: int) -> list[CatalogModel]:
     return picked
 
 
+def _decision_tier(
+    ordered: list[CatalogModel],
+    value: list[CatalogModel],
+    score: Callable[[CatalogModel], float | None],
+    n: int,
+) -> list[CatalogModel]:
+    """Tier 1 from `ordered` (best rating first): only models rated above the best of tier 2.
+    One per vendor had put tier 2's own models behind the leader (cost review 2026-10-03: 210 of
+    338 escalated Worker calls ran on glm-5.3-flash, a tier-2 model, billed as the escalation).
+    With fewer than two left, tier 2's best follow as the last resort, so one model resting is
+    not the tier failing."""
+    top = max((score(m) or 0.0 for m in value), default=0.0)
+    stronger = [m for m in ordered if (score(m) or 0.0) > top]
+    picks = _one_per_vendor(stronger or ordered[:1], n)
+    for m in value:
+        if len(picks) >= min(2, n):
+            break
+        if m.id not in {p.id for p in picks}:
+            picks.append(m)
+    return picks
+
+
 def _value_tier(
     models: list[CatalogModel], score: Callable[[CatalogModel], float | None], policy: Policy
 ) -> list[CatalogModel]:
@@ -489,10 +511,13 @@ def rank(
     best = max((r(m) for m in eligible), default=0.0)
     ranking = Ranking(len(models), eligible, excluded, best)
     under = [m for m in eligible if (m.blended or 0.0) <= policy.tier1_ceiling]
-    ranking.tier1 = _one_per_vendor(
-        sorted(under, key=lambda m: (-r(m), m.blended or 0.0, m.id)), policy.picks
-    )
     ranking.tier2 = _value_tier(eligible, lambda m: m.rating(composite), policy)
+    ranking.tier1 = _decision_tier(
+        sorted(under, key=lambda m: (-r(m), m.blended or 0.0, m.id)),
+        ranking.tier2,
+        lambda m: m.rating(composite),
+        policy.picks,
+    )
     return ranking
 
 
@@ -604,14 +629,16 @@ def rank_cluster(
     ]
 
     # Tier 1: highest score under ceiling
-    t1_candidates = [m for m, _ in paid_scored if (m.blended or 0.0) <= policy.tier1_ceiling]
-    t1_picks = _one_per_vendor(
-        sorted(t1_candidates, key=lambda m: (-(score_fn(m) or 0.0), m.blended or 0.0, m.id)),
-        policy.picks,
-    )
-
     # Tier 2: best cost-benefit among those reaching the floor of tier 1's best
     t2_picks = _value_tier([m for m, _ in paid_scored], score_fn, policy)
+    # Tier 1: highest score under the ceiling, above tier 2's best
+    t1_candidates = [m for m, _ in paid_scored if (m.blended or 0.0) <= policy.tier1_ceiling]
+    t1_picks = _decision_tier(
+        sorted(t1_candidates, key=lambda m: (-(score_fn(m) or 0.0), m.blended or 0.0, m.id)),
+        t2_picks,
+        score_fn,
+        policy.picks,
+    )
 
     # Tier 3: highest score among free models
     free_candidates = [m for m in free_eligible]
