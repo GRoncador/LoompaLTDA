@@ -32,6 +32,7 @@ from loompa.hygiene import (
     weak_tests,
 )
 from loompa.onboarding.greenfield import test_command_for
+from loompa.smoke import smoke, start_command
 from loompa.speckit import story_dir
 from loompa.worktrees import Worktree, WorktreeManager
 
@@ -221,6 +222,22 @@ class InspectorAgent(LoompaAgent):
             )
             ok = ok and res.ok
             others_ok = others_ok and res.ok
+        # a web product is opened in a browser (tamagotchi S-015: 108 green tests, a blank screen)
+        smoke_cmd = start_command(wt.path, q.smoke_command) if ok and not self.ctx.dry_run else ""
+        if smoke_cmd:
+            self.set_state("TESTING", state, detail="abrindo o produto no navegador")
+            sm = await smoke(wt.path, smoke_cmd)
+            parts.append(sm.report())
+            ok = ok and sm.ok
+            others_ok = others_ok and sm.ok
+            self.ctx.emit(
+                "inspector.smoke",
+                story_id=state.story_id,
+                agent=self.name,
+                ok=sm.ok,
+                problems=sm.problems[:5],
+                notes=sm.notes[:3],
+            )
         # 7.10: leftovers no test notices (debris files, machine paths, debugger calls, markers)
         full_diff = (
             self.ctx.worktrees.diff(wt, max_chars=400_000)

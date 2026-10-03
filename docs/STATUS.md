@@ -680,6 +680,16 @@ Decided 2026-09-29:
   verified source (S-041 invented Nubank headers and inverted the sign); a task ended by loop or limit
   gets the test run and the done-check before it counts as unfinished.
 
+- **2026-10-03 — The three proposals, built.** (1) Browser smoke test (`loompa/smoke.py`, Inspector
+  step `[smoke]`): a web product's start command (`quality.smoke_command`; None finds `npm start` in a
+  page with a start script, "" turns it off) must serve the page and every module it imports; with a
+  Chrome/Chromium found, the page is opened headless through the DevTools protocol: a JavaScript error,
+  a canvas of one solid colour or a page with nothing on it fails the step. On tamagotchi's real code
+  the blank S-015 version fails ("#tela-lcd is one solid colour") and the merged one passes. (2) An
+  external format in a spec needs a named source, or the founder is asked (Spec Loompa + Product Owner
+  review). (3) A task stopped by a loop or the call limit counts as finished when it changed something,
+  the suite is green and the self-check finds nothing missing (`worker.salvaged`).
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then

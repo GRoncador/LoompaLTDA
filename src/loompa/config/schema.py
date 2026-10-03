@@ -485,6 +485,9 @@ class QualityConfig(BaseModel):
     typecheck_command: str = ""
     format_command: str = ""
     coverage_min: int = Field(0, ge=0, le=100)
+    # starts the product for the browser smoke test (`loompa/smoke.py`): None finds `npm start` in
+    # a web page with a start script, "" turns the smoke test off
+    smoke_command: str | None = None
     coderabbit: CodeRabbitConfig = Field(default_factory=CodeRabbitConfig)
     require_spec_before_code: bool = True
 
