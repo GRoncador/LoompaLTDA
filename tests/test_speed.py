@@ -241,3 +241,30 @@ async def test_a_task_cut_by_the_tool_call_limit_stays_pending(factory: Factory)
     assert "inspector.verdict" not in types(ctx, sid)
     assert state.tasks_done == [] and "tool calls a task may make" in state.failure_history[0]
     await ctx.aclose()
+
+
+async def test_a_task_stopped_after_its_work_is_green_counts_as_done(factory: Factory):
+    """contas S-041: the fix was in and the suite green when the Worker looped writing extra
+    tests; two tier-1 attempts and a question to the founder followed. A task stopped by the
+    limit that changed something, with the suite green and nothing missing, is finished."""
+    factory.config.schedule.worker_max_iterations = 4
+    factory.save()
+    factory = Factory.open(factory.root)
+    test = "from app.calc import add\n\n\ndef test_soma_dois():\n    assert add(2, 2) == 4\n"
+    reads = iter(range(1, 1000))
+
+    def worker(msgs: list[Message]) -> Any:
+        if not any(m.role == "tool" for m in msgs):
+            return [
+                ToolCall("w", "write_file", {"path": "tests/test_soma_dois.py", "content": test})
+            ]
+        return [ToolCall("r", "read_file", {"path": "app/calc.py", "start": next(reads)})]
+
+    ctx, sid, _ = run_story(factory, worker)
+    await Scheduler(ctx).run(until_idle=True)
+    state = load_state(ctx, sid)
+    seen = types(ctx, sid)
+    assert "worker.salvaged" in seen and "story.task_unfinished" not in seen
+    assert state.blocked_reason.value == "delivery" and state.tasks_done == [1]
+    assert "story.escalated" not in seen
+    await ctx.aclose()

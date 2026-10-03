@@ -7,6 +7,7 @@ semantic commit. The Worker never sees raw terminal output — only ACI-compacte
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -303,6 +304,8 @@ class WorkerAgent(LoompaAgent):
             changed=self.ctx.worktrees.diff_stat(wt),
             red_tests_ok=reproducer,
         )
+        if unfinished(result) and not reproducer:
+            result = await self._salvage(state, wt, task_aci, number, text, result)
         if reproducer and not result.blocked_reason and not unfinished(result):
             result = await self._prove_reproduced(
                 state, wt, task_aci, number, text, spec, plan, tasks_md, outline
@@ -373,6 +376,34 @@ class WorkerAgent(LoompaAgent):
                 task=number,
             )
         return result
+
+    async def _salvage(
+        self, state: StoryState, wt: Worktree, aci: ACI, number: int, text: str, result: AgentResult
+    ) -> AgentResult:
+        """A task stopped by a loop or the call limit may already be done: contas S-041's Worker
+        looped writing extra tests after its fix was in and green, and two tier-1 attempts and a
+        question to the founder followed. It counts as finished only when it changed something,
+        the suite is green and the self-check finds nothing missing; otherwise it stays
+        unfinished, as before."""
+        if not self.ctx.worktrees.diff_working(wt, max_chars=2000).strip():
+            return result
+        tests = await aci.tool_run_tests()
+        if not re.match(r"^\[[^\]]+\] PASS", tests.strip()):
+            return result
+        if await self._dod_check(state, wt, text, result.summary):
+            return result
+        ended_by = (result.data or {}).get("ended_by", "")
+        self.ctx.emit(
+            "worker.salvaged",
+            story_id=state.story_id,
+            agent=self.name,
+            task=number,
+            ended_by=ended_by,
+        )
+        return AgentResult(
+            ok=True,
+            summary=f"tarefa concluída (verificada depois de parar por {ended_by or 'limite'})",
+        )
 
     async def _prove_reproduced(
         self,
