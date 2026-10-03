@@ -30,6 +30,13 @@ Rules:
   it is stored, commands, formats) is given: build on it and never ask the founder about it. When a
   story it builds on has no spec yet, take the simplest reading of its request and write that
   choice in `assumptions`; it is technical, not the founder's decision.
+- A format or interface owned by someone else (a bank's export file, an external API, a device's
+  protocol) is never guessed: describe it only from a source in the material below (a research
+  report, a sample file or documentation from the founder) and name that source in
+  `assumptions`. Without one, set `needs_decision` and ask the founder for a sample file or the
+  documentation; never invent column names, field order, signs, units or date formats. Why: a
+  spec guessed a bank's CSV headers in the wrong language and the sign of purchases, and every
+  test agreed with the guess.
 - `needs_decision`: true only for a genuinely blocking product decision (two viable paths with
   business impact); then `question`, `context` and 2-3 short `options` in plain, non-technical
   {language} for the founder. Otherwise false, and open points go to `questions` as information.
