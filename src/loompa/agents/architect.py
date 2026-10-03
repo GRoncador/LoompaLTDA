@@ -15,6 +15,7 @@ from loompa.engine.state import StoryKind, StoryState
 from loompa.hygiene import TEST_DIRS, is_test_path
 from loompa.risk import assess, render_matrix
 from loompa.speckit import render_plan, render_risk, render_tasks, story_dir, tasks_from_markdown
+from loompa.stack_check import STACK_KEY, STACK_STATES
 
 SYSTEM = """<!-- role:architect -->
 You are the Architect Loompa of an autonomous software factory. From the story's spec, produce the
@@ -258,6 +259,11 @@ class ArchitectAgent(LoompaAgent):
                 else ""
             )
             + delivered_brief(self.ctx.store, state.story_id)
+            + (
+                "## Language check\n" + str(state.extra[STACK_KEY])
+                if state.extra.get(STACK_KEY) and state.extra[STACK_KEY] not in STACK_STATES
+                else ""
+            )
             + (REPRODUCER_NOTE if state.kind == StoryKind.BUGFIX and not state.commits else "")
             + f"## Repository outline\n{outline}\n\n## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
         )

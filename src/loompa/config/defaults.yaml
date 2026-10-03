@@ -36,6 +36,7 @@ budget:
   cap_usd: 5.0              # spending cap of one period
   warn_at_fraction: 0.8     # Finance Loompa alerts the inbox at 80% of the cap
   on_exceed: pause          # pause (stop dispatch until the next period) | tier3 (every role on free models)
+  story_cap_usd: 1.0        # one story past this without finishing waits for the founder (0 = off)
 
 models:
   clusters_enabled: true    # false: every role shares one "general" cluster with the same 3 tiers

@@ -18,6 +18,7 @@ from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance, lifte
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
 from loompa.engine.state import Autonomy, StoryKind, StoryState
+from loompa.finance.story_cap import over_cap
 from loompa.hygiene import new_files, scan_diff
 from loompa.llm import Message
 from loompa.llm.router import TIER_ABOVE
@@ -220,6 +221,13 @@ class WorkerAgent(LoompaAgent):
             tasks_md = mark_task_done(tasks_md, task.number)
             paths.tasks.write_text(tasks_md, encoding="utf-8")
             summaries.append(f"T{task.number}: {result.summary}")
+            if task is not pending[-1] and (spent := over_cap(self.ctx, state)) is not None:
+                # past the story's cap: stop between tasks, with this one committed, and let the
+                # founder decide (finance/story_cap.py)
+                self._flush_learnings(state, aci)
+                self.set_state("IDLE")
+                state.worker_summary = "\n".join(summaries)
+                return AgentResult(ok=False, summary="teto de custo", data={"cost_cap": spent})
         self._flush_learnings(state, aci)
         self.set_state("IDLE")
         state.worker_summary = "\n".join(summaries)

@@ -102,6 +102,8 @@ class BudgetConfig(BaseModel):
     cap_usd: float = Field(5.0, ge=0)
     warn_at_fraction: float = Field(0.8, ge=0, le=1)
     on_exceed: OnExceed = "pause"
+    # One story past this without finishing pauses for the founder (finance/story_cap.py); 0 = off.
+    story_cap_usd: float = Field(1.0, ge=0)
 
     @model_validator(mode="before")
     @classmethod

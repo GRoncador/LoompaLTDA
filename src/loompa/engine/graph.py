@@ -62,11 +62,13 @@ from loompa.engine.state import (
     StoryKind,
     StoryState,
 )
+from loompa.finance.story_cap import CAP_BASE_KEY, over_cap
 from loompa.hygiene import is_test_path
 from loompa.llm import LLMError
 from loompa.llm.router import TIER_ABOVE
 from loompa.risk import needs_preflight
 from loompa.sprints import SprintBoard
+from loompa.stack_check import STACK_KEY, foreign_files, mismatch_note
 from loompa.worktrees import GitError, Worktree
 
 Node = Callable[[EngineContext, StoryState], Awaitable[StoryState]]
@@ -350,7 +352,82 @@ async def node_plan(ctx: EngineContext, state: StoryState) -> StoryState:
         state.autonomy = Autonomy.PREFLIGHT
         state.route = with_preflight(state.route)
         ctx.emit("story.autonomy", story_id=state.story_id, autonomy=state.autonomy.value)
+    languages = ctx.config.stack.languages
+    foreign = foreign_files(state.allowed_paths, languages)
+    checked = state.extra.get(STACK_KEY)
+    if foreign and checked != "accepted":
+        ctx.emit(
+            "plan.foreign_language",
+            story_id=state.story_id,
+            languages=sorted(foreign),
+            stack=languages,
+            replanned=bool(checked),
+        )
+        if not checked:
+            # once: the Architect plans again with the mismatch named (architect.STACK_NOTE)
+            state.extra[STACK_KEY] = mismatch_note(foreign, languages)
+            return goto(state, "plan")
+        names = ", ".join(sorted(foreign))
+        state.extra[STACK_KEY] = "asked"
+        return await block(
+            ctx,
+            state,
+            BlockedReason.STACK,
+            f"plan writes {names} source files; the factory stack is {', '.join(languages)}",
+            resume=state.next_phase() or "dev",
+            message=FounderMessage(
+                factory=ctx.slug,
+                story_id=state.story_id,
+                kind=MessageKind.BLOCKED,
+                sender="Architect Loompa",
+                title=f"“{state.title}” foi planejada em outra linguagem",
+                context=(
+                    f"O produto é feito em {', '.join(languages)}, mas o plano desta entrega "
+                    f"escreve código em {names}, mesmo depois de eu pedir um novo plano. Isso "
+                    "costuma gerar uma segunda versão de algo que já existe."
+                ),
+                impact="A entrega está pausada; as demais seguem normalmente.",
+                options=[
+                    Option(key="proceed", label=f"Seguir com o plano em {names}"),
+                    Option(key="skip", label="Deixar para depois (volta ao backlog)"),
+                    Option(key="drop", label="Cancelar esta entrega"),
+                ],
+            ),
+        )
     return advance(state)
+
+
+async def cost_cap_block(ctx: EngineContext, state: StoryState, spent: float) -> StoryState:
+    """The story spent its cap without finishing (finance/story_cap.py): it waits for the founder,
+    and going on grants another cap from what it has spent now."""
+    cap = ctx.config.budget.story_cap_usd
+    state.extra[CAP_BASE_KEY] = spent
+    ctx.emit("story.cost_cap", story_id=state.story_id, spent=round(spent, 4), cap=cap)
+    return await block(
+        ctx,
+        state,
+        BlockedReason.COST_CAP,
+        f"story spent US$ {spent:.4f}; cap US$ {cap:.2f}",
+        resume="dev",
+        message=FounderMessage(
+            factory=ctx.slug,
+            story_id=state.story_id,
+            kind=MessageKind.BLOCKED,
+            sender="Finance Loompa",
+            title=f"“{state.title}” já custou US$ {spent:.2f} sem terminar",
+            context=(
+                f"Esta entrega passou do teto de US$ {cap:.2f} por história. Quando isso "
+                "acontece, em geral a abordagem não está funcionando, e seguir pode gastar mais "
+                "sem resultado."
+            ),
+            impact="A entrega está pausada; as demais seguem normalmente.",
+            options=[
+                Option(key="continue", label=f"Continuar (libera mais US$ {cap:.2f})"),
+                Option(key="skip", label="Deixar para depois (volta ao backlog)"),
+                Option(key="drop", label="Cancelar esta entrega"),
+            ],
+        ),
+    )
 
 
 async def node_preflight(ctx: EngineContext, state: StoryState) -> StoryState:
@@ -473,6 +550,8 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
             await ArchitectAgent(ctx).amend(state, guidance)
         except LLMError as exc:  # the Worker still gets the guidance as a note
             ctx.emit("plan.amend_failed", story_id=state.story_id, error=str(exc)[:200])
+    if (spent := over_cap(ctx, state)) is not None:
+        return await cost_cap_block(ctx, state, spent)
     tier = "tier1" if state.current_tier == "tier1" else None
     opencode = ctx.config.worker.backend == "opencode"
     worker_cls = OpenCodeWorker if opencode else WorkerAgent
@@ -484,6 +563,8 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     if await _widen_fence(ctx, state, res):
         res = await worker.run(state, wt)
     await KaizenAgent(ctx).capture(state)
+    if (res.data or {}).get("cost_cap"):
+        return await cost_cap_block(ctx, state, float(res.data["cost_cap"]))
     if res.blocked_reason:
         return await block(
             ctx,
@@ -1062,6 +1143,13 @@ def apply_founder_answer(
             # what the founder wrote may withdraw part of the plan: the Architect amends the
             # tasks, or the Worker's self-check keeps asking for it (`contas` S-030)
             state.extra[AMEND_KEY] = note
+    elif reason in (BlockedReason.COST_CAP, BlockedReason.STACK):
+        # the decision itself is the answer; only what the founder wrote is guidance
+        if answer.text and answer.text.strip():
+            state.note(answer.text.strip())
+        if reason == BlockedReason.STACK:
+            state.extra[STACK_KEY] = "accepted"
+        goto(state, resume or "dev")
     elif reason == BlockedReason.CONFLICT:
         # back through `dev`: the base is merged in there and conflicts go to the Worker;
         # retrying the delivery's rebase alone only ever met the same conflict again

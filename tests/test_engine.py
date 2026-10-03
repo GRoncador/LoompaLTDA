@@ -1489,3 +1489,78 @@ async def test_two_stories_dispatched_together_share_one_checkpoint_connection(f
         await asyncio.sleep(0.02)
     assert threading.active_count() == before
     await ctx.aclose()
+
+
+# ---------------------------------------------------------------------- cost controls
+
+
+def plans_in(files_by_attempt: list[list[str]]) -> Callable[..., Any]:
+    """The dry run, with the Architect's plans listing these files, one list per plan."""
+    plans = {"n": 0}
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        out = dry_run_script(model, messages, tools)
+        is_plan = role_of(messages) == "architect" and "## Repository outline" in messages[1].content
+        if is_plan and isinstance(out, str) and '"approach"' in out:
+            data = json.loads(out)
+            data["files"] = files_by_attempt[min(plans["n"], len(files_by_attempt) - 1)]
+            plans["n"] += 1
+            out = json.dumps(data)
+        return out
+
+    script.plans = plans  # type: ignore[attr-defined]
+    return script
+
+
+async def test_a_plan_in_another_language_is_replanned_once_with_the_mismatch_named(
+    factory: Factory,
+):
+    """Tamagotchi S-006: Python persistence in a JavaScript product, 17% of a week's spend."""
+    # the dry-run Worker writes under loompa_dryrun/, so every plan fences it there too
+    script = plans_in([["web/save.js", "loompa_dryrun/"], ["loompa_dryrun/", "tests/"]])
+    ctx = make_ctx(factory, script)
+    assert ctx.config.stack.languages == ["Python"]
+    sid = seed_story(ctx, "Salvar o estado")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert script.plans["n"] == 2 and state.blocked_reason == "delivery"
+    types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
+    assert types.count("plan.foreign_language") == 1
+    await ctx.aclose()
+
+
+async def test_a_plan_still_in_another_language_asks_the_founder_and_can_go_on(factory: Factory):
+    script = plans_in([["web/save.js", "loompa_dryrun/"]])
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Salvar o estado")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "stack"
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert msg.executive_audit() == [] and "JavaScript" in msg.context
+    assert [o.key for o in msg.options] == ["proceed", "skip", "drop"]
+    await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="proceed"))
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    # no third plan: the founder's answer settled it
+    assert script.plans["n"] == 2 and state.blocked_reason == "delivery"
+    await ctx.aclose()
+
+
+async def test_a_story_past_its_cost_cap_waits_and_going_on_grants_another_cap(factory: Factory):
+    factory.config.budget.story_cap_usd = 0.000001  # every story is past it after the plan
+    factory.save()
+    ctx = make_ctx(factory)
+    sid = seed_story(ctx, "Cara demais")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "cost_cap"
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert msg.executive_audit() == [] and "teto" in msg.context
+    assert [o.key for o in msg.options] == ["continue", "skip", "drop"]
+    spent = ctx.store.get_story(sid)["cost_usd"]
+    assert spent > 0 and state.extra["cost_cap_base"] == spent
+    await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="continue"))
+    state = load_state(ctx, sid)
+    assert state.phase == "dev" and not state.founder_notes  # the choice is not guidance
+    await ctx.aclose()
