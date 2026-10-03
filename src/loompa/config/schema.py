@@ -140,6 +140,13 @@ class ModelCandidate(BaseModel):
     # pays for the thinking *and* the answer, so a short task with a small `max_output_tokens`
     # can spend all of it reasoning and return nothing. Empty keeps the provider's default.
     reasoning_effort: str = ""
+    # Which way a slot on OpenRouter reaches its model when the maker's own API has a key (plan
+    # 9.6): "auto" = maker's API first, OpenRouter as the reserve of the same model; "openrouter"
+    # = never the maker's API; "direct" = never OpenRouter (a failure goes to the next model, and
+    # without the maker's key the slot is skipped). "" follows `models.default_route`.
+    route: Literal["", "auto", "openrouter", "direct"] = ""
+    # Set by the router on a "direct" slot whose maker does not take the call's effort.
+    plain_effort: bool = Field(False, exclude=True)
 
     @field_validator("reasoning_effort")
     @classmethod
@@ -314,6 +321,8 @@ class ModelsConfig(BaseModel):
     clusters_enabled: bool = True
     tier1_ceiling: float = Field(1.25, ge=0.0)
     tier2_floor: float = Field(0.75, ge=0.0, le=1.0)
+    # The route of every slot that has no `route` of its own (plan 9.6).
+    default_route: Literal["auto", "openrouter"] = "auto"
 
     def _on_tier_updated(self, tier: str, cands: list[ModelCandidate]) -> None:
         if not hasattr(self, "matrix") or not self.matrix:

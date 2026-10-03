@@ -797,15 +797,22 @@ def apply_proposal(config: LoompaConfig, proposal: Proposal) -> bool:
             name: {t: list(c) for t, c in tiers.items()}
             for name, tiers in (config.models.matrix or {}).items()
         }
+        # the route the founder chose for a model stays with it (plan 9.6)
+        routes = {
+            c.model: c.route
+            for tiers in [config.models.tiers, *matrix.values()]
+            for cands in tiers.values()
+            for c in cands
+            if c.provider == PROVIDER and c.route
+        }
         for cluster_name, tier_map in proposal.clusters.items():
             matrix[cluster_name] = {}
             for t_name, cands_list in tier_map.items():
+                ids = [
+                    m["id"] if isinstance(m, dict) else getattr(m, "id", str(m)) for m in cands_list
+                ]
                 matrix[cluster_name][t_name] = [
-                    ModelCandidate(
-                        provider=PROVIDER,
-                        model=m["id"] if isinstance(m, dict) else getattr(m, "id", str(m)),
-                    )
-                    for m in cands_list
+                    ModelCandidate(provider=PROVIDER, model=i, route=routes.get(i, "")) for i in ids
                 ]
         config.models.matrix = matrix
     for model_id, price in proposal.pricing.items():

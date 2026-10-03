@@ -241,3 +241,31 @@ def test_revision_2_replaces_the_xiaomi_effort_guess_with_what_a_real_call_took(
     xiaomi = cfg.providers["xiaomi"]
     assert xiaomi.takes("low") and xiaomi.takes(None) and not xiaomi.takes("minimal")
     assert not cfg.providers["deepseek"].takes("low")  # still unconfirmed: kept
+
+
+def test_the_route_of_each_slot_and_the_factory_default_survive_the_settings_screen(tmp_path):
+    """Plan 9.6: the screen writes a slot's route inside the matrix and the factory's default
+    route on its own; both come back from the settings view and from config.yaml."""
+    from loompa.config.schema import ModelCandidate
+    from loompa.config.settings import SettingsPatch, apply_settings, describe_settings
+    from loompa.config.store import load_config, save_config
+
+    cfg = default_config()
+    slot = ModelCandidate(provider="openrouter", model="xiaomi/mimo-v2.6-pro", route="direct")
+    cfg.models.matrix["general"]["tier1"] = [slot]
+    notes = apply_settings(
+        tmp_path,
+        cfg,
+        SettingsPatch(matrix=cfg.models.matrix, clusters_enabled=False, default_route="openrouter"),
+    )
+    assert "rota padrão: só OpenRouter" in notes
+    save_config(tmp_path, cfg)
+    again = load_config(tmp_path)
+    assert again.models.default_route == "openrouter"
+    assert again.models.tiers["tier1"][0].route == "direct"
+    from loompa.config.secrets import Secrets
+
+    view = describe_settings(again, Secrets())
+    assert view["models"]["default_route"] == "openrouter"
+    assert view["matrix"]["general"]["tier1"][0]["route"] == "direct"
+    assert "plain_effort" not in view["matrix"]["general"]["tier1"][0]

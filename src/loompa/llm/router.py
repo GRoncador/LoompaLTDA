@@ -201,26 +201,38 @@ class ModelRouter:
     def direct_first(
         self, cands: list[ModelCandidate], reasoning_effort: str | None = None
     ) -> list[ModelCandidate]:
-        """BYOK: in front of each OpenRouter candidate, the same model on the maker's own API
-        when the founder set that provider's key (`ProviderConfig.byok_models`). A call with an
-        effort skips a provider that does not take one (`takes_effort`)."""
+        """BYOK: each OpenRouter slot by its route (plan 9.6). "auto" puts the same model on the
+        maker's own API in front of it when that provider's key is set
+        (`ProviderConfig.byok_models`), skipping a maker that does not take the call's effort
+        (`takes_effort`); "openrouter" keeps the slot as it is; "direct" replaces it with the
+        maker's API, at the maker's effort, and drops it when that key is missing."""
         direct = [
             (name, cfg)
             for name, cfg in self.config.providers.items()
             if cfg.byok_models and resolve_key(cfg.api_key_env, self.secrets)
         ]
-        if not direct:
-            return cands
         out: list[ModelCandidate] = []
         for cand in cands:
             via = self.config.providers.get(cand.provider)
-            if via is not None and is_openrouter_endpoint(via.base_url):
-                effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
-                for name, cfg in direct:
-                    own = cfg.byok_models.get(cand.model)
-                    if own and cfg.takes(effort):
-                        out.append(cand.model_copy(update={"provider": name, "model": own}))
-            out.append(cand)
+            if via is None or not is_openrouter_endpoint(via.base_url):
+                out.append(cand)
+                continue
+            route = cand.route or self.config.models.default_route
+            if route == "openrouter":
+                out.append(cand)
+                continue
+            effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
+            for name, cfg in direct:
+                own = cfg.byok_models.get(cand.model)
+                if own and (route == "direct" or cfg.takes(effort)):
+                    plain = not cfg.takes(effort)
+                    out.append(
+                        cand.model_copy(
+                            update={"provider": name, "model": own, "plain_effort": plain}
+                        )
+                    )
+            if route != "direct":
+                out.append(cand)
         seen: set[tuple[str, str]] = set()
         return [
             c
@@ -531,6 +543,8 @@ class ModelRouter:
                 calls.errors.append(f"{key}: sem chave de API")
                 continue
             effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
+            if cand.plain_effort:
+                effort = ""  # a "direct" slot runs at the maker's default (plan 9.6)
             budget = min(
                 max(self._room(effort, max_tokens, cand), self._fitted.get((key, role), 0)),
                 self.config.models.max_output_ceiling,

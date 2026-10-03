@@ -8,7 +8,7 @@ every response only ever says whether a key is configured.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -102,6 +102,7 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
             "tier1_ceiling": config.models.tier1_ceiling,
             "tier2_floor": config.models.tier2_floor,
             "clusters_enabled": config.models.clusters_enabled,
+            "default_route": config.models.default_route,
         },
         "tiers": {
             tier: [c.model_dump() for c in cands] for tier, cands in config.models.tiers.items()
@@ -179,6 +180,7 @@ class SettingsPatch(BaseModel):
     clusters_enabled: bool | None = None
     tier1_ceiling: float | None = None
     tier2_floor: float | None = None
+    default_route: Literal["auto", "openrouter"] | None = None
     budget: BudgetPatch | None = None
     max_parallel: int | None = None
     worker_backend: str | None = None  # "aci" | "opencode" (Fase 2 spike, ADR-0007)
@@ -292,6 +294,13 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
         notes.append(f"teto de custo Tier 1: US$ {patch.tier1_ceiling:.2f}/M")
     if patch.tier2_floor is not None:
         config.models.tier2_floor = patch.tier2_floor
+    if patch.default_route is not None and patch.default_route != config.models.default_route:
+        config.models.default_route = patch.default_route
+        notes.append(
+            "rota padrão: API do fabricante primeiro"
+            if patch.default_route == "auto"
+            else "rota padrão: só OpenRouter"
+        )
 
     if patch.budget is not None:
         fields = patch.budget.model_dump(exclude_none=True)

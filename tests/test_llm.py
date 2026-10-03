@@ -891,3 +891,48 @@ def test_a_rest_survives_an_engine_restart():
     )
     assert ("gemini/gemini-3.5-flash-lite", "product_owner") in router._rested
     assert ("deepseek/deepseek-chat", "worker") not in router._rested  # an old rest is over
+
+
+def test_each_slot_picks_its_route_to_a_model_the_maker_also_serves():
+    """Plan 9.6: auto = maker first, OpenRouter as the reserve of the same model; openrouter =
+    never the maker; direct = never OpenRouter, at the maker's effort, skipped without its key.
+    The factory's default route covers every slot without one."""
+    cfg = byok_config()
+    cfg.providers["xiaomi"].takes_effort = False
+    tier = cfg.models.tiers["tier2"]
+    router = ModelRouter(cfg, providers={}, secrets={"XIAOMI_API_KEY": "sk-x"})
+
+    def route(slot: str, effort: str | None = None) -> list[tuple[str, str, bool]]:
+        cands = [tier[0].model_copy(update={"route": slot}), tier[1]]
+        return [(c.provider, c.model, c.plain_effort) for c in router.direct_first(cands, effort)]
+
+    glm = ("openrouter", "z-ai/glm-5.3-flash", False)
+    assert route("openrouter") == [("openrouter", "xiaomi/mimo-v2.6-pro", False), glm]
+    assert route("direct") == [("xiaomi", "mimo-v2.6-pro", False), glm]
+    assert route("direct", "low") == [("xiaomi", "mimo-v2.6-pro", True), glm]
+    assert route("auto", "low") == [("openrouter", "xiaomi/mimo-v2.6-pro", False), glm]
+    cfg.models.default_route = "openrouter"
+    assert route("")[0] == ("openrouter", "xiaomi/mimo-v2.6-pro", False)
+    assert route("auto")[0] == ("xiaomi", "mimo-v2.6-pro", False)  # the slot's own choice wins
+    keyless = ModelRouter(cfg, providers={}, secrets={})
+    cands = [tier[0].model_copy(update={"route": "direct"}), tier[1]]
+    assert [c.model for c in keyless.direct_first(cands)] == ["z-ai/glm-5.3-flash"]
+
+
+async def test_a_direct_slot_calls_the_maker_without_an_effort_it_does_not_take():
+    cfg = byok_config()
+    cfg.providers["xiaomi"].takes_effort = False
+    for t in cfg.models.tiers.values():
+        t[0] = t[0].model_copy(update={"route": "direct"})
+    for c in cfg.models.matrix.values():
+        for t in c.values():
+            t[0] = t[0].model_copy(update={"route": "direct"})
+    maker = MockProvider("xiaomi", script=scripted)
+    router = ModelRouter(
+        cfg,
+        providers={"xiaomi": maker, "openrouter": MockProvider("openrouter", script=scripted)},
+        secrets={"XIAOMI_API_KEY": "sk-x"},
+        max_retries=0,
+    )
+    rc = await router.complete("worker", [Message("user", "x")], reasoning_effort="low")
+    assert rc.candidate.provider == "xiaomi" and maker.calls[0]["reasoning_effort"] == ""

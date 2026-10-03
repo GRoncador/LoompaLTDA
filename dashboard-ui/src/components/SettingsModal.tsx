@@ -722,6 +722,7 @@ function ModelsPanel({
     Object.fromEntries((s.role_tasks ?? []).map((t) => [t.key, t.tier]))
   );
   const [clustersEnabled, setClustersEnabled] = useState(s.models?.clusters_enabled ?? true);
+  const [defaultRoute, setDefaultRoute] = useState<"auto" | "openrouter">(s.models?.default_route ?? "auto");
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncNote, setSyncNote] = useState<string | null>(null);
@@ -740,7 +741,12 @@ function ModelsPanel({
     setRoles(s.roles);
     setRoleTasks(Object.fromEntries((s.role_tasks ?? []).map((t) => [t.key, t.tier])));
     setClustersEnabled(s.models?.clusters_enabled ?? true);
+    setDefaultRoute(s.models?.default_route ?? "auto");
   }, [s]);
+
+  /** The maker that also serves an OpenRouter id with its own API, keyed or not (plan 9.6). */
+  const makerOf = (model: string) => s.providers.find((p) => p.name !== "openrouter" && p.byok_models?.includes(model));
+  const anyMakerKey = s.providers.some((p) => p.name !== "openrouter" && p.key.configured && (p.byok_models?.length ?? 0) > 0);
 
   // The catalogue is read from the local cache; only the founder's button goes to the network.
   useEffect(() => {
@@ -790,7 +796,8 @@ function ModelsPanel({
     JSON.stringify(matrix) !== JSON.stringify(s.matrix ?? {}) ||
     JSON.stringify(roles) !== JSON.stringify(s.roles) ||
     JSON.stringify(roleTasks) !== JSON.stringify(Object.fromEntries((s.role_tasks ?? []).map((t) => [t.key, t.tier]))) ||
-    clustersEnabled !== (s.models?.clusters_enabled ?? true);
+    clustersEnabled !== (s.models?.clusters_enabled ?? true) ||
+    defaultRoute !== (s.models?.default_route ?? "auto");
 
   const runSync = async (forceRefresh: boolean) => {
     if (!openrouterReady) { setSyncError(NO_OPENROUTER_HINT); setSyncNote(null); return; }
@@ -867,6 +874,7 @@ function ModelsPanel({
       roles,
       role_tasks: roleTasks,
       clusters_enabled: clustersEnabled,
+      default_route: defaultRoute,
     });
 
   return (
@@ -906,6 +914,27 @@ function ModelsPanel({
           <p className="rounded border border-amber-900/50 bg-amber-950/30 p-2 text-[11px] text-amber-200">
             {NO_OPENROUTER_HINT}
           </p>
+        )}
+
+        {anyMakerKey && (
+          <label className="flex flex-col gap-1 border-t border-line/60 pt-2 text-xs sm:flex-row sm:items-start sm:gap-2">
+            <select
+              className="rounded border border-line bg-ink px-1.5 py-0.5 text-[11px] text-slate-200"
+              value={defaultRoute}
+              onChange={(e) => setDefaultRoute(e.target.value as "auto" | "openrouter")}
+            >
+              <option value="auto">Automático</option>
+              <option value="openrouter">Só OpenRouter</option>
+            </select>
+            <span>
+              <span className="font-medium text-slate-200">Rota padrão das vagas</span>
+              <span className="mt-0.5 block text-slate-400">
+                Automático: um modelo que o fabricante também serve com a chave dele vai primeiro pela API do fabricante, e a
+                OpenRouter fica de reserva do mesmo modelo. Só OpenRouter: uma fatura só, com o teto e o rodízio de provedores
+                dela. Cada vaga pode escolher a sua rota.
+              </span>
+            </span>
+          </label>
         )}
 
         <label className="flex cursor-pointer items-start gap-2 border-t border-line/60 pt-2 text-xs">
@@ -1063,6 +1092,33 @@ function ModelsPanel({
                                     title="Remover" onClick={() => removeCandidate(col.key, t.key, i)}>✕</button>
                                 </div>
                               </div>
+
+                              {c.provider === "openrouter" && c.model && makerOf(c.model) && (() => {
+                                const maker = makerOf(c.model)!;
+                                const route = c.route || "";
+                                const effective = route || defaultRoute;
+                                // only where the maker's key is set, or a direct slot that needs it
+                                if (!maker.key.configured && effective !== "direct") return null;
+                                return (
+                                  <div className="ml-4 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
+                                    <span>rota</span>
+                                    <select
+                                      className="rounded border border-line bg-ink px-1 py-0 text-[10px] text-slate-200"
+                                      value={route}
+                                      title="Por onde esta vaga chama o modelo"
+                                      onChange={(e) => setCandidate(col.key, t.key, i, { route: e.target.value as Candidate["route"] })}
+                                    >
+                                      <option value="">Padrão da fábrica ({defaultRoute === "auto" ? "automático" : "só OpenRouter"})</option>
+                                      <option value="auto">Automático ({maker.label} primeiro)</option>
+                                      <option value="openrouter">Só OpenRouter</option>
+                                      <option value="direct">Só {maker.label}</option>
+                                    </select>
+                                    {!maker.key.configured && effective === "direct" && (
+                                      <span className="text-amber-300">sem a chave da {maker.label}: esta vaga será pulada</span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
 
                               {c.provider !== "openrouter" && provider?.models_url && (
                                 <a className="ml-4 block text-[10px] text-slate-500 hover:text-brand hover:underline" href={provider.models_url} target="_blank" rel="noreferrer">

@@ -84,3 +84,18 @@ line drawn on 2026-09-30 for subscription OAuth: official pay-as-you-go keys onl
   edited by hand on 2026-10-03 to mimo-v2.6-pro with mimo-v2.6-flash behind it. A later recommendation
   applies decision 7.
 - The experiment changes behaviour for half of the later attempts. Set the share to 0 to stop it.
+
+## Amendment (2026-10-03): a route per slot (plan 9.6)
+
+The founder can choose how each OpenRouter slot reaches a model its maker also serves
+(`ModelCandidate.route`), next to the provider in the models screen, shown only when that maker's
+key is set or the slot needs it:
+- `auto`: the maker's API first, OpenRouter as the reserve of the same model (decision 6).
+- `openrouter`: never the maker's API (one bill, OpenRouter's cap and provider rotation).
+- `direct`: never OpenRouter. A failure goes to the next model of the tier; without the maker's
+  key the slot is skipped and the screen says so. An effort the maker does not take is dropped
+  rather than sent, so the call runs at the maker's default.
+An empty route follows `models.default_route` (`auto` or `openrouter`). The slot keeps the
+OpenRouter id; the maker's id comes from `byok_models`. Applying a model suggestion keeps the route
+the founder chose for each model.
+

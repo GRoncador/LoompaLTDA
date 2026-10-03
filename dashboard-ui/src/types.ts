@@ -202,11 +202,17 @@ export interface KeyStatus { env: string; configured: boolean; label: string; so
 export interface ProviderInfo {
   name: string; label: string; kind: string; base_url: string; api_key_env: string; console_url: string;
   models_url: string; needs_key: boolean; recommended: boolean; key: KeyStatus;
+  /** BYOK: the OpenRouter ids this maker also serves with its own key */
+  byok_models?: string[];
 }
+
+/** How an OpenRouter slot reaches a model its maker also serves (plan 9.6); "" = factory default. */
+export type SlotRoute = "" | "auto" | "openrouter" | "direct";
 
 export interface Candidate {
   provider: string;
   model: string;
+  route?: SlotRoute;
   temperature?: number | null;
   max_output_tokens?: number | null;
   score?: number | null;
@@ -280,7 +286,7 @@ export type ModelMatrix = Record<string, Record<string, Candidate[]>>;
 
 export interface Settings {
   providers: ProviderInfo[];
-  models?: { tier1_ceiling: number; tier2_floor: number; clusters_enabled: boolean };
+  models?: { tier1_ceiling: number; tier2_floor: number; clusters_enabled: boolean; default_route?: "auto" | "openrouter" };
   tiers: Record<string, Candidate[]>;
   matrix?: ModelMatrix;
   role_clusters?: Record<string, string>;
@@ -302,6 +308,7 @@ export interface SettingsPatch {
   clusters_enabled?: boolean;
   tier1_ceiling?: number;
   tier2_floor?: number;
+  default_route?: "auto" | "openrouter";
   budget?: { period?: BudgetPeriod; cap_usd?: number; warn_at_fraction?: number; on_exceed?: OnExceed };
   max_parallel?: number;
   tools?: Record<string, { enabled?: boolean; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
