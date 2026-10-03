@@ -80,6 +80,25 @@ class KaizenAgent(LoompaAgent):
             detail = str(item.get("detail") or "").strip()
             verdict = verdicts.get(key) or Triage(reviewed=bool(verdicts))
             covered = filed.get(verdict.duplicate_of, verdict.duplicate_of)
+            if verdict.process_only:
+                # tamagotchi SP-005: five research cards that only "verified and recorded the
+                # closing" left eight cards asking to run `npm test` and attach the output
+                self.ctx.emit(
+                    "backlog.dropped",
+                    story_id=state.story_id,
+                    agent=po.name,
+                    title=title,
+                    reason="process_only",
+                )
+                self.ctx.store.add_learning(
+                    story_id=state.story_id, kind=kind, title=title, detail=detail
+                )
+                lines.append(
+                    f"- **{datetime.now(UTC).date().isoformat()} · {state.story_id} · {label}** — "
+                    f"{title} _(não virou card: só processo, sem mudança no produto)_"
+                )
+                item["_captured"] = "1"
+                continue
             if covered and covered not in keyed:
                 self.ctx.emit(
                     "backlog.duplicate", story_id=covered, agent=po.name, title=title, judged=True

@@ -56,6 +56,8 @@ Rules:
   again. When the founder asks for more of something delivered, the new card names that story and
   describes only what changes on top of it, with the names the delivered work uses (a need, a
   screen, a command keeps its name). When what they ask is already delivered, say so in the reply.
+- A story changes the product. Never draft one that only verifies, confirms or records that
+  delivered work is complete: the factory's tests and the Inspector check every delivery.
 - Follow the founder's corrections literally (drop, reorder, rename, move in or out of the sprint).
 - Ask a question only when you cannot draft even one story without the answer; otherwise draft and
   state your assumption in the reply.

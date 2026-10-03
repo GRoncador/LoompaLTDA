@@ -46,7 +46,11 @@ Rules:
   repository and the notes provided. Do not pretend to have searched the web.
 - When the question asks for a choice, compare the real options and give ONE recommendation and
   what would change it. `follow_ups` are concrete pieces of work the research suggests (each one
-  a card the founder may schedule); leave it empty if there are none.
+  a card the founder may schedule); leave it empty if there are none. A follow-up changes the
+  product or its tests. Never one that only runs the test suite, attaches evidence, records this
+  research or writes process documents for it: the factory runs the tests and the Inspector on
+  every delivery, and this report is the record. When a check needs a tool you lack, say so
+  under `limitations` instead.
 - Only if the request is too ambiguous to research at all, set needs_decision=true and phrase
   `clarification` and 2-3 short `options` in plain, non-technical {language}.
 Respond with JSON only:

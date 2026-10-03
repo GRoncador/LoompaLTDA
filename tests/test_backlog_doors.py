@@ -563,3 +563,31 @@ async def test_a_meeting_sees_what_was_delivered_and_the_po_refuses_it_again(fac
     assert out.story_id is None and out.triage.duplicate_of == "S-001"  # a delivered id counts
     assert "Already delivered" in script.seen["Triage the founder's request"][0][-1].content
     await ctx.aclose()
+
+
+async def test_a_finding_that_changes_nothing_in_the_product_is_not_filed(factory: Factory):
+    """tamagotchi SP-005: read-only research left eight cards asking to run `npm test` and
+    attach the output to a closing record."""
+    script = po_answers(
+        **{
+            "Triage the findings": {
+                "findings": [
+                    {"key": "F1", "process_only": True},
+                    {"key": "F2", "process_only": False, "title": "Testar o salvamento periódico"},
+                ]
+            }
+        }
+    )
+    ctx = make_ctx(factory, script)
+    state = StoryState(story_id="S-027", title="Verificar a simulação")
+    items = [
+        {"kind": "opportunity", "title": "Rodar npm test e anexar a saída", "detail": "x"},
+        {"kind": "opportunity", "title": "Salvamento sem teste", "detail": "y"},
+    ]
+    created = await KaizenAgent(ctx).capture(state, items=items)
+    assert len(created) == 1 and len(ctx.store.list_stories(ctx.slug)) == 1
+    [dropped] = events(ctx, "backlog.dropped")
+    assert dropped["payload"]["reason"] == "process_only"
+    assert all(item.get("_captured") for item in items)  # never offered again
+    assert "só processo" in ctx.factory.paths.learnings.read_text(encoding="utf-8")
+    await ctx.aclose()

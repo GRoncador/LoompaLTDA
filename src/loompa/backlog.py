@@ -52,6 +52,7 @@ class Triage(BaseModel):
     reason_code: str = ""  # one of REFUSAL_CODES when refused
     reason: str = ""  # for the founder, plain language
     duplicate_of: str = ""
+    process_only: bool = False  # a finding that changes nothing in the product: not filed
     title: str = ""
     description: str = ""
     kind: str = ""  # StoryKind value, "" when the Product Owner did not say
