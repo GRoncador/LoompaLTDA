@@ -138,6 +138,22 @@ class ConfigStore:
         self.save(registry)
         return ref
 
+    def projects_dir(self) -> Path | None:
+        return self.load().projects_dir
+
+    def set_projects_dir(self, path: Path) -> Path:
+        """Record the folder every new factory goes in; created when it does not exist."""
+        path = Path(path).expanduser()
+        if not path.is_absolute():
+            raise ValueError("Use o caminho completo da pasta, começando por / ou ~.")
+        if path.exists() and not path.is_dir():
+            raise ValueError(f"{path} é um arquivo, não uma pasta.")
+        path.mkdir(parents=True, exist_ok=True)
+        registry = self.load()
+        registry.projects_dir = path.resolve()
+        self.save(registry)
+        return registry.projects_dir
+
     def set_active(self, slug: str) -> FactoryRef:
         registry = self.load()
         ref = registry.get(slug)

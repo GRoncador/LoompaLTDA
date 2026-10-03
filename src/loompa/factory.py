@@ -170,11 +170,29 @@ def typed_path(text: str) -> Path:
     with spaces in quotes, a terminal escapes spaces with a backslash, and `~` means home.
     `Path("'/Users/a/b c'")` is a *relative* path: resolved against the dashboard's working
     directory it created the tamagotchi-retro factory under `~/'/Users/…'` (2026-10-01)."""
+    return Path(_unquoted(text)).expanduser()
+
+
+def _unquoted(text: str) -> str:
     raw = text.strip()
     while len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"`":
         raw = raw[1:-1].strip()
-    raw = re.sub(r"\\(.)", r"\1", raw)  # "Tamagotchi\ retrô" -> "Tamagotchi retrô"
-    return Path(raw).expanduser()
+    return re.sub(r"\\(.)", r"\1", raw)  # "Tamagotchi\ retrô" -> "Tamagotchi retrô"
+
+
+DEFAULT_PROJECTS_DIR = Path("~/Projects")
+
+
+def factory_folder(projects_dir: Path, folder: str) -> Path:
+    """The root of a factory named only by its folder inside the founder's projects folder.
+    One name, one level: quotes a paste brings are dropped, and a slash, `..` or `~` is refused,
+    so a factory can no longer land outside that folder (tamagotchi-retro, 2026-10-01)."""
+    name = _unquoted(folder)
+    if not name or name in (".", "..") or "/" in name or "\\" in name or name.startswith("~"):
+        raise ValueError(
+            f"Digite só o nome da pasta da fábrica (sem barras): ela fica dentro de {projects_dir}."
+        )
+    return Path(projects_dir) / name
 
 
 def bootstrap_factory(

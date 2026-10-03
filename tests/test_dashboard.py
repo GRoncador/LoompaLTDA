@@ -42,6 +42,25 @@ def test_a_pasted_path_with_quotes_lands_in_the_folder_it_names(client: TestClie
     assert r.status_code == 400 and "caminho completo" in r.json()["detail"]
 
 
+def test_a_new_factory_is_a_folder_name_inside_the_projects_folder(
+    client: TestClient, tmp_path: Path
+):
+    """Chosen once, then every factory is just a folder there (2026-10-03)."""
+    r = client.post("/api/factories", json={"folder": "novo", "name": "Novo"})
+    assert r.status_code == 400 and "pasta onde ficam" in r.json()["detail"]
+    assert client.get("/api/hub").json()["projects_dir"] is None
+    projects = tmp_path / "Projects"
+    r = client.put("/api/hub", json={"projects_dir": f"'{projects}'"})
+    assert r.status_code == 200 and projects.is_dir()
+    assert client.get("/api/hub").json()["projects_dir"] == str(projects.resolve())
+    r = client.post("/api/factories", json={"folder": "'Tamagotchi retrô'", "name": "Tama"})
+    assert r.status_code == 200 and (projects / "Tamagotchi retrô" / ".loompa").is_dir()
+    for bad in ("../fora", "/abs/path", "~/x", ".."):
+        r = client.post("/api/factories", json={"folder": bad, "name": "X"})
+        assert r.status_code == 400 and "sem barras" in r.json()["detail"], bad
+    assert client.put("/api/hub", json={"projects_dir": "relativa"}).status_code == 400
+
+
 def test_factories_and_overview(client: TestClient):
     r = client.get("/api/factories")
     assert r.status_code == 200 and r.json()["active"] == "demo-hq" and r.json()["dry_run"] is True

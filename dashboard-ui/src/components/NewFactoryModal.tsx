@@ -5,7 +5,10 @@ import { Modal } from "./Modal";
 import { ProvidersPanel } from "./SettingsModal";
 
 export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: string) => void }) {
-  const [path, setPath] = useState("");
+  const [folder, setFolder] = useState("");
+  const [projectsDir, setProjectsDir] = useState<string | null>(null);
+  const [dirDraft, setDirDraft] = useState("");
+  const [editingDir, setEditingDir] = useState(false);
   const [name, setName] = useState("");
   const [stack, setStack] = useState("custom");
   const [mission, setMission] = useState("");
@@ -16,10 +19,22 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
   const [settings, setSettings] = useState<Settings | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    api.hub().then((h) => {
+      setProjectsDir(h.projects_dir);
+      setDirDraft(h.projects_dir ?? h.suggested_projects_dir);
+      setEditingDir(!h.projects_dir);
+    }).catch((e) => setErr(String(e)));
+  }, []);
+  const saveDir = async () => {
+    setErr(null);
+    try { const r = await api.setProjectsDir(dirDraft); setProjectsDir(r.projects_dir); setEditingDir(false); }
+    catch (e) { setErr(String(e)); }
+  };
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const r = await api.addFactory({ path, name: name || undefined, stack, mission });
+      const r = await api.addFactory({ folder, name: name || undefined, stack, mission });
       setReport(r.report); setSlug(r.slug); setStep(2);
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   };
@@ -32,7 +47,23 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
     <Modal title={`+ Nova Fábrica · passo ${step}/3`} onClose={() => onClose(slug ?? undefined)}>
       {step === 1 && (
         <div className="space-y-3 text-sm">
-          <label className="block">Caminho do repositório (novo ou existente)<input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Users/eu/projetos/meu-saas" className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-1" /></label>
+          {editingDir ? (
+            <div className="space-y-1">
+              <label className="block">Pasta onde ficam todas as suas fábricas
+                <input value={dirDraft} onChange={(e) => setDirDraft(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-1" />
+              </label>
+              <p className="text-xs text-slate-400">Escolhida uma vez: cada nova fábrica é só uma pasta aqui dentro.</p>
+              <div className="text-right"><button className="btn-ghost" disabled={!dirDraft.trim()} onClick={saveDir}>Usar esta pasta</button></div>
+            </div>
+          ) : (
+            <label className="block">Pasta da fábrica (nova ou já existente)
+              <div className="mt-1 flex items-center gap-1">
+                <span className="truncate text-xs text-slate-400" title={projectsDir ?? ""}>{projectsDir}/</span>
+                <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="meu-saas" className="min-w-0 flex-1 rounded-md border border-line bg-ink px-2 py-1" />
+              </div>
+              <button type="button" className="mt-1 text-xs text-slate-400 underline" onClick={() => setEditingDir(true)}>trocar a pasta das fábricas</button>
+            </label>
+          )}
           <label className="block">Nome do produto<input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-1" /></label>
           <label className="block">Missão (uma frase)<input value={mission} onChange={(e) => setMission(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-1" /></label>
           <label className="block">Stack (só para projetos novos)
@@ -49,7 +80,7 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
             Loompa usa (ou pede uma sugestão inteligente).
           </p>
           {err && <p className="text-xs text-red-300">{err}</p>}
-          <div className="text-right"><button className="btn-primary" disabled={busy || !path} onClick={submit}>{busy ? "Escaneando…" : "Conectar fábrica"}</button></div>
+          <div className="text-right"><button className="btn-primary" disabled={busy || editingDir || !folder.trim()} onClick={submit}>{busy ? "Escaneando…" : "Conectar fábrica"}</button></div>
         </div>
       )}
       {step === 2 && (

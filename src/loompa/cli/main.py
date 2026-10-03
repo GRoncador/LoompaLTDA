@@ -55,7 +55,10 @@ def resolve_factory(slug: str | None = None, path: Path | None = None) -> Factor
 
 @app.command()
 def init(
-    path: Path = typer.Argument(Path("."), help="Raiz do projeto (novo ou existente)."),
+    target: str = typer.Argument(
+        ".",
+        help="Nome da pasta da fábrica dentro da pasta das fábricas (ou um caminho completo).",
+    ),
     name: str | None = typer.Option(None, "--name", "-n", help="Nome da fábrica/produto."),
     stack: str | None = typer.Option(
         None, "--stack", "-s", help=f"Preset greenfield: {', '.join(STACK_PRESETS)}."
@@ -73,7 +76,7 @@ def init(
     ),
 ) -> None:
     """Conecta a fábrica a um repositório novo (greenfield) ou existente (brownfield)."""
-    path = path.resolve()
+    path = _init_root(target, yes)
     detected = mode or detect_mode(path)
     console.print(
         Panel.fit(
@@ -140,6 +143,67 @@ def init(
         console.print("Chaves dos provedores: [bold]loompa setup[/bold]")
     console.print(f"Relatório executivo: {f.paths.onboarding_report}")
     console.print('Próximo passo: [bold]loompa meeting "metas de hoje"[/bold]')
+
+
+def _is_folder_name(text: str) -> bool:
+    raw = text.strip().strip("'\"")
+    return bool(raw) and raw not in (".", "..") and "/" not in raw and not raw.startswith("~")
+
+
+def _init_root(target: str, yes: bool) -> Path:
+    """`loompa init <nome>`: a bare name is a folder inside the founder's projects folder, asked
+    for once and kept in the hub; a path (`.`, `/…`, `~/…`) is used as given."""
+    from loompa.factory import DEFAULT_PROJECTS_DIR, factory_folder, typed_path
+
+    if not _is_folder_name(target):
+        return typed_path(target).resolve()
+    store = ConfigStore()
+    projects = store.projects_dir()
+    if projects is None:
+        if yes:
+            console.print(
+                "[red]Ainda não há pasta das fábricas.[/red] Rode "
+                "[bold]loompa projects-dir ~/Projects[/bold] (ou passe o caminho completo)."
+            )
+            raise typer.Exit(code=2)
+        answer = typer.prompt(
+            "Pasta onde ficam todas as suas fábricas", default=str(DEFAULT_PROJECTS_DIR)
+        )
+        projects = _set_projects_dir(store, answer)
+    try:
+        return factory_folder(projects, target)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+
+
+def _set_projects_dir(store: ConfigStore, text: str) -> Path:
+    from loompa.factory import typed_path
+
+    try:
+        path = store.set_projects_dir(typed_path(text))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+    console.print(f"[green]✔[/green] Pasta das fábricas: {path}")
+    return path
+
+
+@app.command("projects-dir")
+def projects_dir(
+    path: str | None = typer.Argument(None, help="Nova pasta (vazio: mostra a atual)."),
+) -> None:
+    """A pasta onde ficam todas as fábricas: `loompa init <nome>` cria a fábrica dentro dela."""
+    store = ConfigStore()
+    if path is None:
+        current = store.projects_dir()
+        console.print(
+            f"Pasta das fábricas: {current}"
+            if current
+            else "Nenhuma pasta das fábricas definida. Ex.: [bold]loompa projects-dir ~/Projects[/bold]"
+        )
+        return
+    _set_projects_dir(store, path)
 
 
 @app.command()

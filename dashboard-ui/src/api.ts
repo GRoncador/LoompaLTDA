@@ -10,7 +10,10 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   factories: () => req<{ active: string | null; factories: FactoryRef[]; dry_run: boolean }>("/api/factories"),
   activate: (slug: string) => req(`/api/factories/${slug}/activate`, { method: "POST" }),
-  addFactory: (body: { path: string; name?: string; stack?: string; mission?: string; keys?: Record<string, string>; secrets_scope?: "hub" | "factory" }) =>
+  hub: () => req<{ projects_dir: string | null; suggested_projects_dir: string }>("/api/hub"),
+  setProjectsDir: (projects_dir: string) =>
+    req<{ projects_dir: string }>("/api/hub", { method: "PUT", body: JSON.stringify({ projects_dir }) }),
+  addFactory: (body: { folder?: string; path?: string; name?: string; stack?: string; mission?: string; keys?: Record<string, string>; secrets_scope?: "hub" | "factory" }) =>
     req<{ slug: string; mode: string; report: string }>("/api/factories", { method: "POST", body: JSON.stringify(body) }),
   settings: (slug: string) => req<Settings>(`/api/factories/${slug}/settings`),
   updateSettings: (slug: string, patch: SettingsPatch) =>

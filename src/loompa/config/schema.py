@@ -668,6 +668,10 @@ class FactoryRef(BaseModel):
 
 class HubRegistry(BaseModel):
     active: str | None = None
+    # The one folder every factory of this founder lives in, chosen once (first `loompa init`,
+    # `loompa projects-dir` or the dashboard's first "Nova fábrica"): a new factory is then only
+    # a folder name inside it, never a path typed or pasted by hand.
+    projects_dir: Path | None = None
     factories: list[FactoryRef] = Field(default_factory=list)
 
     def get(self, slug: str) -> FactoryRef | None:

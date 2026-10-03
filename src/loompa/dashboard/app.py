@@ -143,12 +143,19 @@ class OrderBody(BaseModel):
 
 
 class FactoryBody(BaseModel):
-    path: str
+    # `folder`: the factory's folder name inside the hub's projects folder (the dashboard's form).
+    # `path`: a full path, for scripts that already send one.
+    folder: str = ""
+    path: str = ""
     name: str | None = None
     stack: str = "custom"
     keys: dict[str, str] = {}  # ENV_NAME -> value, written to the secrets file only
     secrets_scope: str = "hub"
     mission: str = ""
+
+
+class HubBody(BaseModel):
+    projects_dir: str
 
 
 @dataclass
@@ -336,6 +343,26 @@ def create_app(
             "dry_run": hub.dry_run,
         }
 
+    @app.get("/api/hub")
+    def hub_settings() -> dict[str, Any]:
+        from loompa.factory import DEFAULT_PROJECTS_DIR
+
+        projects = hub.store.projects_dir()
+        return {
+            "projects_dir": str(projects) if projects else None,
+            "suggested_projects_dir": str(DEFAULT_PROJECTS_DIR.expanduser()),
+        }
+
+    @app.put("/api/hub")
+    def set_hub(body: HubBody) -> dict[str, Any]:
+        from loompa.factory import typed_path
+
+        try:
+            path = hub.store.set_projects_dir(typed_path(body.projects_dir))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return {"projects_dir": str(path)}
+
     @app.post("/api/factories/{slug}/activate")
     def activate(slug: str) -> dict[str, Any]:
         try:
@@ -346,11 +373,20 @@ def create_app(
 
     @app.post("/api/factories")
     def add_factory(body: FactoryBody) -> dict[str, Any]:
-        from loompa.factory import bootstrap_factory, typed_path
+        from loompa.factory import bootstrap_factory, factory_folder, typed_path
 
-        root = typed_path(body.path)
-        if not root.is_absolute():  # relative to wherever the dashboard was started: never meant
-            raise HTTPException(400, "Use o caminho completo da pasta, começando por / ou ~.")
+        if body.folder.strip():
+            projects = hub.store.projects_dir()
+            if projects is None:
+                raise HTTPException(400, "Escolha primeiro a pasta onde ficam todas as fábricas.")
+            try:
+                root = factory_folder(projects, body.folder)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+        else:
+            root = typed_path(body.path)
+            if not root.is_absolute():  # relative to wherever the dashboard was started
+                raise HTTPException(400, "Use o caminho completo da pasta, começando por / ou ~.")
         result = bootstrap_factory(
             root,
             name=body.name,

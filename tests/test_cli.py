@@ -65,3 +65,28 @@ def test_init_and_providers_commands(git_repo, hub, monkeypatch):
     r = runner.invoke(app, ["providers", "set-key", "gemini", "--clear"])
     assert r.exit_code == 0 and key not in (hub.home / "secrets.env").read_text()
     assert runner.invoke(app, ["init", ".", "--yes", "--preset", "nope"]).exit_code != 0
+
+
+def test_init_with_a_folder_name_creates_it_inside_the_projects_folder(tmp_path: Path, hub):
+    projects = tmp_path / "Projects"
+    # with no projects folder yet and --yes, nothing is guessed
+    r = runner.invoke(app, ["init", "novo", "--yes", "--name", "Novo"])
+    assert r.exit_code == 2 and "projects-dir" in r.stdout
+    r = runner.invoke(app, ["projects-dir", str(projects)])
+    assert r.exit_code == 0 and projects.is_dir()
+    r = runner.invoke(app, ["init", "novo", "--yes", "--stack", "python-cli", "--name", "Novo"])
+    assert r.exit_code == 0, r.stdout
+    assert (projects / "novo" / ".loompa" / "config.yaml").is_file()
+    r = runner.invoke(app, ["projects-dir"])
+    assert str(projects.resolve()) in "".join(r.stdout.split())
+
+
+def test_the_first_init_asks_for_the_projects_folder_once(tmp_path: Path, hub):
+    projects = tmp_path / "Mine"
+    r = runner.invoke(
+        app,
+        ["init", "app", "--stack", "python-cli", "--name", "App"],
+        input=f"{projects}\n\n" + "n\n\n" * 10,  # the folder, no mission, then skip every key
+    )
+    assert (projects / "app" / ".loompa").is_dir(), r.stdout
+    assert hub.projects_dir() == projects.resolve()
