@@ -68,8 +68,9 @@ Rules:
   proposal, once the founder approves it; never say it started.
 - When the founder asks to review old backlog cards and retire the ones that no longer apply,
   add `"review_cards": ["S-017", ...]` with the ids they named (an empty list means every card
-  the factory found itself) and say the Product Owner will review them against the code. Never
-  retire those cards yourself: only a card the founder calls obsolete by name gets a `retire`.
+  the factory found itself) and say the Product Owner will review them against the code; the
+  cards it judges obsolete appear in the draft and leave the backlog when the founder saves it.
+  Never retire those cards yourself: only a card the founder calls obsolete by name gets a `retire`.
 """
 
 CURRENT_SPRINT_SYSTEM = """<!-- role:master -->
