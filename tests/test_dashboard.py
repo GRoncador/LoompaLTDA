@@ -478,3 +478,35 @@ def test_a_story_at_work_shows_what_it_is_doing_on_its_card(client: TestClient):
     assert "task" not in done and not done["stalled"]
     ctx.store.update_story(sid, stage=Stage.AWAITING_FOUNDER.value)
     assert card().get("activity") is None  # waiting for the founder: nothing live to show
+
+
+def test_the_card_counts_from_when_the_stage_and_the_task_began(client: TestClient):
+    """2026-10-03: "há 3 s" restarted on every tool call; the card now counts the time in the
+    stage (a dev retry keeps it, going back from TEST starts it again) and in the task."""
+    from loompa.agents import ProductOwnerAgent
+    from loompa.engine import Stage
+
+    ctx = client.app.state.hub.get("demo-hq").ctx
+    po = ProductOwnerAgent(ctx)
+    sid = po.add_item("Contar o tempo").story_id
+    po.admit(sid)
+    ctx.store.update_story(sid, stage=Stage.DEV.value)
+
+    def activity() -> dict:
+        ov = client.get("/api/factories/demo-hq/overview").json()
+        return next(s for c in ov["columns"] for s in c["stories"] if s["id"] == sid)["activity"]
+
+    ctx.emit("story.stage", story_id=sid, stage="PLAN", node="plan")
+    ctx.emit("story.stage", story_id=sid, stage="DEV", node="plan")
+    entered = activity()["stage_since"]
+    ctx.emit("story.stage", story_id=sid, stage="DEV", node="dev")  # a retry: same stage
+    ctx.emit("worker.task_started", story_id=sid, agent="Worker Loompa", task=1, text="T1")
+    ctx.emit("tool.call", story_id=sid, agent="Worker Loompa", tool="read_file", path="a.py")
+    a = activity()
+    assert a["stage"] == "DEV" and a["stage_since"] == entered
+    task_since = a["task_since"]
+    ctx.emit("tool.call", story_id=sid, agent="Worker Loompa", tool="read_file", path="b.py")
+    assert activity()["task_since"] == task_since  # a tool call does not restart the task
+    ctx.emit("story.stage", story_id=sid, stage="TEST", node="dev")
+    ctx.emit("story.stage", story_id=sid, stage="DEV", node="test")
+    assert activity()["stage_since"] > entered  # back from TEST: a new stretch in DEV

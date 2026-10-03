@@ -125,7 +125,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                     <Card s={s} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} agent={AT_WORK.has(s.stage) ? holder(agents, s.id) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  <Card key={s.id} s={s} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
                 ),
               )}
             </div>
@@ -199,7 +199,7 @@ function Card({ s, agent, activity, now, onOpen, onUnpin }: { s: StoryCard; agen
             </span>
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
-            ) : agent ? <Avatar agent={agent} /> : null}
+            ) : agent ? <Avatar agent={agent} busy={!!activity && now !== undefined && (now - Date.parse(activity.last_at)) / 1000 <= 300} /> : null}
           </div>
         )}
       </button>
@@ -207,11 +207,11 @@ function Card({ s, agent, activity, now, onOpen, onUnpin }: { s: StoryCard; agen
   );
 }
 
-/** The Loompa holding the card now, pulsing while it works. */
-function Avatar({ agent }: { agent: Agent }) {
+/** The Loompa holding the card, pulsing while the story gives signs of life. */
+function Avatar({ agent, busy }: { agent: Agent; busy: boolean }) {
   return (
     <span className="flex shrink-0 items-center gap-1 text-[10px] text-slate-300" title={`${agent.name} está com este card${agent.detail ? ` · ${agent.detail}` : ""}`}>
-      <LoompaFigure role={agent.role} busy />
+      <LoompaFigure role={agent.role} busy={busy} />
       {agent.name.replace(/ Loompa$/, "")}
     </span>
   );
@@ -233,9 +233,26 @@ const HAPPENING: Record<string, string> = {
   "llm.fallthrough": "trocando de modelo", "scheduler.dispatch": "começando",
 };
 
-/** Who is working on this card right now: an agent whose current story it is, not idle. */
-function holder(agents: Agent[], id: string): Agent | null {
-  return agents.find((a) => a.story_id === id && a.state !== "IDLE") ?? null;
+// Who holds a card in each stage when nothing more specific is known.
+const STAGE_OWNER: Record<string, { name: string; role: string }> = {
+  SPEC: { name: "Spec Loompa", role: "product" }, PLAN: { name: "Architect Loompa", role: "architect" },
+  DEV: { name: "Worker Loompa", role: "worker" }, TEST: { name: "Inspector Loompa", role: "inspector" },
+  REVIEW: { name: "Deployer Loompa", role: "deployer" },
+};
+// back-office Loompas speak about a story without holding it
+const BACK_OFFICE = new Set(["ops", "finance", "kaizen"]);
+
+/** Who is working on this card: whoever spoke last on this story, else the stage's owner. The
+ * `agents` table keeps one row per name, so two stories in DEV shared one "Worker Loompa" row
+ * and only the last card to write it showed an avatar (2026-10-03). */
+function holder(agents: Agent[], s: StoryCard, activity: StoryActivity | null): Agent | null {
+  const owner = STAGE_OWNER[s.stage];
+  if (!owner) return null;
+  const spoke = activity?.last_agent ? agents.find((a) => a.name === activity.last_agent) : undefined;
+  const who = spoke && !BACK_OFFICE.has(spoke.role) ? spoke : agents.find((a) => a.name === owner.name);
+  const base = who ?? ({ name: owner.name, role: owner.role, model: "", room: "dev", cost_usd: 0, updated_at: "" } as unknown as Agent);
+  // the row's detail is about this card only when the row is
+  return { ...base, state: "WORKING", story_id: s.id, detail: base.story_id === s.id ? base.detail : "" } as Agent;
 }
 
 /** The newer of the server's snapshot and what live events said since. */
@@ -255,26 +272,42 @@ function ago(seconds: number): string {
   return `${Math.floor(seconds / 3600)}h${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}`;
 }
 
+const STAGE_DOING: Record<string, string> = {
+  SPEC: "especificando", PLAN: "planejando", DEV: "desenvolvendo", TEST: "testando", REVIEW: "entregando",
+};
+
+function since(iso: string | null | undefined, now: number): number | null {
+  return iso ? Math.max(0, (now - Date.parse(iso)) / 1000) : null;
+}
+
+/** The card's live line. The clock counts the task (or the stage) without restarting on every
+ * tool call; silence shows only as an alert past five minutes, and a stall the Ops declared. */
 function Activity({ a, now }: { a: StoryActivity; now: number }) {
   const silent = Math.max(0, (now - Date.parse(a.last_at)) / 1000);
   const quiet = silent > 300; // five minutes without a word: worth a look, not yet an alarm
   const target = a.last_target ? ` ${a.last_target.split("/").pop()}` : "";
   // a streamed call still writing: how much it has written so far (ADR-0016)
   const thinking = a.thinking ? `pensando · ${tokens(a.thinking)} tokens` : "";
+  const inTask = since(a.task_since, now);
+  const inStage = since(a.stage_since, now);
+  const clock = a.task
+    ? `T${a.task}${inTask !== null ? ` há ${ago(inTask)}` : ""}`
+    : `${(a.stage && STAGE_DOING[a.stage]) || "na etapa"}${inStage !== null ? ` há ${ago(inStage)}` : ""}`;
   const what = a.task
-    ? `T${a.task} · ${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}${thinking ? ` · ${thinking}` : a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`
-    : `${a.last_agent || "fábrica"} · ${thinking || (HAPPENING[a.last_event] ?? "trabalhando")}`;
+    ? `${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}${thinking ? ` · ${thinking}` : a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`
+    : `${a.last_agent ? a.last_agent.replace(/ Loompa$/, "") : "fábrica"} · ${thinking || (HAPPENING[a.last_event] ?? "trabalhando")}`;
+  const title = [a.task_text ? `T${a.task}: ${a.task_text}` : "", inStage !== null ? `Nesta etapa há ${ago(inStage)}` : "", `Último sinal há ${ago(silent)}`]
+    .filter(Boolean).join(" · ");
   return (
-    <div className="mt-1 flex items-center gap-1 text-[10px]" title={a.task_text ? `T${a.task}: ${a.task_text}` : undefined}>
+    <div className="mt-1 flex items-center gap-1 text-[10px]" title={title}>
       {a.stalled ? (
         <span className="chip shrink-0 whitespace-nowrap bg-red-900/60 text-red-200">parada há {ago(silent)}</span>
       ) : quiet ? (
-        <span className="chip shrink-0 whitespace-nowrap bg-amber-900/50 text-amber-200">quieta há {ago(silent)}</span>
+        <span className="chip shrink-0 whitespace-nowrap bg-amber-900/50 text-amber-200" title="Nenhum evento há alguns minutos">quieta há {ago(silent)}</span>
       ) : (
         <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
       )}
-      {/* how long ago comes first: it is what tells a slow story from a stuck one */}
-      <span className="truncate text-slate-400">{!a.stalled && !quiet ? `há ${ago(silent)} · ` : ""}{what}</span>
+      <span className="truncate text-slate-400">{clock} · {what}</span>
     </div>
   );
 }

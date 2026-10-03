@@ -679,9 +679,10 @@ class Store:
         }
         if last[0]["type"] == "llm.progress":  # a streamed call still writing (ADR-0016 §4)
             out["thinking"] = json.loads(last[0]["payload_json"] or "{}").get("tokens")
+        out.update(self._stage_since(story_id))
         started = self._q(
-            "SELECT id, payload_json FROM events WHERE story_id = ? AND type = 'worker.task_started' "
-            "ORDER BY id DESC LIMIT 1",
+            "SELECT id, payload_json, created_at FROM events WHERE story_id = ? "
+            "AND type = 'worker.task_started' ORDER BY id DESC LIMIT 1",
             (story_id,),
         )
         since = 0
@@ -695,6 +696,7 @@ class Store:
             if not finished:
                 since = started[0]["id"]
                 out.update(task=p.get("task"), task_text=p.get("text"), origin=p.get("origin"))
+                out["task_since"] = started[0]["created_at"]  # the card counts from here
         tools = self._q(
             "SELECT COUNT(*) AS n, MAX(id) AS last FROM events WHERE story_id = ? "
             "AND type = 'tool.call' AND id > ?",
@@ -712,6 +714,30 @@ class Store:
         )
         out["stalled"] = bool(stalled)
         return out
+
+    def _stage_since(self, story_id: str) -> dict[str, Any]:
+        """The stage a story is in and when it entered it: the first `story.stage` after the last
+        one that named another stage. The engine says the stage after every node, so a dev retry
+        does not restart the clock; going back from TEST to DEV does."""
+        last = self._q(
+            "SELECT id, json_extract(payload_json, '$.stage') AS stage FROM events "
+            "WHERE story_id = ? AND type = 'story.stage' ORDER BY id DESC LIMIT 1",
+            (story_id,),
+        )
+        if not last or not last[0]["stage"]:
+            return {}
+        stage = last[0]["stage"]
+        before = self._q(
+            "SELECT MAX(id) AS id FROM events WHERE story_id = ? AND type = 'story.stage' "
+            "AND json_extract(payload_json, '$.stage') != ?",
+            (story_id, stage),
+        )
+        entered = self._q(
+            "SELECT created_at FROM events WHERE story_id = ? AND type = 'story.stage' AND id > ? "
+            "ORDER BY id LIMIT 1",
+            (story_id, (before[0]["id"] if before else None) or 0),
+        )
+        return {"stage": stage, "stage_since": entered[0]["created_at"]} if entered else {}
 
     def tool_output_by(
         self, factory: str | None = None, since_iso: str | None = None

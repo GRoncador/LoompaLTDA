@@ -152,9 +152,12 @@ function advance(base: StoryActivity | undefined, e: LoompaEvent): StoryActivity
   if (e.type === "story.stalled") return { ...(base ?? { last_event: e.type, last_agent: "", last_at: new Date().toISOString() }), stalled: true };
   const next: StoryActivity = { ...(base ?? {}), last_event: e.type, last_agent: e.agent ?? "", last_at: new Date().toISOString(), stalled: false };
   if (e.type === "worker.task_started") {
-    Object.assign(next, { task: Number(p.task), task_text: String(p.text ?? ""), origin: String(p.origin ?? ""), calls: 0, last_tool: null, last_target: null });
+    Object.assign(next, { task: Number(p.task), task_text: String(p.text ?? ""), origin: String(p.origin ?? ""), calls: 0, last_tool: null, last_target: null, task_since: next.last_at });
   } else if (e.type === "worker.task_finished") {
-    Object.assign(next, { task: null, task_text: null, calls: null, last_tool: null, last_target: null });
+    Object.assign(next, { task: null, task_text: null, calls: null, last_tool: null, last_target: null, task_since: null });
+  } else if (e.type === "story.stage" && p.stage && p.stage !== next.stage) {
+    // the engine repeats the stage after every node: only a new one restarts the clock
+    Object.assign(next, { stage: String(p.stage), stage_since: next.last_at });
   } else if (e.type === "tool.call") {
     Object.assign(next, { calls: (next.calls ?? 0) + 1, last_tool: String(p.tool ?? ""), last_target: String(p.path ?? p.query ?? "") || null });
   }

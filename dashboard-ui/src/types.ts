@@ -55,6 +55,9 @@ export interface StoryActivity {
   last_tool?: string | null;
   last_target?: string | null;
   thinking?: number | null; // tokens a streamed call has written so far
+  stage?: string | null; // the stage the clock below counts in
+  stage_since?: string | null; // when the story entered that stage (a retry in it keeps the clock)
+  task_since?: string | null; // when the task in progress began
 }
 
 export interface Column { key: string; label: string; stories: StoryCard[] }
