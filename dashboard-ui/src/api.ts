@@ -1,4 +1,4 @@
-import type { FactoryFinding, FactoryScan, ProductFinding } from "./types";
+import type { AvailableDTO, FactoryFinding, FactoryScan, ProductFinding } from "./types";
 import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -23,6 +23,9 @@ export const api = {
   /** One minimal call on one cell of the matrix: does this model really answer on this provider? */
   testModel: (slug: string, provider: string, model: string) =>
     req<ProbeResult>(`/api/factories/${slug}/models/test`, { method: "POST", body: JSON.stringify({ provider, model }) }),
+  /** Plan 9.1: each keyed provider's own model list (cached unless `refresh`). */
+  modelsAvailable: (slug: string, refresh = false) =>
+    req<AvailableDTO>(`/api/factories/${slug}/models/available${refresh ? "?refresh=true" : ""}`),
   modelsCatalog: (slug: string) => req<ModelProposalDTO>(`/api/factories/${slug}/models/catalog`),
   previewModelSync: (slug: string, body?: { tier1_ceiling?: number; tier2_floor?: number; force_refresh?: boolean }) =>
     req<ModelProposalDTO>(`/api/factories/${slug}/models/preview-sync`, { method: "POST", body: JSON.stringify(body || {}) }),

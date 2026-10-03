@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { BudgetPeriod, Candidate, ClusterName, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
+import type { AvailableDTO, BudgetPeriod, Candidate, ClusterName, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
 import { Modal } from "./Modal";
 import { PROVIDER_NAMES, ProviderBadge, ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
 
@@ -730,6 +730,8 @@ function ModelsPanel({
   const [catalog, setCatalog] = useState<ModelProposalDTO | null>(null);
   const [pickerTarget, setPickerTarget] = useState<{ cluster: ClusterName; tier: TierKey; index?: number } | null>(null);
   const [probes, setProbes] = useState<Record<string, ProbeResult | "…">>({});
+  const [avail, setAvail] = useState<AvailableDTO | null>(null);
+  const [availBusy, setAvailBusy] = useState(false);
 
   const ceiling = s.models?.tier1_ceiling ?? 1.25;
   const openrouterReady = Boolean(s.providers.find((p) => p.name === "openrouter")?.key.configured);
@@ -747,6 +749,16 @@ function ModelsPanel({
   /** The maker that also serves an OpenRouter id with its own API, keyed or not (plan 9.6). */
   const makerOf = (model: string) => s.providers.find((p) => p.name !== "openrouter" && p.byok_models?.includes(model));
   const anyMakerKey = s.providers.some((p) => p.name !== "openrouter" && p.key.configured && (p.byok_models?.length ?? 0) > 0);
+
+  // What each key can call (plan 9.1): the last answer from the cache; the button asks again.
+  useEffect(() => {
+    api.modelsAvailable(slug).then(setAvail).catch(() => {});
+  }, [slug]);
+  const refreshAvail = async () => {
+    setAvailBusy(true);
+    try { setAvail(await api.modelsAvailable(slug, true)); } catch (e) { setSyncError(String(e)); } finally { setAvailBusy(false); }
+  };
+  const availOf = (provider: string) => avail?.providers.find((p) => p.name === provider && p.ok)?.models;
 
   // The catalogue is read from the local cache; only the founder's button goes to the network.
   useEffect(() => {
@@ -916,6 +928,32 @@ function ModelsPanel({
           </p>
         )}
 
+        <div className="space-y-1 border-t border-line/60 pt-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-slate-200">O que cada chave consegue chamar</span>
+            <button type="button" className="btn-ghost px-1.5 py-0 text-[11px]" disabled={availBusy} onClick={refreshAvail}
+              title="Pergunta a lista de modelos a cada provedor com chave nesta fábrica">
+              {availBusy ? "⟳ consultando…" : "🔑 consultar os provedores"}
+            </button>
+          </div>
+          {avail && avail.providers.length > 0 ? (
+            <ul className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px]">
+              {avail.providers.map((p) => (
+                <li key={p.name} className={p.ok ? "text-slate-300" : "text-rose-300"} title={p.reason || undefined}>
+                  {p.ok ? "✔" : "✘"} {p.label}: {p.detail}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[11px] text-slate-500">Ainda não consultado.</p>
+          )}
+          {avail?.byok.filter((b) => b.found === false).map((b) => (
+            <p key={b.openrouter_id} className="text-[11px] text-amber-300">
+              {cleanModelId(b.openrouter_id)}: o fabricante não lista o id {b.own_id}; essas chamadas vão pela OpenRouter.
+            </p>
+          ))}
+        </div>
+
         {anyMakerKey && (
           <label className="flex flex-col gap-1 border-t border-line/60 pt-2 text-xs sm:flex-row sm:items-start sm:gap-2">
             <select
@@ -954,6 +992,12 @@ function ModelsPanel({
           </span>
         </label>
       </div>
+
+      {avail?.providers.filter((p) => p.ok && p.name !== "openrouter").map((p) => (
+        <datalist key={p.name} id={`avail-${p.name}`}>
+          {p.models.map((m) => <option key={m} value={m} />)}
+        </datalist>
+      ))}
 
       {syncError && <p className="rounded border border-red-900/50 bg-red-950/40 p-2 text-xs text-red-300">✘ {syncError}</p>}
       {syncNote && <p className="rounded border border-emerald-900/50 bg-emerald-950/40 p-2 text-xs text-emerald-300">{syncNote}</p>}
@@ -1074,6 +1118,7 @@ function ModelsPanel({
                                   <input
                                     className="min-w-0 flex-1 rounded border border-line bg-ink px-1.5 py-0.5 font-mono text-[11px] text-slate-200"
                                     value={c.model}
+                                    list={availOf(c.provider) ? `avail-${c.provider}` : undefined}
                                     placeholder="id do modelo neste provedor"
                                     title={c.model}
                                     onChange={(e) => setCandidate(col.key, t.key, i, { model: e.target.value })}

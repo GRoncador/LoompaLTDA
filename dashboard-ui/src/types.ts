@@ -369,3 +369,8 @@ export interface FactoryScan { id: number; factory: string; sprint_id: string | 
 
 /** Today's Kaizen findings about the product, once each (8.4). */
 export interface ProductFinding { title: string; kind: string; detail: string; story_id: string | null; card: string | null; at: string }
+
+/** Plan 9.1: what one key of the factory can call. */
+export interface ProviderModels { name: string; label: string; ok: boolean; models: string[]; detail: string; reason: string; checked_at: number }
+export interface ByokCheck { provider: string; openrouter_id: string; own_id: string; found: boolean | null }
+export interface AvailableDTO { providers: ProviderModels[]; byok: ByokCheck[] }

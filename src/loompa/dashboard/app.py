@@ -998,6 +998,22 @@ def create_app(
         except Exception as exc:
             return {**empty, "openrouter": True, "error": str(exc)}
 
+    @app.get("/api/factories/{slug}/models/available")
+    async def get_models_available(slug: str, refresh: bool = False) -> dict[str, Any]:
+        """Plan 9.1: what each key of the factory can call. Cached unless the founder refreshes."""
+        from loompa.llm.available import available, byok_checks, cached
+
+        ctx = hub.get(slug).ctx
+        results = (
+            await available(ctx.config, ctx.secrets) if refresh else cached(ctx.config, ctx.secrets)
+        )
+        return {
+            "providers": [
+                {k: v for k, v in r.as_dict().items() if k != "base_url"} for r in results
+            ],
+            "byok": [c.__dict__ for c in byok_checks(ctx.config, results)],
+        }
+
     @app.post("/api/factories/{slug}/models/preview-sync")
     def preview_models_sync(slug: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         from loompa.llm.catalog import CatalogError, Policy

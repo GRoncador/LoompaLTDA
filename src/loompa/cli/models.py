@@ -97,3 +97,52 @@ def models_sync(
             f"[green]✔[/green] Proposta enviada ao inbox ({msg.id}). Para aprovar: "
             f"loompa inbox reply {msg.id} --option approve"
         )
+
+
+@models_app.command("available")
+def models_available(
+    factory: str | None = typer.Option(None, "--factory", "-f"),
+    refresh: bool = typer.Option(
+        True,
+        "--refresh/--cached",
+        help="Pergunta aos provedores agora (ou mostra o último resultado).",
+    ),
+    show: str = typer.Option("", "--show", help="Lista os modelos deste provedor (ex.: xiaomi)."),
+) -> None:
+    """O que cada chave da fábrica consegue chamar: a lista de modelos de cada provedor com chave.
+
+    Também confere se os modelos que vão direto ao fabricante (chave própria) existem na lista dele.
+    """
+    import asyncio
+
+    from loompa.config.secrets import Secrets
+    from loompa.llm.available import available, byok_checks, cached
+
+    f = resolve_factory(factory)
+    secrets = Secrets.load(f.root)
+    results = asyncio.run(available(f.config, secrets)) if refresh else cached(f.config, secrets)
+    if not results:
+        console.print(
+            "Nenhum provedor com chave nesta fábrica (ou nada guardado ainda: use --refresh)."
+        )
+        return
+    table = Table(title="Modelos por provedor", show_lines=False)
+    table.add_column("provedor")
+    table.add_column("situação")
+    for r in sorted(results, key=lambda r: r.name):
+        mark = "[green]✔[/green]" if r.ok else "[red]✘[/red]"
+        table.add_row(
+            r.label, f"{mark} {r.detail}" + (f" [dim]({r.reason})[/dim]" if r.reason else "")
+        )
+    console.print(table)
+    for check in byok_checks(f.config, results):
+        if check.found is False:
+            console.print(
+                f"[yellow]![/yellow] {check.openrouter_id}: o id {check.own_id} não está na lista "
+                f"de {f.config.providers[check.provider].label}; essas chamadas vão cair na OpenRouter"
+            )
+        elif check.found:
+            console.print(f"[green]✔[/green] {check.openrouter_id} vai direto como {check.own_id}")
+    if show:
+        hit = next((r for r in results if r.name == show), None)
+        console.print("\n".join(hit.models) if hit else f"[red]✘[/red] sem resultado para {show}")
