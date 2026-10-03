@@ -63,7 +63,7 @@ models:
           model: deepseek/deepseek-v4-flash-0731
       tier3:
         - provider: openrouter
-          model: deepseek/deepseek-v4-flash-0731:free
+          model: qwen/qwen3.8-27b:free
         - provider: openrouter
           model: openrouter/free
     engineering:
@@ -79,7 +79,7 @@ models:
           model: deepseek/deepseek-v4-flash-0731
       tier3:
         - provider: openrouter
-          model: deepseek/deepseek-v4-flash-0731:free
+          model: qwen/qwen3.8-27b:free
         - provider: openrouter
           model: openrouter/free
     routine:
@@ -95,7 +95,7 @@ models:
           model: z-ai/glm-5.3-flash
       tier3:
         - provider: openrouter
-          model: deepseek/deepseek-v4-flash-0731:free
+          model: qwen/qwen3.8-27b:free
         - provider: openrouter
           model: openrouter/free
     # Used only when `clusters_enabled` is off: one list for every role.
@@ -112,7 +112,7 @@ models:
           model: deepseek/deepseek-v4-flash-0731
       tier3:
         - provider: openrouter
-          model: deepseek/deepseek-v4-flash-0731:free
+          model: qwen/qwen3.8-27b:free
         - provider: openrouter
           model: openrouter/free
   tiers:
@@ -128,7 +128,7 @@ models:
         model: deepseek/deepseek-v4-flash-0731
     tier3:
       - provider: openrouter
-        model: deepseek/deepseek-v4-flash-0731:free
+        model: qwen/qwen3.8-27b:free
       - provider: openrouter
         model: openrouter/free
   roles:                     # any role not listed here uses tier2
@@ -330,7 +330,7 @@ pricing:
   z-ai/glm-5.3-flash:       { input: 0.09, output: 0.30, cached_input: 0.018 }
   qwen/qwen3.8-max-0902:    { input: 2.00, output: 6.00, cached_input: 0.25 }
   deepseek/deepseek-v4-flash-0731: { input: 0.04, output: 0.08, cached_input: 0.016 }
-  deepseek/deepseek-v4-flash-0731:free: { input: 0.0, output: 0.0, cached_input: 0.0 }
+  qwen/qwen3.8-27b:free:    { input: 0.0, output: 0.0, cached_input: 0.0 }
   # OpenRouter `-latest` aliases. The recommendation never proposes one, but a founder may add an
   # alias by hand, and the cost tracker bills the id that was asked for — so each needs its own
   # entry, and `AliasWatch` says when the model behind it changes.
