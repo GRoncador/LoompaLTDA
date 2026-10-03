@@ -236,7 +236,7 @@ async def test_escalation_ladder_tier2_to_tier1_and_constitution_lesson(factory:
     assert state.attempts_tier2 == 2 and state.current_tier == "tier1" and state.attempts_tier1 == 0
     # tier2 twice (initial + one retry), then tier1 fixes it
     tiers = [r["key"] for r in ctx.store.usage_by("tier", factory.slug)]
-    assert set(tiers) == {"tier1", "tier2"}
+    assert {"tier1", "tier2"} <= set(tiers) <= {"tier1", "tier2", "tier3"}  # tier 3: wording
     tier2_model = factory.config.models.candidates_for("worker", "tier2")[0].model
     assert seen_models.count(tier2_model) == 6 and seen_models.count(tier1_model) == 3
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
@@ -901,7 +901,8 @@ async def test_ops_loompa_retries_transient_failure_and_tells_founder(factory: F
 
     ctx = make_ctx(factory, script)
     ctx.router.max_retries = 0
-    tier = ctx.config.models.tier_for("architect")  # single-candidate tier, like a free-tier setup
+    # single-candidate tier, like a free-tier setup
+    tier = ctx.config.models.task_tier("architect", "architect.plan", "STANDARD")
     ctx.config.models.tiers[tier] = ctx.config.models.tiers[tier][:1]
     sid = seed_story(ctx, "Recupera sozinho")
     await Scheduler(ctx).run()

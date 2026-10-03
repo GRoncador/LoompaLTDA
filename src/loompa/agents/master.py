@@ -414,6 +414,7 @@ class MasterAgent(LoompaAgent):
                     SPRINT_REPORT_SYSTEM.format(language=self.language),
                     sprint_report.summary_facts(report),
                     max_tokens=1200,
+                    task="master.wording",
                     reasoning_effort="low",
                 )
                 text = str(data.get("summary") or "").strip()
@@ -524,6 +525,7 @@ class MasterAgent(LoompaAgent):
                     BRIEF_SYSTEM.format(language=self.language),
                     render_facts(facts),
                     max_tokens=800,
+                    task="master.wording",
                     reasoning_effort="low",  # ADR-0016: the facts are given; this words them
                 )
                 text = founder_text(str(data.get("reply") or ""))

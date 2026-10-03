@@ -15,7 +15,7 @@ def test_defaults_load_and_validate():
     assert cfg.schedule.max_parallel == 3
     assert (cfg.budget.period, cfg.budget.cap_usd) == ("weekly", 5.0)
     assert cfg.budget.on_exceed == "pause"
-    assert cfg.models.tier_for("master") == "tier1"
+    assert cfg.models.tier_for("master") == "tier2"
     assert cfg.models.tier_for("worker") == "tier2"
     # fixed ids, never `~...-latest`: an alias would change model and price without approval
     assert cfg.models.candidates_for("worker")[0].model == "z-ai/glm-5.3-flash"
@@ -114,12 +114,50 @@ def test_turning_clusters_off_sends_every_role_to_the_general_cluster():
 def test_a_named_task_can_have_its_own_tier():
     """The Master decides on tier 1, but classifying a story is not a decision."""
     cfg = default_config()
-    assert cfg.models.tier_for("master") == "tier1"
-    assert cfg.models.tier_for_task("master", "master.classify") == "tier2"
-    cfg.models.role_tasks["master.classify"] = "tier3"
-    assert cfg.models.tier_for_task("master", "master.classify") == "tier3"
+    assert cfg.models.tier_for("architect") == "tier1"
+    assert cfg.models.tier_for_task("architect", "architect.preflight") == "tier2"
+    cfg.models.role_tasks["architect.preflight"] = "tier3"
+    assert cfg.models.tier_for_task("architect", "architect.preflight") == "tier3"
     # an unknown task is the role's tier, never an error
-    assert cfg.models.tier_for_task("master", "master.inventada") == "tier1"
+    assert cfg.models.tier_for_task("architect", "architect.inventada") == "tier1"
+
+
+def test_the_plan_is_tier_one_only_on_a_complex_story():
+    """Cost review 2026-10-03: a STANDARD plan on tier 1 cost 10% of the spend for nothing the
+    re-plan of an escalation does not already cover."""
+    m = default_config().models
+    assert m.task_tier("architect", "architect.plan", "STANDARD") == "tier2"
+    assert m.task_tier("architect", "architect.plan", "COMPLEX") == "tier1"
+    assert m.task_tier("architect", "architect.inventada", "COMPLEX") is None
+    m.role_tasks["architect.plan"] = "tier1"  # the founder's choice wins over the rule
+    assert m.task_tier("architect", "architect.plan", "STANDARD") == "tier1"
+
+
+def test_an_old_config_drops_the_defaults_the_cost_review_changed(tmp_path):
+    """Every save writes the whole config, so the old defaults would stay forever: revision 1
+    drops the ones written word for word and keeps what the founder changed."""
+    import yaml
+
+    from loompa.config.store import load_config, save_config
+
+    (tmp_path / ".loompa").mkdir()
+    old = {
+        "models": {
+            "full_output_tokens": 96000,
+            "roles": {"master": "tier1", "storyteller": "tier1"},
+            "role_tasks": {"deployer.summary": "tier2", "master.classify": "tier2"},
+        }
+    }
+    (tmp_path / ".loompa" / "config.yaml").write_text(yaml.safe_dump(old), encoding="utf-8")
+    cfg = load_config(tmp_path)
+    assert cfg.revision == 1
+    assert cfg.models.tier_for("master") == "tier2"
+    assert cfg.models.tier_for("storyteller") == "tier1"  # changed by the founder: kept
+    assert cfg.models.tier_for_task("deployer", "deployer.summary") == "tier3"
+    # saved and loaded again, a choice made after the upgrade is not undone
+    cfg.models.role_tasks["deployer.summary"] = "tier2"
+    save_config(tmp_path, cfg)
+    assert load_config(tmp_path).models.tier_for_task("deployer", "deployer.summary") == "tier2"
 
 
 def test_a_legacy_monthly_budget_keeps_its_numbers():

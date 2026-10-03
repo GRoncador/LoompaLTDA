@@ -701,6 +701,60 @@ def test_a_lifted_call_goes_one_tier_above_and_tier_one_stays():
     assert router.candidates("worker")[0] == "tier2"
 
 
+def test_a_declared_task_wins_over_the_story_complexity():
+    """Cost review 2026-10-03: the PO's spec review stays on tier 2 on a COMPLEX story, the plan
+    climbs only there, and SIMPLE never runs above tier 2."""
+    router = ModelRouter(two_provider_matrix(), providers={})
+    tier = lambda *a, **k: router.candidates(*a, **k)[0]  # noqa: E731
+    assert tier("product_owner", complexity="COMPLEX") == "tier1"  # undeclared: still lifted
+    assert tier("product_owner", complexity="COMPLEX", task="product_owner.spec_review") == "tier2"
+    assert tier("architect", complexity="STANDARD", task="architect.plan") == "tier2"
+    assert tier("architect", complexity="COMPLEX", task="architect.plan") == "tier1"
+    assert tier("architect", complexity="SIMPLE") == "tier2"
+    assert tier("deployer", complexity="SIMPLE", task="deployer.summary") == "tier3"
+
+
+async def test_a_free_tier_call_falls_to_tier_two_when_no_free_model_answers():
+    cfg = two_provider_matrix()
+    cfg.models.tiers["tier3"] = [ModelCandidate(provider="free", model="x:free")]
+    asked: list[str] = []
+
+    def rate_limited(model, messages, tools):
+        asked.append(model)
+        return QuotaExhausted("cota", status=429, retry_after=30)
+
+    router = ModelRouter(
+        cfg,
+        providers={
+            "free": MockProvider("free", script=rate_limited),
+            "deepseek": MockProvider("deepseek", script=scripted),
+            "gemini": MockProvider("gemini", script=scripted),
+        },
+        max_retries=0,
+    )
+    rc = await router.complete("deployer", [Message("user", "x")], task="deployer.summary")
+    # no waiting on the free model's 30 s limit: tier 2 answered on the same call
+    assert asked == ["x:free"] and rc.tier == "tier2"
+    assert rc.response.text == "gemini-3.5-flash-lite says hi"
+
+
+async def test_a_spent_budget_keeps_every_call_on_the_free_tier():
+    """`on_exceed: tier3` is the founder choosing free models: no quiet fall back to paid ones."""
+    cfg = two_provider_matrix()
+    cfg.models.tiers["tier3"] = [ModelCandidate(provider="free", model="x:free")]
+    router = ModelRouter(
+        cfg,
+        providers={
+            "free": MockProvider("free", script=lambda *a: LLMError("boom")),
+            "deepseek": MockProvider("deepseek", script=scripted),
+        },
+        max_retries=0,
+    )
+    router.budget_downgrade = lambda: True  # type: ignore[method-assign]
+    with pytest.raises(LLMError):
+        await router.complete("deployer", [Message("user", "x")], task="deployer.summary")
+
+
 def test_ops_does_not_wait_out_a_cut_answer_and_says_why_in_plain_words():
     from loompa.agents.ops import triage
     from loompa.comms import audit_executive_text

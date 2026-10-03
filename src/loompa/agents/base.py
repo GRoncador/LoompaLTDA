@@ -191,6 +191,7 @@ class LoompaAgent:
         label: str = "",
         raise_on_trouble: bool = False,
         red_tests_ok: bool = False,
+        task: str | None = None,
     ) -> LoopResult:
         """Call the model, run the tools it asks for, feed the results back, until it stops.
 
@@ -221,6 +222,7 @@ class LoompaAgent:
                     story_id=story_id,
                     tools=toolbox.spec() or None,
                     tier_override=tier_override,
+                    task=task,
                     max_tokens=max_tokens,
                     complexity=complexity,
                     reasoning_effort=effort,
@@ -317,6 +319,7 @@ class LoompaAgent:
                     story_id=story_id,
                     tools=toolbox.spec() or None,  # providers want the tools while tool turns exist
                     tier_override=tier_override,
+                    task=task,
                     max_tokens=max_tokens,
                     complexity=complexity,
                     reasoning_effort=effort,
@@ -337,9 +340,12 @@ class LoompaAgent:
         max_iterations: int | None = None,
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
+        task: str | None = None,
+        tier_override: str | None = None,
     ) -> dict[str, Any]:
         """Like `ask_json`, but the model may use `toolbox` first. Falls back to the one-shot
-        call when there is nothing to offer or `schedule.agent_tool_iterations` is 0."""
+        call when there is nothing to offer or `schedule.agent_tool_iterations` is 0. `task`
+        and `tier_override` work as in `ask_json`."""
         rounds = (
             max_iterations
             if max_iterations is not None
@@ -347,7 +353,13 @@ class LoompaAgent:
         )
         if rounds <= 0 or not toolbox.spec():
             return await self.ask_json(
-                system, user, story=story, max_tokens=max_tokens, reasoning_effort=reasoning_effort
+                system,
+                user,
+                story=story,
+                tier_override=tier_override,
+                task=task,
+                max_tokens=max_tokens,
+                reasoning_effort=reasoning_effort,
             )
         messages = [Message("system", system), Message("user", user)]
         loop = await self.tool_loop(
@@ -359,6 +371,8 @@ class LoompaAgent:
             keep_tool_results=self.ctx.config.schedule.worker_keep_tool_results,
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
+            task=task,
+            tier_override=tier_override,
         )
         try:
             return _as_dict(extract_json(loop.text))
@@ -370,6 +384,8 @@ class LoompaAgent:
                 agent=self.name,
                 story_id=story.story_id if story else None,
                 tools=toolbox.spec() or None,
+                tier_override=tier_override,
+                task=task,
                 json_mode=True,
                 max_tokens=max_tokens,
                 complexity=str(story.complexity) if story else None,

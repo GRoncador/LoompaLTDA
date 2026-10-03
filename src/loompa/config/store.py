@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from loompa.config.schema import FactoryRef, HubRegistry, LoompaConfig
+from loompa.config.schema import CONFIG_REVISION, FactoryRef, HubRegistry, LoompaConfig
 from loompa.config.secrets import find_secrets
 
 LOOMPA_DIR = ".loompa"
@@ -42,14 +42,31 @@ _PRE_ADR16_DEFAULTS = {
 }
 
 
+# Revision 1 (cost review, 2026-10-03): defaults a file written before it carries word for word,
+# by path. Dropped, the new default applies; a value someone changed stays.
+_REVISION_1_DEFAULTS = {
+    ("roles", "master"): "tier1",
+    ("roles", "storyteller"): "tier2",
+    ("role_tasks", "master.exec_options"): "tier2",
+    ("role_tasks", "deployer.summary"): "tier2",
+}
+
+
 def _upgrade(data: dict) -> dict:
     models = data.get("models")
-    if not isinstance(models, dict) or "full_output_tokens" in models:
+    if not isinstance(models, dict):
         return data
-    for (section, key), old in _PRE_ADR16_DEFAULTS.items():
-        block = data.get(section)
-        if isinstance(block, dict) and block.get(key) == old:
-            del block[key]
+    if "full_output_tokens" not in models:
+        for (section, key), old in _PRE_ADR16_DEFAULTS.items():
+            block = data.get(section)
+            if isinstance(block, dict) and block.get(key) == old:
+                del block[key]
+    if int(data.get("revision") or 0) < 1:
+        for (section, key), old in _REVISION_1_DEFAULTS.items():
+            block = models.get(section)
+            if isinstance(block, dict) and block.get(key) == old:
+                del block[key]
+    data["revision"] = max(int(data.get("revision") or 0), CONFIG_REVISION)
     return data
 
 

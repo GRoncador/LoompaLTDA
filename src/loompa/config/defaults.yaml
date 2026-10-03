@@ -1,6 +1,8 @@
 # Loompa LTDA default factory configuration.
 # Copied into <repo>/.loompa/config.yaml by `loompa init`; edit freely per factory.
 
+revision: 1                 # config/schema.py CONFIG_REVISION: which default changes this file has
+
 factory:
   name: ""
   slug: ""
@@ -129,7 +131,7 @@ models:
       - provider: openrouter
         model: openrouter/free
   roles:                     # any role not listed here uses tier2
-    master: tier1
+    master: tier2            # meetings and chat; its decisions go through the PO and the founder
     architect: tier1
     product: tier2
     product_owner: tier2
@@ -139,13 +141,12 @@ models:
     deployer: tier2
     compliance: tier2
     metrics: tier2
-    storyteller: tier2
+    storyteller: tier3       # wording only; tier 2 when no free model answers
   # Named calls whose profile differs from the role's default tier (loompa/config/schema.py:
-  # ROLE_TASKS). Absent keys use the task's own default.
-  role_tasks:
-    master.classify: tier2
-    master.exec_options: tier2
-    deployer.summary: tier2
+  # ROLE_TASKS). Absent keys use the task's own default: tier 3 (free models, tier 2 when none
+  # answers) for wording what is already decided, tier 2 for checking a plan or a spec, and the
+  # Architect's plan on tier 1 only for a COMPLEX story.
+  role_tasks: {}
   temperature: 0.2
   # Output room is a backstop (ADR-0016): only what a model writes is billed. `low` calls get
   # the light room, every other call the full one; a cut doubles it up to the ceiling, then the

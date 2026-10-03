@@ -223,17 +223,18 @@ class ModelRouter:
         task: str | None = None,
         lift: bool = False,
     ) -> tuple[str, list[ModelCandidate]]:
-        """Tier for a call: explicit override > story complexity > task > role/cluster default.
-        Candidates are resolved from the matrix: cluster(role) x tier. With `lift` (a retry of a
-        step that failed) the call goes one tier above what it would have used."""
+        """Tier for a call: explicit override > declared task > story complexity > role/cluster
+        default. A declared task (ROLE_TASKS) carries its own complexity rule; SIMPLE never runs
+        above tier 2. Candidates are resolved from the matrix: cluster(role) x tier. With `lift`
+        (a retry of a step that failed) the call goes one tier above what it would have used."""
         cluster = self.config.models.cluster_for_role(role)
-        tier = tier_override or self.config.models.tier_for_task(role, task)
-        if tier_override is None and complexity:
-            c = str(complexity).upper()
-            if c == "SIMPLE":
-                tier = "tier2"
-            elif c == "COMPLEX" and role in self.LIFT_ON_COMPLEX:
+        tier = tier_override or self.config.models.task_tier(role, task, complexity)
+        if tier is None:
+            tier = self.config.models.tier_for(role)
+            if complexity and str(complexity).upper() == "COMPLEX" and role in self.LIFT_ON_COMPLEX:
                 tier = "tier1"
+        if tier_override is None and str(complexity or "").upper() == "SIMPLE" and tier == "tier1":
+            tier = "tier2"
 
         tier = tier or ("tier3" if cluster == "routine" else "tier2")
         if lift:
@@ -296,22 +297,29 @@ class ModelRouter:
             span.set(attempts=calls.attempts)
             if not cands:
                 raise LLMError(f"nenhum modelo configurado para o tier {tier}")
+            args = (role, messages, agent, story_id, tools, json_mode, max_tokens, complexity)
+            args += (temperature, reasoning_effort, calls)
             try:
-                routed = await self._route(
-                    tier,
-                    cands,
-                    role,
-                    messages,
-                    agent,
-                    story_id,
-                    tools,
-                    json_mode,
-                    max_tokens,
-                    complexity,
-                    temperature,
-                    reasoning_effort,
-                    calls,
-                )
+                routed = None
+                if tier == "tier3" and not self.budget_downgrade():
+                    # Free models by choice, not by an exhausted budget: one pass, no waiting on
+                    # their rate limits, and tier 2 answers when none of them does.
+                    routed = await self._one_pass(tier, cands, *args)
+                    if routed is None:
+                        self._event(
+                            "llm.fallthrough",
+                            story_id,
+                            agent or role,
+                            role=role,
+                            reason="free_tier",
+                        )
+                        cluster = self.config.models.cluster_for_role(role)
+                        paid = self.config.models.candidates_for_cluster_tier(cluster, "tier2")
+                        if paid:
+                            tier, cands = "tier2", list(paid)
+                            span.set(tier=tier, free_fallback=True)
+                if routed is None:
+                    routed = await self._route(tier, cands, *args)
             except LLMError:
                 # a call that never answered was still paid for, attempt by attempt (smoke run:
                 # six cut attempts, US$0.05, shown as US$0 on the failed span)

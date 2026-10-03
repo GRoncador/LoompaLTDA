@@ -840,6 +840,7 @@ class WorkerAgent(LoompaAgent):
                 messages,
                 agent=self.name,
                 story_id=state.story_id,
+                task="worker.self_check",
                 json_mode=True,
                 max_tokens=600,
                 complexity=str(state.complexity),

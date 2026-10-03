@@ -173,6 +173,9 @@ class RoleTask(BaseModel):
     label: str  # pt-BR, founder-facing
     hint: str  # why this task is not the role's default tier
     default_tier: str
+    # The tier on a COMPLEX story, when it differs: a plan is worth the decision tier only where
+    # the story needs architecture judgement. Empty = `default_tier` whatever the complexity.
+    complex_tier: str = ""
 
 
 ROLE_TASKS: tuple[RoleTask, ...] = (
@@ -187,15 +190,65 @@ ROLE_TASKS: tuple[RoleTask, ...] = (
         key="master.exec_options",
         role="master",
         label="Opções para um bloqueio",
-        hint="transforma um problema técnico em opções para o Founder escolher",
+        hint="transforma um problema técnico já diagnosticado em opções para o Founder escolher",
+        default_tier="tier3",
+    ),
+    RoleTask(
+        key="master.wording",
+        role="master",
+        label="Textos de reunião e relatório",
+        hint="redige fatos já contados no código; nada é decidido aqui",
+        default_tier="tier3",
+    ),
+    RoleTask(
+        key="architect.plan",
+        role="architect",
+        label="Planejar a história",
+        hint="histórias complexas no tier de decisão; as demais no tier 2, e a escalada replaneja no tier 1",
         default_tier="tier2",
+        complex_tier="tier1",
+    ),
+    RoleTask(
+        key="architect.preflight",
+        role="architect",
+        label="Pré-voo de riscos",
+        hint="confere um plano já feito contra fatos medidos no código",
+        default_tier="tier2",
+    ),
+    RoleTask(
+        key="architect.amend",
+        role="architect",
+        label="Ajustar o plano durante o desenvolvimento",
+        hint="acrescenta caminhos e tarefas a um plano que já existe",
+        default_tier="tier2",
+    ),
+    RoleTask(
+        key="architect.lesson",
+        role="architect",
+        label="Registrar uma lição na constituição",
+        hint="redige a regra que uma correção já encontrou",
+        default_tier="tier2",
+    ),
+    RoleTask(
+        key="product_owner.spec_review",
+        role="product_owner",
+        label="Revisar a spec",
+        hint="confere a spec contra critérios dados; não sobe de tier em história complexa",
+        default_tier="tier2",
+    ),
+    RoleTask(
+        key="worker.self_check",
+        role="worker",
+        label="Autoconferência do Worker",
+        hint="marca um checklist; o Inspector confere de novo",
+        default_tier="tier3",
     ),
     RoleTask(
         key="deployer.summary",
         role="deployer",
         label="Resumo da entrega",
         hint="reescreve as notas do Worker em uma frase para o Founder",
-        default_tier="tier2",
+        default_tier="tier3",
     ),
 )
 
@@ -347,6 +400,21 @@ class ModelsConfig(BaseModel):
         if declared is None:
             return self.tier_for(role)
         return self.role_tasks.get(key) or declared.default_tier
+
+    def task_tier(self, role: str, task: str | None, complexity: str | None) -> str | None:
+        """The tier a declared task asks for on a story of `complexity`; None when `task` is not
+        one of ROLE_TASKS. The founder's choice for the task wins over its complexity rule."""
+        if not task:
+            return None
+        key = task if "." in task else f"{role}.{task}"
+        declared = ROLE_TASKS_BY_KEY.get(key)
+        if declared is None:
+            return None
+        if key in self.role_tasks:
+            return self.role_tasks[key]
+        if declared.complex_tier and str(complexity or "").upper() == "COMPLEX":
+            return declared.complex_tier
+        return declared.default_tier
 
     def candidates_for_cluster_tier(self, cluster: str, tier: str) -> list[ModelCandidate]:
         if self.matrix and cluster in self.matrix:
@@ -537,7 +605,13 @@ class StackProfile(BaseModel):
 RETIRED_PROVIDERS: tuple[str, ...] = ("groq",)
 
 
+# Bumped when a default changes in a way an existing config.yaml must pick up (every save writes
+# the whole config, so an old default would otherwise stay forever); see config/store.py.
+CONFIG_REVISION = 1
+
+
 class LoompaConfig(BaseModel):
+    revision: int = 0
     factory: FactoryConfig = Field(default_factory=FactoryConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)

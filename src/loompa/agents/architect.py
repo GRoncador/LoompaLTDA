@@ -268,6 +268,9 @@ class ArchitectAgent(LoompaAgent):
             user,
             self.explore_tools(),
             story=state,
+            task="architect.plan",
+            # the re-plan of an escalated story is part of its tier-1 attempt (ADR-0016 §5)
+            tier_override="tier1" if state.current_tier == "tier1" else None,
         )
         blocker = str(data.get("blocker") or "").strip()
         if blocker and blocker.lower() not in NONE_WORDS and not state.extra.get(BOUNCED_KEY):
@@ -386,6 +389,7 @@ class ArchitectAgent(LoompaAgent):
             self.explore_tools(),
             story=state,
             max_iterations=4,
+            task="architect.amend",
         )
         files = [f for f in self._list(data, "files") if f not in state.allowed_paths]
         tasks = [TASK_PREFIX.sub("", t) for t in self._list(data, "tasks")[:3]]
@@ -444,6 +448,7 @@ class ArchitectAgent(LoompaAgent):
             self.explore_tools(),
             story=state,
             max_iterations=4,
+            task="architect.preflight",
         )
         risks = []
         for r in data.get("risks") or []:
@@ -529,6 +534,7 @@ class ArchitectAgent(LoompaAgent):
                 LESSON_SYSTEM.format(language=self.language),
                 f"Story: {state.title}\n\n## Failure (filtered)\n{failure[:1500]}\n\n## How it was fixed\n{fix_summary[:800]}",
                 story=state,
+                task="architect.lesson",
                 reasoning_effort="low",  # ADR-0016: wording a rule the fix already found
             )
         except Exception:  # noqa: BLE001 - lesson capture must never break the pipeline

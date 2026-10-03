@@ -929,6 +929,7 @@ class ProductOwnerAgent(LoompaAgent):
             user,
             event="spec.reviewed",
             unavailable="revisão indisponível; spec seguiu",
+            task="product_owner.spec_review",
         )
 
     async def review_criteria(
@@ -1183,13 +1184,18 @@ class ProductOwnerAgent(LoompaAgent):
         event: str,
         unavailable: str,
         unsupported_label: str = "Critérios sem origem rastreável",
+        task: str | None = None,
     ) -> AgentResult:
         """One review call: `{approved, unsupported, missing, notes}` folded into an AgentResult.
         The review is advisory when the model is unavailable, so a provider outage never holds
         the line."""
         try:
             data = await self.ask_json(
-                system.format(language=self.language), user, story=state, max_tokens=1500
+                system.format(language=self.language),
+                user,
+                story=state,
+                task=task,
+                max_tokens=1500,
             )
         except Exception:  # noqa: BLE001
             self.set_state("IDLE")

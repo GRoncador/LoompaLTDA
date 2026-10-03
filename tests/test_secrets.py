@@ -219,7 +219,7 @@ def test_settings_api_never_returns_keys(client, hub):
     assert agent["tier"] == "tier1" and agent["candidates"]  # role set to tier1 above
     agent = c.get("/api/factories/keys/agents/Novo Loompa").json()
     assert agent["tier"] == "tier2"  # unknown agent names still map to tier2
-    agent = c.get("/api/factories/keys/agents/Master Loompa").json()
+    agent = c.get("/api/factories/keys/agents/Architect Loompa").json()
     assert agent["tier"] == "tier1" and agent["candidates"][0]["model"] == "z-ai/glm-5.3"
 
 
