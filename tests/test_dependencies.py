@@ -289,6 +289,50 @@ async def test_a_meeting_cannot_take_out_a_dependency_and_leave_its_dependent(fa
     await ctx.aclose()
 
 
+async def test_a_meeting_re_points_a_dependency_before_taking_it_out(factory: Factory):
+    """tamagotchi SP-005: S-035 became covered by S-033, but S-036 depended on both, and the
+    review of the running sprint could neither see nor change that."""
+    ctx = make_ctx(factory, dry_run=True)
+    po = ProductOwnerAgent(ctx)
+    a, b, c = (po.add_item(t).story_id for t in ("Necessidades", "Tela", "Evolução"))
+    po.set_dependencies(c, [a, b])
+    MasterAgent(ctx).start_sprint([a, b, c])
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    conv = chats.choose(conv.id, "current")
+    assert next(i for i in conv.draft.items if i.key == c).depends_on == [a, b]
+    chats.edit(
+        conv.id,
+        [
+            {"op": "update", "ref": b, "in_sprint": False},
+            {"op": "update", "ref": c, "depends_on": [a]},
+        ],
+    )
+    result = await chats.commit(conv.id)
+    assert result.withdrawn == [b] and ctx.store.get_story(c)["depends_on"] == [a]
+    assert ctx.store.get_story(a)["depends_on"] == []
+    await ctx.aclose()
+
+
+async def test_a_review_opened_before_members_had_relations_keeps_them(factory: Factory):
+    ctx = make_ctx(factory, dry_run=True)
+    po = ProductOwnerAgent(ctx)
+    a, b = (po.add_item(t).story_id for t in ("Centavos", "Orçamento"))
+    po.set_dependencies(b, [a])
+    MasterAgent(ctx).start_sprint([a, b])
+    chats = Conversations(ctx)
+    conv = chats.choose(chats.open(ConversationKind.MEETING).id, "current")
+    for item in conv.draft.items:  # as a meeting saved by an older build
+        item.depends_on = []
+    conv.draft.members_deps = False
+    chats.board.save(conv)
+    chats.edit(conv.id, [{"op": "update", "ref": a, "in_sprint": False}])
+    with pytest.raises(ConversationError, match=f"{b} depende de {a}"):
+        await chats.commit(conv.id)
+    assert ctx.store.get_story(b)["depends_on"] == [a]
+    await ctx.aclose()
+
+
 async def test_a_dependent_spec_reads_what_its_dependency_decided(factory: Factory):
     """contas Sprint 2: the spec of the budget-in-summary story asked the founder where the
     limits are stored, a decision already in the spec of the story it builds on."""

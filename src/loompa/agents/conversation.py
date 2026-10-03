@@ -297,6 +297,7 @@ class Conversations:
             conv.mode = mode
             conv.draft.sprint_id, conv.draft.goal = running.id, running.goal
             conv.draft.members = list(running.story_ids)
+            conv.draft.members_deps = True
             for sid in running.story_ids:
                 row = self.ctx.store.get_story(sid)
                 if row is None:
@@ -311,6 +312,7 @@ class Conversations:
                         story_id=sid,
                         origin=row.get("origin", "founder"),
                         stage=row["stage"],
+                        depends_on=list(row.get("depends_on") or []),
                     )
                 )
             text = _current_intro(running.id)

@@ -143,6 +143,9 @@ class Draft(BaseModel):
     review: Triage | None = None  # review conversations: the Product Owner's latest reading
     sprint_id: str = ""  # the sprint the meeting is about (running, or the one being assembled)
     members: list[str] = Field(default_factory=list)  # the running sprint's cards when it opened
+    # the members came in with their relations, so the draft's are theirs to apply (a meeting
+    # opened before they did would otherwise wipe what the cards depend on)
+    members_deps: bool = False
     cancel_sprint: bool = False  # a meeting about the running sprint: call it off on commit
     cancel_reason: str = ""
     # backlog cards the founder wants gone (obsolete, unwanted): story id -> reason. The Product

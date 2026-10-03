@@ -78,6 +78,10 @@ Rules:
 - A story of the sprint leaves it with an `update` setting `in_sprint: false`: it goes back to the
   backlog and keeps its branch. A backlog card joins with an `update` setting `in_sprint: true`, a
   new one with `add` and `in_sprint: true`; the Product Owner reviews whatever joins first.
+- An `update` with `depends_on` re-points what a sprint card waits for, for example when the
+  founder takes out a card whose content another one now covers: the cards that stay must not
+  depend on one that leaves. Only an edit you emit changes the draft: never say a relation, a
+  card or a restart changed unless the op for it is in your answer.
 - {{"op": "restart", "ref": "S-004", "reason": str}} starts a story over from scratch (spec, plan
   and code discarded) with the reason as guidance; the same op with "restart": false undoes it.
 - {{"op": "cancel_sprint", "reason": str}} calls the whole sprint off and sends its unfinished
@@ -683,7 +687,10 @@ class MasterAgent(LoompaAgent):
             for item in members:
                 row = store.get_story(item.story_id) or {}
                 if item.in_sprint and row.get("stage") not in TERMINAL:
-                    for dep in set(row.get("depends_on") or []) & gone:
+                    # the draft's relations, which the meeting may have re-pointed (tamagotchi
+                    # SP-005: S-036 moved off S-035 when S-033 came to cover it)
+                    deps = item.depends_on if draft.members_deps else row.get("depends_on") or []
+                    for dep in set(deps) & gone:
                         raise ConversationError(
                             f"{item.story_id} depende de {dep}: tire as duas do sprint ou nenhuma"
                         )
@@ -730,7 +737,16 @@ class MasterAgent(LoompaAgent):
                 (result.created if added.created else result.existing).append(added.story_id)
             board.add(item.story_id, running.id)
             result.joined.append(item.story_id)
-        po.save_dependencies(joining)
+        po.save_dependencies(
+            joining
+            + [
+                i
+                for i in members
+                if i.in_sprint
+                and draft.members_deps
+                and (store.get_story(i.story_id) or {}).get("stage") not in TERMINAL
+            ]
+        )
         for sid in result.joined:
             po.admit(sid)
         for item in draft.items:
