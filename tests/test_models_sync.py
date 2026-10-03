@@ -449,7 +449,7 @@ def test_cli_previews_then_proposes_through_the_inbox(hub, brownfield_repo, monk
     f.save()
     monkeypatch.setattr(
         "loompa.cli.models.plan",
-        lambda config, policy: plan(config, policy, client=catalog(), today=TODAY),
+        lambda config, policy, **kw: plan(config, policy, client=catalog(), today=TODAY, **kw),
     )
     # this fake catalogue is priced for the older US$ 5 ceiling; the shipped one is US$ 1.25
     ceiling = ["--tier1-ceiling", "5"]

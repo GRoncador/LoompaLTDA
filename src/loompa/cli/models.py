@@ -44,8 +44,13 @@ def models_sync(
     """
     f = resolve_factory(factory)
     policy = Policy(tier1_ceiling=tier1_ceiling, tier2_floor=tier2_floor, picks=picks)
+    from loompa.models_sync import house_for
+    from loompa.store import Store
+
+    db = f.paths.state_db
+    house = house_for(Store(db), f.slug, f.config) if db.is_file() else {}
     try:
-        proposal = plan(f.config, policy)
+        proposal = plan(f.config, policy, house=house)
     except CatalogError as exc:
         console.print(f"[red]✘[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -61,8 +66,15 @@ def models_sync(
         table.add_column("modelo", style="cyan")
         table.add_column("nota", justify="right")
         table.add_column("US$/mi tokens", justify="right")
+        table.add_column("na casa (Worker)", justify="right")
         for m in picked:
-            table.add_row(m["id"], f"{m['score']:.1f}", f"{m['price']:.2f}")
+            h = m.get("house") or {}
+            mark = ""
+            if h.get("tasks"):
+                mark = f"{h['done_rate']:.0%} de {h['tasks']} tarefas"
+                mark += " [yellow]▼ abaixo dos outros[/yellow]" if h.get("flagged") else ""
+                mark += "" if h.get("enough") else " [dim](amostra pequena)[/dim]"
+            table.add_row(m["id"], f"{m['score']:.1f}", f"{m['price']:.2f}", mark)
         console.print(table)
     for label, ids in (("saem", proposal.removed), ("já fora do catálogo", proposal.gone)):
         if ids:

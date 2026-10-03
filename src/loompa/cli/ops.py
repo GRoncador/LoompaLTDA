@@ -569,6 +569,9 @@ def costs(
     f = resolve_factory(factory)
     store = Store(f.paths.state_db)
     r = cost_report(store, f.config.factory.slug, days)
+    from loompa.finance.house import MIN_TASKS, house_scores
+
+    house = [h for h in house_scores(store, f.config.factory.slug, f.config, days) if h.tasks]
     store.close()
     console.print(
         Panel.fit(
@@ -641,6 +644,23 @@ def costs(
         console.print(ab)
     else:
         console.print("Experimento de esforço: nenhuma tarefa no período.")
+    if house:
+        ht = Table(
+            title=f"Nota da casa: o Worker com cada modelo (pesa na sugestão a partir de {MIN_TASKS} tarefas)"
+        )
+        for col in ("modelo", "tarefas", "concluídas", "US$/entregue", "min/tarefa", ""):
+            ht.add_column(col)
+        for h in sorted(house, key=lambda h: -h.tasks):
+            d = h.as_dict()
+            ht.add_row(
+                h.model,
+                str(h.tasks),
+                f"{d['done_rate']:.0%}",
+                f"{d['cost_per_done']:.4f}" if d["cost_per_done"] is not None else "—",
+                f"{d['minutes_per_task']}",
+                "▼ abaixo dos outros" if h.flagged else ("" if h.enough else "amostra pequena"),
+            )
+        console.print(ht)
     console.print(
         f"Teto por história atingido: {r['cost_caps']} · planos em outra linguagem: "
         f"{r['foreign_plans']} · chamadas no tier grátis: {r['free_tier_calls']} "

@@ -62,14 +62,26 @@ def plan(
     client: httpx.Client | None = None,
     today: date | None = None,
     force_refresh: bool = False,
+    house: dict[str, dict[str, Any]] | None = None,
 ) -> Proposal:
-    """Read the catalogue and work out the list this factory would use. Touches nothing."""
+    """Read the catalogue and work out the list this factory would use. Touches nothing.
+    `house` is the Worker's measured record per model (plan 9.5, `finance/house.py`)."""
     pol = policy or Policy(
         tier1_ceiling=config.models.tier1_ceiling,
         tier2_floor=config.models.tier2_floor,
     )
     models = fetch_catalog(config, client=client, force_refresh=force_refresh)
-    return build_proposal(config, models, pol, today or date.today())
+    return build_proposal(config, models, pol, today or date.today(), house=house)
+
+
+def house_for(store: Any, factory: str, config: LoompaConfig) -> dict[str, dict[str, Any]]:
+    """The Worker's house record for the suggestion; empty when nothing was measured."""
+    from loompa.finance.house import house_scores, worker_house
+
+    try:
+        return worker_house(house_scores(store, factory, config))
+    except Exception:  # noqa: BLE001 - the suggestion stands on the external index alone
+        return {}
 
 
 class ModelSync:

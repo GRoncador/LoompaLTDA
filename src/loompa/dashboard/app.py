@@ -985,7 +985,7 @@ def create_app(
     @app.get("/api/factories/{slug}/models/catalog")
     def get_models_catalog(slug: str) -> dict[str, Any]:
         from loompa.llm.catalog import Policy
-        from loompa.models_sync import plan, proposal_to_dict
+        from loompa.models_sync import house_for, plan, proposal_to_dict
 
         rt = hub.get(slug)
         ctx = rt.ctx
@@ -997,7 +997,12 @@ def create_app(
             tier2_floor=ctx.config.models.tier2_floor,
         )
         try:
-            proposal = plan(ctx.config, policy, force_refresh=False)
+            proposal = plan(
+                ctx.config,
+                policy,
+                force_refresh=False,
+                house=house_for(ctx.store, ctx.slug, ctx.config),
+            )
             return {**proposal_to_dict(proposal), "openrouter": True}
         except Exception as exc:
             return {**empty, "openrouter": True, "error": str(exc)}
@@ -1021,7 +1026,7 @@ def create_app(
     @app.post("/api/factories/{slug}/models/preview-sync")
     def preview_models_sync(slug: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         from loompa.llm.catalog import CatalogError, Policy
-        from loompa.models_sync import plan, proposal_to_dict
+        from loompa.models_sync import house_for, plan, proposal_to_dict
 
         rt = hub.get(slug)
         ctx = rt.ctx
@@ -1043,6 +1048,7 @@ def create_app(
                 ctx.config,
                 Policy(tier1_ceiling=ceiling, tier2_floor=floor),
                 force_refresh=force,
+                house=house_for(ctx.store, ctx.slug, ctx.config),
             )
         except CatalogError as exc:
             raise HTTPException(400, str(exc)) from None
@@ -1087,7 +1093,7 @@ def create_app(
     def apply_models_sync(slug: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         from loompa.config.settings import describe_settings
         from loompa.llm.catalog import CatalogError, Policy, apply_proposal
-        from loompa.models_sync import ModelSync, plan
+        from loompa.models_sync import ModelSync, house_for, plan
 
         rt = hub.get(slug)
         ctx = rt.ctx
@@ -1112,6 +1118,7 @@ def create_app(
                 ctx.config,
                 Policy(tier1_ceiling=ceiling, tier2_floor=floor),
                 force_refresh=force,
+                house=house_for(ctx.store, ctx.slug, ctx.config),
             )
         except CatalogError as exc:
             raise HTTPException(400, str(exc)) from None

@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import statistics
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -662,8 +662,15 @@ def _same_price(a: Price | None, b: Price) -> bool:
 
 
 def build_proposal(
-    config: LoompaConfig, models: list[CatalogModel], policy: Policy, today: date
+    config: LoompaConfig,
+    models: list[CatalogModel],
+    policy: Policy,
+    today: date,
+    house: Mapping[str, dict[str, Any]] | None = None,
 ) -> Proposal:
+    """`house`: the Worker's record per model id (plan 9.5). A flagged model, measured on enough
+    tasks and clearly below the best one, goes to the end of its tier; every row shows its record."""
+    house = house or {}
     # three clusters: composite scores per cluster; one cluster: the intelligence index alone
     composite = config.models.clusters_enabled
     ranking = rank(models, policy, today, composite=composite)
@@ -674,7 +681,10 @@ def build_proposal(
     if not configured:
         raise CatalogError("esta fábrica não usa a OpenRouter em nenhum tier")
 
-    picked = {"tier1": ranking.tier1, "tier2": ranking.tier2}
+    def house_last(ms: list[CatalogModel]) -> list[CatalogModel]:
+        return sorted(ms, key=lambda m: bool((house.get(m.id) or {}).get("flagged")))  # stable
+
+    picked = {"tier1": house_last(ranking.tier1), "tier2": house_last(ranking.tier2)}
     tiers: dict[str, list[ModelCandidate]] = {}
     summary: dict[str, list[dict[str, Any]]] = {}
     for tier, current in config.models.tiers.items():
@@ -710,6 +720,9 @@ def build_proposal(
             )
             for m in picked[tier]
         ]
+        for row in summary[tier]:
+            if row["id"] in house:
+                row["house"] = house[row["id"]]
 
     free_eligible = [
         m
@@ -751,6 +764,8 @@ def build_proposal(
         reason = exclusion_reason(m, policy, today, composite=composite)
         row["eligible"] = reason is None
         row["excluded"] = REASONS.get(reason, reason) if reason else ""
+        if m.id in house:
+            row["house"] = house[m.id]
         all_models.append(row)
     return Proposal(
         tiers={t: _dump(c) for t, c in tiers.items()},
