@@ -668,6 +668,18 @@ Decided 2026-09-29:
   "dividida em épico", not a delivery, and its summary translates "story". Not built: a retire
   button in the panel's meeting (the chat there already accepts the op through the Master).
 
+- **2026-10-02 (night) — Review fixes from contas SP-003 and tamagotchi SP-002, both closed.** On a
+  founder's "changes" the Product Owner aligns the contradicted criteria first (`align_criteria`), and
+  a criterion the Inspector fails twice with green tests is reviewed by the Product Owner before a
+  stronger model is paid (`review_judged_criteria`); the judge's `overridden` passes only a criterion
+  the Product Owner changed. A re-planned bugfix whose branch has the fix needs no reproducer. What the
+  founder writes on approving is kept as a note and reaches dependent stories. `node --test` (TAP)
+  output is summarised (the gate read 0/0). `write_file` refuses to wipe or gut an existing file
+  (S-041 lost 1448 lines). Open proposals for the founder: a browser smoke test for web factories (the
+  tamagotchi page passed 108 tests with a blank screen); an external file format in a spec needs a
+  verified source (S-041 invented Nubank headers and inverted the sign); a task ended by loop or limit
+  gets the test run and the done-check before it counts as unfinished.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then
