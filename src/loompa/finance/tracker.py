@@ -29,6 +29,8 @@ def period_start_iso(period: str) -> str:
     return month_start_iso() if period == "monthly" else week_start_iso()
 
 
+ESCALATION_SHARE = 0.4  # of the latest sprint's cost, before the escalations earn a tip
+
 PERIOD_LABEL = {"weekly": "semana", "monthly": "mês"}
 
 
@@ -203,13 +205,10 @@ class CostTracker:
                 )
             ).strip(),
             impact=(
-                (
-                    f"Sem ação, novas entregas podem ficar aguardando até {next_one}. "
-                    if pauses
-                    else "Sem ação, as entregas continuam, porém com modelos mais simples. "
-                )
-                + "Já apliquei prompts mais curtos nas tarefas rotineiras."
-            ),
+                f"Sem ação, novas entregas podem ficar aguardando até {next_one}. "
+                if pauses
+                else "Sem ação, as entregas continuam, porém com modelos mais simples."
+            ).strip(),
             options=[
                 Option(
                     key="keep",
@@ -284,12 +283,35 @@ class CostTracker:
                 f"'{top['tool']}' ({top['calls']} chamadas, {share}% do que as ferramentas leram): "
                 "ler trechos em vez de arquivos inteiros e buscar antes de abrir."
             )
-        by_tier = self.store.usage_by(
-            "tier", self.factory, period_start_iso(self.config.budget.period)
-        )
-        t1 = next((r for r in by_tier if r["key"] == "tier1"), None)
-        if t1 and total and t1["cost_usd"] / total > 0.4:
-            out.append(
-                "Escalações para Tier 1 já respondem por mais de 40% do custo: vale reforçar a Constituição com as lições recentes."
-            )
+        tip = self.escalation_tip()
+        if tip:
+            out.append(tip)
         return out
+
+    def escalation_tip(self) -> str:
+        """Escalations of the latest sprint that cost a large share of it and left no lesson in
+        the constitution. Tier 1 alone is not an escalation: the Master and the Architect run on
+        it by role, and counting them told the founder (tamagotchi, 03/10) that escalations were
+        60% of the cost when there had been none for two sprints and both earlier ones already
+        had their lesson recorded."""
+        since = self._sprint_start() or period_start_iso(self.config.budget.period)
+        total = float(self.store.usage_totals(self.factory, since_iso=since)["cost_usd"])
+        rows = self.store.escalated_cost(self.factory, since)
+        spent = sum(float(r["cost_usd"] or 0) for r in rows)
+        if not total or spent / total <= ESCALATION_SHARE:
+            return ""
+        learned = self.store.story_ids_with_event(self.factory, "constitution.lesson")
+        open_ = [r["story_id"] for r in rows if r["story_id"] not in learned]
+        if not open_:
+            return ""
+        return (
+            f"Subidas para o modelo mais forte custaram {int(spent / total * 100)}% do último "
+            f"sprint ({', '.join(open_[:3])}) e a lição delas ainda não está na Constituição: "
+            "vale registrá-la para que não se repita."
+        )
+
+    def _sprint_start(self) -> str:
+        started = [
+            s["started_at"] for s in self.store.list_sprints(self.factory) if s.get("started_at")
+        ]
+        return max(started) if started else ""

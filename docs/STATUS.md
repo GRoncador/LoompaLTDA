@@ -690,6 +690,23 @@ Decided 2026-09-29:
   review). (3) A task stopped by a loop or the call limit counts as finished when it changed something,
   the suite is green and the self-check finds nothing missing (`worker.salvaged`).
 
+- **2026-10-03 — tamagotchi SP-001..SP-004 review: delivered work in view, no process-only cards,
+  an honest escalation tip.** (1) The SP-005 meeting saw only open cards and drafted again decay,
+  care actions, consequences and restart, delivered an hour before, with needs the code does not
+  have. The backlog section of meetings, brainstorms, the split, the proposal and the quick-story
+  triage now lists the delivered stories (`ConversationBoard.delivered`, newest 30); none is carded
+  again, and a quick story may be refused as a duplicate of a delivered one. (2) Five brainstorm
+  cards that only "verified and recorded the closing" of the JS port left eight Kaizen cards asking
+  to run `npm test` and attach the output (the whole of the assembled SP-006). The Analyst's
+  follow-ups must change the product or its tests; the meeting and the split make no
+  verification-only card; the Product Owner's findings triage marks `process_only` and Kaizen drops
+  those (`backlog.dropped`). (3) The Finance tip "escalations to Tier 1 are over 40% of the cost"
+  counted the Master and the Architect, tier 1 by role: 60% "escalations" after two sprints with
+  none, both earlier ones with their lesson already in the constitution. It now counts tier 1 cost
+  after `story.escalated`, over the latest sprint, and only for stories with no
+  `constitution.lesson`. The 80% budget alert no longer claims "Já apliquei prompts mais curtos",
+  which nothing did.
+
 ## Known gaps / next steps
 
 - First real research run: `loompa providers set-key tavily`, `loompa providers test tavily`, then

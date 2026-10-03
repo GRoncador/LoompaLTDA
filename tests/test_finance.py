@@ -128,3 +128,40 @@ def test_no_tool_note_while_tools_read_little():
         "f", "tool.call", story_id="S-1", agent="Worker Loompa", tool="read_file", tokens=500
     )
     assert not [s for s in t.suggestions() if "trouxe" in s]
+
+
+def usage(t: CostTracker, tier: str, cost_tokens: int, story_id: str, role: str = "worker"):
+    t.record(
+        UsageRecord(
+            agent=role,
+            role=role,
+            provider="p",
+            model="deepseek-chat",
+            tier=tier,
+            input_tokens=0,
+            output_tokens=cost_tokens,
+            story_id=story_id,
+        )
+    )
+
+
+def test_tier1_by_role_is_not_an_escalation_and_a_recorded_lesson_ends_the_tip():
+    """tamagotchi 03/10: the tip said escalations were over 40% of the cost, counting the
+    Architect and the Master (tier 1 by role) after two sprints with no escalation at all."""
+    store, t = make()
+    usage(t, "tier1", 900_000, "S-1", role="architect")
+    usage(t, "tier2", 100_000, "S-1")
+    assert t.escalation_tip() == "" and not [s for s in t.suggestions() if "Constituição" in s]
+    store.emit("f", "story.escalated", story_id="S-2", to_tier="tier1")
+    usage(t, "tier1", 2_000_000, "S-2")  # after the escalation: this one counts
+    tip = t.escalation_tip()
+    assert "S-2" in tip and "S-1" not in tip and "Constituição" in tip
+    store.emit("f", "constitution.lesson", story_id="S-2", rule="x")
+    assert t.escalation_tip() == ""  # the lesson is already there
+
+
+def test_the_budget_alert_claims_no_action_it_did_not_take():
+    store, t = make()
+    usage(t, "tier2", 900_000, "S-1")
+    msg = t.maybe_alert()
+    assert msg is not None and "prompts mais curtos" not in msg.impact

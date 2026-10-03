@@ -566,6 +566,28 @@ class Store:
             tuple(params),
         )
 
+    def escalated_cost(self, factory: str, since_iso: str | None = None) -> list[dict[str, Any]]:
+        """Tier 1 cost of each story after it was escalated, newest escalation first. Tier 1 by
+        itself is not an escalation: the Master and the Architect run on it by role."""
+        rows = self._q(
+            "SELECT u.story_id AS story_id, SUM(u.cost_usd) AS cost_usd, COUNT(*) AS calls, "
+            "e.at AS escalated_at FROM usage u JOIN (SELECT story_id, MIN(created_at) AS at "
+            "FROM events WHERE factory = ? AND type = 'story.escalated' AND story_id IS NOT NULL "
+            "GROUP BY story_id) e ON u.story_id = e.story_id WHERE u.factory = ? "
+            "AND u.tier = 'tier1' AND u.created_at >= e.at AND u.created_at >= ? "
+            "GROUP BY u.story_id ORDER BY e.at DESC",
+            (factory, factory, since_iso or ""),
+        )
+        return rows
+
+    def story_ids_with_event(self, factory: str, type_: str) -> set[str]:
+        rows = self._q(
+            "SELECT DISTINCT story_id FROM events WHERE factory = ? AND type = ? "
+            "AND story_id IS NOT NULL",
+            (factory, type_),
+        )
+        return {r["story_id"] for r in rows}
+
     def usage_by_day(
         self, factory: str | None = None, since_iso: str | None = None
     ) -> list[dict[str, Any]]:
