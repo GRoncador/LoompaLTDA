@@ -1,7 +1,7 @@
 # Loompa LTDA default factory configuration.
 # Copied into <repo>/.loompa/config.yaml by `loompa init`; edit freely per factory.
 
-revision: 2                 # config/schema.py CONFIG_REVISION: which default changes this file has
+revision: 3                 # config/schema.py CONFIG_REVISION: which default changes this file has
 
 factory:
   name: ""
@@ -219,6 +219,7 @@ providers:
     models_url: https://mimo.mi.com/docs/en-US/price/pay-as-you-go
     probe_model: mimo-v2.6-flash
     takes_effort: [low, medium, high]   # `minimal` is a 400
+    id_prefix: "xiaomi/"                # models.dev gives MiMo no canonical id
     byok_models:
       xiaomi/mimo-v2.6-pro: mimo-v2.6-pro
       xiaomi/mimo-v2.6-flash: mimo-v2.6-flash
@@ -256,7 +257,6 @@ providers:
     probe_model: qwen3.8-flash
     takes_effort: false
     byok_models:
-      qwen/qwen3.8-max-0902: qwen3.8-max
       qwen/qwen3.8-flash: qwen3.8-flash
   moonshot:
     kind: openai_compatible
@@ -267,6 +267,7 @@ providers:
     models_url: https://platform.moonshot.ai/docs/pricing/chat
     probe_model: kimi-k2.6
     takes_effort: false
+    id_prefix: "moonshotai/"
     byok_models:
       moonshotai/kimi-k3: kimi-k3
       moonshotai/kimi-k2.6: kimi-k2.6
@@ -278,6 +279,7 @@ providers:
     console_url: https://platform.minimax.io/user-center/basic-information/interface-key
     models_url: https://platform.minimax.io/docs/guides/pricing
     probe_model: MiniMax-M3
+    id_prefix: "minimax/"
     byok_models:
       minimax/minimax-m3: MiniMax-M3
   ollama:

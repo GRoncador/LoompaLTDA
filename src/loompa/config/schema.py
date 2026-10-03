@@ -479,6 +479,11 @@ class ProviderConfig(BaseModel):
     # provider does not take skips it and goes through OpenRouter, which translates it, instead of
     # running at the provider's default thinking (ADR-0016: the effort is part of the call).
     takes_effort: bool | list[str] = True
+    # Plan 9.3: how models.dev names this provider (empty = the Loompa name, or the table in
+    # llm/modelsdev.py), and the explicit identity rule for its models that carry no canonical id
+    # there: `id_prefix + own id` is the OpenRouter id (Xiaomi: "xiaomi/" + "mimo-v2.6-pro").
+    models_dev_id: str = ""
+    id_prefix: str = ""
 
     def takes(self, effort: str | None) -> bool:
         if not effort or self.takes_effort is True:
@@ -643,7 +648,7 @@ RETIRED_PROVIDERS: tuple[str, ...] = ("groq",)
 
 # Bumped when a default changes in a way an existing config.yaml must pick up (every save writes
 # the whole config, so an old default would otherwise stay forever); see config/store.py.
-CONFIG_REVISION = 2
+CONFIG_REVISION = 3
 
 
 class LoompaConfig(BaseModel):

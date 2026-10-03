@@ -140,6 +140,10 @@ async def _run(
             console.print(f"[red]Esteira pausada: {p.get('reason')}[/red]")
 
     ctx.listeners.append(printer)
+    if not ctx.dry_run:  # plan 9.3: a day-old models.dev table is fetched again (best effort)
+        from loompa.llm.modelsdev import refresh_if_stale
+
+        await refresh_if_stale()
     sched = Scheduler(ctx, max_parallel=max_parallel)
     try:
         return await sched.run(until_idle=until_idle, poll_interval=poll)

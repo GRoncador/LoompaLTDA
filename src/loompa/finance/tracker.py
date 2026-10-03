@@ -102,9 +102,20 @@ class CostTracker:
 
     # ----------------------------------------------------------------- pricing
     def cost_of(
-        self, model: str, input_tokens: int, output_tokens: int, cached_tokens: int = 0
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int = 0,
+        provider: str = "",
     ) -> float:
-        price = self.config.price_for(model)
+        price = self.config.pricing.get(model)
+        if price is None and provider:
+            # plan 9.2: a maker's own price from models.dev when the table has no row for it
+            from loompa.llm.modelsdev import price as card_price
+
+            price = card_price(self.config, provider, model)
+        price = price or self.config.price_for(model)
         billable_input = max(0, input_tokens - cached_tokens)
         return round(
             (
@@ -124,7 +135,7 @@ class CostTracker:
             rec.cost_usd, rec.cost_source = round(rec.reported_cost, 6), "reported"
         else:
             rec.cost_usd = self.cost_of(
-                rec.model, rec.input_tokens, rec.output_tokens, rec.cached_tokens
+                rec.model, rec.input_tokens, rec.output_tokens, rec.cached_tokens, rec.provider
             )
             rec.cost_source = "table"
         self.store.record_usage(

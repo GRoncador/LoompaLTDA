@@ -99,3 +99,16 @@ An empty route follows `models.default_route` (`auto` or `openrouter`). The slot
 OpenRouter id; the maker's id comes from `byok_models`. Applying a model suggestion keeps the route
 the founder chose for each model.
 
+## Amendment (2026-10-03): models.dev cards and identity (plan 9.2/9.3)
+
+`byok_models` is no longer the whole identity table. `llm/modelsdev.py` reads models.dev (hub cache,
+fetched by the founder's refresh, and again at engine start when a day old) and ties an OpenRouter
+id to a maker id only when both entries carry the same `canonical_model_id`; for a maker whose
+entries carry none, one explicit rule per provider (`id_prefix`: Xiaomi `xiaomi/`, Moonshot
+`moonshotai/`, MiniMax `minimax/`) compared exactly. The router sends to a maker the config's
+pairs, minus any models.dev refutes (both sides named, different canonical ids), plus the pairs it
+ties; only a provider that opted in (pairs, prefix or `models_dev_id`) gets any. The measure found
+the hand-written `qwen/qwen3.8-max-0902 -> qwen3.8-max` wrong (OpenRouter's pinned release against
+Alibaba's moving alias), so revision 3 of the config drops it. A direct call the price table does not
+cover is metered at the maker's price on its card.
+

@@ -54,6 +54,9 @@ _REVISION_1_DEFAULTS = {
 
 # Revision 2 (2026-10-03): provider fields a real call settled, dropped when still the old guess.
 _REVISION_2_PROVIDERS = {("xiaomi", "takes_effort"): False}
+# Revision 3 (2026-10-03): a hand-written BYOK pair models.dev showed to be two models (OpenRouter's
+# pinned qwen3.8-max-0902 against Alibaba's moving qwen3.8-max alias).
+_REVISION_3_BYOK = {("alibaba", "qwen/qwen3.8-max-0902"): "qwen3.8-max"}
 
 
 def _upgrade(data: dict) -> dict:
@@ -76,6 +79,13 @@ def _upgrade(data: dict) -> dict:
             block = providers.get(name) if isinstance(providers, dict) else None
             if isinstance(block, dict) and block.get(key) == old:
                 del block[key]
+    if int(data.get("revision") or 0) < 3:
+        providers = data.get("providers")
+        for (name, or_id), own in _REVISION_3_BYOK.items():
+            block = providers.get(name) if isinstance(providers, dict) else None
+            pairs = block.get("byok_models") if isinstance(block, dict) else None
+            if isinstance(pairs, dict) and pairs.get(or_id) == own:
+                del pairs[or_id]
     data["revision"] = max(int(data.get("revision") or 0), CONFIG_REVISION)
     return data
 

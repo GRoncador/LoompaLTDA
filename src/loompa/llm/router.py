@@ -17,6 +17,7 @@ import httpx
 
 from loompa.config.schema import LoompaConfig, ModelCandidate
 from loompa.finance import CostTracker, UsageRecord
+from loompa.llm.modelsdev import byok_table
 from loompa.llm.providers import (
     LLMError,
     LLMProvider,
@@ -207,9 +208,10 @@ class ModelRouter:
         (`takes_effort`); "openrouter" keeps the slot as it is; "direct" replaces it with the
         maker's API, at the maker's effort, and drops it when that key is missing."""
         direct = [
-            (name, cfg)
+            (name, cfg, table)
             for name, cfg in self.config.providers.items()
-            if cfg.byok_models and resolve_key(cfg.api_key_env, self.secrets)
+            if (table := byok_table(self.config, name))
+            and resolve_key(cfg.api_key_env, self.secrets)
         ]
         out: list[ModelCandidate] = []
         for cand in cands:
@@ -222,8 +224,8 @@ class ModelRouter:
                 out.append(cand)
                 continue
             effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
-            for name, cfg in direct:
-                own = cfg.byok_models.get(cand.model)
+            for name, cfg, table in direct:
+                own = table.get(cand.model)
                 if own and (route == "direct" or cfg.takes(effort)):
                     plain = not cfg.takes(effort)
                     out.append(

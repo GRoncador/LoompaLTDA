@@ -237,7 +237,7 @@ def test_revision_2_replaces_the_xiaomi_effort_guess_with_what_a_real_call_took(
     }
     (tmp_path / ".loompa" / "config.yaml").write_text(yaml.safe_dump(old), encoding="utf-8")
     cfg = load_config(tmp_path)
-    assert cfg.revision == 2
+    assert cfg.revision >= 2
     xiaomi = cfg.providers["xiaomi"]
     assert xiaomi.takes("low") and xiaomi.takes(None) and not xiaomi.takes("minimal")
     assert not cfg.providers["deepseek"].takes("low")  # still unconfirmed: kept

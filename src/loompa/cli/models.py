@@ -143,6 +143,21 @@ def models_available(
             )
         elif check.found:
             console.print(f"[green]✔[/green] {check.openrouter_id} vai direto como {check.own_id}")
+    from loompa.llm.modelsdev import identity
+
+    for name, cfg in f.config.providers.items():
+        if not (cfg.byok_models or cfg.id_prefix or cfg.models_dev_id):
+            continue
+        ident = identity(f.config, name)
+        if ident is None:
+            continue
+        line = f"{cfg.label}: {len(ident.pairs)} modelos com par na OpenRouter, sem par: {len(ident.unmatched)}"
+        console.print(f"[dim]{line}[/dim]")
+        for or_id, own in ident.contradicted.items():
+            console.print(
+                f"[yellow]![/yellow] {or_id} → {own} não é o mesmo modelo segundo o models.dev; "
+                "esse par fica de fora"
+            )
     if show:
         hit = next((r for r in results if r.name == show), None)
         console.print("\n".join(hit.models) if hit else f"[red]✘[/red] sem resultado para {show}")

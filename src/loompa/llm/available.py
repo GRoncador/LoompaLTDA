@@ -21,7 +21,6 @@ from typing import Any
 import httpx
 
 from loompa.config.schema import LoompaConfig, ProviderConfig
-from loompa.llm.catalog import CATALOG_CACHE_DIR
 from loompa.llm.providers import is_google_endpoint, resolve_key
 
 CACHE_FILE = "provider_models.json"
@@ -152,13 +151,23 @@ async def available(
     client: httpx.AsyncClient | None = None,
     cache_dir: Path | None = None,
 ) -> list[ProviderModels]:
-    """Ask every provider worth asking, in parallel, and refresh the cache with the answers."""
+    """Ask every provider worth asking, in parallel, and refresh the cache with the answers.
+    models.dev (the cards and the identity table, 9.2/9.3) is fetched again alongside."""
+    from loompa.llm import modelsdev
+
     providers = wanted(config, secrets)
     own = client is None
     client = client or httpx.AsyncClient()
+
+    async def cards() -> None:
+        try:
+            await modelsdev.refresh(client=client, cache_dir=cache_dir)
+        except Exception:  # noqa: BLE001 - the availability answer stands without it
+            pass
+
     try:
-        results = await asyncio.gather(
-            *(list_provider(n, c, secrets, client) for n, c in providers.items())
+        *results, _ = await asyncio.gather(
+            *(list_provider(n, c, secrets, client) for n, c in providers.items()), cards()
         )
     finally:
         if own:
@@ -168,7 +177,9 @@ async def available(
 
 
 def _cache_path(cache_dir: Path | None) -> Path:
-    return (cache_dir or CATALOG_CACHE_DIR) / CACHE_FILE
+    from loompa.llm.modelsdev import hub_cache_dir
+
+    return (cache_dir or hub_cache_dir()) / CACHE_FILE
 
 
 def save_cache(results: list[ProviderModels], cache_dir: Path | None = None) -> None:
@@ -205,9 +216,11 @@ def cached(
 
 def byok_checks(config: LoompaConfig, results: list[ProviderModels]) -> list[ByokCheck]:
     """Each maker id `byok_models` would send, checked against that maker's list."""
+    from loompa.llm.modelsdev import byok_table
+
     lists = {r.name: set(r.models) for r in results if r.ok}
     return [
         ByokCheck(name, or_id, own, (own in lists[name]) if name in lists else None)
-        for name, cfg in config.providers.items()
-        for or_id, own in sorted(cfg.byok_models.items())
+        for name in config.providers
+        for or_id, own in sorted(byok_table(config, name).items())
     ]

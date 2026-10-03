@@ -226,6 +226,10 @@ class Hub:
             raise HTTPException(409, str(EngineBusy(holder)))
 
         async def loop() -> None:
+            if not rt.ctx.dry_run:  # plan 9.3: a day-old models.dev table is fetched again
+                from loompa.llm.modelsdev import refresh_if_stale
+
+                await refresh_if_stale()
             sched = Scheduler(rt.ctx)
             rt.ctx.emit("engine.started")
             try:
