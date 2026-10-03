@@ -450,6 +450,14 @@ class ProviderConfig(BaseModel):
     # OpenAI-compatible providers stream their answers (ADR-0016 §4): no wall-clock limit, only
     # silence, and progress while the model writes. Off reads each answer whole.
     stream: bool = True
+    # BYOK: the OpenRouter ids this provider serves with its own key, mapped to its own id. With
+    # the key set, the router tries it before OpenRouter for those models (one provider keeps the
+    # prompt cache, no OpenRouter fee) and OpenRouter stays the fallback. Without a key, nothing.
+    byok_models: dict[str, str] = Field(default_factory=dict)
+    # Whether this API takes `reasoning_effort` as sent. Off: a call that sets an effort skips the
+    # provider and goes through OpenRouter, which translates it, instead of running at the
+    # provider's default thinking (ADR-0016: the effort is part of what the call decides).
+    takes_effort: bool = True
 
     @field_validator("api_key_env")
     @classmethod

@@ -25,7 +25,9 @@ from loompa.llm.providers import (
     Message,
     QuotaExhausted,
     build_provider,
+    is_openrouter_endpoint,
     model_not_found,
+    resolve_key,
 )
 from loompa.trace import Tracer
 
@@ -196,6 +198,36 @@ class ModelRouter:
         }
         self._cooldown.clear()
 
+    def direct_first(
+        self, cands: list[ModelCandidate], reasoning_effort: str | None = None
+    ) -> list[ModelCandidate]:
+        """BYOK: in front of each OpenRouter candidate, the same model on the maker's own API
+        when the founder set that provider's key (`ProviderConfig.byok_models`). A call with an
+        effort skips a provider that does not take one (`takes_effort`)."""
+        direct = [
+            (name, cfg)
+            for name, cfg in self.config.providers.items()
+            if cfg.byok_models and resolve_key(cfg.api_key_env, self.secrets)
+        ]
+        if not direct:
+            return cands
+        out: list[ModelCandidate] = []
+        for cand in cands:
+            via = self.config.providers.get(cand.provider)
+            if via is not None and is_openrouter_endpoint(via.base_url):
+                effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
+                for name, cfg in direct:
+                    own = cfg.byok_models.get(cand.model)
+                    if own and (cfg.takes_effort or not effort):
+                        out.append(cand.model_copy(update={"provider": name, "model": own}))
+            out.append(cand)
+        seen: set[tuple[str, str]] = set()
+        return [
+            c
+            for c in out
+            if (c.provider, c.model) not in seen and not seen.add((c.provider, c.model))
+        ]
+
     # Roles whose judgement matters more on a hard story: lifted to tier1 when COMPLEX.
     LIFT_ON_COMPLEX = ("product", "product_owner", "inspector", "analyst")
 
@@ -278,6 +310,7 @@ class ModelRouter:
         lift: bool = False,
     ) -> RoutedCall:
         tier, cands = self.candidates(role, tier_override, complexity, task, lift)
+        cands = self.direct_first(cands, reasoning_effort)
         with self.tracer.span(
             "llm",
             agent or role,
@@ -316,7 +349,7 @@ class ModelRouter:
                         cluster = self.config.models.cluster_for_role(role)
                         paid = self.config.models.candidates_for_cluster_tier(cluster, "tier2")
                         if paid:
-                            tier, cands = "tier2", list(paid)
+                            tier, cands = "tier2", self.direct_first(list(paid), reasoning_effort)
                             span.set(tier=tier, free_fallback=True)
                 if routed is None:
                     routed = await self._route(tier, cands, *args)

@@ -755,6 +755,62 @@ async def test_a_spent_budget_keeps_every_call_on_the_free_tier():
         await router.complete("deployer", [Message("user", "x")], task="deployer.summary")
 
 
+def byok_config():
+    from loompa.config.schema import ALL_CLUSTERS
+
+    cfg = default_config()
+    tier = [
+        ModelCandidate(provider="openrouter", model="xiaomi/mimo-v2.6-pro"),
+        ModelCandidate(provider="openrouter", model="z-ai/glm-5.3-flash"),
+    ]
+    cfg.models.tiers = {t: list(tier) for t in ("tier1", "tier2", "tier3")}
+    cfg.models.matrix = {c: {t: list(tier) for t in cfg.models.tiers} for c in ALL_CLUSTERS}
+    return cfg
+
+
+def test_a_maker_key_puts_its_own_api_in_front_of_openrouter():
+    """BYOK (2026-10-03): with XIAOMI_API_KEY set, MiMo goes to Xiaomi first; the other models,
+    and every model while no key is set, stay on OpenRouter as before."""
+    cfg = byok_config()
+    plain = ModelRouter(cfg, providers={}, secrets={})
+    assert [c.provider for c in plain.direct_first(cfg.models.tiers["tier2"])] == [
+        "openrouter",
+        "openrouter",
+    ]
+    router = ModelRouter(cfg, providers={}, secrets={"XIAOMI_API_KEY": "sk-x"})
+    cands = router.direct_first(cfg.models.tiers["tier2"])
+    assert [(c.provider, c.model) for c in cands] == [
+        ("xiaomi", "mimo-v2.6-pro"),
+        ("openrouter", "xiaomi/mimo-v2.6-pro"),
+        ("openrouter", "z-ai/glm-5.3-flash"),
+    ]
+    # an effort the maker's API was not confirmed to take keeps the call on OpenRouter
+    assert [c.provider for c in router.direct_first(cfg.models.tiers["tier2"], "low")] == [
+        "openrouter",
+        "openrouter",
+    ]
+
+
+async def test_the_makers_api_failing_falls_back_to_openrouter_and_is_metered_at_its_price():
+    cfg = byok_config()
+    store = Store(":memory:")
+    down = MockProvider("xiaomi", script=lambda *a: LLMError("502", retryable=False))
+    router = ModelRouter(
+        cfg,
+        tracker=CostTracker(store, cfg, "f"),
+        providers={"xiaomi": down, "openrouter": MockProvider("openrouter", script=scripted)},
+        secrets={"XIAOMI_API_KEY": "sk-x"},
+        max_retries=0,
+    )
+    rc = await router.complete("worker", [Message("user", "x")])
+    assert len(down.calls) == 1 and rc.candidate.provider == "openrouter"
+    router._providers["xiaomi"] = MockProvider("xiaomi", script=scripted)
+    router._cooldown.clear()
+    rc = await router.complete("worker", [Message("user", "x" * 4000)])
+    assert rc.candidate.model == "mimo-v2.6-pro" and rc.cost_usd > 0
+    assert cfg.price_for("mimo-v2.6-pro").cached_input < cfg.price_for("mimo-v2.6-pro").input
+
+
 def test_ops_does_not_wait_out_a_cut_answer_and_says_why_in_plain_words():
     from loompa.agents.ops import triage
     from loompa.comms import audit_executive_text

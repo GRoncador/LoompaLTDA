@@ -52,6 +52,11 @@ PROVIDER_ORDER: tuple[str, ...] = (
     "openai",
     "xai",
     "deepseek",
+    "xiaomi",
+    "zai",
+    "alibaba",
+    "moonshot",
+    "minimax",
     "ollama",
 )
 
@@ -78,6 +83,8 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
                 "models_url": p.models_url,
                 "needs_key": bool(p.api_key_env),
                 "recommended": name == "openrouter",
+                # BYOK: the OpenRouter models this key takes over (tried first, OpenRouter behind)
+                "byok_models": sorted(p.byok_models),
                 "key": secrets.status(p.api_key_env)
                 if p.api_key_env
                 else {

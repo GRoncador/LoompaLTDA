@@ -204,6 +204,24 @@ providers:
     api_key_env: XAI_API_KEY
     console_url: https://console.x.ai
     models_url: https://docs.x.ai/docs/models
+  # Asian makers on their own API key (BYOK). `byok_models` maps the OpenRouter id to the
+  # maker's id: with the key set, those models go to the maker first and OpenRouter answers when
+  # it fails. Same price as OpenRouter's list (no 5.5% credit fee), one provider for the prompt
+  # cache. `takes_effort: false` = an effort the API was not confirmed to take: such calls keep
+  # going through OpenRouter. Never a "coding plan" or "token plan" key: those are for coding
+  # tools only, and a custom backend breaks their terms (decision of 2026-10-03).
+  xiaomi:
+    kind: openai_compatible
+    label: Xiaomi MiMo
+    base_url: https://api.xiaomimimo.com/v1
+    api_key_env: XIAOMI_API_KEY
+    console_url: https://platform.xiaomimimo.com
+    models_url: https://mimo.mi.com/docs/en-US/price/pay-as-you-go
+    probe_model: mimo-v2.6-flash
+    takes_effort: false
+    byok_models:
+      xiaomi/mimo-v2.6-pro: mimo-v2.6-pro
+      xiaomi/mimo-v2.6-flash: mimo-v2.6-flash
   deepseek:
     kind: openai_compatible
     label: DeepSeek
@@ -211,7 +229,57 @@ providers:
     api_key_env: DEEPSEEK_API_KEY
     console_url: https://platform.deepseek.com/api_keys
     models_url: https://api-docs.deepseek.com/quick_start/pricing
-    probe_model: deepseek-chat
+    probe_model: deepseek-flash
+    takes_effort: false
+    byok_models:
+      deepseek/deepseek-v4.1-flash: deepseek-flash
+      deepseek/deepseek-v4-pro-0813: deepseek-v4-pro
+  zai:
+    kind: openai_compatible
+    label: Z.AI (GLM)
+    base_url: https://api.z.ai/api/paas/v4
+    api_key_env: ZAI_API_KEY
+    console_url: https://z.ai/manage-apikey/apikey-list
+    models_url: https://docs.z.ai/guides/overview/pricing
+    probe_model: glm-5.3-flash
+    takes_effort: false
+    byok_models:
+      z-ai/glm-5.3: glm-5.3
+      z-ai/glm-5.3-flash: glm-5.3-flash
+  alibaba:
+    kind: openai_compatible
+    label: Alibaba Qwen (Model Studio)
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    api_key_env: DASHSCOPE_API_KEY
+    console_url: https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=playground#/api-key
+    models_url: https://www.alibabacloud.com/help/en/model-studio/model-pricing
+    probe_model: qwen3.8-flash
+    takes_effort: false
+    byok_models:
+      qwen/qwen3.8-max-0902: qwen3.8-max
+      qwen/qwen3.8-flash: qwen3.8-flash
+  moonshot:
+    kind: openai_compatible
+    label: Moonshot Kimi
+    base_url: https://api.moonshot.ai/v1
+    api_key_env: MOONSHOT_API_KEY
+    console_url: https://platform.moonshot.ai/console/api-keys
+    models_url: https://platform.moonshot.ai/docs/pricing/chat
+    probe_model: kimi-k2.6
+    takes_effort: false
+    byok_models:
+      moonshotai/kimi-k3: kimi-k3
+      moonshotai/kimi-k2.6: kimi-k2.6
+  minimax:
+    kind: openai_compatible
+    label: MiniMax
+    base_url: https://api.minimax.io/v1
+    api_key_env: MINIMAX_API_KEY
+    console_url: https://platform.minimax.io/user-center/basic-information/interface-key
+    models_url: https://platform.minimax.io/docs/guides/pricing
+    probe_model: MiniMax-M3
+    byok_models:
+      minimax/minimax-m3: MiniMax-M3
   ollama:
     kind: openai_compatible
     label: Ollama (local)
@@ -273,6 +341,22 @@ pricing:
   "~openai/gpt-luna-latest":  { input: 0.2, output: 1.2, cached_input: 0.02 }
   "~google/gemini-flash-latest": { input: 0.75, output: 3.75, cached_input: 0.075 }
   openrouter/free:          { input: 0.0, output: 0.0, cached_input: 0.0 }
+  # The makers' own ids (BYOK providers above), from their pricing pages on 2026-10-03; a cache
+  # price the page did not show is OpenRouter's listing. DeepSeek bills half off-peak; the peak
+  # price is kept so the meter never under-counts.
+  xiaomi/mimo-v2.6-pro:     { input: 0.435, output: 0.87, cached_input: 0.0036 }
+  xiaomi/mimo-v2.6-flash:   { input: 0.14, output: 0.28, cached_input: 0.0028 }
+  mimo-v2.6-pro:            { input: 0.435, output: 0.87, cached_input: 0.0036 }
+  mimo-v2.6-flash:          { input: 0.14, output: 0.28, cached_input: 0.0028 }
+  deepseek-flash:           { input: 0.30, output: 1.20, cached_input: 0.006 }
+  deepseek-v4-pro:          { input: 1.32, output: 3.96, cached_input: 0.044 }
+  glm-5.3:                  { input: 1.40, output: 4.40, cached_input: 0.14 }
+  glm-5.3-flash:            { input: 0.15, output: 0.50, cached_input: 0.03 }
+  qwen3.8-max:              { input: 2.00, output: 6.00, cached_input: 0.25 }
+  qwen3.8-flash:            { input: 0.15, output: 0.47, cached_input: 0.03 }
+  kimi-k3:                  { input: 3.00, output: 15.0, cached_input: 0.30 }
+  kimi-k2.6:                { input: 0.95, output: 4.00, cached_input: 0.073 }
+  MiniMax-M3:               { input: 0.30, output: 1.20, cached_input: 0.06 }
   default:                  { input: 1.00, output: 3.00, cached_input: 0.25 }
 
 quality:

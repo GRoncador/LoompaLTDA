@@ -15,6 +15,11 @@ export const PROVIDER_NAMES: Record<string, string> = {
   openai: "OpenAI (ChatGPT)",
   xai: "xAI (Grok)",
   deepseek: "DeepSeek",
+  xiaomi: "Xiaomi MiMo",
+  zai: "Z.AI (GLM)",
+  alibaba: "Alibaba Qwen",
+  moonshot: "Moonshot Kimi",
+  minimax: "MiniMax",
   ollama: "Ollama (local)",
   tavily: "Tavily",
 };
@@ -71,6 +76,8 @@ export function normalizeVendor(provider: string, model?: string): string {
   if (m.startsWith("qwen")) return "qwen";
   if (m.startsWith("grok")) return "x-ai";
   if (p === "xai") return "x-ai";
+  if (p === "zai") return "z-ai";
+  if (p === "moonshot") return "moonshotai";
   if (p === "gemini") return "google";
   if (m.startsWith("mistral") || m.startsWith("codestral")) return "mistralai";
   if (m.startsWith("glm")) return "z-ai";
