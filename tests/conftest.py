@@ -128,6 +128,14 @@ def isolated_loompa_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture(autouse=True)
+def lean_inner_pytest(monkeypatch: pytest.MonkeyPatch):
+    """The quality gate runs a real `python -m pytest` in each story's worktree, with a fresh
+    bytecode cache every time (`run_command`), so every plugin installed here (langsmith, cov,
+    xdist…) was recompiled on each call: ~2s instead of ~0.6s. The test repos need none."""
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+
+
+@pytest.fixture(autouse=True)
 def close_leaked_contexts(monkeypatch: pytest.MonkeyPatch):
     """A test that fails before `await ctx.aclose()` would leave the aiosqlite checkpointer
     thread alive and pytest would never exit. Track every EngineContext and close it."""

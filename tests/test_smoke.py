@@ -61,7 +61,11 @@ async def test_a_missing_module_and_a_dead_server_are_problems_without_a_browser
 
 
 @needs_chrome
-async def test_a_page_that_draws_passes_and_a_blank_or_broken_one_fails(tmp_path: Path):
+async def test_a_page_that_draws_passes_and_a_blank_or_broken_one_fails(
+    tmp_path: Path, monkeypatch
+):
+    # these pages draw synchronously on load: the 3s a real game's timers get is not needed
+    monkeypatch.setattr("loompa.smoke.SETTLE_S", 1.0)
     good = await smoke(
         _site(tmp_path / "good", "c.fillStyle = COR; c.fillRect(10, 10, 5, 5);\n"), SERVE
     )
@@ -72,9 +76,11 @@ async def test_a_page_that_draws_passes_and_a_blank_or_broken_one_fails(tmp_path
     assert any("JavaScript error" in p and "naoExiste" in p for p in broken.problems)
 
 
-async def test_the_inspector_fails_a_page_that_does_not_load(factory):
+async def test_the_inspector_fails_a_page_that_does_not_load(factory, monkeypatch):
     """End to end: a story's page imports a module nobody wrote; the tests are green, the
     smoke test is not, and the Worker hears why."""
+    # the 404 is found before any browser: starting Chrome on every round only cost time
+    monkeypatch.setattr("loompa.smoke.find_chrome", lambda: None)
     from typing import Any
 
     from conftest import git

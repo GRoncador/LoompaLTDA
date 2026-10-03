@@ -2,7 +2,7 @@
 
 - Package: `loompa-core` (`src/loompa`), Python ≥ 3.11, managed with `uv`. Run `uv sync --dev`,
   `uv run pytest -n auto`, `uv run ruff check .` before committing (the full suite, in parallel on
-  pytest-xdist: ~3 min instead of ~10; `addopts` already has `-q`, a second one hides the summary line).
+  pytest-xdist: ~1.5 min instead of ~10; `addopts` already has `-q`, a second one hides the summary line).
 - Frontend: `dashboard-ui/` (Vite + React + Tailwind + Phaser). `npm run build` writes the bundle
   into `src/loompa/dashboard/static/` — commit the bundle when the UI changes.
 - Orchestration is LangGraph (`engine/langgraph_engine.py`, ADR-0005); node logic stays in `engine/graph.py`.
