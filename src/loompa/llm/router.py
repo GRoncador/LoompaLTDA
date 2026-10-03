@@ -218,7 +218,7 @@ class ModelRouter:
                 effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
                 for name, cfg in direct:
                     own = cfg.byok_models.get(cand.model)
-                    if own and (cfg.takes_effort or not effort):
+                    if own and cfg.takes(effort):
                         out.append(cand.model_copy(update={"provider": name, "model": own}))
             out.append(cand)
         seen: set[tuple[str, str]] = set()

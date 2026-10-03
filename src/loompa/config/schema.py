@@ -458,10 +458,16 @@ class ProviderConfig(BaseModel):
     # the key set, the router tries it before OpenRouter for those models (one provider keeps the
     # prompt cache, no OpenRouter fee) and OpenRouter stays the fallback. Without a key, nothing.
     byok_models: dict[str, str] = Field(default_factory=dict)
-    # Whether this API takes `reasoning_effort` as sent. Off: a call that sets an effort skips the
-    # provider and goes through OpenRouter, which translates it, instead of running at the
-    # provider's default thinking (ADR-0016: the effort is part of what the call decides).
-    takes_effort: bool = True
+    # Whether this API takes `reasoning_effort` as sent: true, false, or the labels it was seen to
+    # take (Xiaomi takes low/medium/high and refuses `minimal` with a 400). A call whose effort the
+    # provider does not take skips it and goes through OpenRouter, which translates it, instead of
+    # running at the provider's default thinking (ADR-0016: the effort is part of the call).
+    takes_effort: bool | list[str] = True
+
+    def takes(self, effort: str | None) -> bool:
+        if not effort or self.takes_effort is True:
+            return True
+        return isinstance(self.takes_effort, list) and effort in self.takes_effort
 
     @field_validator("api_key_env")
     @classmethod
@@ -621,7 +627,7 @@ RETIRED_PROVIDERS: tuple[str, ...] = ("groq",)
 
 # Bumped when a default changes in a way an existing config.yaml must pick up (every save writes
 # the whole config, so an old default would otherwise stay forever); see config/store.py.
-CONFIG_REVISION = 1
+CONFIG_REVISION = 2
 
 
 class LoompaConfig(BaseModel):

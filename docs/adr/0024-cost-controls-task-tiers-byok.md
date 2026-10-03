@@ -59,7 +59,10 @@ line drawn on 2026-09-30 for subscription OAuth: official pay-as-you-go keys onl
    puts its API before each matching OpenRouter candidate, and OpenRouter answers when it fails. With
    no key, nothing changes. A call with an explicit effort skips a maker whose API was not confirmed to
    take one (`takes_effort: false`), so the effort policy of ADR-0016 holds. Prices come from the
-   makers' pages; DeepSeek's peak price is kept so the meter never under-counts.
+   makers' pages; DeepSeek's peak price is kept so the meter never under-counts. `takes_effort` can
+   also list the labels a real call confirmed: Xiaomi's API (tested 2026-10-03) takes `low`, `medium`
+   and `high`, refuses `minimal` with a 400, and its thinking length did not move with the label in
+   24 sampled calls (MiMo seems to decide by itself). Revision 2 of the config swaps the old `false`.
 7. **Tier 1 holds only models rated above tier 2's best** (`catalog._decision_tier`). If fewer than two
    remain, tier 2's best follows as the last resort.
 8. **Measured, not argued.** `loompa costs` counts from `usage` and the events:

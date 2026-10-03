@@ -785,10 +785,15 @@ def test_a_maker_key_puts_its_own_api_in_front_of_openrouter():
         ("openrouter", "z-ai/glm-5.3-flash"),
     ]
     # an effort the maker's API was not confirmed to take keeps the call on OpenRouter
+    cfg.providers["xiaomi"].takes_effort = False
     assert [c.provider for c in router.direct_first(cfg.models.tiers["tier2"], "low")] == [
         "openrouter",
         "openrouter",
     ]
+    # Xiaomi's measured list: low goes direct, minimal (a 400 there) stays on OpenRouter
+    cfg.providers["xiaomi"].takes_effort = ["low", "medium", "high"]
+    assert router.direct_first(cfg.models.tiers["tier2"], "low")[0].provider == "xiaomi"
+    assert router.direct_first(cfg.models.tiers["tier2"], "minimal")[0].provider == "openrouter"
 
 
 async def test_the_makers_api_failing_falls_back_to_openrouter_and_is_metered_at_its_price():

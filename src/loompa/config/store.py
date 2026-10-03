@@ -52,6 +52,10 @@ _REVISION_1_DEFAULTS = {
 }
 
 
+# Revision 2 (2026-10-03): provider fields a real call settled, dropped when still the old guess.
+_REVISION_2_PROVIDERS = {("xiaomi", "takes_effort"): False}
+
+
 def _upgrade(data: dict) -> dict:
     models = data.get("models")
     if not isinstance(models, dict):
@@ -64,6 +68,12 @@ def _upgrade(data: dict) -> dict:
     if int(data.get("revision") or 0) < 1:
         for (section, key), old in _REVISION_1_DEFAULTS.items():
             block = models.get(section)
+            if isinstance(block, dict) and block.get(key) == old:
+                del block[key]
+    if int(data.get("revision") or 0) < 2:
+        providers = data.get("providers")
+        for (name, key), old in _REVISION_2_PROVIDERS.items():
+            block = providers.get(name) if isinstance(providers, dict) else None
             if isinstance(block, dict) and block.get(key) == old:
                 del block[key]
     data["revision"] = max(int(data.get("revision") or 0), CONFIG_REVISION)

@@ -150,7 +150,7 @@ def test_an_old_config_drops_the_defaults_the_cost_review_changed(tmp_path):
     }
     (tmp_path / ".loompa" / "config.yaml").write_text(yaml.safe_dump(old), encoding="utf-8")
     cfg = load_config(tmp_path)
-    assert cfg.revision == 1
+    assert cfg.revision >= 1
     assert cfg.models.tier_for("master") == "tier2"
     assert cfg.models.tier_for("storyteller") == "tier1"  # changed by the founder: kept
     assert cfg.models.tier_for_task("deployer", "deployer.summary") == "tier3"
@@ -220,3 +220,24 @@ def test_a_config_written_before_adr_0016_gets_the_new_room_and_tries(tmp_path: 
     cfg["models"].update(full_output_tokens=96000, max_output_ceiling=32768)
     (tmp_path / LOOMPA_DIR / CONFIG_FILE).write_text(yaml.safe_dump(cfg))
     assert load_config(tmp_path).models.max_output_ceiling == 32768
+
+
+def test_revision_2_replaces_the_xiaomi_effort_guess_with_what_a_real_call_took(tmp_path):
+    """A real call (2026-10-03) showed Xiaomi's API takes low/medium/high and refuses `minimal`;
+    a config that still carries the old `false` guess gets the measured list."""
+    import yaml
+
+    from loompa.config.store import load_config
+
+    (tmp_path / ".loompa").mkdir()
+    old = {
+        "revision": 1,
+        "models": {"full_output_tokens": 96000},
+        "providers": {"xiaomi": {"takes_effort": False}, "deepseek": {"takes_effort": False}},
+    }
+    (tmp_path / ".loompa" / "config.yaml").write_text(yaml.safe_dump(old), encoding="utf-8")
+    cfg = load_config(tmp_path)
+    assert cfg.revision == 2
+    xiaomi = cfg.providers["xiaomi"]
+    assert xiaomi.takes("low") and xiaomi.takes(None) and not xiaomi.takes("minimal")
+    assert not cfg.providers["deepseek"].takes("low")  # still unconfirmed: kept

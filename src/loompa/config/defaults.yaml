@@ -1,7 +1,7 @@
 # Loompa LTDA default factory configuration.
 # Copied into <repo>/.loompa/config.yaml by `loompa init`; edit freely per factory.
 
-revision: 1                 # config/schema.py CONFIG_REVISION: which default changes this file has
+revision: 2                 # config/schema.py CONFIG_REVISION: which default changes this file has
 
 factory:
   name: ""
@@ -208,7 +208,7 @@ providers:
   # maker's id: with the key set, those models go to the maker first and OpenRouter answers when
   # it fails. Same price as OpenRouter's list (no 5.5% credit fee), one provider for the prompt
   # cache. `takes_effort: false` = an effort the API was not confirmed to take: such calls keep
-  # going through OpenRouter. Never a "coding plan" or "token plan" key: those are for coding
+  # going through OpenRouter; a list = the labels a real call confirmed (xiaomi, 2026-10-03). Never a "coding plan" or "token plan" key: those are for coding
   # tools only, and a custom backend breaks their terms (decision of 2026-10-03).
   xiaomi:
     kind: openai_compatible
@@ -218,7 +218,7 @@ providers:
     console_url: https://platform.xiaomimimo.com
     models_url: https://mimo.mi.com/docs/en-US/price/pay-as-you-go
     probe_model: mimo-v2.6-flash
-    takes_effort: false
+    takes_effort: [low, medium, high]   # `minimal` is a 400
     byok_models:
       xiaomi/mimo-v2.6-pro: mimo-v2.6-pro
       xiaomi/mimo-v2.6-flash: mimo-v2.6-flash
