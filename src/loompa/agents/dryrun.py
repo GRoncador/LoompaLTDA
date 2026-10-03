@@ -228,6 +228,8 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
         return json.dumps(
             {"reply": "Simulação: mantive o rascunho como está para o sprint.", "picks": []}
         )
+    if role == "product_owner" and "Review old backlog cards" in messages[0].content:
+        return json.dumps({"reply": "Simulação: mantive todos os cards.", "cards": []})
     if role == "product_owner" and "rank the backlog" in messages[0].content:
         return json.dumps({"order": [], "notes": "simulação: ordem mantida"})
     if role == "product_owner" and "guardian of the spec" in messages[0].content:

@@ -918,3 +918,57 @@ async def test_a_meeting_retires_an_obsolete_backlog_card(factory: Factory):
     assert ctx.store.get_story(keep)["stage"] == Stage.BACKLOG
     assert events(ctx, "backlog.retired")[0]["payload"]["reason"] == "já configurado à mão"
     await ctx.aclose()
+
+
+async def test_the_product_owner_reviews_old_cards_against_the_code_and_drafts_retirements(
+    factory: Factory,
+):
+    """contas SP-004: the founder asked for the ~20 Kaizen cards written before the cents
+    migration to be reviewed; the Product Owner only said one was "retirable" and had no way to
+    act. The Master now hands the review over, the Product Owner reads the code and its
+    retirements land in the draft, where the founder can undo them before saving."""
+    from test_backlog_doors import po_answers
+
+    def master(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "master" and "Sprint Meeting" in messages[0].content:
+            return json.dumps(
+                {
+                    "reply": "O Product Owner vai revisar os cards antigos.",
+                    "ops": [],
+                    "review_cards": [],
+                }
+            )
+        return script(model, messages, tools)
+
+    seen: list[str] = []
+
+    def review(messages: list[Message]) -> dict[str, Any]:
+        seen.append(messages[1].content)
+        return {
+            "reply": "Aposento um card e mantenho outro.",
+            "cards": [
+                {"ref": "S-001", "verdict": "retire", "reason": "O teste citado já verifica isso."},
+                {"ref": "S-002", "verdict": "keep", "reason": "A falha ainda existe."},
+                {"ref": "S-003", "verdict": "retire", "reason": "não foi pedido"},  # founder's card
+            ],
+        }
+
+    script = po_answers(**{"Review old backlog cards": review})
+    ctx = make_ctx(factory, master)
+    po = ProductOwnerAgent(ctx)
+    po.add_item("[Oportunidade] teste sem asserção", "O teste X não verifica Y.", origin="kaizen")
+    po.add_item("[Débito técnico] helper fora do lugar", origin="kaizen")
+    po.add_item("Exportar PDF")
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    await chats.say(conv.id, "Revise os cards antigos e aposente os que não valem mais")
+    conv = chats.board.require(conv.id)
+    assert "S-001" in seen[0] and "O teste X não verifica Y." in seen[0]
+    assert "S-003" not in seen[0]  # only what the factory found, when no ids are named
+    assert conv.turns[-1].name == "Product Owner Loompa"
+    assert conv.draft.retire == {"S-001": "O teste citado já verifica isso."}
+    assert any("S-002 fica" in c for c in conv.turns[-1].changes)
+    assert events(ctx, "backlog.reviewed")[0]["payload"]["retire"] == ["S-001"]
+    chats.edit(conv.id, [{"op": "unretire", "ref": "S-001"}])  # the founder keeps it after all
+    assert chats.board.require(conv.id).draft.retire == {}
+    await ctx.aclose()

@@ -66,6 +66,10 @@ Rules:
   should go into the sprint or wants to start it, add `"consult_po": true` to your JSON and say in
   the reply that the Product Owner will propose the sprint. The sprint starts only after that
   proposal, once the founder approves it; never say it started.
+- When the founder asks to review old backlog cards and retire the ones that no longer apply,
+  add `"review_cards": ["S-017", ...]` with the ids they named (an empty list means every card
+  the factory found itself) and say the Product Owner will review them against the code. Never
+  retire those cards yourself: only a card the founder calls obsolete by name gets a `retire`.
 """
 
 CURRENT_SPRINT_SYSTEM = """<!-- role:master -->
@@ -454,6 +458,10 @@ class MasterAgent(LoompaAgent):
             )
         finally:
             self.set_state("IDLE")
+        review = turn.extra.get("review_cards")
+        if isinstance(review, list) and not current:  # the founder asked for old cards reviewed
+            await ProductOwnerAgent(self.ctx).review_cards(conv, [str(r) for r in review])
+            board.save(conv)
         if turn.consult and conv.draft.items and not current:  # the Product Owner proposes it
             await ProductOwnerAgent(self.ctx).propose_sprint(conv)
             board.save(conv)

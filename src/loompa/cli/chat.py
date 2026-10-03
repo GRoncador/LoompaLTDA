@@ -76,6 +76,8 @@ HELP = {
     ConversationKind.MEETING: (
         "/incluir D1 S-004  põe cards no sprint (e /excluir tira do sprint)\n"
         "/aposentar S-010 [motivo]  cancela um card do backlog ao salvar\n"
+        "/revisar [S-017 …]  o Product Owner revê cards antigos no código e propõe aposentar\n"
+        "/manter S-017      desfaz uma aposentadoria do rascunho\n"
         "/proposta          o Product Owner propõe o sprint (vem antes de /sprint)\n"
         "/sprint [meta]     salva no backlog e começa o sprint\n"
         "/montar [meta]     salva e deixa o sprint montado, esperando o atual terminar\n"
@@ -149,6 +151,10 @@ def print_draft(conv: Conversation) -> None:
         console.print(f"[bold]Meta do sprint:[/bold] {draft.goal}")
     if draft.cancel_sprint:
         console.print(f"[red]O {draft.sprint_id} será cancelado ao aplicar.[/red]")
+    for sid, reason in draft.retire.items():
+        console.print(
+            f"[red]sai do backlog ao salvar:[/red] {sid}" + (f" — {reason}" if reason else "")
+        )
     if not draft.items:
         console.print("[dim]O rascunho está vazio.[/dim]")
         return
@@ -292,6 +298,11 @@ async def handle(
         _show(report)
     elif command == "/meta" and conv.kind != ConversationKind.REVIEW:
         _show(convs.edit(conv.id, [{"op": "goal", "text": rest}]))
+    elif command == "/revisar" and meeting:
+        await convs.review_cards(conv.id, args)
+        say_aloud(convs, convs.board.require(conv.id))
+    elif command == "/manter" and args and meeting:
+        _show(convs.edit(conv.id, [{"op": "unretire", "ref": a} for a in args]))
     elif command == "/proposta" and meeting:
         await convs.propose(conv.id)
         say_aloud(convs, convs.board.require(conv.id))

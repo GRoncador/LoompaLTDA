@@ -435,6 +435,18 @@ class Conversations:
         self.board.save(conv)
         return turn
 
+    async def review_cards(self, conversation_id: str, refs: list[str]) -> TurnResult:
+        """The Product Owner reviews old backlog cards against the code and proposes which
+        retire; the retirements are draft edits the founder can still undo."""
+        from loompa.agents.product_owner import ProductOwnerAgent
+
+        conv = self.board.require(conversation_id)
+        if conv.kind != ConversationKind.MEETING:
+            raise ConversationError("só a reunião de sprint revisa cards do backlog")
+        turn = await ProductOwnerAgent(self.ctx).review_cards(conv, refs)
+        self.board.save(conv)
+        return turn
+
     async def quick_story(self, title: str, description: str = "", priority: int = 3) -> QuickStory:
         """The founder's quick story (plan 10.6): the Product Owner reads it first. Approved, it
         is filed as the Product Owner wrote it (the founder's words stay on the card); refused,
