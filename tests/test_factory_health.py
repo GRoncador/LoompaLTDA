@@ -277,3 +277,24 @@ def test_a_runaway_and_a_slow_model_in_a_role_are_found(tmp_path: Path):
     )
     slow = found["llm.slow_model"]
     assert slow.key == "ds/product_owner" and "contra 70 s de ling" in slow.detail
+
+
+def test_a_salvaged_task_is_not_counted_as_cut(tmp_path: Path):
+    """Plan 8.6.1: a run stopped by the limit that was done anyway (2595d1f) is finished. Only
+    the run it saved is discounted: an earlier cut run of the same task still counts."""
+    saved_only = [
+        ev(1, "worker.task", "S-041", task=7, ended_by="limit", tool_calls=69),
+        ev(2, "worker.salvaged", "S-041", task=7, ended_by="limit"),
+    ]
+    assert "worker.task_limit" not in by_signal(detect(window(tmp_path, saved_only)))
+
+    mixed = [
+        ev(1, "worker.task", "S-045", task=1, ended_by="limit", tool_calls=55),
+        ev(2, "story.task_unfinished", "S-045", task=1),
+        ev(3, "worker.task", "S-041", task=7, ended_by="limit", tool_calls=40),
+        ev(4, "worker.task", "S-041", task=7, ended_by="limit", tool_calls=69),
+        ev(5, "worker.salvaged", "S-041", task=7, ended_by="limit"),
+    ]
+    found = by_signal(detect(window(tmp_path, mixed)))["worker.task_limit"]
+    assert [(e["story"], e["calls"]) for e in found.evidence] == [("S-045", 55), ("S-041", 40)]
+    assert "1 pararam no limite já prontas" in found.detail

@@ -193,14 +193,26 @@ def cuts(w: Window) -> list[Finding]:
 def task_limits(w: Window) -> list[Finding]:
     """A task that ended by the call limit, or kept repeating itself (S-030 T3, S-031 T5)."""
     out = []
+    cut = [e for e in w.of("worker.task") if e["payload"].get("ended_by") == "limit"]
+    # a cut run that was done anyway (changed, green, self-check clean) is finished, not cut
+    # (2595d1f, plan 8.6.1): `worker.salvaged` follows the `worker.task` of the run it saved
+    salvaged: set[int] = set()
+    for s in w.of("worker.salvaged"):
+        key = (s["story_id"], s["payload"].get("task"))
+        runs = [
+            e
+            for e in w.of("worker.task")
+            if (e["story_id"], e["payload"].get("task")) == key and e["id"] < s["id"]
+        ]
+        if runs:
+            salvaged.add(max(runs, key=lambda e: e["id"])["id"])
     # since 8.1 a cut task emits both `worker.task` (with its calls) and `story.task_unfinished`:
     # one task, counted once, keeping the event that has the numbers
     by_task: dict[tuple[Any, Any], dict[str, Any]] = {}
-    for e in [e for e in w.of("worker.task") if e["payload"].get("ended_by") == "limit"] + list(
-        w.of("story.task_unfinished")
-    ):
+    for e in [e for e in cut if e["id"] not in salvaged] + list(w.of("story.task_unfinished")):
         by_task.setdefault((e["story_id"], e["payload"].get("task")), e)
     ended = list(by_task.values())
+    saved = len([e for e in cut if e["id"] in salvaged])
     if ended:
         out.append(
             Finding(
@@ -215,6 +227,11 @@ def task_limits(w: Window) -> list[Finding]:
                         "várias ferramentas, e `calls` é o total de ferramentas da tarefa)."
                         if w.limits.get("worker_max_iterations")
                         else "."
+                    )
+                    + (
+                        f" Outras {saved} pararam no limite já prontas e foram salvas."
+                        if saved
+                        else ""
                     )
                 ),
                 area="worker",
