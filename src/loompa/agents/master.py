@@ -52,6 +52,10 @@ Rules:
   false. When the founder asks for an existing backlog card, reference it by its id with an
   `update` (`in_sprint: true`) instead of adding it again. Never duplicate a card that is already
   in the backlog or in progress.
+- The backlog also lists what is already delivered: the product does that today. Never draft it
+  again. When the founder asks for more of something delivered, the new card names that story and
+  describes only what changes on top of it, with the names the delivered work uses (a need, a
+  screen, a command keeps its name). When what they ask is already delivered, say so in the reply.
 - Follow the founder's corrections literally (drop, reorder, rename, move in or out of the sprint).
 - Ask a question only when you cannot draft even one story without the answer; otherwise draft and
   state your assumption in the reply.

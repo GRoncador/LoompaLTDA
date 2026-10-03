@@ -511,3 +511,55 @@ def test_the_cli_keeps_an_unreviewed_start(factory: Factory):
     ProductOwnerAgent(ctx).add_item("Login")
     assert MasterAgent(ctx).start_sprint().story_ids == ["S-001"]
     ctx.close()
+
+
+def deliver(ctx, story_id: str) -> None:
+    state = StoryState.from_row(ctx.store.get_story(story_id))
+    state.stage = Stage.DONE
+    ctx.store.update_story(story_id, stage=Stage.DONE.value, state=state.model_dump(mode="json"))
+
+
+async def test_a_meeting_sees_what_was_delivered_and_the_po_refuses_it_again(factory: Factory):
+    """tamagotchi SP-005: the meeting saw only open cards and drafted again the care actions and
+    the restart delivered an hour before, with needs the code does not have."""
+    seen: list[str] = []
+
+    def master(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "master" and "Sprint Meeting" in messages[0].content:
+            seen.append(messages[-1].content)
+            return json.dumps({"reply": "Isso já foi entregue no S-001.", "ops": []})
+        return script(model, messages, tools)
+
+    script = po_answers(
+        **{
+            "Triage the founder's request": {
+                "admit": False,
+                "reason_code": "duplicate",
+                "reason": "O S-001 já entregou isso.",
+                "duplicate_of": "S-001",
+                "title": "Alimentar o pet",
+                "description": "Ação de alimentar.",
+                "kind": "feature",
+                "after": "",
+            }
+        }
+    )
+    ctx = make_ctx(factory, master)
+    po = ProductOwnerAgent(ctx)
+    sid = po.add_item(
+        "Alimentar, dormir e brincar", "Ações de cuidado: recuperam fome, sono e humor."
+    ).story_id
+    po.add_item("Tela de opções")
+    deliver(ctx, sid)
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    await chats.say(conv.id, "Quero ações do jogador sobre o pet")
+    assert "Already delivered" in seen[0]
+    assert '- S-001 · "Alimentar, dormir e brincar" — Ações de cuidado: recuperam fome' in seen[0]
+    assert (
+        "S-002" in seen[0].split("Already delivered")[0]
+    )  # the open card stays in the backlog part
+    out = await chats.quick_story("alimentar o pet")
+    assert out.story_id is None and out.triage.duplicate_of == "S-001"  # a delivered id counts
+    assert "Already delivered" in script.seen["Triage the founder's request"][0][-1].content
+    await ctx.aclose()

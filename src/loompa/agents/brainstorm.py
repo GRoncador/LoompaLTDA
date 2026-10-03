@@ -261,7 +261,7 @@ async def consult(
                 f"## Question from the Master\n{question}\n\n"
                 f"## Brainstorm so far\n{render_brainstorm(conv.draft)}\n\n"
                 f"## Conversation so far\n{render_transcript(conv, limit=10)}\n\n"
-                f"## Backlog\n{render_backlog(board.cards(), limit=40)}\n\n"
+                f"## Backlog\n{render_backlog(board.cards(), limit=40, delivered=board.delivered())}\n\n"
                 f"## Tools\n{tools}\n\n"
                 f"## Constitution (excerpt)\n{agent.constitution(2500)}\n\n"
                 + agent.precedents(

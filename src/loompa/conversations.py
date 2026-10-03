@@ -15,7 +15,7 @@ the same operations, so the chat and the checkboxes can never disagree.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal
@@ -30,6 +30,8 @@ MAX_ITEMS = 40  # cards a draft may hold
 MAX_TITLE = 120
 PROMPT_TURNS = 16  # transcript turns replayed to the model; the draft carries the rest
 PROMPT_TURN_CHARS = 1500
+DELIVERED_LIMIT = 30  # delivered stories shown to a meeting, newest first
+DELIVERED_SUMMARY_CHARS = 220
 
 
 class ConversationError(ValueError):
@@ -245,6 +247,16 @@ class OpenCard:
     @property
     def waiting(self) -> bool:
         return self.stage == Stage.BACKLOG
+
+
+@dataclass(frozen=True)
+class DeliveredCard:
+    """A story the factory delivered and the founder approved: what the product does today."""
+
+    id: str
+    title: str
+    summary: str = ""
+    kind: str = ""
 
 
 def to_scale(stored: int) -> int:
@@ -671,7 +683,12 @@ def render_brainstorm(draft: Draft) -> str:
     return "\n".join(lines)
 
 
-def render_backlog(cards: Mapping[str, OpenCard], *, limit: int = 60) -> str:
+def render_backlog(
+    cards: Mapping[str, OpenCard],
+    *,
+    limit: int = 60,
+    delivered: Sequence[DeliveredCard] = (),
+) -> str:
     waiting = [c for c in cards.values() if c.waiting]
     busy = [c for c in cards.values() if not c.waiting]
     lines = ["Cards waiting in the backlog (reference them by id):"]
@@ -692,6 +709,22 @@ def render_backlog(cards: Mapping[str, OpenCard], *, limit: int = 60) -> str:
     if busy:
         lines.append("Work already in progress (never duplicate it):")
         lines += [f'- {c.id} · {c.stage} · "{c.title}"' for c in busy[:limit]]
+    if delivered:
+        lines.append(render_delivered(delivered))
+    return "\n".join(lines)
+
+
+def render_delivered(cards: Sequence[DeliveredCard]) -> str:
+    """The delivered stories, newest first. A meeting that saw only open cards drafted five
+    stories the product already had (tamagotchi SP-005: decay, care actions, consequences and
+    restart, delivered an hour before), with needs the code does not use."""
+    lines = [
+        "Already delivered and approved by the founder (the product does this today; never draft "
+        "it again, and use the names it uses):"
+    ]
+    for c in cards:
+        tag = f" · {c.kind}" if c.kind not in ("", "feature") else ""
+        lines.append(f'- {c.id}{tag} · "{c.title}"' + (f" — {c.summary}" if c.summary else ""))
     return "\n".join(lines)
 
 
@@ -767,3 +800,22 @@ class ConversationBoard:
             for row in self.store.list_stories(self.slug)
             if row["stage"] not in TERMINAL
         }
+
+    def delivered(self, limit: int = DELIVERED_LIMIT) -> list[DeliveredCard]:
+        """The delivered stories, newest first, each with the opening of its description."""
+        rows = [r for r in self.store.list_stories(self.slug, stage=Stage.DONE) if r.get("title")]
+        rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
+        out = []
+        for row in rows[:limit]:
+            text = " ".join(str(row.get("description") or "").split())
+            if len(text) > DELIVERED_SUMMARY_CHARS:
+                text = text[:DELIVERED_SUMMARY_CHARS].rsplit(" ", 1)[0] + "…"
+            out.append(
+                DeliveredCard(
+                    id=row["id"],
+                    title=row["title"],
+                    summary=text,
+                    kind=str((row.get("state") or {}).get("kind") or ""),
+                )
+            )
+        return out

@@ -146,7 +146,7 @@ async def run_turn(
     brainstorm = conv.kind == ConversationKind.BRAINSTORM
     draft = render_brainstorm(conv.draft) if brainstorm else render_draft(conv.draft)
     user = (
-        f"{context}\n\n## Backlog\n{render_backlog(board.cards())}\n\n"
+        f"{context}\n\n## Backlog\n{render_backlog(board.cards(), delivered=board.delivered())}\n\n"
         f"## Current draft\n{draft}\n\n"
         f"## Conversation so far\n{history}\n\n## Founder's message\n{text}"
     )
