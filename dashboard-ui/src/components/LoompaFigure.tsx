@@ -10,15 +10,17 @@ export const ROLE_NAME: Record<string, string> = {
   inspector: "Inspector", deployer: "Deployer", analyst: "Analyst", founder: "Você", factory: "Fábrica",
 };
 
-/** A tiny Loompa (hair, face, body in the role's colour); `busy` adds the pulsing dot. */
-export default function LoompaFigure({ role, busy = false }: { role: string; busy?: boolean }) {
-  if (role === "founder") return <span className="inline-flex h-4 w-3 items-center justify-center text-[11px] leading-none">🙂</span>;
-  if (role === "factory") return <span className="inline-flex h-4 w-3 items-center justify-center text-[11px] leading-none">⚙️</span>;
+/** A tiny Loompa (hair, face, body in the role's colour); `busy` adds the pulsing dot. `lg` is
+ * the double size, for the card's corner, where the figure stands beside two lines of text. */
+export default function LoompaFigure({ role, busy = false, lg = false }: { role: string; busy?: boolean; lg?: boolean }) {
+  const box = lg ? "h-8 w-6" : "h-4 w-3";
+  if (role === "founder") return <span className={`inline-flex ${box} items-center justify-center leading-none ${lg ? "text-[20px]" : "text-[11px]"}`}>🙂</span>;
+  if (role === "factory") return <span className={`inline-flex ${box} items-center justify-center leading-none ${lg ? "text-[20px]" : "text-[11px]"}`}>⚙️</span>;
   return (
-    <span className="relative inline-flex h-4 w-3 shrink-0 flex-col items-center">
-      <span className="h-0.5 w-2.5 rounded-sm bg-green-500" />
-      <span className="h-1.5 w-2 rounded-sm bg-amber-200" />
-      <span className="h-2 w-2.5 rounded-sm" style={{ background: ROLE_COLOR[role] ?? "#e2e8f0" }} />
+    <span className={`relative inline-flex ${box} shrink-0 flex-col items-center`}>
+      <span className={`${lg ? "h-1 w-5" : "h-0.5 w-2.5"} rounded-sm bg-green-500`} />
+      <span className={`${lg ? "h-3 w-4" : "h-1.5 w-2"} rounded-sm bg-amber-200`} />
+      <span className={`${lg ? "h-4 w-5" : "h-2 w-2.5"} rounded-sm`} style={{ background: ROLE_COLOR[role] ?? "#e2e8f0" }} />
       {busy && <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />}
     </span>
   );
