@@ -178,11 +178,6 @@ function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnp
   if (s.blocked_reason) alerts.push({ text: BLOCKED_LABEL[s.blocked_reason] ?? "bloqueada", cls: "bg-amber-900/60 text-amber-200", title: "Esperando a sua resposta na Caixa de Entrada" });
   if (s.qa_verdict === "CONCERNS") alerts.push({ text: "ressalvas", cls: "bg-orange-900/50 text-orange-200", title: "O Inspector aprovou com ressalvas" });
   if (s.current_tier === "tier1" && open) alerts.push({ text: "escalada", cls: "bg-blue-900/60 text-blue-200", title: "Passou para os modelos mais fortes depois de tentativas sem sucesso" });
-  // classification: quiet text, read when you look for it
-  const meta = [
-    s.phase && !["BACKLOG", "AWAITING_FOUNDER", "DONE"].includes(s.stage) ? s.phase.replace("_", " ") : "",
-    s.epic,
-  ].filter(Boolean);
   // past the per-story cap the card stops and waits for the founder: the number says so first
   const overCap = cap > 0 && s.cost_usd >= cap;
   const stalled = !!activity?.stalled;
@@ -232,10 +227,10 @@ function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnp
             </span>
           </div>
         )}
-        {activity && now !== undefined && <Activity a={activity} now={now} />}
-        {(meta.length > 0 || agent || stalled) && (
-          <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
-            <span className="min-w-0 flex-1 truncate">{meta.join(" · ")}</span>
+        {(AT_WORK.has(s.stage) || agent || stalled) && (
+          <div className="mt-1.5 flex items-center gap-1 text-[10px]">
+            <Stage stage={s.stage} since={activity?.stage_since} now={now} />
+            <span className="min-w-0 flex-1 truncate text-slate-500">{activity ? doing(activity) : ""}</span>
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
             ) : agent ? <Avatar agent={agent} busy={!!activity && now !== undefined && (now - Date.parse(activity.last_at)) / 1000 <= 300} /> : null}
@@ -311,42 +306,42 @@ function ago(seconds: number): string {
   return `${Math.floor(seconds / 3600)}h${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}`;
 }
 
-const STAGE_DOING: Record<string, string> = {
-  SPEC: "especificando", PLAN: "planejando", DEV: "desenvolvendo", TEST: "testando", REVIEW: "entregando",
-};
-
 function since(iso: string | null | undefined, now: number): number | null {
   return iso ? Math.max(0, (now - Date.parse(iso)) / 1000) : null;
 }
 
-/** The card's live line. The clock counts the task (or the stage) without restarting on every
- * tool call; silence shows only as an alert past five minutes, and a stall the Ops declared. */
-function Activity({ a, now }: { a: StoryActivity; now: number }) {
-  const silent = Math.max(0, (now - Date.parse(a.last_at)) / 1000);
-  const quiet = silent > 300; // five minutes without a word: worth a look, not yet an alarm
+/** The stage, as the card's loudest small thing: in the Kanban a column can hold two stages
+ * (SPEC/PLAN, TEST/REVIEW), so the tag says which one, and next to it how long the card has
+ * been in it — the phase's clock, not the current call's. */
+const STAGE_TAG: Record<string, { text: string; cls: string; title: string }> = {
+  SPEC: { text: "spec", cls: "bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/40", title: "Escrevendo a especificação" },
+  PLAN: { text: "plano", cls: "bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-500/40", title: "Quebrando a história em tarefas" },
+  DEV: { text: "dev", cls: "bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40", title: "Escrevendo o código" },
+  TEST: { text: "teste", cls: "bg-sky-500/20 text-sky-300 ring-1 ring-sky-500/40", title: "O Inspector está conferindo" },
+  REVIEW: { text: "entrega", cls: "bg-teal-500/20 text-teal-300 ring-1 ring-teal-500/40", title: "O Deployer está entregando" },
+};
+
+function Stage({ stage, since: at, now }: { stage: string; since?: string | null; now?: number }) {
+  const tag = STAGE_TAG[stage];
+  if (!tag) return null;
+  const inStage = now !== undefined ? since(at, now) : null;
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      <span className={`chip px-1.5 py-0 text-[9px] ${tag.cls}`} title={tag.title}>{tag.text}</span>
+      {inStage !== null && <span className="tabular-nums text-slate-400" title={`Nesta etapa há ${ago(inStage)}`}>{ago(inStage)}</span>}
+    </span>
+  );
+}
+
+/** What the Loompa is doing right now, in a few words: the task and its steps, or whoever spoke
+ * last. No clocks here — the stage tag carries the only time the founder asked for. */
+function doing(a: StoryActivity): string {
   const target = a.last_target ? ` ${a.last_target.split("/").pop()}` : "";
   // a streamed call still writing: how much it has written so far (ADR-0016)
   const thinking = a.thinking ? `pensando · ${tokens(a.thinking)} tokens` : "";
-  const inTask = since(a.task_since, now);
-  const inStage = since(a.stage_since, now);
-  // no "há 2h30" on the card: the founder reads what is happening, not for how long. The
-  // elapsed time stays in the tooltip, and silence still shows as its own chip (11.2)
-  const clock = a.task ? `T${a.task}` : (a.stage && STAGE_DOING[a.stage]) || "na etapa";
-  const what = a.task
-    ? `${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}${thinking ? ` · ${thinking}` : a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`
-    : `${a.last_agent ? a.last_agent.replace(/ Loompa$/, "") : "fábrica"} · ${thinking || (HAPPENING[a.last_event] ?? "trabalhando")}`;
-  const title = [a.task_text ? `T${a.task}: ${a.task_text}` : "", inTask !== null ? `Nesta tarefa há ${ago(inTask)}` : "", inStage !== null ? `Nesta etapa há ${ago(inStage)}` : "", `Último sinal há ${ago(silent)}`]
-    .filter(Boolean).join(" · ");
-  return (
-    <div className="mt-1 flex items-center gap-1 text-[10px]" title={title}>
-      {a.stalled ? (
-        <span className="chip shrink-0 whitespace-nowrap bg-red-900/60 text-red-200">parada há {ago(silent)}</span>
-      ) : (
-        // some minutes of silence are normal in a long call: the dot goes amber and still, and
-        // only a stall the Ops declared is worth a chip
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${quiet ? "bg-amber-400" : "animate-pulse bg-emerald-400"}`} />
-      )}
-      <span className="truncate text-slate-400">{clock} · {what}</span>
-    </div>
-  );
+  if (a.task) {
+    const steps = `T${a.task} · ${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}`;
+    return `${steps}${thinking ? ` · ${thinking}` : a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`;
+  }
+  return thinking || HAPPENING[a.last_event] || "trabalhando";
 }
