@@ -122,7 +122,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
             <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold text-slate-300">
               <span>{c.label}</span><span className="text-slate-500">{c.stories.length}</span>
             </div>
-            <div className="scroll-thin flex-1 space-y-1.5 overflow-y-auto px-2 pb-2">
+            <div className="scroll-thin flex-1 space-y-1.5 overflow-y-auto px-2 pb-2 pt-1">
               {ordered(c).map((s) =>
                 c.key === "BACKLOG" ? (
                   <div
@@ -213,9 +213,9 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   const size = COMPLEXITY[s.complexity] ?? COMPLEXITY.STANDARD;
   // the pointer answers by lifting the card a little, never by changing a title's weight: this
   // card under the mouse, or a story someone's sprint tag / blocker chip is pointing at
-  const lifted = (!!hl.sprint && hl.sprint === s.sprint_id) || !!hl.ids?.includes(s.id);
+  const pointed = !!hl.sprint && hl.sprint === s.sprint_id ? "sprint" : hl.ids?.includes(s.id) ? "block" : "";
   return (
-    <div className={`group relative rounded-md border p-2 text-xs transition-transform duration-200 ease-out hover:scale-[1.03] ${lifted ? "scale-[1.03]" : ""} ${running ? "border-brand bg-brand/[0.07] ring-1 ring-brand running-glow" : "border-line bg-panel hover:border-slate-500"}`}>
+    <div className={`group relative rounded-md border p-2 text-xs transition-transform duration-200 ease-out hover:scale-[1.03] ${pointed ? "scale-[1.03]" : ""} ${running ? "border-brand bg-brand/[0.07] ring-1 ring-brand running-glow" : "border-line bg-panel hover:border-slate-500"}`}>
       <div className="flex items-center gap-1 text-[10px] text-slate-500">
         <span className="text-[12px] leading-none" title={kind.label}>{kind.icon}</span>
         <button className="hover:text-slate-300" onClick={() => onOpen(s.id)}>{s.id}</button>
@@ -237,7 +237,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
         </span>
       </div>
       <button className="w-full text-left" onClick={() => onOpen(s.id)}>
-        <div className="mt-0.5 font-normal leading-snug text-slate-100">{s.title}</div>
+        <div className={`mt-0.5 font-normal leading-snug transition-colors ${pointed === "block" ? "text-red-300" : pointed === "sprint" ? "text-sky-300" : "text-slate-100"}`}>{s.title}</div>
         {s.tasks_total > 0 && (
           <div className="mt-1.5 flex items-center gap-1.5" title={`${s.tasks_done} de ${s.tasks_total} tarefas do plano concluídas`}>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
@@ -255,7 +255,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
           <div className="mt-1">
             <span className="chip bg-red-900/70 text-red-200" title={s.waiting?.label || "O plano desta história só é feito depois que estas forem entregues"}
               onMouseEnter={() => onHl?.({ ids: blockers })} onMouseLeave={() => onHl?.({})}>
-              🔒 bloq. {blockers.join(", ")}
+              🔒 {blockers.join(", ")}
             </span>
           </div>
         )}
