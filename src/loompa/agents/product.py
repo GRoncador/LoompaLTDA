@@ -30,6 +30,10 @@ Rules:
   it is stored, commands, formats) is given: build on it and never ask the founder about it. When a
   story it builds on has no spec yet, take the simplest reading of its request and write that
   choice in `assumptions`; it is technical, not the founder's decision.
+- Behaviour that accumulates over many small steps (a timer, a game loop, periodic updates) gets a
+  criterion that many small steps give the same result as one step of the same total size. Why: a
+  pet's needs decayed 100 times too fast in the running page, rounded on every tick, while every
+  test called the simulation once with a large interval.
 - A format or interface owned by someone else (a bank's export file, an external API, a device's
   protocol) is never guessed: describe it only from a source in the material below (a research
   report, a sample file or documentation from the founder) and name that source in
