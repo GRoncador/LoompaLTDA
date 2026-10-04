@@ -291,11 +291,14 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
 function Avatar({ agent, tier, model }: { agent: Agent; tier?: string; model?: string | null }) {
   const short = shortModel(model ?? "");
   return (
-    <span className="flex min-w-0 items-center gap-1 text-[10px] text-slate-300"
+    // the figure, the name and the tier on one line; the model's name below it, to the right
+    <span className="flex min-w-0 shrink-0 flex-col items-end text-[10px] text-slate-300"
       title={`${agent.name} está com este card${tier ? ` · ${TIER_NAME[tier] ?? tier}` : ""}${model ? ` · ${model}` : ""}${agent.detail ? ` · ${agent.detail}` : ""}`}>
-      <LoompaFigure role={agent.role} />
-      <span className="shrink-0">{agent.name.replace(/ Loompa$/, "")}{tier ? ` (${TIER_SHORT[tier] ?? tier})` : ""}</span>
-      {short && <span className="truncate text-slate-500">· {short}</span>}
+      <span className="flex items-center gap-1 whitespace-nowrap">
+        <LoompaFigure role={agent.role} />
+        {agent.name.replace(/ Loompa$/, "")}{tier ? ` (${TIER_SHORT[tier] ?? tier})` : ""}
+      </span>
+      {short && <span className="break-all text-right text-slate-500">{short}</span>}
     </span>
   );
 }
