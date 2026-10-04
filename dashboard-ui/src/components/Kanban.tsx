@@ -211,11 +211,11 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   // card's own dependencies are the best we have
   const blockers = !open ? [] : s.waiting ? [...new Set([...s.waiting.gone, ...s.waiting.pending, ...s.waiting.chain])] : s.depends_on ?? [];
   const size = COMPLEXITY[s.complexity] ?? COMPLEXITY.STANDARD;
-  // bold is the pointer's answer, never a card's own weight: this card under the mouse, or a
-  // story someone's sprint tag / blocker chip is pointing at
-  const bold = (!!hl.sprint && hl.sprint === s.sprint_id) || !!hl.ids?.includes(s.id);
+  // the pointer answers by lifting the card a little, never by changing a title's weight: this
+  // card under the mouse, or a story someone's sprint tag / blocker chip is pointing at
+  const lifted = (!!hl.sprint && hl.sprint === s.sprint_id) || !!hl.ids?.includes(s.id);
   return (
-    <div className={`group relative rounded-md border p-2 text-xs ${running ? "border-brand bg-brand/[0.07] ring-1 ring-brand running-glow" : "border-line bg-panel hover:border-slate-500"}`}>
+    <div className={`group relative rounded-md border p-2 text-xs transition-transform duration-200 ease-out hover:scale-[1.03] ${lifted ? "scale-[1.03]" : ""} ${running ? "border-brand bg-brand/[0.07] ring-1 ring-brand running-glow" : "border-line bg-panel hover:border-slate-500"}`}>
       <div className="flex items-center gap-1 text-[10px] text-slate-500">
         <span className="text-[12px] leading-none" title={kind.label}>{kind.icon}</span>
         <button className="hover:text-slate-300" onClick={() => onOpen(s.id)}>{s.id}</button>
@@ -237,7 +237,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
         </span>
       </div>
       <button className="w-full text-left" onClick={() => onOpen(s.id)}>
-        <div className={`mt-0.5 leading-snug text-slate-100 group-hover:font-semibold ${bold ? "font-semibold" : "font-normal"}`}>{s.title}</div>
+        <div className="mt-0.5 font-normal leading-snug text-slate-100">{s.title}</div>
         {s.tasks_total > 0 && (
           <div className="mt-1.5 flex items-center gap-1.5" title={`${s.tasks_done} de ${s.tasks_total} tarefas do plano concluídas`}>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
