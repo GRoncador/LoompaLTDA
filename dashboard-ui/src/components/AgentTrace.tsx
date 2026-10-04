@@ -6,22 +6,39 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { TraceDetail, TraceOutline, TraceSpan } from "../types";
 
-export default function AgentTrace({ slug, id }: { slug: string; id: string }) {
+export default function AgentTrace({ slug, id, live = false }: { slug: string; id: string; live?: boolean }) {
   const [data, setData] = useState<TraceOutline | null>(null);
   const [error, setError] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  useEffect(() => { api.storyTrace(slug, id).then(setData).catch(() => setError(true)); }, [slug, id]);
+  // newest phase on top while the story runs; the whole run from the start when reading it later
+  const [newest, setNewest] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api.storyTrace(slug, id, newest).then((d) => { if (alive) setData(d); }).catch(() => { if (alive) setError(true); });
+    load();
+    // while a Loompa is on this story the tab follows it; a finished story is read once
+    if (!live) return () => { alive = false; };
+    const timer = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [slug, id, newest, live]);
   if (error) return <p className="text-xs text-slate-400">Não foi possível ler o registro desta história.</p>;
   if (!data) return <p className="text-xs text-slate-400">carregando…</p>;
   if (data.spans.length === 0) return <p className="text-xs text-slate-400">Nenhum passo registrado ainda.</p>;
   const t = data.totals;
   return (
     <div className="space-y-2 text-xs">
-      <p className="text-[11px] text-slate-500">
-        {t.calls} consultas ao modelo{t.cuts > 0 ? ` (${t.cuts} cortadas)` : ""} · {t.tools} usos de ferramenta ·
-        US$ {t.cost_usd.toFixed(4)} · modelo {dur(t.model_ms)} · ferramentas {dur(t.tool_ms)}
-        {data.truncated ? " · mostrando o trecho mais recente" : ""}
-      </p>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+        {live && <span className="flex items-center gap-1 text-emerald-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />ao vivo</span>}
+        <span>
+          {t.calls} consultas ao modelo{t.cuts > 0 ? ` (${t.cuts} cortadas)` : ""} · {t.tools} usos de ferramenta ·
+          US$ {t.cost_usd.toFixed(4)} · modelo {dur(t.model_ms)} · ferramentas {dur(t.tool_ms)}
+          {data.truncated ? " · mostrando o trecho mais recente" : ""}
+        </span>
+        <button className="ml-auto rounded border border-line px-1.5 py-0.5 hover:bg-line" onClick={() => setNewest(!newest)}
+          title="Dentro de cada etapa os passos ficam sempre na ordem em que aconteceram; isto muda a ordem das etapas entre si.">
+          {newest ? "etapa mais recente no topo" : "do começo ao fim"}
+        </button>
+      </div>
       <ol className="space-y-0.5">
         {data.spans.map((s) => (
           <li key={s.id} style={{ paddingLeft: `${Math.min(s.depth, 6) * 12}px` }}>
@@ -43,6 +60,7 @@ function Line({ slug, id, s, open, onToggle }: { slug: string; id: string; s: Tr
         title={s.has_detail ? "abrir o que foi enviado e recebido" : undefined}
       >
         <span className="w-4 shrink-0 text-slate-600">{s.has_detail ? (open ? "▾" : "▸") : ""}</span>
+        <span className="shrink-0 tabular-nums text-slate-600" title={new Date(s.start).toLocaleString("pt-BR")}>{clock(s.start)}</span>
         <span className={`shrink-0 rounded px-1 text-[9px] uppercase ${KIND[s.kind] ?? "bg-slate-800 text-slate-400"}`}>{KIND_LABEL[s.kind] ?? s.kind}</span>
         <span className="min-w-0 flex-1 break-words text-slate-300">{summary(s)}</span>
         <span className={`shrink-0 tabular-nums ${failed ? "text-red-300" : "text-slate-500"}`}>{failed ? s.status : dur(s.ms)}</span>
@@ -126,6 +144,12 @@ function Part({ title, items, collapsed = false }: { title: string; items: Trace
 }
 
 const ROLE: Record<string, string> = { system: "instruções", user: "pedido", assistant: "modelo", tool: "ferramenta" };
+
+/** The wall clock of a span, in the founder's timezone: the trace stores UTC. */
+function clock(iso: string): string {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
 
 function k(n: unknown): string {
   const v = Number(n ?? 0);

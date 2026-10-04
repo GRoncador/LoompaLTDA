@@ -82,11 +82,18 @@ def _span(node: TraceNode, depth: int) -> dict[str, Any]:
     return out
 
 
-def outline(root: Path, story_id: str) -> dict[str, Any]:
-    """The whole trace flattened depth-first, newest run first: each span with its numbers."""
+def outline(root: Path, story_id: str, *, newest_first: bool = True) -> dict[str, Any]:
+    """The whole trace flattened depth-first, each span with its numbers.
+
+    Order: the phases (the top of the tree) come newest first by default, like the history tab,
+    so what is happening now is at the top; *inside* a phase everything stays in the order it
+    happened, because a round of the tool loop read backwards makes no sense. `newest_first=False`
+    reads the whole run from the beginning, like a log.
+    """
     trace = read_trace(trace_dir(root) / f"{story_id}.jsonl")
     rows: list[dict[str, Any]] = []
-    for top in reversed(trace.tree()):  # the latest phase first, like the history tab
+    tops = trace.tree()
+    for top in reversed(tops) if newest_first else tops:
         stack: list[tuple[TraceNode, int]] = [(top, 0)]
         while stack:
             node, depth = stack.pop()
@@ -97,6 +104,7 @@ def outline(root: Path, story_id: str) -> dict[str, Any]:
     return {
         "spans": rows[:MAX_SPANS],
         "truncated": len(rows) > MAX_SPANS,
+        "newest_first": newest_first,
         "totals": {
             "calls": len(calls),
             "tools": len(tools),

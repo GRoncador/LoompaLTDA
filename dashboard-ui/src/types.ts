@@ -422,6 +422,7 @@ export interface TraceSpan {
 export interface TraceOutline {
   spans: TraceSpan[];
   truncated: boolean;
+  newest_first: boolean;
   totals: { calls: number; tools: number; cost_usd: number; cuts: number; model_ms: number; tool_ms: number };
 }
 

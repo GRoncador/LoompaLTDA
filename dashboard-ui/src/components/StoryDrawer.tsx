@@ -94,7 +94,7 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint }: { slug:
         ) : tab === "log" ? (
           <History history={data.history ?? []} commits={data.commits ?? []} />
         ) : tab === "agent" ? (
-          <AgentTrace slug={slug} id={id} />
+          <AgentTrace slug={slug} id={id} live={["SPEC", "PLAN", "DEV", "TEST", "REVIEW"].includes(s.stage)} />
         ) : (
           <Markdown text={data.docs?.[tab] ?? ""} />
         )}

@@ -538,13 +538,13 @@ def create_app(
         }
 
     @app.get("/api/factories/{slug}/stories/{story_id}/trace")
-    def story_trace(slug: str, story_id: str) -> dict[str, Any]:
+    def story_trace(slug: str, story_id: str, newest_first: bool = True) -> dict[str, Any]:
         """What the Loompas actually did on this story: the tree of nodes, tasks, model calls
         and tool calls from the trace file (plan 11.4)."""
         from loompa import trace_view
 
         ctx = hub.get(slug).ctx
-        return trace_view.outline(ctx.root, story_id)
+        return trace_view.outline(ctx.root, story_id, newest_first=newest_first)
 
     @app.get("/api/factories/{slug}/stories/{story_id}/trace/{span_id}")
     def story_trace_span(slug: str, story_id: str, span_id: str) -> dict[str, Any]:
