@@ -1351,6 +1351,22 @@ async def test_red_baseline_is_not_blamed_on_story(factory: Factory):
     ctx.close()
 
 
+async def test_baseline_of_a_resumed_story_ignores_its_own_failing_tests(factory: Factory):
+    # an engine restart mid-node: the worktree already holds the story's reproduction test,
+    # which fails on purpose and must not be read as "already failing on the base"
+    ctx = make_ctx(factory, dry_run=True)
+    sid = seed_story(ctx, "Retomada com teste de reprodução")
+    wt = ctx.worktrees.create(sid, title="Retomada com teste de reprodução")
+    (wt.path / "tests" / "test_repro.py").write_text("def test_repro():\n    assert False\n")
+    git("add", ".", cwd=wt.path)
+    git("commit", "-qm", "test: reproduction", cwd=wt.path)
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.extra["baseline"]["failing"] == []
+    assert not any(e["type"] == "inspector.baseline_red" for e in ctx.store.events_since(0))
+    ctx.close()
+
+
 # ------------------------------------------------------------------- runner crashes
 
 
@@ -1595,3 +1611,27 @@ async def test_an_amendment_never_sends_the_worker_into_the_factorys_own_folder(
     assert state.allowed_paths == [*before, "app/ofx.py"]
     assert LOOMPA_NOTE in (factory.paths.specs / sid / "tasks.md").read_text()
     await ctx.aclose()
+
+
+async def test_dry_run_engine_refuses_a_factory_with_real_work(factory: Factory):
+    # a simulated engine shares stories, checkpoints and costs with the real one
+    from loompa.engine.lock import DryRunOnLiveFactory
+
+    ctx = make_ctx(factory, dry_run=True)
+    seed_story(ctx, "Trabalho real")
+    ctx.store.record_usage(
+        factory=ctx.slug,
+        story_id=None,
+        agent="Worker Loompa",
+        role="worker",
+        provider="openrouter",
+        model="m",
+        tier="tier2",
+        input_tokens=1,
+        output_tokens=1,
+        cost_usd=0.001,
+        duration_ms=1200,
+    )
+    with pytest.raises(DryRunOnLiveFactory):
+        await Scheduler(ctx).run()
+    ctx.close()

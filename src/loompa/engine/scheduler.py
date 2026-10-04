@@ -32,7 +32,7 @@ from loompa.dependencies import WAIT_KEY, Gate, in_chain, plan_gate, spec_passed
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, back_to_backlog, block
 from loompa.engine.langgraph_engine import GraphRuntime
-from loompa.engine.lock import EngineLock
+from loompa.engine.lock import DryRunOnLiveFactory, EngineLock
 from loompa.engine.phases import goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.finance import BudgetStatus
@@ -366,7 +366,11 @@ class Scheduler:
         self, *, until_idle: bool = True, poll_interval: float = 1.0, max_cycles: int | None = None
     ) -> list[str]:
         """Dispatch and reap until nothing is runnable (or forever when until_idle=False).
-        Raises `EngineBusy` when another engine already runs this factory."""
+        Raises `EngineBusy` when another engine already runs this factory, and
+        `DryRunOnLiveFactory` when a simulated engine would write into a factory with real work
+        (its stories, checkpoints and costs are shared with the real engine)."""
+        if self.ctx.dry_run and self.ctx.store.has_live_usage(self.ctx.slug):
+            raise DryRunOnLiveFactory()
         cycles = 0
         lock = EngineLock(self.ctx.factory.paths.loompa / "engine.lock")
         lock.acquire()

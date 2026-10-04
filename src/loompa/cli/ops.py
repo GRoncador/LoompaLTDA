@@ -14,7 +14,7 @@ from rich.table import Table
 from loompa.cli.main import app, resolve_factory
 from loompa.comms import FounderAnswer, MessageKind
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column
-from loompa.engine.lock import EngineBusy, EngineLock
+from loompa.engine.lock import EngineLock, EngineRefused
 from loompa.factory import Factory
 from loompa.llm import ModelRouter
 from loompa.sprints import SprintBoard, SprintError, SprintStatus
@@ -202,8 +202,8 @@ def run(
         )
     try:
         done = asyncio.run(_run(ctx, until_idle=not watch, max_parallel=parallel))
-    except EngineBusy as busy:
-        console.print(f"[red]✘[/red] {busy}")
+    except EngineRefused as refused:
+        console.print(f"[red]✘[/red] {refused}")
         ctx.close()
         raise typer.Exit(1) from None
     console.print(f"[green]✔[/green] ciclo encerrado · {len(done)} histórias processadas")

@@ -455,6 +455,12 @@ class Store:
             r["payload"] = json.loads(r.pop("payload_json") or "{}")
         return rows
 
+    def has_live_usage(self, factory: str) -> bool:
+        """Whether a real provider ever answered here: the dry-run provider answers in 0 ms."""
+        return bool(
+            self._q("SELECT 1 FROM usage WHERE factory = ? AND duration_ms > 0 LIMIT 1", (factory,))
+        )
+
     def usage_between(self, factory: str, start: str, end: str) -> list[dict[str, Any]]:
         """Every model call of a factory in [start, end]: a sprint's window (8.2)."""
         return self._q(

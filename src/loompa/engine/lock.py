@@ -18,13 +18,25 @@ except ImportError:  # pragma: no cover - Windows
     fcntl = None  # type: ignore[assignment]
 
 
-class EngineBusy(RuntimeError):
+class EngineRefused(RuntimeError):
+    """The engine will not start on this factory; the message is for the founder."""
+
+
+class EngineBusy(EngineRefused):
     def __init__(self, pid: str):
         super().__init__(
             f"outra esteira já está rodando nesta fábrica (processo {pid or '?'}); "
             "pare aquela antes de ligar outra"
         )
         self.pid = pid
+
+
+class DryRunOnLiveFactory(EngineRefused):
+    def __init__(self) -> None:
+        super().__init__(
+            "esta fábrica já trabalhou com IA de verdade; a simulação (--dry-run) mexeria nas "
+            "histórias e nos custos reais. Rode sem --dry-run, ou use --no-engine no painel"
+        )
 
 
 class EngineLock:

@@ -43,7 +43,7 @@ from loompa.conversations import (
 )
 from loompa.dependencies import WAIT_KEY, plan_gate
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column, load_state
-from loompa.engine.lock import EngineBusy, EngineLock
+from loompa.engine.lock import DryRunOnLiveFactory, EngineBusy, EngineLock
 from loompa.factory import Factory
 from loompa.finance import period_start_iso, today_start_iso
 from loompa.sprints import SprintBoard, SprintError
@@ -224,6 +224,8 @@ class Hub:
         holder = EngineLock(rt.ctx.factory.paths.loompa / "engine.lock").holder()
         if holder:
             raise HTTPException(409, str(EngineBusy(holder)))
+        if rt.ctx.dry_run and rt.ctx.store.has_live_usage(rt.ctx.slug):
+            raise HTTPException(409, str(DryRunOnLiveFactory()))
 
         async def loop() -> None:
             if not rt.ctx.dry_run:  # plan 9.3: a day-old models.dev table is fetched again

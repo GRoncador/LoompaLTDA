@@ -529,7 +529,15 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     # §5) before the founder hears of it, as with any other failure of a step.
     wt = _ensure_worktree(ctx, state)
     if "baseline" not in state.extra:
-        state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
+        if ctx.worktrees.changed_files(wt):
+            # resumed mid-node (engine restart): the worktree already holds the story's own
+            # work, whose reproduction tests would count as "already failing on the base"
+            with ctx.worktrees.base_checkout(wt.base) as base_path:
+                state.extra["baseline"] = await InspectorAgent(ctx).baseline(
+                    state, wt, at=base_path
+                )
+        else:
+            state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
     elif (conflicts := DeployerAgent(ctx).sync_with_base(state, wt)) is not None:
         merged = not conflicts or await _resolve_with_retries(ctx, state, wt, conflicts)
         if merged:
