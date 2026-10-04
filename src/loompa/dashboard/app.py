@@ -1402,6 +1402,11 @@ def _story_card(s: dict[str, Any]) -> dict[str, Any]:
         "phase": st.get("phase", ""),
         "route": st.get("route") or [],
         "qa_verdict": st.get("qa_verdict"),
+        # just the shape of each finding: the card's chip says the kind, never the text
+        "qa_findings": [
+            {"prefix": str(f.get("prefix") or "ARCH"), "severity": str(f.get("severity") or "low")}
+            for f in (st.get("qa_findings") or [])
+        ],
         "attempts": {"tier2": s.get("attempts_tier2", 0), "tier1": s.get("attempts_tier1", 0)},
         "tasks_done": len(st.get("tasks_done") or []),
         "tasks_total": st.get("tasks_total", 0),

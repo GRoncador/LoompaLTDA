@@ -22,6 +22,9 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
   // drag-and-drop priority, backlog only: the preview order while dragging, sent on drop
   const [dragId, setDragId] = useState<string | null>(null);
   const [preview, setPreview] = useState<string[] | null>(null);
+  // the mouse over a sprint tag, or over what blocks a card, puts those stories in bold: the
+  // titles are plain otherwise, so the board has one weight and the pointer does the pointing
+  const [hl, setHl] = useState<{ sprint?: string; ids?: string[] }>({});
   const dropped = useRef(false); // dragend fires after drop: only a cancelled drag resets
   const backlog = columns.find((c) => c.key === "BACKLOG")?.stories ?? [];
   const ordered = (c: Column) => {
@@ -132,10 +135,10 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                     onDrop={(e) => { e.preventDefault(); drop(); }}
                     onDragEnd={() => { if (!dropped.current) { setDragId(null); setPreview(null); } }}
                   >
-                    <Card s={s} cap={storyCap} onOpen={onOpen} onUnpin={onUnpin} />
+                    <Card s={s} cap={storyCap} hl={hl} onHl={setHl} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} cap={storyCap} running={working(s, live, now)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  <Card key={s.id} s={s} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
                 ),
               )}
             </div>
@@ -160,6 +163,9 @@ const KIND_ICON: Record<string, { icon: string; label: string }> = {
   feature: { icon: "✨", label: "funcionalidade" }, bugfix: { icon: "🐞", label: "correção" }, research: { icon: "🔎", label: "pesquisa" },
 };
 
+const SEVERITY = ["low", "medium", "high"]; // worst last: the chip names the worst one
+const FINDING: Record<string, string> = { SEC: "segurança", PERF: "desempenho", TEST: "testes", ARCH: "arquitetura" };
+
 const BLOCKED_LABEL: Record<string, string> = { delivery: "revisar", question: "dúvida", waiver: "risco", dependency: "dependência saiu" };
 
 // the size the Product Owner gave the card, always on the card: it says what to expect from it
@@ -169,7 +175,7 @@ const COMPLEXITY: Record<string, { text: string; cls: string; title: string }> =
   COMPLEX: { text: "complexa", cls: "bg-fuchsia-900/50 text-fuchsia-300", title: "História complexa: mais tarefas, mais revisão e mais custo" },
 };
 
-function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnpin }: { s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; cap?: number; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
+function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl, onOpen, onUnpin }: { s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; cap?: number; hl?: { sprint?: string; ids?: string[] }; onHl?: (h: { sprint?: string; ids?: string[] }) => void; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
   const pinned = s.priority_pinned && s.stage === "BACKLOG";
   const kind = KIND_ICON[s.kind] ?? KIND_ICON.feature;
   const open = !["DONE", "CANCELLED"].includes(s.stage);
@@ -187,7 +193,16 @@ function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnp
       title: `${failed} ${failed === 1 ? "tentativa" : "tentativas"} sem sucesso${t1 ? ", agora com os modelos mais fortes (Tier 1)" : ""}. Depois de três, a história para e a decisão é sua.`,
     });
   }
-  if (s.qa_verdict === "CONCERNS") alerts.push({ text: "ressalvas", cls: open ? "bg-orange-900/50 text-orange-200" : "bg-slate-800 text-slate-400", title: "O Inspector aprovou com ressalvas: achados de severidade média ou baixa, que não impedem a entrega. Os médios viram oportunidades do Kaizen." });
+  if (s.qa_verdict === "CONCERNS") {
+    // the kind of the worst finding fits in four letters and says where to look
+    const found = [...(s.qa_findings ?? [])].sort((a, b) => SEVERITY.indexOf(b.severity) - SEVERITY.indexOf(a.severity));
+    const kinds = [...new Set(found.map((f) => f.prefix))];
+    alerts.push({
+      text: kinds.length ? `ressalvas · ${kinds[0]}` : "ressalvas",
+      cls: open ? "bg-orange-900/50 text-orange-200" : "bg-slate-800 text-slate-400",
+      title: `O Inspector aprovou com ressalvas${kinds.length ? ` (${kinds.map((k) => FINDING[k] ?? k).join(", ")})` : ""}: achados de severidade média ou baixa, que não impedem a entrega. Os médios viram oportunidades do Kaizen.`,
+    });
+  }
   // past the per-story cap the card stops and waits for the founder: the number says so first
   const overCap = cap > 0 && s.cost_usd >= cap;
   const stalled = !!activity?.stalled;
@@ -196,13 +211,19 @@ function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnp
   // card's own dependencies are the best we have
   const blockers = !open ? [] : s.waiting ? [...new Set([...s.waiting.gone, ...s.waiting.pending, ...s.waiting.chain])] : s.depends_on ?? [];
   const size = COMPLEXITY[s.complexity] ?? COMPLEXITY.STANDARD;
+  // bold is the pointer's answer, never a card's own weight: this card under the mouse, or a
+  // story someone's sprint tag / blocker chip is pointing at
+  const bold = (!!hl.sprint && hl.sprint === s.sprint_id) || !!hl.ids?.includes(s.id);
   return (
-    <div className={`relative rounded-md border bg-panel p-2 text-xs ${running ? "border-brand ring-1 ring-brand running-glow" : "border-line hover:border-slate-500"}`}>
+    <div className={`group relative rounded-md border p-2 text-xs ${running ? "border-brand bg-brand/[0.07] ring-1 ring-brand running-glow" : "border-line bg-panel hover:border-slate-500"}`}>
       <div className="flex items-center gap-1 text-[10px] text-slate-500">
         <span className="text-[12px] leading-none" title={kind.label}>{kind.icon}</span>
         <button className="hover:text-slate-300" onClick={() => onOpen(s.id)}>{s.id}</button>
         <span className={`chip px-1.5 py-0 text-[9px] ${size.cls}`} title={size.title}>{size.text}</span>
-        {s.sprint_id && <span className="rounded bg-sky-950/70 px-1 text-sky-500/80" title={`Sprint ${s.sprint_id}`}>{s.sprint_id}</span>}
+        {s.sprint_id && (
+          <span className="cursor-default rounded bg-sky-950/70 px-1 text-sky-500/80 hover:text-sky-300" title={`Sprint ${s.sprint_id}: passe o mouse para destacar as histórias dele`}
+            onMouseEnter={() => onHl?.({ sprint: s.sprint_id ?? undefined })} onMouseLeave={() => onHl?.({})}>{s.sprint_id}</span>
+        )}
         <span className="ml-auto flex items-center gap-1">
           {pinned && onUnpin && (
             <button className="text-[11px] opacity-80 hover:opacity-100" title="Posição fixada por você: o Product Owner não move este card. Clique para devolver a ordem a ele." onClick={() => onUnpin(s.id)}>📌</button>
@@ -216,7 +237,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnp
         </span>
       </div>
       <button className="w-full text-left" onClick={() => onOpen(s.id)}>
-        <div className="mt-0.5 font-medium leading-snug text-slate-100">{s.title}</div>
+        <div className={`mt-0.5 leading-snug text-slate-100 group-hover:font-semibold ${bold ? "font-semibold" : "font-normal"}`}>{s.title}</div>
         {s.tasks_total > 0 && (
           <div className="mt-1.5 flex items-center gap-1.5" title={`${s.tasks_done} de ${s.tasks_total} tarefas do plano concluídas`}>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
@@ -232,15 +253,17 @@ function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnp
         )}
         {blockers.length > 0 && (
           <div className="mt-1">
-            <span className="chip bg-red-900/70 text-red-200" title={s.waiting?.label || "O plano desta história só é feito depois que estas forem entregues"}>
+            <span className="chip bg-red-900/70 text-red-200" title={s.waiting?.label || "O plano desta história só é feito depois que estas forem entregues"}
+              onMouseEnter={() => onHl?.({ ids: blockers })} onMouseLeave={() => onHl?.({})}>
               🔒 bloq. {blockers.join(", ")}
             </span>
           </div>
         )}
         {(AT_WORK.has(s.stage) || agent || stalled) && (
-          <div className="mt-1.5 flex items-center gap-1 text-[10px]">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[10px]">
             <Stage stage={s.stage} since={activity?.stage_since} now={now} />
-            <span className="min-w-0 flex-1 truncate text-slate-500">{activity ? doing(activity) : ""}</span>
+            {/* no truncation: what the Loompa is doing wraps, so it is always readable */}
+            <span className="min-w-0 flex-1 basis-24 break-words text-slate-500">{activity ? doing(activity) : ""}</span>
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
             ) : agent ? <Avatar agent={agent} busy={!!activity && now !== undefined && (now - Date.parse(activity.last_at)) / 1000 <= 300} /> : null}

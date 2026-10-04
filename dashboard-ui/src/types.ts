@@ -31,6 +31,7 @@ export interface StoryCard {
   route: string[];
   qa_verdict: string | null;
   attempts: { tier2: number; tier1: number };
+  qa_findings?: { prefix: string; severity: string }[]; // só a forma do achado (11.2)
   tasks_done: number;
   tasks_total: number;
   branch: string;
