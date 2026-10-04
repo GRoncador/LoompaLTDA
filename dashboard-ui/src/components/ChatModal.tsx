@@ -269,6 +269,18 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
             <ul className="scroll-thin flex-1 space-y-1.5 overflow-y-auto p-3">
               {items.length === 0 && <li className="text-xs text-slate-500">O rascunho está vazio. Conte suas ideias na conversa.</li>}
               {items.map((i) => <Item key={i.key} item={i} sprint={isMeeting} member={isCurrent && !!i.story_id && members.includes(i.story_id)} editable={open && !busy && !conv?.draft.cancel_sprint} onEdit={edit} />)}
+              {isMeeting && Object.keys(conv?.draft.retire ?? {}).length > 0 && (
+                <li className="space-y-1 rounded-md border border-red-900/60 bg-red-950/20 p-2 text-xs">
+                  <div className="text-[10px] uppercase tracking-wide text-red-300">Saem do backlog ao salvar (canceladas)</div>
+                  {Object.entries(conv?.draft.retire ?? {}).map(([sid, reason]) => (
+                    <div key={sid} className="flex items-start justify-between gap-2">
+                      <span className="text-slate-300"><span className="font-mono text-slate-400">{sid}</span>{reason ? ` · ${reason}` : ""}</span>
+                      <button className="btn-ghost flex-shrink-0 px-1.5 py-0 text-[11px]" disabled={!open || busy}
+                        title="O card continua no backlog" onClick={() => edit([{ op: "unretire", ref: sid }])}>manter</button>
+                    </div>
+                  ))}
+                </li>
+              )}
             </ul>
             {open && conv && isCurrent && (
               <div className="space-y-1 border-t border-line p-2">

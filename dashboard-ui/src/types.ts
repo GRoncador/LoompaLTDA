@@ -157,6 +157,8 @@ export interface Conversation {
     direction?: string; ready?: boolean; consults?: Opinion[];
     approved?: { direction: string; ideas: string[]; reviewed: boolean; at: string } | null;
     split?: DraftItem[] | null;
+    /** backlog cards that leave (cancelled) when the meeting is saved: id -> reason */
+    retire?: Record<string, string>;
     /** plan 10.10: the opening brainstorm of a greenfield factory with no code */
     kickoff?: Kickoff | null;
   };
