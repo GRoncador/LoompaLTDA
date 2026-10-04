@@ -217,6 +217,9 @@ export interface Candidate {
   provider: string;
   model: string;
   route?: SlotRoute;
+  reasoning_effort?: string;
+  /** plan 9.4: "fixed" runs every call at reasoning_effort (a slot filled from the AA suggestion) */
+  effort_mode?: "" | "auto" | "fixed";
   temperature?: number | null;
   max_output_tokens?: number | null;
   score?: number | null;
@@ -388,3 +391,19 @@ export interface StackOption {
 export interface Kickoff { vision: string; out_of_v1: string[]; stacks: StackOption[]; chosen: number | null; applied: boolean }
 
 export interface ToolInfo { enabled: boolean; api_key_env: string; console_url: string; key: KeyStatus }
+
+/** Plan 9.4 (revised 04/10): the suggestion from Artificial Analysis alone. */
+export interface AAPick {
+  aa_id: string; name: string; creator: string; effort_tag: string; effort: string; score: number;
+  coverage: number; price: number | null; value?: number | null; speed?: number | null; ttft?: number | null;
+  free_at: string[]; openrouter_id?: string | null;
+  house?: { tasks: number; done_rate: number | null; enough: boolean; flagged: boolean } | null;
+}
+export interface AAProfile {
+  profile: string; label: string; weights: Record<string, number>; mix: Record<string, number>;
+  tier1: AAPick[]; tier2: AAPick[]; tier3: AAPick[]; floor: number; considered: number; partial: number; unpriced: AAPick[];
+}
+export interface AASuggestion {
+  fetched_at: number | null; entries: number; ceiling: number; floor_share: number; attribution: string;
+  price_note: string; profiles: AAProfile[]; key: boolean; stale: boolean;
+}

@@ -201,13 +201,14 @@ async def refresh(
     *,
     cache_dir: Path | None = None,
     client: httpx.AsyncClient | None = None,
+    timeout_s: float = 60.0,
 ) -> dict[str, Any]:
     """One call to the free API (it returns every model); the old cache stays on failure."""
     own = client is None
     client = client or httpx.AsyncClient()
     try:
         resp = await client.get(
-            base_url.rstrip("/") + URL_PATH, headers={"x-api-key": key}, timeout=60.0
+            base_url.rstrip("/") + URL_PATH, headers={"x-api-key": key}, timeout=timeout_s
         )
         resp.raise_for_status()
         body = resp.json()
@@ -365,6 +366,33 @@ OPENROUTER_CREATORS = {
 }
 
 
+def aa_id_of(openrouter_id: str, known: set[str]) -> str | None:
+    """The AA id an OpenRouter id stands for, by the one explicit rule (creator table, dots to
+    hyphens, exact or with the creator repeated); None when nothing matches exactly."""
+    vendor, _, slug = openrouter_id.split(":")[0].partition("/")
+    vendor = OPENROUTER_CREATORS.get(vendor, vendor)
+    slug = slug.replace(".", "-")
+    for cand in (f"{vendor}/{slug}", f"{vendor}/{vendor}-{slug}"):
+        if cand in known:
+            return cand
+    return None
+
+
+def routes(entries: list[Entry], catalog: list[dict[str, Any]]) -> dict[str, str]:
+    """AA base id -> a paid OpenRouter id for it, so "usar" can fill a slot. Display help only:
+    the ranking never depends on it, and the founder can set any other route by hand."""
+    known = {e.aa_id for e in entries} | {e.base for e in entries}
+    out: dict[str, str] = {}
+    for item in catalog:
+        oid = str(item.get("id") or "")
+        if not oid or oid.endswith(":free") or oid.startswith("~"):
+            continue
+        aid = aa_id_of(oid, known)
+        if aid:
+            out.setdefault(aid, oid)
+    return out
+
+
 def free_offers(entries: list[Entry], catalog: list[dict[str, Any]]) -> dict[str, list[str]]:
     """AA ids offered free on OpenRouter (`:free` ids of the cached catalogue). The only provider
     data the ranking reads, and only for tier 3. The id is translated by one explicit rule (creator
@@ -391,7 +419,9 @@ def suggest(
     catalog: list[dict[str, Any]] | None = None,
     *,
     mix: dict[str, float] | None = None,
+    house: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """`house`: the Worker's record by OpenRouter id (plan 9.5), shown next to the AA rating."""
     """Every profile's ranking from the cached AA list (no network)."""
     cached = load(cache_dir)
     entries = parse(cached.get("data") or [])
@@ -403,11 +433,32 @@ def suggest(
         except (OSError, ValueError, KeyError, TypeError):
             catalog = []
     free = free_offers(entries, catalog)
+    route = routes(entries, catalog)
+    known = {e.aa_id for e in entries} | {e.base for e in entries}
+    by_aa: dict[str, dict[str, Any]] = {}
+    for oid, record in (house or {}).items():
+        aid = aa_id_of(oid, known)
+        if aid:
+            by_aa[aid] = {**record, "openrouter_id": oid}
+    base_of = {e.aa_id: e.base for e in entries}
     ceiling = config.models.tier1_ceiling
     floor = config.models.tier2_floor
     profiles = (
         ["engineering", "strategy", "routine"] if config.models.clusters_enabled else ["general"]
     )
+    profiles_out = [
+        rank(entries, p, ceiling=ceiling, floor_share=floor, free=free, mix=mix).as_dict()
+        for p in profiles
+    ]
+    for prof in profiles_out:
+        for key in ("tier1", "tier2", "tier3", "unpriced"):
+            for pick in prof[key]:
+                base = base_of.get(pick["aa_id"], pick["aa_id"])
+                oid = route.get(pick["aa_id"]) or route.get(base)
+                if key == "tier3" and pick.get("free_at"):
+                    oid = pick["free_at"][0].removeprefix("OpenRouter (").removesuffix(")")
+                pick["openrouter_id"] = oid
+                pick["house"] = by_aa.get(pick["aa_id"]) or by_aa.get(base)
     return {
         "fetched_at": cached.get("fetched_at"),
         "entries": len(entries),
@@ -417,8 +468,63 @@ def suggest(
         # AA prices per token; a higher effort spends more reasoning tokens, which AA does not give
         "price_note": "O preço é por token: um esforço mais alto gasta mais tokens de raciocínio, "
         "e a Artificial Analysis não informa quantos. O custo-benefício de uma variante Max é otimista.",
-        "profiles": [
-            rank(entries, p, ceiling=ceiling, floor_share=floor, free=free, mix=mix).as_dict()
-            for p in profiles
-        ],
+        "profiles": profiles_out,
     }
+
+
+SNAPSHOT_KEY = "aa:suggestion"
+
+
+def _signature(result: dict[str, Any]) -> dict[str, list[str]]:
+    """What a change notice compares: the first three of tiers 1 and 2 of each profile."""
+    return {
+        f"{p['profile']}.{t}": [x["name"] for x in p[t][:3]]
+        for p in result["profiles"]
+        for t in ("tier1", "tier2")
+    }
+
+
+async def weekly(ctx: Any) -> bool:
+    """At engine start: a week-old AA list is fetched again (when the key is set), and the
+    founder is told in the inbox when the top picks changed. Nothing in the factory changes:
+    applying a suggestion is the founder's act (ADR-0011). True when a notice was sent."""
+    from loompa.comms import FounderMessage, MessageKind
+
+    tool = ctx.config.tools.artificial_analysis
+    key = ctx.secrets.get(tool.api_key_env)
+    if not key or not stale():
+        return False
+    try:
+        await refresh(key, tool.base_url, timeout_s=20.0)
+    except Exception:  # noqa: BLE001 - offline or refused: the old list stands
+        return False
+    result = suggest(ctx.config, mix=work_mix(ctx.store, ctx.slug, ctx.config))
+    now = _signature(result)
+    before = ctx.store.get(SNAPSHOT_KEY)
+    ctx.store.set(SNAPSHOT_KEY, json.dumps(now))
+    if not before or json.loads(before) == now:
+        return False
+    old = json.loads(before)
+    lines = []
+    for key_, names in now.items():
+        if old.get(key_) != names:
+            profile, tier = key_.split(".")
+            label = PROFILE_LABEL.get(profile, profile).split(" (")[0]
+            lines.append(
+                f"{label}, {tier.replace('tier', 'tier ')}: {', '.join(names) or '(nenhum)'}"
+            )
+    ctx.inbox(
+        FounderMessage(
+            factory=ctx.slug,
+            kind=MessageKind.INFO,
+            sender="Master Loompa",
+            title="A sugestão de modelos mudou nesta semana",
+            context="A Artificial Analysis atualizou as notas, e os primeiros da sugestão mudaram:\n"
+            + "\n".join(f"- {ln}" for ln in lines),
+            impact="Nada mudou na fábrica. Veja a aba Sugestão de modelos nas Configurações e "
+            "aplique o que quiser.",
+            allow_free_text=False,
+        )
+    )
+    ctx.emit("models.aa_changed", changed=len(lines))
+    return True

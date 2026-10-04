@@ -227,9 +227,11 @@ class Hub:
 
         async def loop() -> None:
             if not rt.ctx.dry_run:  # plan 9.3: a day-old models.dev table is fetched again
+                from loompa.llm import aa_rank
                 from loompa.llm.modelsdev import refresh_if_stale
 
                 await refresh_if_stale()
+                await aa_rank.weekly(rt.ctx)
             sched = Scheduler(rt.ctx)
             rt.ctx.emit("engine.started")
             try:
@@ -1030,6 +1032,48 @@ def create_app(
             ],
             "byok": [c.__dict__ for c in byok_checks(ctx.config, results)],
         }
+
+    @app.get("/api/factories/{slug}/models/aa")
+    def get_models_aa(slug: str) -> dict[str, Any]:
+        """Plan 9.4 (revised 04/10): the suggestion from Artificial Analysis alone, from the
+        weekly cache. The factory's work mix weighs the single cluster; the house record and an
+        OpenRouter id are shown next to each pick (help to fill a slot, never a filter)."""
+        from loompa.finance.house import house_scores, worker_house
+        from loompa.llm import aa_rank
+
+        ctx = hub.get(slug).ctx
+        try:
+            house = worker_house(house_scores(ctx.store, ctx.slug, ctx.config))
+        except Exception:  # noqa: BLE001
+            house = {}
+        tool = ctx.config.tools.artificial_analysis
+        return {
+            **aa_rank.suggest(
+                ctx.config, mix=aa_rank.work_mix(ctx.store, ctx.slug, ctx.config), house=house
+            ),
+            "key": bool(ctx.secrets.get(tool.api_key_env)),
+            "stale": aa_rank.stale(),
+        }
+
+    @app.post("/api/factories/{slug}/models/aa/refresh")
+    async def refresh_models_aa(slug: str) -> dict[str, Any]:
+        from loompa.llm import aa_rank
+
+        ctx = hub.get(slug).ctx
+        ctx.reload_secrets()
+        tool = ctx.config.tools.artificial_analysis
+        key = ctx.secrets.get(tool.api_key_env)
+        if not key:
+            raise HTTPException(
+                400, "Configure a chave da Artificial Analysis em Provedores e chaves."
+            )
+        try:
+            await aa_rank.refresh(key, tool.base_url)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(
+                502, "Não consegui consultar a Artificial Analysis agora. Tente de novo mais tarde."
+            ) from None
+        return get_models_aa(slug)
 
     @app.post("/api/factories/{slug}/models/preview-sync")
     def preview_models_sync(slug: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
