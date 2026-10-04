@@ -173,3 +173,71 @@ def models_available(
     if show:
         hit = next((r for r in results if r.name == show), None)
         console.print("\n".join(hit.models) if hit else f"[red]✘[/red] sem resultado para {show}")
+
+
+@models_app.command("aa")
+def models_aa(
+    factory: str | None = typer.Option(None, "--factory", "-f"),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Consulta a Artificial Analysis agora (1 das 100 consultas do dia).",
+    ),
+) -> None:
+    """Sugestão de modelos pela Artificial Analysis: os 5 melhores de cada tier por perfil de papel,
+    cada um num nível de esforço. Não olha chaves nem provedores: escolher e configurar é do Founder.
+    """
+    import asyncio
+
+    from loompa.config.secrets import Secrets
+    from loompa.llm import aa_rank
+
+    f = resolve_factory(factory)
+    tool = f.config.tools.artificial_analysis
+    if refresh or aa_rank.stale():
+        key = Secrets.load(f.root).get(tool.api_key_env)
+        if not key:
+            console.print(
+                "[red]✘[/red] Configure a chave da Artificial Analysis em Configurações › Provedores."
+            )
+            raise typer.Exit(code=1)
+        try:
+            asyncio.run(aa_rank.refresh(key, tool.base_url))
+        except Exception:  # noqa: BLE001 - the cached ranking (if any) is shown below
+            console.print("[yellow]![/yellow] Não consegui consultar a Artificial Analysis agora.")
+    result = aa_rank.suggest(f.config)
+    if not result["entries"]:
+        console.print("Ainda não há dados da Artificial Analysis: use --refresh.")
+        return
+    console.print(
+        f"{result['entries']} modelos avaliados · teto do tier 1 US$ {result['ceiling']:.2f}/mi "
+        f"· piso do tier 2 {result['floor_share']:.0%} do melhor · {result['attribution']}"
+    )
+    for p in result["profiles"]:
+        console.print(
+            f"\n[bold]{p['label']}[/bold] [dim](fora por falta de benchmark: {p['partial']})[/dim]"
+        )
+        for tier, title in (
+            ("tier1", "Tier 1"),
+            ("tier2", "Tier 2 (custo-benefício)"),
+            ("tier3", "Tier 3 (grátis)"),
+        ):
+            table = Table(title=title, show_lines=False)
+            for col in (
+                "modelo",
+                "esforço",
+                "nota",
+                "US$/mi",
+                "onde é grátis" if tier == "tier3" else "",
+            ):
+                table.add_column(col)
+            for x in p[tier]:
+                table.add_row(
+                    x["name"],
+                    {"off": "sem raciocínio", "": "padrão"}.get(x["effort"], x["effort"]),
+                    f"{x['score']:.1f}",
+                    f"{x['price']:.2f}" if x["price"] else "—",
+                    ", ".join(x["free_at"]) if tier == "tier3" else "",
+                )
+            if p[tier]:
+                console.print(table)
