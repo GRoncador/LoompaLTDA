@@ -1023,6 +1023,14 @@ def create_app(
         from loompa.llm.available import available, byok_checks, cached
 
         ctx = hub.get(slug).ctx
+        if refresh and _openrouter_ready(ctx):
+            # the OpenRouter list the model picker reads is renewed with it (Founder, 04/10)
+            from loompa.llm.catalog import fetch_catalog
+
+            try:
+                await asyncio.to_thread(fetch_catalog, ctx.config, force_refresh=True)
+            except Exception:  # noqa: BLE001 - the providers' own lists still answer
+                pass
         results = (
             await available(ctx.config, ctx.secrets) if refresh else cached(ctx.config, ctx.secrets)
         )

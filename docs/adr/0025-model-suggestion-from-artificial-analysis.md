@@ -42,13 +42,17 @@ token, where OpenRouter passes three indices.
    outside), with the date of the data; "usar" fills the cell like any edit of the screen. Every
    cluster's ranking is computed whatever the factory uses. The list comes from a weekly cache
    refreshed at engine start; an inbox note tells when the first picks of a tier change. Nothing
-   changes by itself.
+   changes by itself. A "Benchmark de modelos" tab, last in the settings, shows the whole ranking
+   (the four clusters, ten per tier; the popup shows five) with the tier-1 price ceiling (moved
+   there from the budget tab) and the refresh. The OpenRouter suggestion buttons left the models
+   screen; "Consultar os provedores" took their place and also renews the OpenRouter list the
+   model picker reads.
 7. The house score (plan 9.5) is shown next to each pick: on the Worker it disagreed with AA
    (GLM 5.3 Flash: Terminal-Bench 0.33, 62% of tasks done here; MiMo-V2.6-Flash: 0.23, 96%).
 
 ## Consequences
-- The OpenRouter suggestion of ADR-0011 stays until the Founder retires it; its catalogue remains for
-  picking models by hand.
+- The OpenRouter suggestion of ADR-0011 is off the screen (its endpoints stay); its catalogue remains
+  for picking models by hand.
 - AA's price is per token: a high-effort variant spends more reasoning tokens, which AA does not
   report, so its cost-benefit is optimistic. The page says so.
 - Attribution to Artificial Analysis is shown; the free API allows 100 requests a day.

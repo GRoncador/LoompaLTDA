@@ -35,7 +35,7 @@ URL_PATH = "/data/llms/models"
 CACHE_FILE = "artificial_analysis.json"
 STALE_S = 7 * 24 * 3600
 MIN_COVERAGE = 0.6
-PICKS = 5
+PICKS = 10  # the benchmark tab shows ten; the popup of a slot shows the first five
 
 # What each cluster's roles do, as AA benchmarks (weights sum to 1), decided with the Founder on
 # 2026-10-04. Only the suite AA runs on new models: since 2026-08 a release gets HLE, LCR, SciCode

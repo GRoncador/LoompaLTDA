@@ -11,7 +11,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
   const [s, setS] = useState<Settings | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
-  const [tab, setTab] = useState<"providers" | "models" | "budget">("providers");
+  const [tab, setTab] = useState<"providers" | "models" | "budget" | "benchmark">("providers");
   const load = () => api.settings(slug).then(setS).catch((e) => setErr(String(e)));
   useEffect(() => { load(); }, [slug]);
   const save = async (patch: SettingsPatch) => {
@@ -23,9 +23,9 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
       {!s ? <p className="text-sm text-slate-400">{err ?? "carregando…"}</p> : (
         <div className="scroll-thin max-h-[82vh] space-y-4 overflow-y-auto pr-1 text-sm">
           <div className="flex gap-2 border-b border-line pb-2">
-            {(["providers", "models", "budget"] as const).map((t) => (
+            {(["providers", "models", "budget", "benchmark"] as const).map((t) => (
               <button key={t} className={tab === t ? "btn-primary" : "btn-ghost"} onClick={() => setTab(t)}>
-                {t === "providers" ? "Provedores e chaves" : t === "models" ? "Modelos e papéis" : "Orçamento"}
+                {t === "providers" ? "Provedores e chaves" : t === "models" ? "Modelos e papéis" : t === "budget" ? "Orçamento" : "Benchmark de modelos"}
               </button>
             ))}
           </div>
@@ -34,6 +34,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
           {tab === "providers" && <ProvidersPanel slug={slug} s={s} onSave={save} />}
           {tab === "models" && <ModelsPanel slug={slug} s={s} onSave={save} onReload={load} />}
           {tab === "budget" && <BudgetPanel s={s} onSave={save} />}
+          {tab === "benchmark" && <BenchmarkPanel slug={slug} s={s} onSave={save} />}
           <p className="text-[11px] text-slate-500">
             Chaves ficam só em <code>{s.secrets_files.hub}</code> (todas as fábricas) ou <code>{s.secrets_files.factory}</code> (esta fábrica). Nunca entram no config.yaml, no git ou em logs. Mudanças valem na próxima chamada, sem reiniciar.
           </p>
@@ -316,8 +317,8 @@ type TierKey = "tier1" | "tier2" | "tier3";
 
 const MAX_MODELS_PER_TIER = 6;
 const NO_OPENROUTER_HINT =
-  "A lista de modelos e a sugestão inteligente vêm da OpenRouter. Configure a chave da OpenRouter na aba " +
-  "“Provedores e chaves” para liberar o catálogo completo e a recomendação automática.";
+  "A lista de modelos para escolher à mão vem da OpenRouter. Configure a chave da OpenRouter na aba " +
+  "“Provedores e chaves” para liberar o catálogo completo. A sugestão de modelos (💡 e aba Benchmark) não depende dela.";
 
 /** The score a model gets in one cluster, and the points it buys per dollar. */
 function clusterScore(m: ModelPick, cluster: ClusterName): number | null {
@@ -682,7 +683,7 @@ function ModelPickerModal({
           {(extended ? extendedList : recommended).length === 0 ? (
             <p className="py-6 text-center text-xs text-slate-500">
               {all.length === 0
-                ? "Nenhum catálogo carregado. Use “Atualizar lista de modelos OpenRouter”."
+                ? "Nenhum catálogo carregado. Use “Consultar os provedores” no topo da matriz."
                 : "Nenhum modelo encontrado com os termos pesquisados."}
             </p>
           ) : (
@@ -784,7 +785,11 @@ function ModelsPanel({
   }, [slug]);
   const refreshAvail = async () => {
     setAvailBusy(true);
-    try { setAvail(await api.modelsAvailable(slug, true)); } catch (e) { setSyncError(String(e)); } finally { setAvailBusy(false); }
+    try {
+      setAvail(await api.modelsAvailable(slug, true));
+      const cat = await api.modelsCatalog(slug).catch(() => null); // the picker's list, renewed with it
+      if (cat && (cat.clusters || cat.all_models)) setCatalog(cat);
+    } catch (e) { setSyncError(String(e)); } finally { setAvailBusy(false); }
   };
   const availOf = (provider: string) => avail?.providers.find((p) => p.name === provider && p.ok)?.models;
 
@@ -919,8 +924,7 @@ function ModelsPanel({
 
   return (
     <div className="space-y-4">
-      {aa && aaAt && <SuggestPopup data={aa} cluster={aaAt.cluster} tier={aaAt.tier} onUse={useAA} onClose={() => setAAAt(null)}
-        onRefresh={async () => { setAA(await api.refreshModelsAA(slug)); }} />}
+      {aa && aaAt && <SuggestPopup data={aa} cluster={aaAt.cluster} tier={aaAt.tier} onUse={useAA} onClose={() => setAAAt(null)} />}
       {/* ------------------------------------------------------------ actions */}
       <div className="space-y-3 rounded-lg border border-line bg-slate-900/60 p-3">
         <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
@@ -931,23 +935,10 @@ function ModelsPanel({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              className={`flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold ${openrouterReady ? "btn-ghost" : "btn-ghost opacity-50"}`}
-              disabled={syncing}
-              onClick={() => runSync(true)}
-              title="Baixa o catálogo da OpenRouter de novo e grava os modelos e preços no cache local"
-            >
-              <span aria-hidden="true">{syncing ? "⟳" : "📡"}</span>
-              Atualizar lista de modelos OpenRouter
-            </button>
-            <button
-              className={`flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold ${openrouterReady ? "btn-primary" : "btn-ghost opacity-50"}`}
-              disabled={syncing}
-              onClick={() => runSync(false)}
-              title="Rankeia o catálogo por cluster e tier e propõe uma matriz sob o teto de custo"
-            >
-              <span aria-hidden="true">{syncing ? "⟳" : "✨"}</span>
-              {syncing ? "Calculando…" : "Sugestão inteligente"}
+            <button type="button" className="flex items-center gap-1.5 whitespace-nowrap btn-ghost text-xs font-semibold" disabled={availBusy} onClick={refreshAvail}
+              title="Pergunta a lista de modelos a cada provedor com chave nesta fábrica e renova a lista da OpenRouter usada para escolher modelos">
+              <span aria-hidden="true">{availBusy ? "⟳" : "🔑"}</span>
+              {availBusy ? "Consultando…" : "Consultar os provedores"}
             </button>
           </div>
         </div>
@@ -961,10 +952,6 @@ function ModelsPanel({
         <div className="space-y-1 border-t border-line/60 pt-2 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-slate-200">O que cada chave consegue chamar</span>
-            <button type="button" className="btn-ghost px-1.5 py-0 text-[11px]" disabled={availBusy} onClick={refreshAvail}
-              title="Pergunta a lista de modelos a cada provedor com chave nesta fábrica">
-              {availBusy ? "⟳ consultando…" : "🔑 consultar os provedores"}
-            </button>
           </div>
           {avail && avail.providers.length > 0 ? (
             <ul className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px]">
@@ -1372,16 +1359,13 @@ function RolesPanel({
 function BudgetPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) => Promise<void> }) {
   const [b, setB] = useState(s.budget);
   const [par, setPar] = useState(s.schedule.max_parallel);
-  const [ceiling, setCeiling] = useState(s.models?.tier1_ceiling ?? 1.25);
 
   useEffect(() => {
     setB(s.budget);
     setPar(s.schedule.max_parallel);
-    setCeiling(s.models?.tier1_ceiling ?? 1.25);
   }, [s]);
 
   const periodWord = b.period === "weekly" ? "semana" : "mês";
-  const quarter = Math.round((b.cap_usd / 4) * 100) / 100;
 
   return (
     <div className="max-w-3xl space-y-4">
@@ -1425,21 +1409,6 @@ function BudgetPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =>
         ))}
       </div>
 
-      <div className="space-y-2 rounded-lg border border-line bg-slate-900/40 p-3">
-        <div className="font-semibold text-slate-100">Limite por modelo</div>
-        <label className="block text-xs text-slate-400">
-          Teto para recomendação de modelos (US$ por 1M de tokens)
-          <input type="number" min={0} step={0.25} className={`${input} mt-1`} value={ceiling} onChange={(e) => setCeiling(Number(e.target.value))} />
-        </label>
-        <p className="text-[11px] text-slate-500">
-          Usado pela <strong className="text-slate-400">sugestão inteligente</strong>: modelos cujo custo combinado (3 de entrada : 1 de saída) passa deste valor
-          ficam fora do Tier 1. O padrão é um quarto do teto do período — hoje US$ {quarter.toFixed(2)}, cerca de 4M de tokens por {periodWord}.
-          {Math.abs(ceiling - quarter) > 0.01 && (
-            <button type="button" className="ml-1 text-brand hover:underline" onClick={() => setCeiling(quarter)}>usar US$ {quarter.toFixed(2)}</button>
-          )}
-        </p>
-      </div>
-
       <label className="block text-xs text-slate-400">
         Histórias em paralelo
         <input type="number" min={1} max={32} className={`${input} mt-1`} value={par} onChange={(e) => setPar(Number(e.target.value))} />
@@ -1449,7 +1418,7 @@ function BudgetPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =>
         O custo exato é acompanhado no painel de cada provedor; aqui é uma estimativa por tokens.
       </p>
       <div className="text-right">
-        <button className="btn-primary" onClick={() => onSave({ budget: b, max_parallel: par, tier1_ceiling: ceiling })}>
+        <button className="btn-primary" onClick={() => onSave({ budget: b, max_parallel: par })}>
           Salvar orçamento
         </button>
       </div>
@@ -1472,82 +1441,168 @@ const BENCH_LABEL: Record<string, string> = {
 };
 const MIX_LABEL: Record<string, string> = { engineering: "Engenharia", strategy: "Estratégia", routine: "Rotina" };
 
-/** ADR-0025: what Artificial Analysis rates best for one tier of one cluster, as (model, effort),
- *  with no regard for keys or routes. Opened from that tier's header and closed by a click
- *  outside; "usar" puts the pick first in the tier with the effort fixed (saved with the screen). */
-function SuggestPopup({ data, cluster, tier, onUse, onClose, onRefresh }: {
+/** One tier of the Artificial Analysis ranking (ADR-0025): the same table in the popup of a slot and
+ *  in the Benchmark tab. `onUse` adds the "usar" column (the popup only). */
+function AATable({ picks, onUse }: { picks: AAPick[]; onUse?: (p: AAPick) => void }) {
+  if (picks.length === 0) return <p className="text-xs text-slate-400">Nenhuma sugestão para este tier.</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="text-left text-[10px] text-slate-500">
+          <tr>
+            <th className="py-1 pr-2">#</th><th className="pr-2">modelo</th><th className="pr-2">esforço</th><th className="pr-2">nota</th>
+            <th className="pr-2">US$/mi</th><th className="pr-2" title="Pontos de nota por dólar por milhão de tokens">pts/$</th>
+            <th className="pr-2">na casa (Worker)</th><th className="pr-2">rota OpenRouter</th>{onUse && <th />}
+          </tr>
+        </thead>
+        <tbody>
+          {picks.map((p, i) => (
+            <tr key={p.aa_id} className="border-t border-line/50">
+              <td className="py-1 pr-2 font-mono text-slate-500">{i + 1}</td>
+              <td className="pr-2 text-slate-100">{p.name}</td>
+              <td className="pr-2 text-slate-300">{EFFORT_LABEL[p.effort] ?? p.effort}</td>
+              <td className="pr-2 font-mono text-cyan-300">{p.score.toFixed(1)}{p.coverage < 1 ? <span className="text-slate-500" title="Nem todos os benchmarks do perfil existem para este modelo; o peso foi redistribuído"> *</span> : null}</td>
+              <td className="pr-2 font-mono text-slate-300">{p.price != null ? p.price.toFixed(2) : "—"}</td>
+              <td className="pr-2 font-mono text-emerald-300">{p.value != null ? p.value.toFixed(0) : "—"}</td>
+              <td className={`pr-2 ${p.house?.flagged ? "text-amber-300" : "text-slate-300"}`}>
+                {p.house && p.house.tasks > 0 ? `${Math.round((p.house.done_rate ?? 0) * 100)}% de ${p.house.tasks}${p.house.enough ? "" : " (amostra pequena)"}` : "—"}
+              </td>
+              <td className="pr-2 font-mono text-[10px] text-slate-400">{p.openrouter_id ?? "configure à mão"}</td>
+              {onUse && (
+                <td className="text-right">
+                  <button className="btn-ghost px-2 py-0 text-[11px]" disabled={!p.openrouter_id}
+                    title={p.openrouter_id ? `Põe ${p.openrouter_id} como 1º desta vaga, com o esforço fixo` : "Sem rota conhecida na OpenRouter: configure à mão"}
+                    onClick={() => onUse(p)}>usar</button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function aaDate(data: AASuggestion): string {
+  const d = data.fetched_at ? new Date(data.fetched_at * 1000).toLocaleDateString("pt-BR") : null;
+  return (d ? `Dados de ${d}` : "Sem dados ainda") + (data.stale && d ? " (desatualizados: atualizam ao ligar o motor)" : "");
+}
+
+function Weights({ prof }: { prof: AASuggestion["profiles"][number] }) {
+  return (
+    <div className="flex flex-wrap gap-1 text-[10px]">
+      {Object.entries(prof.weights).map(([k, w]) => (
+        <span key={k} className="rounded border border-line px-1.5 py-0.5 text-slate-300">{BENCH_LABEL[k] ?? k} {Math.round(w * 100)}%</span>
+      ))}
+      {Object.keys(prof.mix ?? {}).length > 0 && (
+        <span className="px-1 text-slate-400">· pesado pelo trabalho da fábrica: {Object.entries(prof.mix).map(([k, v]) => `${MIX_LABEL[k] ?? k} ${Math.round(v * 100)}%`).join(", ")}</span>
+      )}
+    </div>
+  );
+}
+
+function tierNote(data: AASuggestion, tier: string, floor?: number): string {
+  if (tier === "tier1") return `Os melhores com preço até US$ ${data.ceiling.toFixed(2)}/milhão de tokens.`;
+  if (tier === "tier2") return `Pelo menos ${Math.round(data.floor_share * 100)}% da nota do melhor do tier 1 (${floor ?? "?"}), pelo custo-benefício.`;
+  return "Os melhores oferecidos de graça em algum provedor.";
+}
+
+/** ADR-0025: the first five Artificial Analysis picks for one tier of one cluster, opened from that
+ *  tier's header and closed by a click outside; "usar" puts the pick first in the tier with the
+ *  effort fixed (saved with the screen). The ten best, and the refresh, are in the Benchmark tab. */
+function SuggestPopup({ data, cluster, tier, onUse, onClose }: {
   data: AASuggestion; cluster: string; tier: string;
-  onUse: (cluster: string, tier: string, p: AAPick) => void; onClose: () => void; onRefresh: () => Promise<void>;
+  onUse: (cluster: string, tier: string, p: AAPick) => void; onClose: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const refresh = async () => { setBusy(true); setErr(null); try { await onRefresh(); } catch (e) { setErr(String(e)); } finally { setBusy(false); } };
   const prof = data.profiles.find((p) => p.profile === cluster);
-  const picks: AAPick[] = prof ? (prof as unknown as Record<string, AAPick[]>)[tier] ?? [] : [];
-  const fetched = data.fetched_at ? new Date(data.fetched_at * 1000).toLocaleDateString("pt-BR") : null;
+  const picks: AAPick[] = prof ? ((prof as unknown as Record<string, AAPick[]>)[tier] ?? []).slice(0, 5) : [];
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-4xl space-y-2 rounded-lg border border-line bg-slate-900 p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="font-semibold text-slate-100">💡 {prof?.label ?? cluster} · {TIER_TITLE[tier] ?? tier}</div>
-            <div className="text-[11px] text-slate-400">
-              {fetched ? `Dados de ${fetched}` : "Sem data"}{data.stale ? " (desatualizados: atualizam ao ligar o motor)" : ""} · {data.entries} modelos avaliados · {data.attribution}
-            </div>
+            <div className="text-[11px] text-slate-400">{aaDate(data)} · {data.entries} modelos avaliados · {data.attribution}</div>
           </div>
-          <div className="flex items-center gap-1">
-            <button className="btn-ghost px-2 py-0 text-[11px]" disabled={busy || !data.key}
-              title={data.key ? "Consulta a Artificial Analysis agora (1 das 100 consultas do dia)" : "Configure a chave em Provedores e chaves"}
-              onClick={refresh}>{busy ? "⟳" : "📡 atualizar"}</button>
-            <button className="btn-ghost px-2 py-0 text-xs" onClick={onClose}>✕</button>
-          </div>
+          <button className="btn-ghost px-2 py-0 text-xs" onClick={onClose}>✕</button>
         </div>
-        {err && <p className="text-[11px] text-red-300">{err}</p>}
-        {prof && (
-          <div className="flex flex-wrap gap-1 text-[10px]">
-            {Object.entries(prof.weights).map(([k, w]) => (
-              <span key={k} className="rounded border border-line px-1.5 py-0.5 text-slate-300">{BENCH_LABEL[k] ?? k} {Math.round(w * 100)}%</span>
-            ))}
-            {Object.keys(prof.mix ?? {}).length > 0 && (
-              <span className="px-1 text-slate-400">· pesado pelo trabalho da fábrica: {Object.entries(prof.mix).map(([k, v]) => `${MIX_LABEL[k] ?? k} ${Math.round(v * 100)}%`).join(", ")}</span>
-            )}
-          </div>
-        )}
+        {prof && <Weights prof={prof} />}
         <p className="text-[11px] text-slate-400">
-          {tier === "tier1" ? `Os melhores com preço até US$ ${data.ceiling.toFixed(2)}/milhão de tokens.` : tier === "tier2" ? `Pelo menos ${Math.round(data.floor_share * 100)}% da nota do melhor do tier 1 (${prof?.floor ?? "?"}), pelo custo-benefício.` : "Os melhores oferecidos de graça em algum provedor."}
-          {" "}A escolha e a chave são suas; “usar” põe o modelo como 1º desta vaga, com o esforço fixo.
+          {tierNote(data, tier, prof?.floor)} A escolha e a chave são suas; “usar” põe o modelo como 1º desta vaga, com o esforço fixo.
         </p>
-        {picks.length === 0 ? <p className="text-xs text-slate-400">Nenhuma sugestão para este tier.</p> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="text-left text-[10px] text-slate-500">
-                <tr><th className="py-1 pr-2">modelo</th><th className="pr-2">esforço</th><th className="pr-2">nota</th><th className="pr-2">US$/mi</th><th className="pr-2" title="Pontos de nota por dólar por milhão de tokens">pts/$</th><th className="pr-2">na casa (Worker)</th><th className="pr-2">rota OpenRouter</th><th /></tr>
-              </thead>
-              <tbody>
-                {picks.map((p) => (
-                  <tr key={p.aa_id} className="border-t border-line/50">
-                    <td className="py-1 pr-2 text-slate-100">{p.name}</td>
-                    <td className="pr-2 text-slate-300">{EFFORT_LABEL[p.effort] ?? p.effort}</td>
-                    <td className="pr-2 font-mono text-cyan-300">{p.score.toFixed(1)}{p.coverage < 1 ? <span className="text-slate-500" title="Nem todos os benchmarks do perfil existem para este modelo; o peso foi redistribuído"> *</span> : null}</td>
-                    <td className="pr-2 font-mono text-slate-300">{p.price != null ? p.price.toFixed(2) : "—"}</td>
-                    <td className="pr-2 font-mono text-emerald-300">{p.value != null ? p.value.toFixed(0) : "—"}</td>
-                    <td className={`pr-2 ${p.house?.flagged ? "text-amber-300" : "text-slate-300"}`}>
-                      {p.house && p.house.tasks > 0 ? `${Math.round((p.house.done_rate ?? 0) * 100)}% de ${p.house.tasks}${p.house.enough ? "" : " (amostra pequena)"}` : "—"}
-                    </td>
-                    <td className="pr-2 font-mono text-[10px] text-slate-400">{p.openrouter_id ?? "configure à mão"}</td>
-                    <td className="text-right">
-                      <button className="btn-ghost px-2 py-0 text-[11px]" disabled={!p.openrouter_id}
-                        title={p.openrouter_id ? `Põe ${p.openrouter_id} como 1º desta vaga, com o esforço fixo` : "Sem rota conhecida na OpenRouter: configure à mão"}
-                        onClick={() => onUse(cluster, tier, p)}>usar</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <AATable picks={picks} onUse={(p) => onUse(cluster, tier, p)} />
         <p className="text-[10px] text-amber-300/80">{data.price_note}</p>
       </div>
+    </div>
+  );
+}
+
+/** ADR-0025: the whole Artificial Analysis ranking, every cluster whatever the factory uses, ten per
+ *  tier; the price ceiling that bounds tier 1 is set here, and the benchmark is refreshed here. */
+function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave: (p: SettingsPatch) => Promise<void> }) {
+  const [data, setData] = useState<AASuggestion | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ceiling, setCeiling] = useState(s.models?.tier1_ceiling ?? 1.25);
+  const load = () => api.modelsAA(slug).then(setData).catch((e) => setErr(String(e)));
+  useEffect(() => { load(); }, [slug]);
+  useEffect(() => { setCeiling(s.models?.tier1_ceiling ?? 1.25); }, [s]);
+  const refresh = async () => {
+    setBusy(true); setErr(null);
+    try { setData(await api.refreshModelsAA(slug)); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  };
+  const saveCeiling = async () => { await onSave({ tier1_ceiling: ceiling }); await load(); };
+  const quarter = Math.round(((s.budget?.cap_usd ?? 0) / 4) * 100) / 100;
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2 rounded-lg border border-line bg-slate-900/60 p-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1 text-xs text-slate-400">
+            <div className="text-sm font-semibold text-slate-100">Benchmark de modelos (Artificial Analysis)</div>
+            <p>
+              Todos os modelos que a Artificial Analysis avalia, cada um num nível de esforço, ranqueados para cada cluster com os benchmarks do que ele faz,
+              sem olhar suas chaves ou provedores. Os 10 melhores de cada tier; o 💡 de cada vaga em Modelos e papéis mostra os 5 primeiros e põe um deles na vaga.
+            </p>
+            {data && <p>{aaDate(data)} · {data.entries} modelos avaliados · {data.attribution}</p>}
+            {data && <p className="text-amber-300/90">{data.price_note}</p>}
+          </div>
+          <button className="btn-ghost whitespace-nowrap text-xs" disabled={busy || (data ? !data.key : true)}
+            title={data?.key ? "Consulta a Artificial Analysis agora (1 das 100 consultas do dia)" : "Configure a chave em Provedores e chaves"} onClick={refresh}>
+            {busy ? "⟳ consultando…" : "📡 Atualizar benchmark"}
+          </button>
+        </div>
+        <div className="flex flex-col gap-1 border-t border-line/60 pt-2 text-xs sm:flex-row sm:items-end sm:gap-3">
+          <label className="block text-slate-400">
+            Teto de preço do tier 1 (US$ por 1M de tokens, 3 de entrada : 1 de saída)
+            <input type="number" min={0} step={0.25} className={`${input} mt-1 w-40`} value={ceiling} onChange={(e) => setCeiling(Number(e.target.value))} />
+          </label>
+          <button className="btn-primary text-xs" disabled={ceiling === (s.models?.tier1_ceiling ?? 1.25)} onClick={saveCeiling}>Salvar teto</button>
+          {quarter > 0 && Math.abs(ceiling - quarter) > 0.01 && (
+            <button type="button" className="text-[11px] text-brand hover:underline" onClick={() => setCeiling(quarter)}>
+              usar US$ {quarter.toFixed(2)} (um quarto do teto de gastos)
+            </button>
+          )}
+        </div>
+      </div>
+      {err && <p className="text-xs text-red-300">{err}</p>}
+      {!data ? <p className="text-xs text-slate-400">carregando…</p> : data.entries === 0 ? (
+        <p className="text-xs text-slate-400">Ainda não há dados: use “Atualizar benchmark”.</p>
+      ) : data.profiles.map((prof) => (
+        <div key={prof.profile} className="space-y-2 rounded-lg border border-line bg-panel p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="font-semibold text-slate-100">{prof.label}</div>
+            <div className="text-[11px] text-slate-500">piso do tier 2: {prof.floor} · {prof.partial} modelos de fora por falta de benchmark</div>
+          </div>
+          <Weights prof={prof} />
+          {(["tier1", "tier2", "tier3"] as const).map((tier) => (
+            <div key={tier}>
+              <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-slate-500">{TIER_TITLE[tier]} · <span className="normal-case">{tierNote(data, tier, prof.floor)}</span></div>
+              <AATable picks={prof[tier]} />
+            </div>
+          ))}
+        </div>
+      ))}
+      <p className="text-[11px] text-slate-500">* nota com parte do peso redistribuída: o modelo não tem todos os benchmarks do perfil.</p>
     </div>
   );
 }
