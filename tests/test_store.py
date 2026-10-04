@@ -161,3 +161,22 @@ def test_store_gives_up_on_non_lock_errors():
     s = Store(":memory:")
     with pytest.raises(sqlite3.OperationalError):
         s._q("SELECT * FROM nope")
+
+
+def test_patch_story_state_merges_and_keeps_the_rest():
+    """The dev node only checkpoints when it ends: the progress bar reads these patches."""
+    s = Store(":memory:")
+    s.upsert_story(
+        {
+            "id": "S-001",
+            "factory": "f",
+            "title": "Login",
+            "stage": "DEV",
+            "state": {"kind": "feature", "tasks_total": 4, "tasks_done": []},
+        }
+    )
+    s.patch_story_state("S-001", tasks_done=[1, 2])
+    state = s.get_story("S-001")["state"]
+    assert state["tasks_done"] == [1, 2] and state["tasks_total"] == 4
+    assert state["kind"] == "feature"
+    s.patch_story_state("S-404", tasks_done=[1])  # an unknown story is a no-op, not a crash

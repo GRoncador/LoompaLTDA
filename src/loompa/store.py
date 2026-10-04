@@ -316,6 +316,15 @@ class Store:
         sets = ", ".join(f"{k} = ?" for k in fields)
         self._x(f"UPDATE stories SET {sets} WHERE id = ?", (*fields.values(), story_id))
 
+    def patch_story_state(self, story_id: str, **fields: Any) -> None:
+        """Merge a few keys into the stored state without waiting for the node to end. The
+        checkpoint is written only between nodes, so a long `dev` left the dashboard's progress
+        bar at 0/N until the whole story moved on (2026-10-04)."""
+        row = self.get_story(story_id)
+        if row is None:
+            return
+        self.update_story(story_id, state={**(row.get("state") or {}), **fields})
+
     def get_story(self, story_id: str) -> dict[str, Any] | None:
         rows = self._q("SELECT * FROM stories WHERE id = ?", (story_id,))
         return self._hydrate(rows[0]) if rows else None

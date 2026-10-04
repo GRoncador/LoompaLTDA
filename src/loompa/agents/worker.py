@@ -196,6 +196,7 @@ class WorkerAgent(LoompaAgent):
         # stopped mid-`dev` resumed with tasks_done=[] and redid committed work (`contas` S-031)
         state.tasks_done = sorted(set(state.tasks_done) | {t.number for t in tasks if t.done})
         pending = [t for t in tasks if t.number not in state.tasks_done]
+        self._publish_progress(state)
         if not pending and state.failure_history:
             # every task is done but the Inspector failed the story: run a focused fix pass
             return await self._fix_pass(state, wt)
@@ -230,6 +231,7 @@ class WorkerAgent(LoompaAgent):
                 state.worker_summary = "\n".join([*summaries, f"T{task.number}: não concluída"])
                 return _with_refusals(result, aci)
             state.tasks_done.append(task.number)
+            self._publish_progress(state)
             tasks_md = mark_task_done(tasks_md, task.number)
             paths.tasks.write_text(tasks_md, encoding="utf-8")
             summaries.append(f"T{task.number}: {result.summary}")
@@ -244,6 +246,15 @@ class WorkerAgent(LoompaAgent):
         self.set_state("IDLE")
         state.worker_summary = "\n".join(summaries)
         return AgentResult(ok=True, summary=state.worker_summary)
+
+    def _publish_progress(self, state: StoryState) -> None:
+        """The checklist as it stands, for the dashboard's progress bar: the state is checkpointed
+        only when the node ends, and `dev` is the longest node (2026-10-04)."""
+        self.ctx.store.patch_story_state(
+            state.story_id,
+            tasks_done=sorted(state.tasks_done),
+            tasks_total=state.tasks_total,
+        )
 
     @contextmanager
     def _task_span(

@@ -24,9 +24,14 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
   const dropped = useRef(false); // dragend fires after drop: only a cancelled drag resets
   const backlog = columns.find((c) => c.key === "BACKLOG")?.stories ?? [];
   const ordered = (c: Column) => {
-    if (c.key !== "BACKLOG" || !preview) return c.stories;
-    const byId = new Map(c.stories.map((s) => [s.id, s]));
-    return preview.map((id) => byId.get(id)).filter((s): s is StoryCard => !!s);
+    if (c.key === "BACKLOG") {
+      if (!preview) return c.stories;
+      const byId = new Map(c.stories.map((s) => [s.id, s]));
+      return preview.map((id) => byId.get(id)).filter((s): s is StoryCard => !!s);
+    }
+    // a card a Loompa is working on right now goes to the top of its column: the first cards
+    // are the ones running, then the ones next in line (11.2)
+    return [...c.stories].sort((a, b) => Number(working(b, live, now)) - Number(working(a, live, now)));
   };
   const dragOver = (overId: string) => {
     if (!dragId || dragId === overId) return;
@@ -129,7 +134,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                     <Card s={s} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  <Card key={s.id} s={s} running={working(s, live, now)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
                 ),
               )}
             </div>
@@ -140,6 +145,15 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
   );
 }
 
+/** A card is being worked on when it sits in a working stage and the factory gave a sign of
+ * life on it in the last five minutes. Those cards rise to the top and get the amber ring. */
+function working(s: StoryCard, live: Record<string, StoryActivity>, now: number): boolean {
+  if (!AT_WORK.has(s.stage) || s.waiting?.gate === "wait") return false;
+  const a = latest(s.activity, live[s.id]);
+  if (!a || a.stalled) return false;
+  return (now - Date.parse(a.last_at)) / 1000 <= 300;
+}
+
 // one fixed glyph per kind, left of the id, like an issue-type icon (11.1)
 const KIND_ICON: Record<string, { icon: string; label: string }> = {
   feature: { icon: "✨", label: "funcionalidade" }, bugfix: { icon: "🐞", label: "correção" }, research: { icon: "🔎", label: "pesquisa" },
@@ -147,7 +161,14 @@ const KIND_ICON: Record<string, { icon: string; label: string }> = {
 
 const BLOCKED_LABEL: Record<string, string> = { delivery: "revisar", question: "dúvida", waiver: "risco", dependency: "dependência saiu" };
 
-function Card({ s, agent, activity, now, onOpen, onUnpin }: { s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
+// the size the Product Owner gave the card, always on the card: it says what to expect from it
+const COMPLEXITY: Record<string, { text: string; cls: string; title: string }> = {
+  SIMPLE: { text: "simples", cls: "bg-slate-800 text-slate-300", title: "História simples: caminho curto, sem muitas etapas" },
+  STANDARD: { text: "padrão", cls: "bg-sky-900/50 text-sky-300", title: "História padrão: o fluxo completo da fábrica" },
+  COMPLEX: { text: "complexa", cls: "bg-fuchsia-900/50 text-fuchsia-300", title: "História complexa: mais tarefas, mais revisão e mais custo" },
+};
+
+function Card({ s, agent, activity, now, running = false, onOpen, onUnpin }: { s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
   const pinned = s.priority_pinned && s.stage === "BACKLOG";
   const kind = KIND_ICON[s.kind] ?? KIND_ICON.feature;
   const open = !["DONE", "CANCELLED"].includes(s.stage);
@@ -159,16 +180,21 @@ function Card({ s, agent, activity, now, onOpen, onUnpin }: { s: StoryCard; agen
   // classification: quiet text, read when you look for it
   const meta = [
     s.phase && !["BACKLOG", "AWAITING_FOUNDER", "DONE"].includes(s.stage) ? s.phase.replace("_", " ") : "",
-    s.epic, s.complexity && s.complexity !== "STANDARD" ? s.complexity.toLowerCase() : "",
+    s.epic,
     s.cost_usd > 0 ? `$${s.cost_usd.toFixed(2)}` : "",
   ].filter(Boolean);
   const stalled = !!activity?.stalled;
-  const deps = open && !s.waiting && !!s.depends_on?.length;
+  // what holds the card: short, red and naming the story that has to land first
+  // the gate (when the server computed one) knows which are still missing; without it, the
+  // card's own dependencies are the best we have
+  const blockers = !open ? [] : s.waiting ? [...new Set([...s.waiting.gone, ...s.waiting.pending, ...s.waiting.chain])] : s.depends_on ?? [];
+  const size = COMPLEXITY[s.complexity] ?? COMPLEXITY.STANDARD;
   return (
-    <div className="relative rounded-md border border-line bg-panel p-2 text-xs hover:border-slate-500">
+    <div className={`relative rounded-md border bg-panel p-2 text-xs ${running ? "border-brand ring-1 ring-brand running-glow" : "border-line hover:border-slate-500"}`}>
       <div className="flex items-center gap-1 text-[10px] text-slate-500">
         <span className="text-[12px] leading-none" title={kind.label}>{kind.icon}</span>
         <button className="hover:text-slate-300" onClick={() => onOpen(s.id)}>{s.id}</button>
+        <span className={`chip px-1.5 py-0 text-[9px] ${size.cls}`} title={size.title}>{size.text}</span>
         <span className="ml-auto flex items-center gap-1">
           {pinned && onUnpin && (
             <button className="text-[11px] opacity-80 hover:opacity-100" title="Posição fixada por você: o Product Owner não move este card. Clique para devolver a ordem a ele." onClick={() => onUnpin(s.id)}>📌</button>
@@ -191,16 +217,17 @@ function Card({ s, agent, activity, now, onOpen, onUnpin }: { s: StoryCard; agen
             {alerts.map((a) => <span key={a.text} className={`chip ${a.cls}`} title={a.title}>{a.text}</span>)}
           </div>
         )}
-        {s.waiting?.label && (
-          <div className="mt-1 text-[10px] text-indigo-300" title="Esperando sem precisar de você: retoma sozinha quando a cadeia estiver pronta">⏳ {s.waiting.label}</div>
+        {blockers.length > 0 && (
+          <div className="mt-1">
+            <span className="chip bg-red-900/70 text-red-200" title={s.waiting?.label || "O plano desta história só é feito depois que estas forem entregues"}>
+              🔒 bloq. {blockers.join(", ")}
+            </span>
+          </div>
         )}
         {activity && now !== undefined && <Activity a={activity} now={now} />}
-        {(meta.length > 0 || deps || agent || stalled) && (
+        {(meta.length > 0 || agent || stalled) && (
           <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
-            <span className="min-w-0 flex-1 truncate">
-              {meta.join(" · ")}
-              {deps && <span title="O plano desta história só é feito depois que estas forem entregues">{meta.length ? " · " : ""}↳ depois de {s.depends_on!.join(", ")}</span>}
-            </span>
+            <span className="min-w-0 flex-1 truncate">{meta.join(" · ")}</span>
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
             ) : agent ? <Avatar agent={agent} busy={!!activity && now !== undefined && (now - Date.parse(activity.last_at)) / 1000 <= 300} /> : null}
@@ -294,13 +321,13 @@ function Activity({ a, now }: { a: StoryActivity; now: number }) {
   const thinking = a.thinking ? `pensando · ${tokens(a.thinking)} tokens` : "";
   const inTask = since(a.task_since, now);
   const inStage = since(a.stage_since, now);
-  const clock = a.task
-    ? `T${a.task}${inTask !== null ? ` há ${ago(inTask)}` : ""}`
-    : `${(a.stage && STAGE_DOING[a.stage]) || "na etapa"}${inStage !== null ? ` há ${ago(inStage)}` : ""}`;
+  // no "há 2h30" on the card: the founder reads what is happening, not for how long. The
+  // elapsed time stays in the tooltip, and silence still shows as its own chip (11.2)
+  const clock = a.task ? `T${a.task}` : (a.stage && STAGE_DOING[a.stage]) || "na etapa";
   const what = a.task
     ? `${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}${thinking ? ` · ${thinking}` : a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`
     : `${a.last_agent ? a.last_agent.replace(/ Loompa$/, "") : "fábrica"} · ${thinking || (HAPPENING[a.last_event] ?? "trabalhando")}`;
-  const title = [a.task_text ? `T${a.task}: ${a.task_text}` : "", inStage !== null ? `Nesta etapa há ${ago(inStage)}` : "", `Último sinal há ${ago(silent)}`]
+  const title = [a.task_text ? `T${a.task}: ${a.task_text}` : "", inTask !== null ? `Nesta tarefa há ${ago(inTask)}` : "", inStage !== null ? `Nesta etapa há ${ago(inStage)}` : "", `Último sinal há ${ago(silent)}`]
     .filter(Boolean).join(" · ");
   return (
     <div className="mt-1 flex items-center gap-1 text-[10px]" title={title}>

@@ -108,6 +108,12 @@ class OpenCodeWorker(LoompaAgent):
                     task=task.number,
                 )
             state.tasks_done.append(task.number)
+            # the checkpoint waits for the node to end: publish the bar's numbers as we go
+            self.ctx.store.patch_story_state(
+                state.story_id,
+                tasks_done=sorted(state.tasks_done),
+                tasks_total=state.tasks_total,
+            )
             tasks_md = mark_task_done(tasks_md, task.number)
             paths.tasks.write_text(tasks_md, encoding="utf-8")
             summaries.append(f"T{task.number}: {result.summary}")
