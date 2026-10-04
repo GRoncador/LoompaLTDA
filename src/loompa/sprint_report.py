@@ -49,6 +49,7 @@ RESULT_LABEL = {
     "split": "dividida em épico",
     "cancelled": "cancelada",
     "withdrawn": "devolvida ao backlog",
+    "retired": "aposentada (coberta por outra entrega ou sem sentido)",
     "waiting": "aguardando você",
     "working": "em andamento",
 }
@@ -137,7 +138,9 @@ def _story(
     stage_times, changes = _stage_times(by_type.get("story.stage", []), end)
     stage = row.get("stage", "CANCELLED")
     if sid not in sprint.story_ids:
-        result = "withdrawn"
+        # tamagotchi SP-005: S-034/S-035 left the sprint and were retired as covered by S-033;
+        # read as "returned to the backlog", the summary said the goal was not reached
+        result = "retired" if stage == "CANCELLED" else "withdrawn"
     elif sid in split_parents:
         # an epic is done when its parts are: the parts are the deliveries, the epic is not
         # (tamagotchi SP-001 reported "4 de 5 entregues" counting S-002, which has no code)
@@ -326,6 +329,11 @@ def measure(store: Store, slug: str, sprint: Sprint, *, previous: bool = True) -
         "withdrawn": [
             {"id": s["id"], "title": s["title"]} for s in stories if s["result"] == "withdrawn"
         ],
+        "retired": [
+            {"id": s["id"], "title": s["title"], "reason": _retire_reason(events, s["id"])}
+            for s in stories
+            if s["result"] == "retired"
+        ],
         "duplicates": sum(1 for e in events if e["type"] == "backlog.duplicate"),
     }
 
@@ -384,6 +392,7 @@ def _totals(
         "split": results.get("split", 0),
         "cancelled": results.get("cancelled", 0),
         "withdrawn": results.get("withdrawn", 0),
+        "retired": results.get("retired", 0),
         "waiting": results.get("waiting", 0),
         "working": results.get("working", 0),
         "duration_s": round(_seconds(start, end)) if sprint.started_at else 0,
@@ -559,6 +568,7 @@ def render_markdown(report: dict[str, Any], summary: str = "") -> str:
         f"{t['delivered']} de {t['stories']} histórias entregues"
         + (f", {t['cancelled']} canceladas" if t["cancelled"] else "")
         + (f", {t['withdrawn']} devolvidas ao backlog" if t["withdrawn"] else "")
+        + (f", {t['retired']} aposentadas" if t.get("retired") else "")
         + (f", {t['waiting']} aguardando você" if t["waiting"] else "")
         + (f", {t['working']} em andamento" if t["working"] else "")
         + "."
@@ -655,6 +665,12 @@ def render_markdown(report: dict[str, Any], summary: str = "") -> str:
             + ", ".join(f"{w['id']} · {w['title']}" for w in later["withdrawn"])
             + "."
         )
+    for r in later.get("retired") or []:
+        lines.append(
+            f"- {r['id']} · {r['title']}: aposentada"
+            + (f" ({r['reason']})" if r["reason"] else "")
+            + "."
+        )
     if later["cards"]:
         by_origin = Counter(c["origin"] for c in later["cards"])
         lines.append(
@@ -724,7 +740,14 @@ def summary_facts(report: dict[str, Any]) -> str:
             else ""
         )
         + f", cancelled {t['cancelled']}, back to backlog "
-        f"{t['withdrawn']}, waiting for the founder {t['waiting']}, still in progress {t['working']}.",
+        f"{t['withdrawn']}, waiting for the founder {t['waiting']}, still in progress {t['working']}"
+        + (
+            f"; retired on purpose (covered by delivered work or obsolete, NOT missing work) "
+            f"{t['retired']}"
+            if t.get("retired")
+            else ""
+        )
+        + ".",
         f"Duration: {duration(t['duration_s'])}. Cost of the stories: {usd(t['cost_usd'])}"
         + (f" ({usd(t['cost_per_delivered_usd'])} per delivered story)" if t["delivered"] else "")
         + f". Founder waiting time: {duration(t['founder_wait_s'])}.",
@@ -756,6 +779,11 @@ def summary_facts(report: dict[str, Any]) -> str:
     lines.append(
         f"## Left for later\nNew backlog cards: {len(later['cards'])}; Kaizen findings: "
         f"{sum(later['findings'].values())}; back to backlog: {len(later['withdrawn'])}."
+        + "".join(
+            f'\nRetired (not missing work): {r["id"]} "{r["title"]}"'
+            + (f": {r['reason']}" if r["reason"] else "")
+            for r in later.get("retired") or []
+        )
     )
     return "\n".join(lines)
 
@@ -824,3 +852,11 @@ def load(reports_dir: Path, sprint_id: str) -> dict[str, Any] | None:
         return json.loads(js.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def _retire_reason(events: list[dict[str, Any]], sid: str) -> str:
+    """Why the meeting retired a story (`backlog.retired`), for the report."""
+    for e in reversed(events):
+        if e["type"] == "backlog.retired" and e.get("story_id") == sid:
+            return str((e.get("payload") or {}).get("reason") or "")[:200]
+    return ""

@@ -232,3 +232,26 @@ def test_the_cli_prints_and_saves_the_report(factory: Factory):
     assert r.exit_code == 0, r.output
     assert "Relatório do SP-001" in r.output and "Resumo executivo" in r.output
     assert (factory.paths.reports / "SP-001.json").is_file()
+
+
+async def test_a_story_retired_as_covered_is_not_reported_as_returned_work(factory: Factory):
+    """tamagotchi SP-005: S-034/S-035 left the sprint and were retired as covered by S-033; the
+    report counted them as returned to the backlog and the summary said the goal was missed."""
+    ctx = make_ctx(factory, dry_run=True)
+    a, b, c = sprint_with_history(ctx)
+    po = ProductOwnerAgent(ctx)
+    x = po.add_item("Ações de cuidado").story_id
+    board = SprintBoard(ctx.store, ctx.slug)
+    board.add(x, "SP-001")
+    board.withdraw(x)
+    ctx.emit("sprint.adjusted", sprint_id="SP-001", joined=[], withdrawn=[x], restarted=[])
+    ctx.store.update_story(x, stage=Stage.CANCELLED.value)
+    ctx.emit("backlog.retired", story_id=x, reason="coberta pela S-001")
+    await MasterAgent(ctx).close_finished_sprints()
+    report = sprint_report.load(factory.paths.reports, "SP-001")
+    assert next(s for s in report["stories"] if s["id"] == x)["result"] == "retired"
+    assert report["totals"]["withdrawn"] == 0 and report["totals"]["retired"] == 1
+    assert "NOT missing work" in sprint_report.summary_facts(report)
+    md = (factory.paths.reports / "SP-001.md").read_text()
+    assert "aposentada (coberta pela S-001)" in md and "Devolvidas ao backlog" not in md
+    await ctx.aclose()
