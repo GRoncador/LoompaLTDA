@@ -419,12 +419,14 @@ export interface TraceSpan {
   attempts?: { model?: string; outcome?: string; error?: string; output_tokens?: number; cost_usd?: number }[];
 }
 
-export interface TraceOutline {
-  spans: TraceSpan[];
-  truncated: boolean;
-  newest_first: boolean;
-  totals: { calls: number; tools: number; cost_usd: number; cuts: number; model_ms: number; tool_ms: number };
-}
+export type TraceOutline =
+  // nothing was written since the version the window sent: the answer is just the version
+  | { version: string; unchanged: true }
+  | {
+      version: string; unchanged: false; spans: TraceSpan[]; truncated: boolean;
+      totals: { calls: number; tools: number; cost_usd: number; cuts: number; model_ms: number; tool_ms: number };
+    };
+export type TraceRun = Extract<TraceOutline, { unchanged: false }>;
 
 export interface TraceMessage { role: string; name?: string | null; content: string; tool_calls: { name: string; arguments: unknown }[] }
 

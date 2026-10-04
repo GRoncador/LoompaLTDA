@@ -538,13 +538,14 @@ def create_app(
         }
 
     @app.get("/api/factories/{slug}/stories/{story_id}/trace")
-    def story_trace(slug: str, story_id: str, newest_first: bool = True) -> dict[str, Any]:
+    def story_trace(slug: str, story_id: str, known: str | None = None) -> dict[str, Any]:
         """What the Loompas actually did on this story: the tree of nodes, tasks, model calls
-        and tool calls from the trace file (plan 11.4)."""
+        and tool calls from the trace file (plan 11.4). `known` is the version the window holds,
+        so a poll over a quiet story costs a `stat`."""
         from loompa import trace_view
 
         ctx = hub.get(slug).ctx
-        return trace_view.outline(ctx.root, story_id, newest_first=newest_first)
+        return trace_view.outline(ctx.root, story_id, known=known)
 
     @app.get("/api/factories/{slug}/stories/{story_id}/trace/{span_id}")
     def story_trace_span(slug: str, story_id: str, span_id: str) -> dict[str, Any]:

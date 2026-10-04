@@ -2,31 +2,58 @@
  * the tree of phases, tasks, rounds of the tool loop, model calls and tool calls. Each line
  * carries its numbers; clicking one opens the prompt, the answer or the tool's result, which the
  * server resolves from the trace file only when asked. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { TraceDetail, TraceOutline, TraceSpan } from "../types";
+import type { TraceDetail, TraceRun, TraceSpan } from "../types";
 
 export default function AgentTrace({ slug, id, live = false }: { slug: string; id: string; live?: boolean }) {
-  const [data, setData] = useState<TraceOutline | null>(null);
+  const [data, setData] = useState<TraceRun | null>(null);
   const [error, setError] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  // newest phase on top while the story runs; the whole run from the start when reading it later
-  const [newest, setNewest] = useState(true);
+  const box = useRef<HTMLDivElement>(null);
+  const version = useRef<string | null>(null);
+  const stick = useRef(true); // the reader is at the end: keep them there as new steps arrive
+
+  // the panel's scrolling element is the drawer's tab area, not this list
+  const scroller = () => box.current?.closest(".scroll-always") as HTMLElement | null;
+  const atBottom = () => {
+    const el = scroller();
+    return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
+
   useEffect(() => {
     let alive = true;
-    const load = () => api.storyTrace(slug, id, newest).then((d) => { if (alive) setData(d); }).catch(() => { if (alive) setError(true); });
+    const load = async () => {
+      try {
+        const d = await api.storyTrace(slug, id, version.current);
+        if (!alive || d.unchanged) return; // nothing was written since the last poll
+        stick.current = atBottom(); // decided before the list grows under the reader
+        version.current = d.version;
+        setData(d);
+      } catch {
+        if (alive) setError(true);
+      }
+    };
+    version.current = null;
     load();
     // while a Loompa is on this story the tab follows it; a finished story is read once
     if (!live) return () => { alive = false; };
     const timer = setInterval(load, 5000);
     return () => { alive = false; clearInterval(timer); };
-  }, [slug, id, newest, live]);
-  if (error) return <p className="text-xs text-slate-400">Não foi possível ler o registro desta história.</p>;
-  if (!data) return <p className="text-xs text-slate-400">carregando…</p>;
-  if (data.spans.length === 0) return <p className="text-xs text-slate-400">Nenhum passo registrado ainda.</p>;
-  const t = data.totals;
+  }, [slug, id, live]);
+
+  // the newest step is at the end: open at the end, and stay there while the reader is there
+  useEffect(() => {
+    const el = scroller();
+    if (data && el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [data]);
+  const t = data?.totals;
   return (
-    <div className="space-y-2 text-xs">
+    <div ref={box} className="space-y-2 text-xs">
+      {error && <p className="text-slate-400">Não foi possível ler o registro desta história.</p>}
+      {!error && !data && <p className="text-slate-400">carregando…</p>}
+      {data && data.spans.length === 0 && <p className="text-slate-400">Nenhum passo registrado ainda.</p>}
+      {data && t && data.spans.length > 0 && (<>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
         {live && <span className="flex items-center gap-1 text-emerald-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />ao vivo</span>}
         <span>
@@ -34,10 +61,7 @@ export default function AgentTrace({ slug, id, live = false }: { slug: string; i
           US$ {t.cost_usd.toFixed(4)} · modelo {dur(t.model_ms)} · ferramentas {dur(t.tool_ms)}
           {data.truncated ? " · mostrando o trecho mais recente" : ""}
         </span>
-        <button className="ml-auto rounded border border-line px-1.5 py-0.5 hover:bg-line" onClick={() => setNewest(!newest)}
-          title="Dentro de cada etapa os passos ficam sempre na ordem em que aconteceram; isto muda a ordem das etapas entre si.">
-          {newest ? "etapa mais recente no topo" : "do começo ao fim"}
-        </button>
+        <span className="ml-auto">do começo (topo) ao mais recente (fim)</span>
       </div>
       <ol className="space-y-0.5">
         {data.spans.map((s) => (
@@ -46,6 +70,7 @@ export default function AgentTrace({ slug, id, live = false }: { slug: string; i
           </li>
         ))}
       </ol>
+      </>)}
     </div>
   );
 }

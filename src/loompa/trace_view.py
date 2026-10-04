@@ -82,18 +82,30 @@ def _span(node: TraceNode, depth: int) -> dict[str, Any]:
     return out
 
 
-def outline(root: Path, story_id: str, *, newest_first: bool = True) -> dict[str, Any]:
+def version(root: Path, story_id: str) -> str:
+    """What the trace file looks like right now. The window polls every few seconds while a
+    Loompa works, and a story's file only ever grows: when this did not change, nothing was
+    written and the answer is three bytes instead of the whole outline."""
+    path = trace_dir(root) / f"{story_id}.jsonl"
+    try:
+        st = path.stat()
+    except OSError:
+        return "0-0"
+    return f"{int(st.st_mtime_ns)}-{st.st_size}"
+
+
+def outline(root: Path, story_id: str, *, known: str | None = None) -> dict[str, Any]:
     """The whole trace flattened depth-first, each span with its numbers.
 
-    Order: the phases (the top of the tree) come newest first by default, like the history tab,
-    so what is happening now is at the top; *inside* a phase everything stays in the order it
-    happened, because a round of the tool loop read backwards makes no sense. `newest_first=False`
-    reads the whole run from the beginning, like a log.
+    Order: as it happened, parents before their children — the way a run reads. `known` is the
+    `version` the window already has: the same one means nothing new was written.
     """
+    now = version(root, story_id)
+    if known and known == now:
+        return {"version": now, "unchanged": True}
     trace = read_trace(trace_dir(root) / f"{story_id}.jsonl")
     rows: list[dict[str, Any]] = []
-    tops = trace.tree()
-    for top in reversed(tops) if newest_first else tops:
+    for top in trace.tree():
         stack: list[tuple[TraceNode, int]] = [(top, 0)]
         while stack:
             node, depth = stack.pop()
@@ -102,9 +114,11 @@ def outline(root: Path, story_id: str, *, newest_first: bool = True) -> dict[str
     calls = [s for s in trace.spans if s.get("kind") == "llm"]
     tools = [s for s in trace.spans if s.get("kind") == "tool"]
     return {
-        "spans": rows[:MAX_SPANS],
+        "version": now,
+        "unchanged": False,
+        # the oldest spans are the ones to drop: the window reads towards the end
+        "spans": rows[-MAX_SPANS:],
         "truncated": len(rows) > MAX_SPANS,
-        "newest_first": newest_first,
         "totals": {
             "calls": len(calls),
             "tools": len(tools),

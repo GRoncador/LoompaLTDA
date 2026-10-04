@@ -535,6 +535,11 @@ def test_the_story_window_reads_the_trace_of_what_the_agent_did(client: TestClie
 
     out = client.get(f"/api/factories/demo-hq/stories/{sid}/trace").json()
     assert [s["kind"] for s in out["spans"]] == ["node", "llm"]  # the tree, parents before children
+    # polling while the story runs: the same version answers without reading the file again
+    again = client.get(
+        f"/api/factories/demo-hq/stories/{sid}/trace", params={"known": out["version"]}
+    ).json()
+    assert again == {"version": out["version"], "unchanged": True}
     assert out["totals"]["calls"] == 1 and out["totals"]["cost_usd"] == 0.0021
     llm = out["spans"][1]
     assert llm["attrs"]["model"] == "x/mini" and llm["has_detail"]
