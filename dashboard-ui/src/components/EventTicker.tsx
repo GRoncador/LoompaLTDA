@@ -1,18 +1,22 @@
-import type { LoompaEvent } from "../types";
+import LoompaFigure from "./LoompaFigure";
+import type { Agent, LoompaEvent } from "../types";
 
 const LABEL: Record<string, string> = {
   "story.stage": "→", "inbox.new": "📬", "llm.call": "🧠", "story.escalated": "⬆️", "story.retry": "🔁", "tool.call": "🔧",
   "worktree.commit": "✅", "story.merged": "🚀", "kaizen.learning": "💡", "agent.state": "👤", "engine.started": "▶", "engine.stopped": "⏸", "scheduler.paused": "⛔",
 };
 
-export default function EventTicker({ events }: { events: LoompaEvent[] }) {
+export default function EventTicker({ events, agents = [] }: { events: LoompaEvent[]; agents?: Agent[] }) {
   const last = events.slice(-6).reverse();
+  // the Loompa who spoke, drawn like everywhere else, instead of one generic figure for all
+  const roleOf = new Map(agents.map((a) => [a.name, a.role]));
   return (
     <footer className="flex h-7 items-center gap-4 overflow-hidden border-t border-line bg-panel px-3 text-[11px] text-slate-400">
       {last.length === 0 && <span>aguardando eventos da fábrica…</span>}
       {last.map((e, i) => (
-        <span key={`${e.id ?? i}-${i}`} className="whitespace-nowrap">
-          {LABEL[e.type] ?? "•"} {e.story_id ?? ""} {e.agent ? `${e.agent}:` : ""} {summarize(e)}
+        <span key={`${e.id ?? i}-${i}`} className="flex items-center gap-1 whitespace-nowrap">
+          {e.agent && roleOf.has(e.agent) ? <LoompaFigure role={roleOf.get(e.agent)!} /> : <span>{LABEL[e.type] ?? "•"}</span>}
+          {e.story_id ?? ""} {e.agent ? `${e.agent.replace(/ Loompa$/, "")}:` : ""} {summarize(e)}
         </span>
       ))}
     </footer>

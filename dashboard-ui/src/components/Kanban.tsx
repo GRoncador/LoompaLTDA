@@ -267,7 +267,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             <span className="min-w-0 flex-1 break-words text-slate-500">{activity ? doing(activity) : ""}</span>
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
-            ) : agent ? <Avatar agent={agent} busy={!!activity && now !== undefined && (now - Date.parse(activity.last_at)) / 1000 <= 300} /> : null}
+            ) : agent ? <Avatar agent={agent} /> : null}
           </div>
         )}
       </button>
@@ -275,11 +275,12 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   );
 }
 
-/** The Loompa holding the card, pulsing while the story gives signs of life. */
-function Avatar({ agent, busy }: { agent: Agent; busy: boolean }) {
+/** The Loompa holding the card. No life dot here: the card's amber border already says which
+ * ones are being worked on right now (11.2). */
+function Avatar({ agent }: { agent: Agent }) {
   return (
     <span className="flex shrink-0 items-center gap-1 text-[10px] text-slate-300" title={`${agent.name} está com este card${agent.detail ? ` · ${agent.detail}` : ""}`}>
-      <LoompaFigure role={agent.role} busy={busy} />
+      <LoompaFigure role={agent.role} />
       {agent.name.replace(/ Loompa$/, "")}
     </span>
   );
