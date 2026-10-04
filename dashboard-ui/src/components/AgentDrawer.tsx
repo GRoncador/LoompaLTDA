@@ -95,7 +95,9 @@ export function Row({ k, v }: { k: string; v: React.ReactNode }) {
 export function Drawer({ title, children, onClose, fill = false }: { title: string; children: React.ReactNode; onClose: () => void; fill?: boolean }) {
   return (
     <div className="fixed inset-0 z-30 flex justify-end bg-black/40" onClick={onClose}>
-      <aside className={`h-full w-full max-w-lg border-l border-line bg-panel p-5 ${fill ? "flex flex-col overflow-hidden" : "scroll-thin overflow-y-auto"}`} onClick={(e) => e.stopPropagation()}>
+      {/* half the screen: the story window holds a diff, a spec and the agent's own steps,
+          and max-w-lg made every one of them a column of two words (11.4) */}
+      <aside className={`h-full w-full border-l border-line bg-panel p-5 md:w-1/2 md:min-w-[40rem] ${fill ? "flex flex-col overflow-hidden" : "scroll-thin overflow-y-auto"}`} onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex shrink-0 items-center justify-between gap-3">
           <h3 className="text-base font-semibold">{title}</h3>
           <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>

@@ -85,7 +85,7 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint }: { slug:
       </div>
       <div className="mt-4 flex shrink-0 gap-1 border-b border-line text-xs">
         {tabs.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 ${tab === t ? "border-b-2 border-brand text-brand" : "text-slate-400"}`}>{t === "log" ? "histórico" : t === "diff" ? "mudanças" : t === "agent" ? "o que o agente fez" : t + ".md"}</button>
+          <button key={t} onClick={() => setTab(t)} title={TAB_HINT[t]} className={`px-3 py-1.5 ${tab === t ? "border-b-2 border-brand text-brand" : "text-slate-400"}`}>{t === "log" ? "histórico" : t === "diff" ? "mudanças" : t === "agent" ? "bastidores" : t + ".md"}</button>
         ))}
       </div>
       <div className="scroll-always mt-3 min-h-0 flex-1 pr-1">
@@ -102,6 +102,13 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint }: { slug:
     </Drawer>
   );
 }
+
+const TAB_HINT: Record<string, string> = {
+  spec: "O que a história precisa entregar", plan: "Como o Architect decidiu fazer",
+  tasks: "A lista de tarefas e o que já foi feito", research: "O relatório da pesquisa",
+  diff: "O código que esta história mudou", log: "O que aconteceu em cada etapa",
+  agent: "Bastidores: cada consulta ao modelo e cada ferramenta usada, com o que foi enviado e recebido",
+};
 
 const KIND_LABEL: Record<string, string> = { feature: "funcionalidade", bugfix: "correção", research: "pesquisa" };
 const COMPLEXITY_LABEL: Record<string, string> = { SIMPLE: "simples", STANDARD: "padrão", COMPLEX: "complexa" };
