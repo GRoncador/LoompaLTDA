@@ -20,7 +20,17 @@ from loompa.conversations import (
     OpenCard,
     apply_ops,
 )
-from loompa.dependencies import WAIT_KEY, Gate, find_cycle, merge_gate, plan_gate, rows_by_id
+from loompa.dependencies import (
+    BUILT_ON_KEY,
+    WAIT_KEY,
+    Gate,
+    awaiting_merge,
+    find_cycle,
+    merge_gate,
+    plan_gate,
+    rows_by_id,
+    still_waiting,
+)
 from loompa.engine import Scheduler, Stage, load_state
 from loompa.factory import Factory
 from loompa.llm import Message
@@ -467,4 +477,30 @@ async def test_what_the_founder_writes_on_approving_reaches_the_stories_built_on
     later = po.add_item("Persistência").story_id
     po.set_dependencies(later, [sid])
     assert "Ao aprovar: o reabrir_app fica para a S-002" in delivered_brief(ctx.store, later)
+    await ctx.aclose()
+
+
+async def test_a_rejected_delivery_holds_the_story_built_on_it(factory: Factory):
+    """11.5: B builds on A's branch while A waits for the founder. If the founder asks for
+    changes, A goes back to `dev` and stops being "awaiting" — but B still carries A's commits,
+    so it must not merge until A is really in the base."""
+    ctx = make_ctx(factory, dry_run=True)
+    po = ProductOwnerAgent(ctx)
+    a, b = (po.add_item(t).story_id for t in ("Guardar centavos", "Orçamento por categoria"))
+    po.set_dependencies(b, [a])
+    MasterAgent(ctx).start_sprint([a, b])
+    await Scheduler(ctx).run()
+    await Scheduler(ctx).run()  # the engine polls; `run()` stops as soon as nothing runs
+
+    sb = load_state(ctx, b)
+    assert sb.extra[BUILT_ON_KEY] == a and sb.stage == Stage.REVIEW  # parked on A's branch
+
+    delivery = next(m for m in ctx.store.list_messages(factory.slug, "pending") if m.story_id == a)
+    await Scheduler(ctx).aanswer(
+        delivery.id, FounderAnswer(option_key="changes", text="faltou arredondar")
+    )
+    rows = rows_by_id(ctx.store, factory.slug)
+    assert rows[a]["stage"] != Stage.DONE and not awaiting_merge(rows[a])  # back to work
+    assert merge_gate(rows, b) == [a]  # B keeps waiting: it carries A's commits
+    assert still_waiting(rows, rows[b])
     await ctx.aclose()

@@ -43,11 +43,13 @@ from loompa.comms import (
     sanitize_for_founder,
 )
 from loompa.dependencies import (
+    BUILT_ON_KEY,
     WAIT_KEY,
     Gate,
     base_branch_for,
     dependents,
     deps_of,
+    gone_under,
     merge_gate,
     plan_gate,
     rows_by_id,
@@ -461,9 +463,14 @@ def _ensure_worktree(ctx: EngineContext, state: StoryState) -> Worktree:
     if existing is None:
         # a dependency whose delivery the founder has not accepted yet is not in the base: the
         # story starts from its branch, so it is written on top of that code (11.5)
-        on = base_branch_for(rows_by_id(ctx.store, ctx.slug), state.story_id)
+        rows = rows_by_id(ctx.store, ctx.slug)
+        on = base_branch_for(rows, state.story_id)
         if on:
-            ctx.emit("story.built_on", story_id=state.story_id, branch=on)
+            # remembered: after the founder asks for changes the dependency stops being "awaiting",
+            # but this story still carries its commits and must not merge before it (11.5)
+            dep = next((d for d in deps_of(rows.get(state.story_id)) if (rows.get(d) or {}).get("branch") == on), "")
+            state.extra[BUILT_ON_KEY] = dep
+            ctx.emit("story.built_on", story_id=state.story_id, branch=on, dependency=dep)
     wt = existing or ctx.worktrees.create(state.story_id, title=state.title, base=on or None)
     state.worktree = str(wt.path)
     state.branch = wt.branch
@@ -881,7 +888,23 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     # the founder's acceptance still holds the merge: delivering this story now would carry a
     # delivery they have not accepted into the base with it (11.5). Waiting is time, not a
     # decision, so nothing reaches the inbox: the story parks and the Scheduler frees its slot.
-    waits = merge_gate(rows_by_id(ctx.store, ctx.slug), state.story_id)
+    rows = rows_by_id(ctx.store, ctx.slug)
+    if gone := gone_under(rows, state.story_id):
+        # the story it was written on top of left the sprint: its code never reaches the base, so
+        # delivering this one as it stands would carry code nobody wants (11.5)
+        title = (rows.get(gone) or {}).get("title", gone)
+        return await block(
+            ctx,
+            state,
+            BlockedReason.DEPENDENCY,
+            f"built on {gone}, which was cancelled or sent back to the backlog",
+            executive=(
+                f"Esta história foi construída em cima de “{title}”, que saiu do sprint. "
+                "O trabalho está pronto, mas entregá-lo levaria junto o código daquela história."
+            ),
+            resume="review",
+        )
+    waits = merge_gate(rows, state.story_id)
     if waits:
         first = WAIT_KEY not in state.extra
         state.extra[WAIT_KEY] = {

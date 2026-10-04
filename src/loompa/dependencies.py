@@ -28,6 +28,7 @@ from typing import Any
 from loompa.engine.state import TERMINAL, Stage
 
 WAIT_KEY = "waiting"  # state.extra: parked at the gate before `plan`, with what it waits for
+BUILT_ON_KEY = "built_on"  # state.extra: the story whose branch this worktree started from (11.5)
 LIVE = (Stage.SPEC, Stage.PLAN, Stage.DEV, Stage.TEST, Stage.REVIEW, Stage.AWAITING_FOUNDER)
 
 
@@ -214,13 +215,43 @@ def plan_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> GateResul
     return out
 
 
+def built_on(row: Mapping[str, Any] | None) -> str:
+    """The story whose branch this one's worktree started from, when there is one (11.5)."""
+    extra = ((row or {}).get("state") or {}).get("extra") or {}
+    return str(extra.get(BUILT_ON_KEY) or "")
+
+
 def merge_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> list[str]:
-    """Dependencies this story may build on but must not merge over: deliveries the founder has
-    not accepted yet. Merging the story would carry their commits into the base (11.5)."""
+    """Dependencies this story must not merge over. Two cases, and the second is the one a
+    rejected delivery creates:
+
+    * the dependency is a delivery the founder has not accepted yet — merging now would carry it
+      into the base;
+    * the story's own branch *started from* that dependency's branch and the dependency is not in
+      the base yet. That stays true when the founder asks for changes: the delivery goes back to
+      `dev` and stops being "awaiting", but this story still carries its commits, so it waits
+      until the dependency is really merged (its code arrives in the rebase before the delivery).
+    """
     me = rows.get(story_id)
     if me is None:
         return []
-    return [dep for dep in deps_of(me) if (row := rows.get(dep)) and awaiting_merge(row)]
+    on = built_on(me)
+    out = []
+    for dep in deps_of(me):
+        row = rows.get(dep)
+        if row is None:
+            continue
+        if awaiting_merge(row) or (dep == on and row["stage"] != Stage.DONE):
+            out.append(dep)
+    return out
+
+
+def gone_under(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> str:
+    """The story this one was built on, when it was cancelled or sent back to the backlog: its
+    code will never reach the base, so this one cannot be delivered as it stands (11.5)."""
+    on = built_on(rows.get(story_id))
+    row = rows.get(on) if on else None
+    return on if row is not None and row["stage"] in (Stage.CANCELLED, Stage.BACKLOG) else ""
 
 
 def still_waiting(rows: Mapping[str, Mapping[str, Any]], row: Mapping[str, Any]) -> bool:

@@ -120,7 +120,14 @@ chain, by design" — turned the founder's day into the chain's bottleneck. The 
   two deliveries pending the story waits as before.
 - Nothing reaches the inbox for either wait: waiting is still time, not a decision.
 
-Risk accepted: if the founder rejects a delivery that a dependent already built on, that dependent
-is on top of code that goes back to `dev`. It is a merge to redo, not work lost — the same
-reintegration path a moved base already uses. The founder's "no" costs more than before; their
-silence costs much less.
+A rejected delivery is the case that decides the shape of the merge gate. When the founder asks
+for changes, the dependency goes back to `dev` and stops being "awaiting the founder" — but the
+dependent still *carries its commits*, because its branch started there. So the gate does not ask
+"is the dependency awaiting the founder?"; it asks "is the branch I started from in the base?".
+The story the worktree started from is recorded in `state.extra["built_on"]`, and the dependent
+waits until that story is really merged (its new code arrives in the rebase before the delivery).
+If that story is cancelled or sent back to the backlog instead, the dependent *is* blocked for the
+founder: its work is finished, but delivering it would carry code nobody wants.
+
+Risk accepted: the founder's "no" costs more than before — one finished story waits longer and may
+have to reconcile with the dependency's second version. Their silence costs much less.
