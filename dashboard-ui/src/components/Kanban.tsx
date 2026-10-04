@@ -265,7 +265,11 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
         {/* what the Loompa says it is doing, right above its figure and aligned with it; it
             may take two lines and nothing below moves because of that */}
         {activity && (
-          <div className="mt-1 break-words text-right text-[10px] text-slate-400" title={doing(activity).title}>{doing(activity).text}</div>
+          <div className="mt-1 break-words text-right text-[10px] text-slate-400" title={doing(activity).title}>
+            {doing(activity).text}
+            {/* the token counter never shares a line: it is the part that keeps moving */}
+            {doing(activity).thinking && <div className="text-slate-500">{doing(activity).thinking}</div>}
+          </div>
         )}
         {/* the stage tag in the bottom-left corner, the Loompa in the bottom-right one */}
         {(AT_WORK.has(s.stage) || agent || stalled) && (
@@ -378,20 +382,22 @@ function Stage({ stage, since: at, now }: { stage: string; since?: string | null
 /** What the Loompa is doing right now, in its own words whenever it said them ("alinhando
  * critérios ao pedido de ajustes", "abrindo o produto no navegador"). The generic word for the
  * event type is only the last resort. No clocks here — the stage tag carries the time. */
-function doing(a: StoryActivity): { text: string; title: string } {
+function doing(a: StoryActivity): { text: string; thinking: string; title: string } {
   const target = a.last_target ? ` ${a.last_target.split("/").pop()}` : "";
-  // a streamed call still writing: how much it has written so far (ADR-0016)
+  // a streamed call still writing: how much it has written so far (ADR-0016). It goes on a
+  // line of its own, because it is the one number that changes every second.
   const thinking = a.thinking ? `pensando · ${tokens(a.thinking)} tokens` : "";
   if (a.task) {
     // "T3 (6)": the task and the tool calls it has made so far, then the one in progress
-    const now = thinking || (a.last_tool ? `${DOING[a.last_tool] ?? a.last_tool}${target}` : "");
+    const tool = a.last_tool ? `${DOING[a.last_tool] ?? a.last_tool}${target}` : "";
     return {
-      text: `T${a.task} (${a.calls ?? 0})${now ? ` · ${now}` : ""}`,
+      text: `T${a.task} (${a.calls ?? 0})${tool ? ` · ${tool}` : ""}`,
+      thinking,
       title: `${a.task_text ? `T${a.task}: ${a.task_text}\n` : ""}(${a.calls ?? 0}) ferramentas usadas nesta tarefa`,
     };
   }
   // the Worker's own detail is "T3: texto da tarefa", already said by the branch above
   const said = a.detail && !/^T\d+:/.test(a.detail) ? a.detail : "";
-  const text = said ? (thinking ? `${said} · ${thinking}` : said) : thinking || HAPPENING[a.last_event] || "trabalhando";
-  return { text, title: text };
+  const text = said || (thinking ? "" : HAPPENING[a.last_event] || "trabalhando");
+  return { text, thinking, title: [text, thinking].filter(Boolean).join(" · ") };
 }
