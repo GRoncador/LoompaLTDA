@@ -82,6 +82,7 @@ def slot_effort(cand: ModelCandidate, asked: str | None) -> str:
         return cand.reasoning_effort
     return asked if asked is not None else cand.reasoning_effort
 
+
 # One tier up, for the retries of a failed step (ADR-0016 §5: one try on the tier it used, then two
 # on the tier above; tier 1 has nothing above it and stays).
 TIER_ABOVE = {"tier3": "tier2", "tier2": "tier1", "tier1": "tier1"}
