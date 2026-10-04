@@ -1454,6 +1454,7 @@ function AATable({ picks, onUse }: { picks: AAPick[]; onUse?: (p: AAPick) => voi
           <tr>
             <th className="py-1 pr-2">#</th><th className="pr-2">modelo</th><th className="pr-2">esforço</th><th className="pr-2">nota</th>
             <th className="pr-2">US$/mi</th><th className="pr-2" title="Pontos de nota por dólar por milhão de tokens">pts/$</th>
+            <th className="pr-2" title="Velocidade de saída medida pela Artificial Analysis (mediana, tokens por segundo); — quando ela não informa">tok/s</th>
             <th className="pr-2">na casa (Worker)</th><th className="pr-2">rota OpenRouter</th>{onUse && <th />}
           </tr>
         </thead>
@@ -1466,6 +1467,7 @@ function AATable({ picks, onUse }: { picks: AAPick[]; onUse?: (p: AAPick) => voi
               <td className="pr-2 font-mono text-cyan-300">{p.score.toFixed(1)}{p.coverage < 1 ? <span className="text-slate-500" title="Nem todos os benchmarks do perfil existem para este modelo; o peso foi redistribuído"> *</span> : null}</td>
               <td className="pr-2 font-mono text-slate-300">{p.price != null ? p.price.toFixed(2) : "—"}</td>
               <td className="pr-2 font-mono text-emerald-300">{p.value != null ? p.value.toFixed(0) : "—"}</td>
+              <td className="pr-2 font-mono text-slate-300">{p.speed ? Math.round(p.speed) : "—"}</td>
               <td className={`pr-2 ${p.house?.flagged ? "text-amber-300" : "text-slate-300"}`}>
                 {p.house && p.house.tasks > 0 ? `${Math.round((p.house.done_rate ?? 0) * 100)}% de ${p.house.tasks}${p.house.enough ? "" : " (amostra pequena)"}` : "—"}
               </td>
