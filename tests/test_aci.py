@@ -407,3 +407,19 @@ def test_a_search_pattern_that_is_not_a_regex_is_searched_as_text(tmp_path):
     search._rg = None  # the Python fallback, as on a machine without ripgrep
     hits = search.grep("atualizar(estado")
     assert [(h.path, h.line) for h in hits] == [("a.js", 1)]
+
+
+def test_tap_long_error_message_does_not_backtrack():
+    """A `not ok` block with a long `error: |-` message and no closing key hung the dashboard
+    (catastrophic regex backtracking on the event loop)."""
+    import time
+
+    body = "".join(f"      line {i} of the message\n" for i in range(40))
+    out = (
+        "TAP version 13\nnot ok 1 - boom\n  ---\n  error: |-\n" + body + "  ...\n"
+        "# tests 1\n# pass 0\n# fail 1\n"
+    )
+    t = time.monotonic()
+    s = summarize_tests(out, 1)
+    assert time.monotonic() - t < 2
+    assert s.failed == 1 and s.failures[0].name == "boom"

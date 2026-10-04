@@ -111,6 +111,25 @@ _TAP_COUNT = re.compile(r"^# (pass|fail|skipped|cancelled|tests) (\d+)\s*$", re.
 _TAP_NOT_OK = re.compile(r"^(\s*)not ok \d+ - (.+?)\s*$")
 
 
+_TAP_BLOCK_END = re.compile(r"^\s+(?:code|name|stack|expected|failureType):")
+
+
+def _tap_error_block(meta: str) -> list[str]:
+    """The lines of the `error: |-` block of a TAP failure, up to the next key. Read line by
+    line: a single regex with nested `\\s+.*\\n?` loops backtracks without end on a long
+    message (the dashboard hung for minutes on it)."""
+    lines = meta.splitlines()
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("error: |"):
+            block: list[str] = []
+            for nxt in lines[i + 1 :]:
+                if _TAP_BLOCK_END.match(nxt):
+                    return block
+                block.append(nxt)
+            return []  # no closing key: the old pattern did not match either
+    return []
+
+
 def _summarize_tap(text: str, returncode: int, *, cwd_prefix: str = "") -> CommandSummary:
     """`node --test` (TAP): the counts come from its footer, and each failing test from its
     `not ok` line with the YAML block under it. A suite whose only error is that its subtests
@@ -147,11 +166,9 @@ def _summarize_tap(text: str, returncode: int, *, cwd_prefix: str = "") -> Comma
         location = loc.group(1) if loc else ""
         if cwd_prefix and location.startswith(cwd_prefix):
             location = location[len(cwd_prefix) :].lstrip("/")
-        err = re.search(
-            r"error: \|-?\n((?:\s+.*\n?)+?)\s+(?:code|name|stack|expected|failureType):", meta
-        )
+        err = _tap_error_block(meta)
         message = (
-            " ".join(x.strip() for x in err.group(1).splitlines() if x.strip())
+            " ".join(x.strip() for x in err if x.strip())
             if err
             else (
                 re.search(r"error: '(.*)'", meta) or re.search(r"error: (.*)", meta) or [None, ""]
