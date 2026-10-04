@@ -241,14 +241,6 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
       </div>
       <button className="w-full text-left" onClick={() => onOpen(s.id)}>
         <div className={`mt-0.5 font-normal leading-snug transition-colors ${pointed === "block" ? "text-red-300" : pointed === "sprint" ? "text-sky-300" : "text-slate-100"}`}>{s.title}</div>
-        {s.tasks_total > 0 && (
-          <div className="mt-1.5 flex items-center gap-1.5" title={`${s.tasks_done} de ${s.tasks_total} tarefas do plano concluídas`}>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
-              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, (100 * s.tasks_done) / s.tasks_total)}%` }} />
-            </div>
-            <span className="text-[10px] tabular-nums text-slate-400">{s.tasks_done}/{s.tasks_total}</span>
-          </div>
-        )}
         {alerts.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
             {alerts.map((a) => <span key={a.text} className={`chip ${a.cls}`} title={a.title}>{a.text}</span>)}
@@ -262,12 +254,24 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             </span>
           </div>
         )}
-        {/* the stage tag keeps the bottom-left corner and the Loompa the bottom-right one,
-            whatever happens: only the text between them wraps, and it is never cut */}
+        {/* what the Loompa says it is doing, on its own line: it may take two, and nothing
+            below it moves because of that */}
+        {activity && (
+          <div className="mt-1 break-words text-[10px] text-slate-400" title={doing(activity).title}>{doing(activity).text}</div>
+        )}
+        {s.tasks_total > 0 && (
+          <div className="mt-1.5 flex items-center gap-1.5" title={`${s.tasks_done} de ${s.tasks_total} tarefas do plano concluídas`}>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
+              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, (100 * s.tasks_done) / s.tasks_total)}%` }} />
+            </div>
+            <span className="text-[10px] tabular-nums text-slate-400">{s.tasks_done}/{s.tasks_total}</span>
+          </div>
+        )}
+        {/* the stage tag in the bottom-left corner, the Loompa in the bottom-right one */}
         {(AT_WORK.has(s.stage) || agent || stalled) && (
           <div className="mt-1.5 flex items-end gap-1 text-[10px]">
             <Stage stage={s.stage} since={activity?.stage_since} now={now} />
-            <span className="min-w-0 flex-1 break-words text-slate-500" title={activity ? doing(activity).title : ""}>{activity ? doing(activity).text : ""}</span>
+            <span className="flex-1" />
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
             ) : agent ? <Avatar agent={agent} /> : null}
