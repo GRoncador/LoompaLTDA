@@ -364,10 +364,15 @@ class ACI:
         return "\n".join(f"{e.name}/" if e.is_dir() else e.name for e in entries[:300]) or "(empty)"
 
     def tool_search(self, pattern: str, glob: str | None = None) -> str:
+        try:
+            re.compile(pattern)
+            note = ""
+        except re.error:
+            note = "(not a valid regular expression: searched as plain text)\n"
         hits = [h for h in self._search.grep(pattern, glob=glob) if not is_protected(h.path)]
         if not hits:
-            return "no matches"
-        return "\n".join(f"{h.path}:{h.line}: {h.text}" for h in hits[:60])
+            return f"{note}no matches"
+        return note + "\n".join(f"{h.path}:{h.line}: {h.text}" for h in hits[:60])
 
     def tool_find_symbol(self, name: str) -> str:
         if self._symbols is None:

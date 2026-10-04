@@ -395,3 +395,15 @@ async def test_write_file_never_wipes_or_guts_an_existing_file(tmp_path: Path):
     assert (
         await aci.call("write_file", {"path": "new.py", "content": ""})
     ).ok  # a new file may start empty
+
+
+def test_a_search_pattern_that_is_not_a_regex_is_searched_as_text(tmp_path):
+    """tamagotchi S-037: the Worker searched `atualizar(estado`; the Python fallback raised
+    re.error and the whole dev node died instead of the tool answering."""
+    from loompa.memory.lexical import CodeSearch
+
+    (tmp_path / "a.js").write_text("export function atualizar(estado) {}\n")
+    search = CodeSearch(tmp_path)
+    search._rg = None  # the Python fallback, as on a machine without ripgrep
+    hits = search.grep("atualizar(estado")
+    assert [(h.path, h.line) for h in hits] == [("a.js", 1)]

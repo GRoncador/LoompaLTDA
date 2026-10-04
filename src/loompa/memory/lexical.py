@@ -126,8 +126,11 @@ class CodeSearch:
                 args += ["-g", glob]
             for d in _SKIP_DIRS:
                 args += ["-g", f"!{d}"]
-            args += [pattern, str(self.root)]
+            args += ["--", pattern, str(self.root)]
             proc = subprocess.run(args, capture_output=True, text=True, timeout=60)
+            if regex and proc.returncode == 2 and "regex parse error" in proc.stderr:
+                # a pattern a model wrote that is not a valid regex: searched as plain text
+                return self.grep(pattern, regex=False, glob=glob, case_sensitive=case_sensitive)
             hits = []
             for line in proc.stdout.splitlines()[: self.max_hits]:
                 parts = line.split(":", 2)
@@ -141,7 +144,10 @@ class CodeSearch:
                     )
             return hits
         flags = 0 if case_sensitive else re.I
-        rx = re.compile(pattern if regex else re.escape(pattern), flags)
+        try:
+            rx = re.compile(pattern if regex else re.escape(pattern), flags)
+        except re.error:  # tamagotchi S-037: "atualizar(estado" killed the story's dev node
+            rx = re.compile(re.escape(pattern), flags)
         hits: list[SearchHit] = []
         for file in self.files():
             if glob and not file.match(glob):
