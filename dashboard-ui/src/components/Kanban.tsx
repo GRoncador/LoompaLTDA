@@ -254,11 +254,6 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             </span>
           </div>
         )}
-        {/* what the Loompa says it is doing, on its own line: it may take two, and nothing
-            below it moves because of that */}
-        {activity && (
-          <div className="mt-1 break-words text-[10px] text-slate-400" title={doing(activity).title}>{doing(activity).text}</div>
-        )}
         {s.tasks_total > 0 && (
           <div className="mt-1.5 flex items-center gap-1.5" title={`${s.tasks_done} de ${s.tasks_total} tarefas do plano concluídas`}>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
@@ -266,6 +261,11 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             </div>
             <span className="text-[10px] tabular-nums text-slate-400">{s.tasks_done}/{s.tasks_total}</span>
           </div>
+        )}
+        {/* what the Loompa says it is doing, right above its figure and aligned with it; it
+            may take two lines and nothing below moves because of that */}
+        {activity && (
+          <div className="mt-1 break-words text-right text-[10px] text-slate-400" title={doing(activity).title}>{doing(activity).text}</div>
         )}
         {/* the stage tag in the bottom-left corner, the Loompa in the bottom-right one */}
         {(AT_WORK.has(s.stage) || agent || stalled) && (
