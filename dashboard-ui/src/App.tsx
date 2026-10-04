@@ -159,6 +159,9 @@ function advance(base: StoryActivity | undefined, e: LoompaEvent): StoryActivity
   } else if (e.type === "story.stage" && p.stage && p.stage !== next.stage) {
     // the engine repeats the stage after every node: only a new one restarts the clock
     Object.assign(next, { stage: String(p.stage), stage_since: next.last_at });
+  } else if (e.type === "agent.state") {
+    // the Loompa's own words for what it is doing; it goes quiet when the agent stops
+    next.detail = ["WORKING", "TESTING"].includes(String(p.state)) ? String(p.detail ?? "") || null : null;
   } else if (e.type === "tool.call") {
     Object.assign(next, { calls: (next.calls ?? 0) + 1, last_tool: String(p.tool ?? ""), last_target: String(p.path ?? p.query ?? "") || null });
   }

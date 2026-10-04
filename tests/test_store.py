@@ -180,3 +180,16 @@ def test_patch_story_state_merges_and_keeps_the_rest():
     assert state["tasks_done"] == [1, 2] and state["tasks_total"] == 4
     assert state["kind"] == "feature"
     s.patch_story_state("S-404", tasks_done=[1])  # an unknown story is a no-op, not a crash
+
+
+def test_story_activity_carries_what_the_loompa_says_it_is_doing():
+    """The card prefers the Loompa's own sentence to the event type's generic word (11.2)."""
+    s = Store(":memory:")
+    s.upsert_story({"id": "S-001", "factory": "f", "title": "x", "stage": "TEST"})
+    s.emit("f", "agent.state", story_id="S-001", agent="Inspector Loompa",
+           state="TESTING", detail="abrindo o produto no navegador")
+    s.emit("f", "llm.call", story_id="S-001", agent="Inspector Loompa")
+    assert s.story_activity("S-001")["detail"] == "abrindo o produto no navegador"
+    # the Loompa stopped: the sentence goes with it
+    s.emit("f", "agent.state", story_id="S-001", agent="Inspector Loompa", state="IDLE", detail="")
+    assert "detail" not in s.story_activity("S-001")

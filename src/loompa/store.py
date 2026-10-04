@@ -695,6 +695,17 @@ class Store:
         if last[0]["type"] == "llm.progress":  # a streamed call still writing (ADR-0016 §4)
             out["thinking"] = json.loads(last[0]["payload_json"] or "{}").get("tokens")
         out.update(self._stage_since(story_id))
+        # what the Loompa itself says it is doing ("abrindo o produto no navegador"): better on
+        # the card than the event's generic word (11.2)
+        said = self._q(
+            "SELECT payload_json FROM events WHERE story_id = ? AND type = 'agent.state' "
+            "ORDER BY id DESC LIMIT 1",
+            (story_id,),
+        )
+        if said:
+            p = json.loads(said[0]["payload_json"] or "{}")
+            if p.get("state") in ("WORKING", "TESTING") and p.get("detail"):
+                out["detail"] = str(p["detail"])
         started = self._q(
             "SELECT id, payload_json, created_at FROM events WHERE story_id = ? "
             "AND type = 'worker.task_started' ORDER BY id DESC LIMIT 1",

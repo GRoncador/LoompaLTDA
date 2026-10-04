@@ -368,8 +368,9 @@ function Stage({ stage, since: at, now }: { stage: string; since?: string | null
   );
 }
 
-/** What the Loompa is doing right now, in a few words: the task and its steps, or whoever spoke
- * last. No clocks here — the stage tag carries the only time the founder asked for. */
+/** What the Loompa is doing right now, in its own words whenever it said them ("alinhando
+ * critérios ao pedido de ajustes", "abrindo o produto no navegador"). The generic word for the
+ * event type is only the last resort. No clocks here — the stage tag carries the time. */
 function doing(a: StoryActivity): string {
   const target = a.last_target ? ` ${a.last_target.split("/").pop()}` : "";
   // a streamed call still writing: how much it has written so far (ADR-0016)
@@ -378,5 +379,8 @@ function doing(a: StoryActivity): string {
     const steps = `T${a.task} · ${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}`;
     return `${steps}${thinking ? ` · ${thinking}` : a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`;
   }
+  // the Worker's own detail is "T3: texto da tarefa", already said by the branch above
+  const said = a.detail && !/^T\d+:/.test(a.detail) ? a.detail : "";
+  if (said) return thinking ? `${said} · ${thinking}` : said;
   return thinking || HAPPENING[a.last_event] || "trabalhando";
 }
