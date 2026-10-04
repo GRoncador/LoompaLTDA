@@ -118,8 +118,10 @@ entregá-lo levaria junto código que você decidiu não usar.
 
 ### Casos que continuam esperando de propósito
 
-- **duas entregas pendentes ao mesmo tempo** como dependências da mesma história: um worktree parte
-  de um branch só, então ela espera o seu aceite, como antes;
+- **duas entregas pendentes que não são da mesma cadeia**: um worktree parte de um branch só, e
+  nenhum dos dois carrega o outro, então ela espera o seu aceite. Se forem da mesma cadeia (a
+  segunda foi escrita em cima da primeira), o branch da ponta carrega as duas e a história começa
+  normalmente;
 - dependência **reprovada, com dúvida, risco, conflito ou custo estourado**: não está "construída e
   aprovada", então o portão do plano continua fechado.
 

@@ -25,6 +25,7 @@ from loompa.dependencies import (
     WAIT_KEY,
     Gate,
     awaiting_merge,
+    base_branch_for,
     find_cycle,
     merge_gate,
     parked_before_review,
@@ -538,3 +539,32 @@ async def test_a_chain_of_three_keeps_moving_while_the_founder_decides_the_first
 
     assert [board_column(rows[sid]) for sid in (a, b, c)] == ["AWAITING_FOUNDER"] * 3
     await ctx.aclose()
+
+
+def test_two_pending_deliveries_in_a_chain_let_the_next_story_start():
+    """11.5 (tamagotchi S-056, 04/10): S-056 depended on S-054 and S-055, both built and green.
+    "More than one pending delivery" held it — but S-055 had been written on top of S-054, so its
+    branch carries both. The tip of the chain is a base that leaves nothing out."""
+    ROUTE = ["spec", "spec_review", "plan", "dev", "test", "review"]
+    rows = {
+        "S-054": {"id": "S-054", "stage": Stage.AWAITING_FOUNDER, "depends_on": [], "branch": "b54",
+                  "state": {"blocked_reason": "delivery", "qa_verdict": "PASS",
+                            "route": ROUTE, "resume_phase": "review"}},
+        "S-055": {"id": "S-055", "stage": Stage.REVIEW, "depends_on": ["S-054"], "branch": "b55",
+                  "state": {"qa_verdict": "PASS", "route": ROUTE, "phase": "review",
+                            "extra": {BUILT_ON_KEY: "S-054", WAIT_KEY: {"unmerged": ["S-054"]}}}},
+        "S-056": {"id": "S-056", "stage": Stage.PLAN, "depends_on": ["S-054", "S-055"],
+                  "branch": "", "state": {"route": ROUTE, "phase": "plan"}},
+    }
+    gate = plan_gate(rows, "S-056")
+    assert gate.gate == Gate.OPEN and gate.unmerged == ["S-054", "S-055"]
+    assert base_branch_for(rows, "S-056") == "b55"  # the tip, which carries S-054 too
+    assert merge_gate(rows, "S-056") == ["S-054", "S-055"]  # still merges after both
+
+    # the same two, but separate lines of work (S-055 built on a third story): no branch carries
+    # both, so the story waits for the founder, as before
+    rows["S-055"]["depends_on"] = ["S-050"]
+    rows["S-055"]["state"]["extra"][BUILT_ON_KEY] = "S-050"
+    apart = plan_gate(rows, "S-056")
+    assert apart.gate == Gate.WAIT and apart.pending == ["S-054", "S-055"]
+    assert base_branch_for(rows, "S-056") == ""

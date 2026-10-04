@@ -214,9 +214,10 @@ def plan_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> GateResul
             out.pending.append(dep)
             if row["stage"] == Stage.AWAITING_FOUNDER:
                 out.founder.append(dep)
-    if len(out.unmerged) > 1:
-        # a worktree starts from one branch: with two deliveries pending, the story would be
-        # missing one of them. It waits for the founder, as before.
+    if len(out.unmerged) > 1 and not tip_of(rows, out.unmerged):
+        # a worktree starts from one branch. When the pending deliveries are a chain, its tip
+        # carries them all; when they are separate lines of work, the story would be missing one
+        # of them, so it waits for the founder, as before.
         out.pending.extend(out.unmerged)
         out.founder.extend(out.unmerged)
         out.unmerged = []
@@ -234,6 +235,28 @@ def built_on(row: Mapping[str, Any] | None) -> str:
     """The story whose branch this one's worktree started from, when there is one (11.5)."""
     extra = ((row or {}).get("state") or {}).get("extra") or {}
     return str(extra.get(BUILT_ON_KEY) or "")
+
+
+def branch_carries(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> set[str]:
+    """The stories whose commits a story's branch already holds: itself and the chain of branches
+    it was started from (`built_on`), which is how a chain's tip carries everything before it."""
+    seen: set[str] = set()
+    cur = story_id
+    while cur and cur not in seen:
+        seen.add(cur)
+        cur = built_on(rows.get(cur))
+    return seen
+
+
+def tip_of(rows: Mapping[str, Mapping[str, Any]], ids: Iterable[str]) -> str:
+    """The one story among `ids` whose branch already carries all the others, or "" when they are
+    separate lines of work. Two deliveries pending at once are fine when the second was written on
+    top of the first: starting from its branch gives the new story both (11.5)."""
+    want = set(ids)
+    for sid in want:
+        if want <= branch_carries(rows, sid):
+            return sid
+    return ""
 
 
 def merge_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> list[str]:
@@ -282,12 +305,14 @@ def still_waiting(rows: Mapping[str, Mapping[str, Any]], row: Mapping[str, Any])
 
 
 def base_branch_for(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> str:
-    """The branch a new worktree starts from: the dependency whose delivery is approved but not
-    merged yet, so the story is written on top of its code. "" means the base branch."""
+    """The branch a new worktree starts from: the dependency that is built but not merged yet, so
+    the story is written on top of its code. With a chain of them, the tip, whose branch carries
+    the others. "" means the base branch."""
     pending = merge_gate(rows, story_id)
-    if len(pending) != 1:
+    if not pending:
         return ""
-    return str((rows.get(pending[0]) or {}).get("branch") or "")
+    tip = pending[0] if len(pending) == 1 else tip_of(rows, pending)
+    return str((rows.get(tip) or {}).get("branch") or "") if tip else ""
 
 
 def rows_by_id(store: Any, slug: str) -> dict[str, dict[str, Any]]:

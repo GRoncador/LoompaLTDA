@@ -116,8 +116,9 @@ chain, by design" — turned the founder's day into the chain's bottleneck. The 
 - What the acceptance still holds is the **merge**: before `review`, a story whose dependency is
   not in the base yet parks (`merge_gate`) and resumes when the founder accepts and the Deployer
   merges. Without that, delivering the dependent would carry an unaccepted delivery into the base.
-- Only one dependency may be in that state at a time: a worktree starts from one branch, so with
-  two deliveries pending the story waits as before.
+- Several dependencies may be in that state when their branches form a chain: the worktree starts
+  from the tip, which carries the ones before it (`tip_of`, tamagotchi S-056 on 2026-10-04). When
+  they are separate lines of work no single branch carries both, and the story waits as before.
 - Nothing reaches the inbox for either wait: waiting is still time, not a decision.
 
 A rejected delivery is the case that decides the shape of the merge gate. When the founder asks
