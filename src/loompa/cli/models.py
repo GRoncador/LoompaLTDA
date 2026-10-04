@@ -244,7 +244,7 @@ def models_aa(
             for x in p[tier]:
                 table.add_row(
                     x["name"],
-                    {"off": "sem raciocínio", "": "padrão"}.get(x["effort"], x["effort"]),
+                    {"none": "sem raciocínio", "": "padrão"}.get(x["effort"], x["effort"]),
                     f"{x['score']:.1f}",
                     f"{x['price']:.2f}" if x["price"] else "—",
                     ", ".join(x["free_at"]) if tier == "tier3" else "",

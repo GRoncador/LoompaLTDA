@@ -130,7 +130,9 @@ class BudgetConfig(BaseModel):
         return data
 
 
-REASONING_EFFORTS = ("minimal", "low", "medium", "high", "max")
+# "none" turns thinking off (an AA "Non-reasoning" variant, plan 9.4); a provider that refuses it
+# falls through to the next candidate.
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "max")
 
 
 class ModelCandidate(BaseModel):
@@ -147,6 +149,11 @@ class ModelCandidate(BaseModel):
     # = never the maker's API; "direct" = never OpenRouter (a failure goes to the next model, and
     # without the maker's key the slot is skipped). "" follows `models.default_route`.
     route: Literal["", "auto", "openrouter", "direct"] = ""
+    # Plan 9.4 (decided 2026-10-04): "fixed" sends `reasoning_effort` on every call, whatever the
+    # task asks, because a rating is only true at the effort it was measured at (a slot filled from
+    # the AA suggestion is fixed); "" or "auto" keeps the per-task policy of ADR-0016. Escalation
+    # still works by tier, and a cut answer still gets more room, never another effort.
+    effort_mode: Literal["", "auto", "fixed"] = ""
     # Set by the router on a "direct" slot whose maker does not take the call's effort.
     plain_effort: bool = Field(False, exclude=True)
 

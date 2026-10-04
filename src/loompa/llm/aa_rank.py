@@ -99,7 +99,7 @@ def work_mix(store: Any, factory: str, config: Any, days: int = 30) -> dict[str,
 
 
 # AA effort tags -> what the Loompa sends (`ModelCandidate.reasoning_effort`); "" = provider default,
-# "off" = thinking off. Xhigh has no Loompa label: it maps to max, the closest above high.
+# "none" = thinking off. Xhigh has no Loompa label: it maps to max, the closest above high.
 EFFORTS = {
     "minimal": "minimal",
     "low": "low",
@@ -107,7 +107,7 @@ EFFORTS = {
     "high": "high",
     "xhigh": "max",
     "max": "max",
-    "non-reasoning": "off",
+    "non-reasoning": "none",
     "reasoning": "",
 }
 _TAG = re.compile(r"\(([^)]*)\)")

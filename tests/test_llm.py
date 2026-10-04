@@ -936,3 +936,31 @@ async def test_a_direct_slot_calls_the_maker_without_an_effort_it_does_not_take(
     )
     rc = await router.complete("worker", [Message("user", "x")], reasoning_effort="low")
     assert rc.candidate.provider == "xiaomi" and maker.calls[0]["reasoning_effort"] == ""
+
+
+async def test_a_fixed_slot_runs_every_call_at_its_own_effort():
+    """Plan 9.4 (2026-10-04): a rating is only true at the effort it was measured at, so a slot
+    filled from the AA suggestion ignores the per-task effort; an automatic slot keeps it."""
+    from loompa.llm.router import slot_effort
+
+    fixed = ModelCandidate(
+        provider="openrouter", model="m", reasoning_effort="high", effort_mode="fixed"
+    )
+    auto = ModelCandidate(provider="openrouter", model="m", reasoning_effort="high")
+    assert slot_effort(fixed, "low") == "high" and slot_effort(fixed, None) == "high"
+    assert slot_effort(auto, "low") == "low" and slot_effort(auto, None) == "high"
+    off = ModelCandidate(
+        provider="openrouter", model="m", reasoning_effort="none", effort_mode="fixed"
+    )
+    assert slot_effort(off, "max") == "none"
+    cfg = byok_config()
+    for tiers in [cfg.models.tiers, *cfg.models.matrix.values()]:
+        for t in tiers:
+            tiers[t] = [
+                c.model_copy(update={"reasoning_effort": "medium", "effort_mode": "fixed"})
+                for c in tiers[t]
+            ]
+    seen = MockProvider("openrouter", script=scripted)
+    router = ModelRouter(cfg, providers={"openrouter": seen}, secrets={}, max_retries=0)
+    await router.complete("worker", [Message("user", "x")], reasoning_effort="low")
+    assert seen.calls[0]["reasoning_effort"] == "medium"

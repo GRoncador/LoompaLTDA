@@ -72,7 +72,15 @@ def _cut_tail(resp: LLMResponse, keep: Any = None) -> dict[str, str]:
 # The only effort label the factory sends (ADR-0016): `low` to think less. Everything else is the
 # provider's default (or the founder's per-model setting). On glm-5.3-flash `medium` and `high`
 # thought as little as `low`, and `max` as much as the default: the labels are not a scale.
-LIGHT_EFFORTS = ("low", "minimal")
+LIGHT_EFFORTS = ("low", "minimal", "none")
+
+
+def slot_effort(cand: ModelCandidate, asked: str | None) -> str:
+    """The effort a call runs at on `cand`: the slot's own when it is fixed (plan 9.4), otherwise
+    what the call asked for, else the slot's default."""
+    if cand.effort_mode == "fixed":
+        return cand.reasoning_effort
+    return asked if asked is not None else cand.reasoning_effort
 
 # One tier up, for the retries of a failed step (ADR-0016 §5: one try on the tier it used, then two
 # on the tier above; tier 1 has nothing above it and stays).
@@ -223,7 +231,7 @@ class ModelRouter:
             if route == "openrouter":
                 out.append(cand)
                 continue
-            effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
+            effort = slot_effort(cand, reasoning_effort)
             for name, cfg, table in direct:
                 own = table.get(cand.model)
                 if own and (route == "direct" or cfg.takes(effort)):
@@ -544,7 +552,7 @@ class ModelRouter:
             if hasattr(prov, "available") and not prov.available():  # type: ignore[attr-defined]
                 calls.errors.append(f"{key}: sem chave de API")
                 continue
-            effort = reasoning_effort if reasoning_effort is not None else cand.reasoning_effort
+            effort = slot_effort(cand, reasoning_effort)
             if cand.plain_effort:
                 effort = ""  # a "direct" slot runs at the maker's default (plan 9.6)
             budget = min(
