@@ -20,7 +20,7 @@ from loompa.conversations import (
     OpenCard,
     apply_ops,
 )
-from loompa.dependencies import WAIT_KEY, Gate, find_cycle, plan_gate, rows_by_id
+from loompa.dependencies import WAIT_KEY, Gate, find_cycle, merge_gate, plan_gate, rows_by_id
 from loompa.engine import Scheduler, Stage, load_state
 from loompa.factory import Factory
 from loompa.llm import Message
@@ -201,20 +201,27 @@ async def test_a_sprint_never_starts_without_a_dependency(factory: Factory):
 # --------------------------------------------------------------------------- the engine
 
 
-async def test_the_chain_specs_first_and_the_dependent_plans_on_the_delivered_code(
+async def test_the_chain_specs_first_and_the_dependent_builds_on_the_approved_delivery(
     factory: Factory,
 ):
+    """11.5: while A waits for the founder's acceptance, B goes on building on A's branch — the
+    Inspector already passed it. What the acceptance still holds is B's own merge."""
     ctx = make_ctx(factory, dry_run=True)
     po = ProductOwnerAgent(ctx)
     a, b = (po.add_item(t).story_id for t in ("Guardar centavos", "Orçamento por categoria"))
     po.set_dependencies(b, [a])
     MasterAgent(ctx).start_sprint([a, b])
     await Scheduler(ctx).run()
+    # `run()` stops as soon as nothing is running: B parks at the plan gate while A is still in
+    # dev, and the engine (which polls) picks it up again. Here that is the second run.
+    await Scheduler(ctx).run()
 
     sa, sb = load_state(ctx, a), load_state(ctx, b)
     assert sa.stage == Stage.AWAITING_FOUNDER and sa.blocked_reason == "delivery"
-    assert sb.stage != Stage.AWAITING_FOUNDER and WAIT_KEY in sb.extra  # parked, not blocked
-    assert sb.spec_ready and not sb.plan_ready
+    # B was not held at the plan gate: it specified, planned and built on A's code
+    assert sb.plan_ready and WAIT_KEY in sb.extra  # parked before `review`, not blocked
+    assert sb.stage != Stage.AWAITING_FOUNDER
+    assert any((ctx.worktrees.get(b).path / "loompa_dryrun").iterdir())  # A's code is in it
     # the chain's specs came first: A planned only after B's spec was approved
     b_spec = first(ctx, lambda e: e["type"] == "spec.approved" and e["story_id"] == b)
     a_plan = first(
@@ -226,8 +233,10 @@ async def test_the_chain_specs_first_and_the_dependent_plans_on_the_delivered_co
         ),
     )
     assert b_spec < a_plan
-    gate = plan_gate(rows_by_id(ctx.store, factory.slug), b)
-    assert gate.gate == Gate.WAIT and gate.label() == f"aguardando {a}, que espera você"
+    rows = rows_by_id(ctx.store, factory.slug)
+    gate = plan_gate(rows, b)
+    assert gate.gate == Gate.OPEN and gate.unmerged == [a]
+    assert merge_gate(rows, b) == [a]  # it may build on A, never merge over it
     delivery = next(m for m in ctx.store.list_messages(factory.slug, "pending") if m.story_id == a)
     assert f"A {b} depende desta" in delivery.impact  # one answer unblocks both
     assert not [m for m in ctx.store.list_messages(factory.slug) if m.story_id == b]
@@ -239,9 +248,8 @@ async def test_the_chain_specs_first_and_the_dependent_plans_on_the_delivered_co
     assert sb.stage == Stage.AWAITING_FOUNDER and sb.blocked_reason == "delivery"
     assert WAIT_KEY not in sb.extra
     assert len([e for e in events(ctx, "spec.approved") if e["story_id"] == b]) == 1  # not redone
-    # planned on the code A delivered: its merged file is in B's worktree
+    assert len([e for e in events(ctx, "story.stage") if e["story_id"] == b and e["payload"].get("node") == "node_plan"]) == 1  # planned once
     assert (factory.root / "loompa_dryrun").is_dir()
-    assert any((ctx.worktrees.get(b).path / "loompa_dryrun").iterdir())
     await ctx.aclose()
 
 

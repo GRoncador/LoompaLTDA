@@ -103,3 +103,24 @@ both.
   pipeline), and grouping by area without order (notes only).
 - Not verified against a real model: the relations in the Product Owner's proposal. `contas` Sprint 2
   has the cents → budget chain to exercise it.
+
+## Amendment (2026-10-04, plan 11.5): the founder's acceptance holds the merge, not the work
+
+The consequence above — "a chain whose first story waits on the founder holds the rest of the
+chain, by design" — turned the founder's day into the chain's bottleneck. The decision changes:
+
+- A dependency that is **built and approved by the Inspector** (`AWAITING_FOUNDER`, blocked for
+  `delivery`, verdict `PASS` or `CONCERNS`) counts as delivered **for the gate before `plan`**. The
+  dependent plans and builds on it; its worktree starts from that story's branch, so it has the
+  code (`base_branch_for`).
+- What the acceptance still holds is the **merge**: before `review`, a story whose dependency is
+  not in the base yet parks (`merge_gate`) and resumes when the founder accepts and the Deployer
+  merges. Without that, delivering the dependent would carry an unaccepted delivery into the base.
+- Only one dependency may be in that state at a time: a worktree starts from one branch, so with
+  two deliveries pending the story waits as before.
+- Nothing reaches the inbox for either wait: waiting is still time, not a decision.
+
+Risk accepted: if the founder rejects a delivery that a dependent already built on, that dependent
+is on top of code that goes back to `dev`. It is a merge to redo, not work lost — the same
+reintegration path a moved base already uses. The founder's "no" costs more than before; their
+silence costs much less.

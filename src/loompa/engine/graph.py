@@ -42,7 +42,16 @@ from loompa.comms import (
     compose_research_message,
     sanitize_for_founder,
 )
-from loompa.dependencies import WAIT_KEY, Gate, dependents, deps_of, plan_gate, rows_by_id
+from loompa.dependencies import (
+    WAIT_KEY,
+    Gate,
+    base_branch_for,
+    dependents,
+    deps_of,
+    merge_gate,
+    plan_gate,
+    rows_by_id,
+)
 from loompa.engine.context import EngineContext
 from loompa.engine.phases import (
     Phase,
@@ -447,9 +456,15 @@ async def node_preflight(ctx: EngineContext, state: StoryState) -> StoryState:
 def _ensure_worktree(ctx: EngineContext, state: StoryState) -> Worktree:
     if not ctx.worktrees.get(state.story_id) and not ctx.worktrees.head_is_valid():
         DeployerAgent(ctx).bootstrap_repo()
-    wt = ctx.worktrees.get(state.story_id) or ctx.worktrees.create(
-        state.story_id, title=state.title
-    )
+    existing = ctx.worktrees.get(state.story_id)
+    on = ""
+    if existing is None:
+        # a dependency whose delivery the founder has not accepted yet is not in the base: the
+        # story starts from its branch, so it is written on top of that code (11.5)
+        on = base_branch_for(rows_by_id(ctx.store, ctx.slug), state.story_id)
+        if on:
+            ctx.emit("story.built_on", story_id=state.story_id, branch=on)
+    wt = existing or ctx.worktrees.create(state.story_id, title=state.title, base=on or None)
     state.worktree = str(wt.path)
     state.branch = wt.branch
     return wt
@@ -863,6 +878,25 @@ async def _merge_after_approval(
 
 
 async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
+    # the founder's acceptance still holds the merge: delivering this story now would carry a
+    # delivery they have not accepted into the base with it (11.5). Waiting is time, not a
+    # decision, so nothing reaches the inbox: the story parks and the Scheduler frees its slot.
+    waits = merge_gate(rows_by_id(ctx.store, ctx.slug), state.story_id)
+    if waits:
+        first = WAIT_KEY not in state.extra
+        state.extra[WAIT_KEY] = {
+            "gate": Gate.WAIT.value,
+            "pending": waits,
+            "founder": waits,
+            "gone": [],
+            "chain": [],
+            "unmerged": waits,
+            "label": f"pronta · aguardando o seu aceite de {', '.join(waits)}",
+        }
+        state.phase = "review"  # where it resumes when the dependency is merged
+        if first:
+            ctx.emit("story.waiting", story_id=state.story_id, pending=waits, stage="review")
+        return state
     wt = _ensure_worktree(ctx, state)
     failed = state.extra.pop(MERGE_FAILED_KEY, None)
     if failed:

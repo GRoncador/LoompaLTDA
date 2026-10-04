@@ -8,6 +8,14 @@ The gate decides, before a chain story plans, whether it may: every dependency d
 spec of the chain approved (open); something still missing (wait: the story parks and frees its
 slot, nobody is asked); or a dependency cancelled or sent back to the backlog (gone: the founder
 decides). Waiting is time, not a decision, so it never reaches the inbox.
+
+A dependency that is *built and approved by the Inspector*, waiting only for the founder to accept
+the delivery, counts as delivered for this gate (11.5): the founder's day was becoming the chain's
+bottleneck, and nothing is lost by building on code the Inspector passed. The dependent starts its
+worktree from that branch, so it has the code. What the founder's approval still holds is the
+merge: a story whose dependency is not in the base yet parks before `review` (`merge_gate`),
+because merging it would drag the unapproved delivery into the base with it. Only one dependency
+may be in that state, since a worktree starts from one branch.
 """
 
 from __future__ import annotations
@@ -94,6 +102,17 @@ def spec_passed(row: Mapping[str, Any]) -> bool:
     return row["stage"] in (Stage.PLAN, Stage.DEV, Stage.TEST, Stage.REVIEW)
 
 
+def awaiting_merge(row: Mapping[str, Any]) -> bool:
+    """Built, green for the Inspector and waiting only for the founder to accept the delivery.
+    Its code exists on its branch; what it lacks is the merge into the base."""
+    st = row.get("state") or {}
+    return (
+        row["stage"] == Stage.AWAITING_FOUNDER
+        and str(st.get("blocked_reason") or "") == "delivery"
+        and str(st.get("qa_verdict") or "") in ("PASS", "CONCERNS")
+    )
+
+
 def chain_of(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> list[str]:
     """Every active story linked to `story_id` by dependencies, either way, itself included."""
     links: dict[str, set[str]] = {}
@@ -135,6 +154,7 @@ class GateResult:
     founder: list[str] = field(default_factory=list)  # ...of those, the ones waiting on the founder
     gone: list[str] = field(default_factory=list)  # cancelled, or back in the backlog
     chain: list[str] = field(default_factory=list)  # chain stories whose spec is not approved
+    unmerged: list[str] = field(default_factory=list)  # approved deliveries not in the base yet
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -143,6 +163,7 @@ class GateResult:
             "founder": self.founder,
             "gone": self.gone,
             "chain": self.chain,
+            "unmerged": self.unmerged,
             "label": self.label(),
         }
 
@@ -156,6 +177,8 @@ class GateResult:
             return f"spec aprovada · aguardando {', '.join(self.pending)}"
         if self.chain:
             return f"spec aprovada · aguardando as specs de {', '.join(self.chain)}"
+        if self.unmerged:
+            return f"construindo sobre {', '.join(self.unmerged)}, que espera o seu aceite"
         return ""
 
 
@@ -169,10 +192,18 @@ def plan_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> GateResul
         row = rows.get(dep)
         if row is None or row["stage"] in (Stage.CANCELLED, Stage.BACKLOG):
             out.gone.append(dep)
+        elif awaiting_merge(row):
+            out.unmerged.append(dep)  # built and approved by the Inspector: good enough to plan
         elif row["stage"] != Stage.DONE:
             out.pending.append(dep)
             if row["stage"] == Stage.AWAITING_FOUNDER:
                 out.founder.append(dep)
+    if len(out.unmerged) > 1:
+        # a worktree starts from one branch: with two deliveries pending, the story would be
+        # missing one of them. It waits for the founder, as before.
+        out.pending.extend(out.unmerged)
+        out.founder.extend(out.unmerged)
+        out.unmerged = []
     out.chain = [
         sid for sid in chain_of(rows, story_id) if sid != story_id and not spec_passed(rows[sid])
     ]
@@ -181,6 +212,36 @@ def plan_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> GateResul
     elif out.pending or out.chain:
         out.gate = Gate.WAIT
     return out
+
+
+def merge_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> list[str]:
+    """Dependencies this story may build on but must not merge over: deliveries the founder has
+    not accepted yet. Merging the story would carry their commits into the base (11.5)."""
+    me = rows.get(story_id)
+    if me is None:
+        return []
+    return [dep for dep in deps_of(me) if (row := rows.get(dep)) and awaiting_merge(row)]
+
+
+def still_waiting(rows: Mapping[str, Mapping[str, Any]], row: Mapping[str, Any]) -> bool:
+    """A parked story that must stay parked. Where it parked says what it waits for: `unmerged`
+    in the note means it is a finished story held before `review` until the delivery it was
+    built on is accepted; anything else is the gate before `plan`."""
+    note = ((row.get("state") or {}).get("extra") or {}).get(WAIT_KEY)
+    if not note:
+        return False
+    if note.get("unmerged"):
+        return bool(merge_gate(rows, row["id"]))
+    return plan_gate(rows, row["id"]).gate == Gate.WAIT
+
+
+def base_branch_for(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> str:
+    """The branch a new worktree starts from: the dependency whose delivery is approved but not
+    merged yet, so the story is written on top of its code. "" means the base branch."""
+    pending = merge_gate(rows, story_id)
+    if len(pending) != 1:
+        return ""
+    return str((rows.get(pending[0]) or {}).get("branch") or "")
 
 
 def rows_by_id(store: Any, slug: str) -> dict[str, dict[str, Any]]:

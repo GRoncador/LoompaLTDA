@@ -28,7 +28,7 @@ from typing import Any
 
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent, StoryStalled, triage
 from loompa.comms import FounderAnswer, FounderMessage, MessageKind
-from loompa.dependencies import WAIT_KEY, Gate, in_chain, plan_gate, spec_passed
+from loompa.dependencies import WAIT_KEY, in_chain, spec_passed, still_waiting
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, back_to_backlog, block
 from loompa.engine.langgraph_engine import GraphRuntime
@@ -148,10 +148,7 @@ class Scheduler:
             and s["stage"] not in PAUSED
             and s["id"] not in self.running
             and s["stage"] != Stage.BACKLOG  # cards wait for a sprint
-            and not (
-                (s.get("state") or {}).get("extra", {}).get(WAIT_KEY)
-                and plan_gate(rows, s["id"]).gate == Gate.WAIT
-            )
+            and not still_waiting(rows, s)  # parked before `plan` or before `review` (11.5)
         ]
         return sorted(out, key=lambda s: 0 if in_chain(rows, s["id"]) and not spec_passed(s) else 1)
 
