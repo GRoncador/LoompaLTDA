@@ -264,7 +264,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
         {(AT_WORK.has(s.stage) || agent || stalled) && (
           <div className="mt-1.5 flex items-end gap-1 text-[10px]">
             <Stage stage={s.stage} since={activity?.stage_since} now={now} />
-            <span className="min-w-0 flex-1 break-words text-slate-500">{activity ? doing(activity) : ""}</span>
+            <span className="min-w-0 flex-1 break-words text-slate-500" title={activity ? doing(activity).title : ""}>{activity ? doing(activity).text : ""}</span>
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
             ) : agent ? <Avatar agent={agent} /> : null}
@@ -371,16 +371,20 @@ function Stage({ stage, since: at, now }: { stage: string; since?: string | null
 /** What the Loompa is doing right now, in its own words whenever it said them ("alinhando
  * critérios ao pedido de ajustes", "abrindo o produto no navegador"). The generic word for the
  * event type is only the last resort. No clocks here — the stage tag carries the time. */
-function doing(a: StoryActivity): string {
+function doing(a: StoryActivity): { text: string; title: string } {
   const target = a.last_target ? ` ${a.last_target.split("/").pop()}` : "";
   // a streamed call still writing: how much it has written so far (ADR-0016)
   const thinking = a.thinking ? `pensando · ${tokens(a.thinking)} tokens` : "";
   if (a.task) {
-    const steps = `T${a.task} · ${a.calls ?? 0} ${a.calls === 1 ? "passo" : "passos"}`;
-    return `${steps}${thinking ? ` · ${thinking}` : a.last_tool ? ` · ${DOING[a.last_tool] ?? a.last_tool}${target}` : ""}`;
+    // "T3 (6)": the task and the tool calls it has made so far, then the one in progress
+    const now = thinking || (a.last_tool ? `${DOING[a.last_tool] ?? a.last_tool}${target}` : "");
+    return {
+      text: `T${a.task} (${a.calls ?? 0})${now ? ` · ${now}` : ""}`,
+      title: `${a.task_text ? `T${a.task}: ${a.task_text}\n` : ""}(${a.calls ?? 0}) ferramentas usadas nesta tarefa`,
+    };
   }
   // the Worker's own detail is "T3: texto da tarefa", already said by the branch above
   const said = a.detail && !/^T\d+:/.test(a.detail) ? a.detail : "";
-  if (said) return thinking ? `${said} · ${thinking}` : said;
-  return thinking || HAPPENING[a.last_event] || "trabalhando";
+  const text = said ? (thinking ? `${said} · ${thinking}` : said) : thinking || HAPPENING[a.last_event] || "trabalhando";
+  return { text, title: text };
 }
