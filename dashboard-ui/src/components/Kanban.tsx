@@ -163,8 +163,8 @@ const BLOCKED_LABEL: Record<string, string> = { delivery: "revisar", question: "
 
 // the size the Product Owner gave the card, always on the card: it says what to expect from it
 const COMPLEXITY: Record<string, { text: string; cls: string; title: string }> = {
-  SIMPLE: { text: "simples", cls: "bg-slate-800 text-slate-300", title: "História simples: caminho curto, sem muitas etapas" },
-  STANDARD: { text: "padrão", cls: "bg-sky-900/50 text-sky-300", title: "História padrão: o fluxo completo da fábrica" },
+  SIMPLE: { text: "simples", cls: "bg-sky-900/50 text-sky-300", title: "História simples: caminho curto, sem muitas etapas" },
+  STANDARD: { text: "padrão", cls: "bg-slate-800 text-slate-300", title: "História padrão: o fluxo completo da fábrica" },
   COMPLEX: { text: "complexa", cls: "bg-fuchsia-900/50 text-fuchsia-300", title: "História complexa: mais tarefas, mais revisão e mais custo" },
 };
 
@@ -333,10 +333,10 @@ function Activity({ a, now }: { a: StoryActivity; now: number }) {
     <div className="mt-1 flex items-center gap-1 text-[10px]" title={title}>
       {a.stalled ? (
         <span className="chip shrink-0 whitespace-nowrap bg-red-900/60 text-red-200">parada há {ago(silent)}</span>
-      ) : quiet ? (
-        <span className="chip shrink-0 whitespace-nowrap bg-amber-900/50 text-amber-200" title="Nenhum evento há alguns minutos">quieta há {ago(silent)}</span>
       ) : (
-        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
+        // some minutes of silence are normal in a long call: the dot goes amber and still, and
+        // only a stall the Ops declared is worth a chip
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${quiet ? "bg-amber-400" : "animate-pulse bg-emerald-400"}`} />
       )}
       <span className="truncate text-slate-400">{clock} · {what}</span>
     </div>
