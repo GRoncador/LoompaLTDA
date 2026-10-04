@@ -56,6 +56,7 @@ export interface StoryActivity {
   last_tool?: string | null;
   last_target?: string | null;
   detail?: string | null; // what the Loompa says it is doing, in its own words
+  model?: string | null; // the model the last call on this story used
   thinking?: number | null; // tokens a streamed call has written so far
   stage?: string | null; // the stage the clock below counts in
   stage_since?: string | null; // when the story entered that stage (a retry in it keeps the clock)

@@ -165,6 +165,7 @@ function advance(base: StoryActivity | undefined, e: LoompaEvent): StoryActivity
   } else if (e.type === "tool.call") {
     Object.assign(next, { calls: (next.calls ?? 0) + 1, last_tool: String(p.tool ?? ""), last_target: String(p.path ?? p.query ?? "") || null });
   }
+  if (e.type === "llm.call" && p.model) next.model = String(p.model);
   next.thinking = e.type === "llm.progress" ? Number(p.tokens ?? 0) : null;
   return next;
 }

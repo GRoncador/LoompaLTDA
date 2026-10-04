@@ -706,6 +706,16 @@ class Store:
             p = json.loads(said[0]["payload_json"] or "{}")
             if p.get("state") in ("WORKING", "TESTING") and p.get("detail"):
                 out["detail"] = str(p["detail"])
+        # the model actually used last on this story: the tier is a choice, this is the answer
+        used = self._q(
+            "SELECT payload_json FROM events WHERE story_id = ? AND type = 'llm.call' "
+            "ORDER BY id DESC LIMIT 1",
+            (story_id,),
+        )
+        if used:
+            model = json.loads(used[0]["payload_json"] or "{}").get("model")
+            if model:
+                out["model"] = str(model)
         started = self._q(
             "SELECT id, payload_json, created_at FROM events WHERE story_id = ? "
             "AND type = 'worker.task_started' ORDER BY id DESC LIMIT 1",

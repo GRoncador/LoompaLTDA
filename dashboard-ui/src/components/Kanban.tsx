@@ -278,7 +278,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             <span className="flex-1" />
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
-            ) : agent ? <Avatar agent={agent} /> : null}
+            ) : agent ? <Avatar agent={agent} tier={s.current_tier} model={activity?.model} /> : null}
           </div>
         )}
       </button>
@@ -286,15 +286,32 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   );
 }
 
-/** The Loompa holding the card. No life dot here: the card's amber border already says which
- * ones are being worked on right now (11.2). */
-function Avatar({ agent }: { agent: Agent }) {
+/** The Loompa holding the card, with the tier and the model it is on. No life dot here: the
+ * card's amber border already says which ones are being worked on right now (11.2). */
+function Avatar({ agent, tier, model }: { agent: Agent; tier?: string; model?: string | null }) {
+  const short = shortModel(model ?? "");
   return (
-    <span className="flex shrink-0 items-center gap-1 text-[10px] text-slate-300" title={`${agent.name} está com este card${agent.detail ? ` · ${agent.detail}` : ""}`}>
+    <span className="flex min-w-0 items-center gap-1 text-[10px] text-slate-300"
+      title={`${agent.name} está com este card${tier ? ` · ${TIER_NAME[tier] ?? tier}` : ""}${model ? ` · ${model}` : ""}${agent.detail ? ` · ${agent.detail}` : ""}`}>
       <LoompaFigure role={agent.role} />
-      {agent.name.replace(/ Loompa$/, "")}
+      <span className="shrink-0">{agent.name.replace(/ Loompa$/, "")}{tier ? ` (${TIER_SHORT[tier] ?? tier})` : ""}</span>
+      {short && <span className="truncate text-slate-500">· {short}</span>}
     </span>
   );
+}
+
+const TIER_SHORT: Record<string, string> = { tier1: "T1", tier2: "T2", tier3: "T3" };
+const TIER_NAME: Record<string, string> = {
+  tier1: "Tier 1 (os mais fortes)", tier2: "Tier 2 (custo-benefício)", tier3: "Tier 3 (gratuitos)",
+};
+
+/** The model as a name someone can read on a card: no provider, no date, no suffix. */
+function shortModel(model: string): string {
+  const name = (model.split(":").pop() ?? model).split("/").pop() ?? "";
+  return name
+    .replace(/^(claude|gpt|gemini|grok|llama|qwen|deepseek)-/i, (m) => m.toLowerCase())
+    .replace(/-(\d{8}|latest|preview|exp)$/i, "")
+    .slice(0, 18);
 }
 
 // stages in which a story is being worked on: only those show a live line
@@ -332,7 +349,8 @@ function holder(agents: Agent[], s: StoryCard, activity: StoryActivity | null): 
   const who = spoke && !BACK_OFFICE.has(spoke.role) ? spoke : agents.find((a) => a.name === owner.name);
   const base = who ?? ({ name: owner.name, role: owner.role, model: "", room: "dev", cost_usd: 0, updated_at: "" } as unknown as Agent);
   // the row's detail is about this card only when the row is
-  return { ...base, state: "WORKING", story_id: s.id, detail: base.story_id === s.id ? base.detail : "" } as Agent;
+  const mine = base.story_id === s.id; // the row's model and detail are about this card only when the row is
+  return { ...base, state: "WORKING", story_id: s.id, detail: mine ? base.detail : "", model: mine ? base.model : "" } as Agent;
 }
 
 /** The newer of the server's snapshot and what live events said since. */

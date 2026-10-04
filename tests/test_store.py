@@ -193,3 +193,12 @@ def test_story_activity_carries_what_the_loompa_says_it_is_doing():
     # the Loompa stopped: the sentence goes with it
     s.emit("f", "agent.state", story_id="S-001", agent="Inspector Loompa", state="IDLE", detail="")
     assert "detail" not in s.story_activity("S-001")
+
+
+def test_story_activity_names_the_model_the_last_call_used():
+    """The card says the tier it chose and the model that answered (11.2)."""
+    s = Store(":memory:")
+    s.upsert_story({"id": "S-001", "factory": "f", "title": "x", "stage": "DEV"})
+    s.emit("f", "llm.call", story_id="S-001", agent="Worker Loompa", model="xiaomi/mimo-2.6-pro")
+    s.emit("f", "tool.call", story_id="S-001", agent="Worker Loompa", tool="edit_file")
+    assert s.story_activity("S-001")["model"] == "xiaomi/mimo-2.6-pro"
