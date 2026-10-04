@@ -11,7 +11,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
   const [s, setS] = useState<Settings | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
-  const [tab, setTab] = useState<"providers" | "models" | "suggest" | "budget">("providers");
+  const [tab, setTab] = useState<"providers" | "models" | "budget">("providers");
   const load = () => api.settings(slug).then(setS).catch((e) => setErr(String(e)));
   useEffect(() => { load(); }, [slug]);
   const save = async (patch: SettingsPatch) => {
@@ -23,9 +23,9 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
       {!s ? <p className="text-sm text-slate-400">{err ?? "carregando…"}</p> : (
         <div className="scroll-thin max-h-[82vh] space-y-4 overflow-y-auto pr-1 text-sm">
           <div className="flex gap-2 border-b border-line pb-2">
-            {(["providers", "models", "suggest", "budget"] as const).map((t) => (
+            {(["providers", "models", "budget"] as const).map((t) => (
               <button key={t} className={tab === t ? "btn-primary" : "btn-ghost"} onClick={() => setTab(t)}>
-                {t === "providers" ? "Provedores e chaves" : t === "models" ? "Modelos e papéis" : t === "suggest" ? "Sugestão de modelos" : "Orçamento"}
+                {t === "providers" ? "Provedores e chaves" : t === "models" ? "Modelos e papéis" : "Orçamento"}
               </button>
             ))}
           </div>
@@ -33,7 +33,6 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
           {notes.length > 0 && <p className="text-xs text-emerald-300">✔ {notes.join(" · ")}</p>}
           {tab === "providers" && <ProvidersPanel slug={slug} s={s} onSave={save} />}
           {tab === "models" && <ModelsPanel slug={slug} s={s} onSave={save} onReload={load} />}
-          {tab === "suggest" && <SuggestPanel slug={slug} s={s} onSave={save} />}
           {tab === "budget" && <BudgetPanel s={s} onSave={save} />}
           <p className="text-[11px] text-slate-500">
             Chaves ficam só em <code>{s.secrets_files.hub}</code> (todas as fábricas) ou <code>{s.secrets_files.factory}</code> (esta fábrica). Nunca entram no config.yaml, no git ou em logs. Mudanças valem na próxima chamada, sem reiniciar.
@@ -748,6 +747,9 @@ function ModelsPanel({
   const [pickerTarget, setPickerTarget] = useState<{ cluster: ClusterName; tier: TierKey; index?: number } | null>(null);
   const [probes, setProbes] = useState<Record<string, ProbeResult | "…">>({});
   const [avail, setAvail] = useState<AvailableDTO | null>(null);
+  // ADR-0025: the Artificial Analysis suggestion, shown per tier of each cluster on demand
+  const [aa, setAA] = useState<AASuggestion | null>(null);
+  const [aaAt, setAAAt] = useState<{ cluster: string; tier: string } | null>(null);
   const [availBusy, setAvailBusy] = useState(false);
 
   const ceiling = s.models?.tier1_ceiling ?? 1.25;
@@ -766,6 +768,15 @@ function ModelsPanel({
   /** The maker that also serves an OpenRouter id with its own API, keyed or not (plan 9.6). */
   const makerOf = (model: string) => s.providers.find((p) => p.name !== "openrouter" && p.byok_models?.includes(model));
   const anyMakerKey = s.providers.some((p) => p.name !== "openrouter" && p.key.configured && (p.byok_models?.length ?? 0) > 0);
+
+  useEffect(() => { api.modelsAA(slug).then(setAA).catch(() => {}); }, [slug]);
+  const useAA = (cluster: string, tier: string, p: AAPick) => {
+    if (!p.openrouter_id) return;
+    const slot: Candidate = { provider: "openrouter", model: p.openrouter_id, reasoning_effort: p.effort, effort_mode: "fixed" };
+    writeCell(cluster, tier, [slot, ...cell(cluster, tier).filter((c) => c.model !== p.openrouter_id)].slice(0, MAX_MODELS_PER_TIER));
+    setAAAt(null);
+    setSyncNote(`${p.name} entrou como 1º da vaga, com o esforço fixo. Salve para valer.`);
+  };
 
   // What each key can call (plan 9.1): the last answer from the cache; the button asks again.
   useEffect(() => {
@@ -908,6 +919,8 @@ function ModelsPanel({
 
   return (
     <div className="space-y-4">
+      {aa && aaAt && <SuggestPopup data={aa} cluster={aaAt.cluster} tier={aaAt.tier} onUse={useAA} onClose={() => setAAAt(null)}
+        onRefresh={async () => { setAA(await api.refreshModelsAA(slug)); }} />}
       {/* ------------------------------------------------------------ actions */}
       <div className="space-y-3 rounded-lg border border-line bg-slate-900/60 p-3">
         <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
@@ -1080,6 +1093,11 @@ function ModelsPanel({
                         <span className="truncate text-[10px] text-slate-400">{t.sublabel}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
+                        {aa && aa.entries > 0 && (
+                          <button type="button" className="btn-ghost px-1 py-0 text-[11px]"
+                            title="Sugestões da Artificial Analysis para este cluster e tier"
+                            onClick={() => setAAAt({ cluster: col.key, tier: t.key })}>💡</button>
+                        )}
                         <span className="font-mono text-[9px] text-slate-500">{candidates.length}/{MAX_MODELS_PER_TIER}</span>
                         {candidates.length < MAX_MODELS_PER_TIER && (
                           <button
@@ -1454,96 +1472,81 @@ const BENCH_LABEL: Record<string, string> = {
 };
 const MIX_LABEL: Record<string, string> = { engineering: "Engenharia", strategy: "Estratégia", routine: "Rotina" };
 
-/** Plan 9.4, revised with the Founder on 2026-10-04: what Artificial Analysis rates best for each
- *  cluster, as (model, effort), with no regard for keys or routes. "usar" puts the pick in that
- *  tier's slot with the effort fixed; choosing a route and its key stays with the founder. */
-function SuggestPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave: (p: SettingsPatch) => Promise<void> }) {
-  const [data, setData] = useState<AASuggestion | null>(null);
+/** ADR-0025: what Artificial Analysis rates best for one tier of one cluster, as (model, effort),
+ *  with no regard for keys or routes. Opened from that tier's header and closed by a click
+ *  outside; "usar" puts the pick first in the tier with the effort fixed (saved with the screen). */
+function SuggestPopup({ data, cluster, tier, onUse, onClose, onRefresh }: {
+  data: AASuggestion; cluster: string; tier: string;
+  onUse: (cluster: string, tier: string, p: AAPick) => void; onClose: () => void; onRefresh: () => Promise<void>;
+}) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { api.modelsAA(slug).then(setData).catch((e) => setErr(String(e))); }, [slug]);
-  const refresh = async () => {
-    setBusy(true); setErr(null);
-    try { setData(await api.refreshModelsAA(slug)); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
-  };
-  const use = async (cluster: string, tier: string, p: AAPick) => {
-    if (!p.openrouter_id) return;
-    const matrix: ModelMatrix = JSON.parse(JSON.stringify(s.matrix ?? {}));
-    const cell = (matrix[cluster] ??= {})[tier] ?? [];
-    const slot: Candidate = { provider: "openrouter", model: p.openrouter_id, reasoning_effort: p.effort, effort_mode: "fixed" };
-    matrix[cluster][tier] = [slot, ...cell.filter((c) => c.model !== p.openrouter_id)].slice(0, 6);
-    await onSave({ matrix });
-  };
-  const fetched = data?.fetched_at ? new Date(data.fetched_at * 1000).toLocaleDateString("pt-BR") : null;
-  if (err && !data) return <p className="text-xs text-red-300">{err}</p>;
-  if (!data) return <p className="text-xs text-slate-400">carregando…</p>;
+  const refresh = async () => { setBusy(true); setErr(null); try { await onRefresh(); } catch (e) { setErr(String(e)); } finally { setBusy(false); } };
+  const prof = data.profiles.find((p) => p.profile === cluster);
+  const picks: AAPick[] = prof ? (prof as unknown as Record<string, AAPick[]>)[tier] ?? [] : [];
+  const fetched = data.fetched_at ? new Date(data.fetched_at * 1000).toLocaleDateString("pt-BR") : null;
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-2 rounded-lg border border-line bg-slate-900/60 p-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1 text-xs text-slate-400">
-          <div className="text-sm font-semibold text-slate-100">Sugestão de modelos pela Artificial Analysis</div>
-          <p>
-            Ranqueia todos os modelos que a Artificial Analysis avalia, cada um num nível de esforço, sem olhar suas chaves ou provedores.
-            Tier 1: os melhores com preço até US$ {data.ceiling.toFixed(2)}/milhão de tokens. Tier 2: pelo menos {Math.round(data.floor_share * 100)}% da nota do melhor do tier 1, pelo custo-benefício.
-            Tier 3: os melhores oferecidos de graça. Escolher a rota e configurar a chave é com você; “usar” põe o modelo na vaga com o esforço fixo.
-          </p>
-          <p className="text-amber-300/90">{data.price_note}</p>
-          <p>{data.entries} modelos avaliados{fetched ? ` · dados de ${fetched}` : ""}{data.stale ? " · desatualizados" : ""} · {data.attribution}</p>
-        </div>
-        <button className="btn-ghost whitespace-nowrap text-xs" disabled={busy || !data.key} title={data.key ? "Consulta a Artificial Analysis (1 das 100 consultas do dia)" : "Configure a chave em Provedores e chaves"} onClick={refresh}>
-          {busy ? "⟳ consultando…" : "📡 Atualizar agora"}
-        </button>
-      </div>
-      {err && <p className="text-xs text-red-300">{err}</p>}
-      {data.entries === 0 && <p className="text-xs text-slate-400">Ainda não há dados: use “Atualizar agora”.</p>}
-      {data.profiles.map((prof) => (
-        <div key={prof.profile} className="space-y-2 rounded-lg border border-line bg-panel p-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div className="font-semibold text-slate-100">{prof.label}</div>
-            <div className="text-[11px] text-slate-500">piso do tier 2: {prof.floor} · {prof.partial} modelos de fora por falta de benchmark</div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-4xl space-y-2 rounded-lg border border-line bg-slate-900 p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="font-semibold text-slate-100">💡 {prof?.label ?? cluster} · {TIER_TITLE[tier] ?? tier}</div>
+            <div className="text-[11px] text-slate-400">
+              {fetched ? `Dados de ${fetched}` : "Sem data"}{data.stale ? " (desatualizados: atualizam ao ligar o motor)" : ""} · {data.entries} modelos avaliados · {data.attribution}
+            </div>
           </div>
+          <div className="flex items-center gap-1">
+            <button className="btn-ghost px-2 py-0 text-[11px]" disabled={busy || !data.key}
+              title={data.key ? "Consulta a Artificial Analysis agora (1 das 100 consultas do dia)" : "Configure a chave em Provedores e chaves"}
+              onClick={refresh}>{busy ? "⟳" : "📡 atualizar"}</button>
+            <button className="btn-ghost px-2 py-0 text-xs" onClick={onClose}>✕</button>
+          </div>
+        </div>
+        {err && <p className="text-[11px] text-red-300">{err}</p>}
+        {prof && (
           <div className="flex flex-wrap gap-1 text-[10px]">
             {Object.entries(prof.weights).map(([k, w]) => (
               <span key={k} className="rounded border border-line px-1.5 py-0.5 text-slate-300">{BENCH_LABEL[k] ?? k} {Math.round(w * 100)}%</span>
             ))}
+            {Object.keys(prof.mix ?? {}).length > 0 && (
+              <span className="px-1 text-slate-400">· pesado pelo trabalho da fábrica: {Object.entries(prof.mix).map(([k, v]) => `${MIX_LABEL[k] ?? k} ${Math.round(v * 100)}%`).join(", ")}</span>
+            )}
           </div>
-          {Object.keys(prof.mix ?? {}).length > 0 && (
-            <div className="text-[11px] text-slate-400">
-              Pesado pelo trabalho desta fábrica: {Object.entries(prof.mix).map(([k, v]) => `${MIX_LABEL[k] ?? k} ${Math.round(v * 100)}%`).join(" · ")}
-            </div>
-          )}
-          {(["tier1", "tier2", "tier3"] as const).map((tier) => prof[tier].length > 0 && (
-            <div key={tier} className="overflow-x-auto">
-              <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-slate-500">{TIER_TITLE[tier]}</div>
-              <table className="w-full text-xs">
-                <thead className="text-left text-[10px] text-slate-500">
-                  <tr><th className="py-1 pr-2">modelo</th><th className="pr-2">esforço</th><th className="pr-2">nota</th><th className="pr-2">US$/mi</th><th className="pr-2">na casa (Worker)</th><th className="pr-2">rota OpenRouter</th><th /></tr>
-                </thead>
-                <tbody>
-                  {prof[tier].map((p) => (
-                    <tr key={p.aa_id} className="border-t border-line/50">
-                      <td className="py-1 pr-2 text-slate-100">{p.name}</td>
-                      <td className="pr-2 text-slate-300">{EFFORT_LABEL[p.effort] ?? p.effort}</td>
-                      <td className="pr-2 font-mono text-cyan-300">{p.score.toFixed(1)}{p.coverage < 1 ? <span className="text-slate-500" title="Nem todos os benchmarks do perfil existem para este modelo; o peso foi redistribuído"> *</span> : null}</td>
-                      <td className="pr-2 font-mono text-slate-300">{p.price != null ? p.price.toFixed(2) : "—"}</td>
-                      <td className={`pr-2 ${p.house?.flagged ? "text-amber-300" : "text-slate-300"}`}>
-                        {p.house && p.house.tasks > 0 ? `${Math.round((p.house.done_rate ?? 0) * 100)}% de ${p.house.tasks}${p.house.enough ? "" : " (amostra pequena)"}` : "—"}
-                      </td>
-                      <td className="pr-2 font-mono text-[10px] text-slate-400">{p.openrouter_id ?? "configure à mão"}</td>
-                      <td className="text-right">
-                        <button className="btn-ghost px-2 py-0 text-[11px]" disabled={!p.openrouter_id}
-                          title={p.openrouter_id ? `Põe ${p.openrouter_id} como 1º da vaga ${tier.replace("tier", "tier ")} deste cluster, com o esforço fixo` : "Sem rota conhecida na OpenRouter: configure à mão em Modelos e papéis"}
-                          onClick={() => use(prof.profile, tier, p)}>usar</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-      ))}
-      <p className="text-[11px] text-slate-500">* nota com parte do peso redistribuída: o modelo não tem todos os benchmarks do perfil.</p>
+        )}
+        <p className="text-[11px] text-slate-400">
+          {tier === "tier1" ? `Os melhores com preço até US$ ${data.ceiling.toFixed(2)}/milhão de tokens.` : tier === "tier2" ? `Pelo menos ${Math.round(data.floor_share * 100)}% da nota do melhor do tier 1 (${prof?.floor ?? "?"}), pelo custo-benefício.` : "Os melhores oferecidos de graça em algum provedor."}
+          {" "}A escolha e a chave são suas; “usar” põe o modelo como 1º desta vaga, com o esforço fixo.
+        </p>
+        {picks.length === 0 ? <p className="text-xs text-slate-400">Nenhuma sugestão para este tier.</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-left text-[10px] text-slate-500">
+                <tr><th className="py-1 pr-2">modelo</th><th className="pr-2">esforço</th><th className="pr-2">nota</th><th className="pr-2">US$/mi</th><th className="pr-2">na casa (Worker)</th><th className="pr-2">rota OpenRouter</th><th /></tr>
+              </thead>
+              <tbody>
+                {picks.map((p) => (
+                  <tr key={p.aa_id} className="border-t border-line/50">
+                    <td className="py-1 pr-2 text-slate-100">{p.name}</td>
+                    <td className="pr-2 text-slate-300">{EFFORT_LABEL[p.effort] ?? p.effort}</td>
+                    <td className="pr-2 font-mono text-cyan-300">{p.score.toFixed(1)}{p.coverage < 1 ? <span className="text-slate-500" title="Nem todos os benchmarks do perfil existem para este modelo; o peso foi redistribuído"> *</span> : null}</td>
+                    <td className="pr-2 font-mono text-slate-300">{p.price != null ? p.price.toFixed(2) : "—"}</td>
+                    <td className={`pr-2 ${p.house?.flagged ? "text-amber-300" : "text-slate-300"}`}>
+                      {p.house && p.house.tasks > 0 ? `${Math.round((p.house.done_rate ?? 0) * 100)}% de ${p.house.tasks}${p.house.enough ? "" : " (amostra pequena)"}` : "—"}
+                    </td>
+                    <td className="pr-2 font-mono text-[10px] text-slate-400">{p.openrouter_id ?? "configure à mão"}</td>
+                    <td className="text-right">
+                      <button className="btn-ghost px-2 py-0 text-[11px]" disabled={!p.openrouter_id}
+                        title={p.openrouter_id ? `Põe ${p.openrouter_id} como 1º desta vaga, com o esforço fixo` : "Sem rota conhecida na OpenRouter: configure à mão"}
+                        onClick={() => onUse(cluster, tier, p)}>usar</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="text-[10px] text-amber-300/80">{data.price_note}</p>
+      </div>
     </div>
   );
 }

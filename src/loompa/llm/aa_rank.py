@@ -443,9 +443,8 @@ def suggest(
     base_of = {e.aa_id: e.base for e in entries}
     ceiling = config.models.tier1_ceiling
     floor = config.models.tier2_floor
-    profiles = (
-        ["engineering", "strategy", "routine"] if config.models.clusters_enabled else ["general"]
-    )
+    # every cluster's ranking, whatever the factory uses: each tier of each cluster asks its own
+    profiles = ["engineering", "strategy", "routine", "general"]
     profiles_out = [
         rank(entries, p, ceiling=ceiling, floor_share=floor, free=free, mix=mix).as_dict()
         for p in profiles

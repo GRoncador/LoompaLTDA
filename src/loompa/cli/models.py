@@ -218,7 +218,10 @@ def models_aa(
         f"{result['entries']} modelos avaliados · teto do tier 1 US$ {result['ceiling']:.2f}/mi "
         f"· piso do tier 2 {result['floor_share']:.0%} do melhor · {result['attribution']}"
     )
-    for p in result["profiles"]:
+    active = (
+        {"engineering", "strategy", "routine"} if f.config.models.clusters_enabled else {"general"}
+    )
+    for p in [p for p in result["profiles"] if p["profile"] in active]:
         console.print(
             f"\n[bold]{p['label']}[/bold] [dim](fora por falta de benchmark: {p['partial']})[/dim]"
         )

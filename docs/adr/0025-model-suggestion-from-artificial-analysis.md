@@ -37,8 +37,12 @@ token, where OpenRouter passes three indices.
    `fixed` and every call runs at its effort, because the rating is only true there; a slot set by
    hand stays `auto` (ADR-0016's per-task policy). Escalation still works by tier and a cut answer
    still gets more room. `none` turns thinking off; OpenRouter takes it where the model allows it.
-6. **A page, not a button:** "Sugestão de modelos" in the settings, from a weekly cache refreshed at
-   engine start; an inbox note when the first picks of a tier change. Nothing changes by itself.
+6. **Where it is used, not a page apart (Founder, 2026-10-04):** a 💡 in the header of each tier of
+   each cluster in "Modelos e papéis" opens that cell's suggestions in a popup (closed by a click
+   outside), with the date of the data; "usar" fills the cell like any edit of the screen. Every
+   cluster's ranking is computed whatever the factory uses. The list comes from a weekly cache
+   refreshed at engine start; an inbox note tells when the first picks of a tier change. Nothing
+   changes by itself.
 7. The house score (plan 9.5) is shown next to each pick: on the Worker it disagreed with AA
    (GLM 5.3 Flash: Terminal-Bench 0.33, 62% of tasks done here; MiMo-V2.6-Flash: 0.23, 96%).
 
