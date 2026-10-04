@@ -22,8 +22,9 @@ the 3.4k calls of `contas`. Every line goes through the same secret redaction as
 that belong to no story (chats, meetings) go to `_factory-<date>.jsonl`. Files untouched for
 `trace.retention_days` are removed when an engine context is built.
 
-Always on, dry-run included. Developer-facing: `loompa trace` reads it; the founder never sees
-it, not even in the dashboard.
+Always on, dry-run included. `loompa trace` reads it in the terminal and, since plan 11.4, the
+story window reads it too (`trace_view.py`): the founder asked to watch what the agent is doing,
+the way an agent CLI shows its own run.
 """
 
 from __future__ import annotations

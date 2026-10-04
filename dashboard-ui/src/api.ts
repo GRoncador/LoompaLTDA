@@ -1,4 +1,5 @@
 import type { AASuggestion, AvailableDTO, FactoryFinding, FactoryScan, ProductFinding } from "./types";
+import type { TraceDetail, TraceOutline } from "./types";
 import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -15,6 +16,8 @@ export const api = {
     req<{ projects_dir: string }>("/api/hub", { method: "PUT", body: JSON.stringify({ projects_dir }) }),
   addFactory: (body: { folder?: string; path?: string; name?: string; stack?: string; mission?: string; keys?: Record<string, string>; secrets_scope?: "hub" | "factory" }) =>
     req<{ slug: string; mode: string; report: string }>("/api/factories", { method: "POST", body: JSON.stringify(body) }),
+  storyTrace: (slug: string, id: string) => req<TraceOutline>(`/api/factories/${slug}/stories/${id}/trace`),
+  storyTraceSpan: (slug: string, id: string, span: string) => req<TraceDetail>(`/api/factories/${slug}/stories/${id}/trace/${span}`),
   settings: (slug: string) => req<Settings>(`/api/factories/${slug}/settings`),
   updateSettings: (slug: string, patch: SettingsPatch) =>
     req<{ changes: string[]; settings: Settings }>(`/api/factories/${slug}/settings`, { method: "PUT", body: JSON.stringify(patch) }),

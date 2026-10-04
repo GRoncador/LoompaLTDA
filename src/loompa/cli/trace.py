@@ -1,6 +1,7 @@
 """`loompa trace`: read a story's trace in the terminal (Fase 8.1).
 
-A tool for developing Loompa, not for the founder: it shows what each round of a tool loop sent
+The terminal view of the trace (the story window has its own since 11.4): it shows what each
+round of a tool loop sent
 and got back — model, tokens, why the answer ended, the tools and their arguments — and, for one
 call, the whole prompt. `--stats` puts time and cost side by side per role and model, which is
 how a tier-2 model is compared with another on the same work before a preset changes.

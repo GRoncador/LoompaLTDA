@@ -517,18 +517,45 @@ def create_app(
             for name in ("spec", "plan", "tasks", "research")
             if (specs / f"{name}.md").is_file()
         }
+        card = _story_card(row)
+        if (row.get("state") or {}).get("extra", {}).get(WAIT_KEY):  # computed now (ADR-0021)
+            card["waiting"] = plan_gate(
+                {r["id"]: r for r in ctx.store.list_stories(slug)}, story_id
+            ).as_dict()
         return {
-            "story": _story_card(row),
+            "story": card,
+            "story_cap_usd": ctx.config.budget.story_cap_usd,
             "sprints": sprint_report.sprints_of(ctx.store, slug, story_id),
             "state": state.model_dump(mode="json"),
             "docs": docs,
             "checkpoints": ctx.store.checkpoints(story_id),
             "history": story_history(ctx.store, story_id),  # one sentence per step (11.3)
+            "activity": ctx.store.story_activity(story_id),  # the live line of the card (11.2)
             "usage": ctx.store.usage_totals(slug, story_id=story_id),
             "commits": ctx.worktrees.log(ctx.worktrees.get(story_id))
             if ctx.worktrees.get(story_id)
             else [],
         }
+
+    @app.get("/api/factories/{slug}/stories/{story_id}/trace")
+    def story_trace(slug: str, story_id: str) -> dict[str, Any]:
+        """What the Loompas actually did on this story: the tree of nodes, tasks, model calls
+        and tool calls from the trace file (plan 11.4)."""
+        from loompa import trace_view
+
+        ctx = hub.get(slug).ctx
+        return trace_view.outline(ctx.root, story_id)
+
+    @app.get("/api/factories/{slug}/stories/{story_id}/trace/{span_id}")
+    def story_trace_span(slug: str, story_id: str, span_id: str) -> dict[str, Any]:
+        """One call opened: the prompt it got, the answer, or a tool's arguments and result."""
+        from loompa import trace_view
+
+        ctx = hub.get(slug).ctx
+        span = trace_view.detail(ctx.root, story_id, span_id)
+        if span is None:
+            raise HTTPException(404, span_id)
+        return span
 
     @app.get("/api/factories/{slug}/stories/{story_id}/diff")
     def story_diff(slug: str, story_id: str) -> dict[str, Any]:

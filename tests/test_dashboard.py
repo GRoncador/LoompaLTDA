@@ -510,3 +510,37 @@ def test_the_card_counts_from_when_the_stage_and_the_task_began(client: TestClie
     ctx.emit("story.stage", story_id=sid, stage="TEST", node="dev")
     ctx.emit("story.stage", story_id=sid, stage="DEV", node="test")
     assert activity()["stage_since"] > entered  # back from TEST: a new stretch in DEV
+
+
+def test_the_story_window_reads_the_trace_of_what_the_agent_did(client: TestClient, git_repo: Path):
+    """Plan 11.4: the trace that `loompa trace` prints is also JSON for the story window — the
+    tree with its numbers, and one span opened with the prompt and the answer."""
+    import json
+
+    from loompa.trace import trace_dir
+
+    sid = client.post("/api/factories/demo-hq/stories", json={"title": "Ver o agente"}).json()["id"]
+    path = trace_dir(git_repo) / f"{sid}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    msg = {"t": "msg", "h": "h1", "role": "user", "content": "escreva a spec"}
+    answer = {"t": "msg", "h": "h2", "role": "assistant", "content": "pronto", "tool_calls": []}
+    node = {"t": "span", "id": "n1", "kind": "node", "name": "spec", "start": "2026-10-04T10:00:00Z",
+            "end": "2026-10-04T10:01:00Z", "ms": 60000, "status": "ok", "attrs": {"tier": "tier2"}}
+    call = {"t": "span", "id": "c1", "parent": "n1", "kind": "llm", "name": "spec",
+            "start": "2026-10-04T10:00:10Z", "end": "2026-10-04T10:00:40Z", "ms": 30000, "status": "ok",
+            "attrs": {"agent": "Spec Loompa", "model": "x/mini", "input_tokens": 1200,
+                      "output_tokens": 300, "cost_usd": 0.0021, "finish_reason": "stop",
+                      "messages": ["h1"], "response": "h2"}}
+    path.write_text("\n".join(json.dumps(r) for r in (msg, answer, call, node)) + "\n")
+
+    out = client.get(f"/api/factories/demo-hq/stories/{sid}/trace").json()
+    assert [s["kind"] for s in out["spans"]] == ["node", "llm"]  # the tree, parents before children
+    assert out["totals"]["calls"] == 1 and out["totals"]["cost_usd"] == 0.0021
+    llm = out["spans"][1]
+    assert llm["attrs"]["model"] == "x/mini" and llm["has_detail"]
+    assert "messages" not in llm["attrs"]  # the outline never carries the prompts
+
+    span = client.get(f"/api/factories/demo-hq/stories/{sid}/trace/c1").json()
+    assert span["messages"][0]["content"] == "escreva a spec"
+    assert span["response"]["content"] == "pronto"
+    assert client.get(f"/api/factories/demo-hq/stories/{sid}/trace/nope").status_code == 404

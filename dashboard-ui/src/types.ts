@@ -410,3 +410,25 @@ export interface AASuggestion {
   fetched_at: number | null; entries: number; ceiling: number; floor_share: number; attribution: string;
   price_note: string; profiles: AAProfile[]; key: boolean; stale: boolean;
 }
+
+/** One span of a story's trace: a phase, a task, a round of the tool loop, a model or tool call. */
+export interface TraceSpan {
+  id: string; depth: number; kind: string; name: string; start: string; ms: number;
+  status: string; has_detail: boolean; error?: string;
+  attrs?: Record<string, unknown>;
+  attempts?: { model?: string; outcome?: string; error?: string; output_tokens?: number; cost_usd?: number }[];
+}
+
+export interface TraceOutline {
+  spans: TraceSpan[];
+  truncated: boolean;
+  totals: { calls: number; tools: number; cost_usd: number; cuts: number; model_ms: number; tool_ms: number };
+}
+
+export interface TraceMessage { role: string; name?: string | null; content: string; tool_calls: { name: string; arguments: unknown }[] }
+
+export interface TraceDetail {
+  id: string; kind: string; name: string; start: string; ms: number; status: string; error?: string | null;
+  attrs: Record<string, unknown>;
+  messages: TraceMessage[]; response: TraceMessage | null; result: TraceMessage | null;
+}
