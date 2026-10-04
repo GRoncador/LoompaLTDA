@@ -52,14 +52,20 @@ _BARE_IMPORT = re.compile(r"""(?:^|[;\s])import\s*['"](\.{1,2}/[^'"]+)['"]""", r
 PAGE_PROBE = """(() => {
   const out = {text: document.body ? document.body.innerText.trim().length : 0, canvases: []};
   for (const c of document.querySelectorAll('canvas')) {
-    let colours = -1;
+    let colours = -1, edges = {};
     try {
       const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
       const seen = new Set();
       for (let i = 0; i < d.length && seen.size < 2; i += 4) seen.add(d[i] + ',' + d[i+1] + ',' + d[i+2] + ',' + d[i+3]);
       colours = seen.size;
+      // pixels unlike the top-left one along each 1-px edge: a drawing cut by the edge
+      const W = c.width, H = c.height, bg = d.slice(0, 4).join(',');
+      const at = (x, y) => { const i = (y * W + x) * 4; return d.slice(i, i + 4).join(','); };
+      const side = (n, f) => { let k = 0; for (let j = 0; j < n; j++) if (at(...f(j)) !== bg) k++; return k / n; };
+      edges = {top: side(W, j => [j, 0]), bottom: side(W, j => [j, H - 1]),
+               left: side(H, j => [0, j]), right: side(H, j => [W - 1, j])};
     } catch (e) {}
-    out.canvases.push({id: c.id || '', width: c.width, height: c.height, colours});
+    out.canvases.push({id: c.id || '', width: c.width, height: c.height, colours, edges});
   }
   return JSON.stringify(out);
 })()"""
@@ -239,12 +245,29 @@ async def _render(chrome: str, url: str, out: SmokeResult) -> None:
                     f"{name} ({c.get('width')}x{c.get('height')}) is one solid colour after "
                     f"{SETTLE_S:.0f}s: nothing was drawn on it"
                 )
+        for c in canvases:
+            if cut := clipped_edges(c.get("edges") or {}):
+                name = f"#{c['id']}" if c.get("id") else "a canvas"
+                out.problems.append(
+                    f"{name}: the drawing touches the {' and '.join(cut)} edge(s) — something "
+                    "is cut off or drawn past the canvas"
+                )
         if not canvases and not seen.get("text"):
             out.problems.append("the page shows no text and no canvas")
         out.notes.append(f"rendered in {Path(chrome).name}")
     finally:
         await _stop(proc)
         shutil.rmtree(profile, ignore_errors=True)
+
+
+def clipped_edges(edges: dict[str, float]) -> list[str]:
+    """Edges where part of the drawing reaches the canvas border (tamagotchi S-048: a sprite
+    grown past the screen, its hand and feet cut, passed every test). A border drawn all round
+    (a frame) or a filled edge is a design; a few pixels on one side are a cut."""
+    framed = [k for k, v in edges.items() if v >= 0.9]
+    if len(framed) == 4:
+        return []
+    return [k for k in ("top", "bottom", "left", "right") if 0 < edges.get(k, 0) < 0.9]
 
 
 def _collect(msg: dict, errors: list[str]) -> None:

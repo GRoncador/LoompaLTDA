@@ -112,3 +112,16 @@ async def test_the_inspector_fails_a_page_that_does_not_load(factory, monkeypatc
     assert any("/src/falta.js, which answers 404" in p for p in events[0]["payload"]["problems"])
     assert seen and "[smoke] FAIL" in "\n".join(load_state(ctx, sid).failure_history)
     await ctx.aclose()
+
+
+def test_a_drawing_cut_by_the_canvas_edge_is_a_problem():
+    from loompa.smoke import clipped_edges
+
+    # tamagotchi S-048: the sprite's hand and feet past the right and bottom edges
+    assert clipped_edges({"top": 0, "bottom": 0.18, "left": 0, "right": 0.05}) == [
+        "bottom",
+        "right",
+    ]
+    assert clipped_edges({"top": 1, "bottom": 1, "left": 1, "right": 1}) == []  # a frame
+    assert clipped_edges({"top": 0, "bottom": 0, "left": 0, "right": 0}) == []
+    assert clipped_edges({}) == []
