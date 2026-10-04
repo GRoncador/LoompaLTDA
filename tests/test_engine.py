@@ -1500,7 +1500,9 @@ def plans_in(files_by_attempt: list[list[str]]) -> Callable[..., Any]:
 
     def script(model: str, messages: list[Message], tools: Any) -> Any:
         out = dry_run_script(model, messages, tools)
-        is_plan = role_of(messages) == "architect" and "## Repository outline" in messages[1].content
+        is_plan = (
+            role_of(messages) == "architect" and "## Repository outline" in messages[1].content
+        )
         if is_plan and isinstance(out, str) and '"approach"' in out:
             data = json.loads(out)
             data["files"] = files_by_attempt[min(plans["n"], len(files_by_attempt) - 1)]
@@ -1563,4 +1565,33 @@ async def test_a_story_past_its_cost_cap_waits_and_going_on_grants_another_cap(f
     await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="continue"))
     state = load_state(ctx, sid)
     assert state.phase == "dev" and not state.founder_notes  # the choice is not guidance
+    await ctx.aclose()
+
+
+async def test_an_amendment_never_sends_the_worker_into_the_factorys_own_folder(factory: Factory):
+    """`contas` S-042: the founder's "changes" became a task "adjust criterion 6 of the spec in
+    .loompa/specs/S-042/", a folder the worktree does not have; the Worker looped 18 rounds."""
+    from loompa.agents.architect import LOOMPA_NOTE, ArchitectAgent
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect" and "## Founder's guidance" in messages[-1].content:
+            return json.dumps(
+                {
+                    "files": [".loompa/specs/S-001/spec.md", "./.loompa/x.md", "app/ofx.py"],
+                    "tasks": [
+                        "Ajustar o critério 6 da spec em .loompa/specs/S-001/ e a regra em app/ofx.py"
+                    ],
+                    "reason": "pedido",
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Importar OFX")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    before = list(state.allowed_paths)  # the story's own evidence folder is in it on purpose
+    await ArchitectAgent(ctx).amend(state, "PAYMENT também é despesa")
+    assert state.allowed_paths == [*before, "app/ofx.py"]
+    assert LOOMPA_NOTE in (factory.paths.specs / sid / "tasks.md").read_text()
     await ctx.aclose()

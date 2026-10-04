@@ -182,10 +182,19 @@ does not need stays out). Decide what the plan needs so the Worker can follow th
 - `files`: extra paths (relative to the repo root) it must be allowed to create, edit or delete;
 - `tasks`: 0-3 extra atomic tasks (one commit each, with its check) that carry out the request.
 Add only what the guidance needs and never repeat a task already done. A plain clarification needs
-nothing new: return empty lists.
+nothing new: return empty lists. The story's spec, plan and tasks under `.loompa/` are not in the
+repository the Worker edits, and the factory updates the spec's criteria itself when the founder
+changes them: never name a `.loompa/` path in `files` or ask a task to edit it. Why: a task told the
+Worker to "adjust criterion 6 of the spec in .loompa/specs/" and it spent 18 rounds looking for it.
 Respond with JSON only: {{"files": [str], "tasks": [str], "reason": str}}
 Write `tasks` and `reason` in {language}; paths as they are.
 """
+
+# Appended to an amended task that still names the factory's own folder (see AMEND_SYSTEM).
+LOOMPA_NOTE = (
+    " (The spec and plan under .loompa/ are not in this repository and the factory updates them:"
+    " do not look for them; change only the product files.)"
+)
 
 TASK_PREFIX = re.compile(r"^\s*T\d+\s*[:.-]\s*")  # the model numbering its own tasks
 FILE_REF = re.compile(r"[\w.-]+/|\b[\w-]+\.[a-z]{1,5}\b")
@@ -397,8 +406,16 @@ class ArchitectAgent(LoompaAgent):
             max_iterations=4,
             task="architect.amend",
         )
-        files = [f for f in self._list(data, "files") if f not in state.allowed_paths]
-        tasks = [TASK_PREFIX.sub("", t) for t in self._list(data, "tasks")[:3]]
+        files = [
+            f
+            for f in self._list(data, "files")
+            if f not in state.allowed_paths and not f.removeprefix("./").startswith(".loompa/")
+        ]
+        tasks = [
+            TASK_PREFIX.sub("", t)
+            + (LOOMPA_NOTE if ".loompa/" in t and LOOMPA_NOTE not in t else "")
+            for t in self._list(data, "tasks")[:3]
+        ]
         state.allowed_paths = state.allowed_paths + files
         files += self._follow_tasks(state, tasks, "amend")
         if tasks:
