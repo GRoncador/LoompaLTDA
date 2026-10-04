@@ -28,6 +28,7 @@ from loompa.dependencies import (
     base_branch_for,
     find_cycle,
     merge_gate,
+    merge_parked_note,
     parked_before_review,
     plan_gate,
     rows_by_id,
@@ -568,3 +569,34 @@ def test_two_pending_deliveries_in_a_chain_let_the_next_story_start():
     apart = plan_gate(rows, "S-056")
     assert apart.gate == Gate.WAIT and apart.pending == ["S-054", "S-055"]
     assert base_branch_for(rows, "S-056") == ""
+
+
+def test_the_parked_card_says_nothing_is_missing():
+    """11.5 (tamagotchi S-055, 04/10): a story finished and green, parked before `review` until
+    the delivery it was built on is accepted, was shown with a closed padlock over S-054 — the
+    card's "a dependency is missing" — because its note repeated the dependency in `pending` and
+    `founder`. Nothing is missing there: the code is written and the Inspector passed it."""
+    note = merge_parked_note(["S-054"], "pronta · aguardando o seu aceite de S-054")
+    assert note["unmerged"] == ["S-054"]  # what it waits for, and what names it on the card
+    assert not note["pending"] and not note["founder"] and not note["chain"] and not note["gone"]
+    assert note["gate"] == Gate.WAIT.value  # it is waiting: no Loompa is working on it
+
+    ROUTE = ["spec", "spec_review", "plan", "dev", "test", "review"]
+    rows = {
+        "S-054": {"id": "S-054", "stage": Stage.AWAITING_FOUNDER, "depends_on": [], "branch": "b54",
+                  "state": {"blocked_reason": "delivery", "qa_verdict": "PASS",
+                            "route": ROUTE, "resume_phase": "review"}},
+        "S-055": {"id": "S-055", "stage": Stage.REVIEW, "depends_on": ["S-054"], "branch": "b55",
+                  "state": {"qa_verdict": "PASS", "route": ROUTE, "phase": "review",
+                            "extra": {BUILT_ON_KEY: "S-054", WAIT_KEY: note}}},
+    }
+    assert parked_before_review(rows["S-055"]) and still_waiting(rows, rows["S-055"])
+
+    # a row parked by an older version carried the dependency in every field; the panel reads it
+    # as it is written today, so the padlock opens without a migration
+    legacy = note | {"pending": ["S-054"], "founder": ["S-054"]}
+    rows["S-055"]["state"]["extra"][WAIT_KEY] = legacy
+    assert still_waiting(rows, rows["S-055"])  # the engine only ever read `unmerged`
+    shown = merge_parked_note(legacy["unmerged"], legacy["label"]) | {"ready": True}
+    assert not shown["pending"] and not shown["founder"]
+    assert shown["unmerged"] == ["S-054"] and shown["ready"]

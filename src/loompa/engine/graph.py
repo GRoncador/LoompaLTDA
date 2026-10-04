@@ -51,6 +51,7 @@ from loompa.dependencies import (
     deps_of,
     gone_under,
     merge_gate,
+    merge_parked_note,
     plan_gate,
     rows_by_id,
 )
@@ -928,15 +929,9 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     waits = merge_gate(rows, state.story_id)
     if waits:
         first = WAIT_KEY not in state.extra
-        state.extra[WAIT_KEY] = {
-            "gate": Gate.WAIT.value,
-            "pending": waits,
-            "founder": waits,
-            "gone": [],
-            "chain": [],
-            "unmerged": waits,
-            "label": f"pronta · aguardando o seu aceite de {', '.join(waits)}",
-        }
+        state.extra[WAIT_KEY] = merge_parked_note(
+            waits, f"pronta · aguardando o seu aceite de {', '.join(waits)}"
+        )
         state.phase = "review"  # where it resumes when the dependency is merged
         if first:
             ctx.emit("story.waiting", story_id=state.story_id, pending=waits, stage="review")
@@ -1174,15 +1169,9 @@ def apply_founder_answer(
                 # belt and braces: `review` parks a story whose dependency is not in the base, so
                 # this delivery should not exist. If one ever does, the approval is kept and the
                 # merge waits for the dependency instead of carrying it along (11.5).
-                state.extra[WAIT_KEY] = {
-                    "gate": Gate.WAIT.value,
-                    "pending": waits,
-                    "founder": waits,
-                    "gone": [],
-                    "chain": [],
-                    "unmerged": waits,
-                    "label": f"aprovada · aguardando a entrega de {', '.join(waits)}",
-                }
+                state.extra[WAIT_KEY] = merge_parked_note(
+                    waits, f"aprovada · aguardando a entrega de {', '.join(waits)}"
+                )
                 state.blocked_reason = None
                 state.stage = Stage.REVIEW
                 state.phase = "review"

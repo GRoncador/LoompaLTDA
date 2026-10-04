@@ -41,7 +41,7 @@ from loompa.conversations import (
     ConversationStatus,
     MeetingMode,
 )
-from loompa.dependencies import WAIT_KEY, parked_before_review, plan_gate
+from loompa.dependencies import WAIT_KEY, merge_parked_note, parked_before_review, plan_gate
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column, load_state
 from loompa.engine.lock import DryRunOnLiveFactory, EngineBusy, EngineLock
 from loompa.factory import Factory
@@ -440,7 +440,12 @@ def create_app(
             if s["stage"] in LIVE_STAGES:  # only a story at work has something to show
                 card["activity"] = ctx.store.story_activity(s["id"])
             if parked_before_review(s):
-                card["waiting"] = (s["state"]["extra"][WAIT_KEY] | {"ready": True})
+                # the note as it is written today, also for a row parked by an older version:
+                # nothing holds this card but the delivery before it (11.5)
+                note = s["state"]["extra"][WAIT_KEY]
+                card["waiting"] = merge_parked_note(
+                    note.get("unmerged") or [], str(note.get("label") or "")
+                ) | {"ready": True}
             columns[board_column(s)].append(card)
         backend_services = {"ops", "finance", "kaizen"}
         agents = {
@@ -524,6 +529,11 @@ def create_app(
             card["waiting"] = plan_gate(
                 {r["id"]: r for r in ctx.store.list_stories(slug)}, story_id
             ).as_dict()
+        if parked_before_review(row):  # the drawer says the same as the card (11.5)
+            note = row["state"]["extra"][WAIT_KEY]
+            card["waiting"] = merge_parked_note(
+                note.get("unmerged") or [], str(note.get("label") or "")
+            ) | {"ready": True}
         return {
             "story": card,
             "story_cap_usd": ctx.config.budget.story_cap_usd,

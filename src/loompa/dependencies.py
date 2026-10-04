@@ -198,6 +198,23 @@ class GateResult:
         return ""
 
 
+def merge_parked_note(waits: Iterable[str], label: str) -> dict[str, Any]:
+    """The note of a story that is finished and green and parked before `review` until the
+    delivery it was built on is accepted (11.5). Only `unmerged` is read: by `still_waiting`, to
+    know where it parked, and by the panel, to name the delivery it is waiting for. `pending` and
+    `founder` stay empty on purpose — on the card they mean "a dependency is missing", and none
+    is: the code is written, the Inspector passed it and only the merge waits."""
+    return {
+        "gate": Gate.WAIT.value,
+        "pending": [],
+        "founder": [],
+        "gone": [],
+        "chain": [],
+        "unmerged": list(waits),
+        "label": label,
+    }
+
+
 def plan_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> GateResult:
     """May `story_id` plan now? See the module docstring."""
     me = rows.get(story_id)

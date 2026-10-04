@@ -260,7 +260,9 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
               className={`chip ${held.length ? "bg-red-900/70 text-red-200" : "border border-red-400/70 bg-transparent font-normal text-red-300"}`}
               title={held.length
                 ? s.waiting?.label || "Esta história só segue depois que estas forem entregues"
-                : `Livre para trabalhar: escrita sobre ${linked.join(", ")}. Só a integração espera o seu aceite daquela entrega.`}
+                : s.waiting?.ready
+                  ? `Pronta e verde: escrita sobre ${linked.join(", ")}. Só falta integrar, e isso espera o seu aceite daquela entrega.`
+                  : `Livre para trabalhar: escrita sobre ${linked.join(", ")}. Só a integração espera o seu aceite daquela entrega.`}
               onMouseEnter={() => onHl?.({ ids: held.length ? held : linked })} onMouseLeave={() => onHl?.({})}>
               {held.length ? "🔒" : "🔓"} {(held.length ? held : linked).join(", ")}
             </span>
