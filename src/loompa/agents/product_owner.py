@@ -317,8 +317,10 @@ Respond with JSON only:
 {{"reply": str, "cards": [{{"ref": "S-017", "verdict": "retire" or "keep", "reason": str}}]}}
 `reply` is what the founder reads: at most four short sentences, how many you propose to retire
 and keep and the main reason, no file names or code. Nothing is cancelled yet: your retirements go
-into the draft and leave the backlog only when the founder saves it, so never say you retired them. `reason` is one short sentence per card, also for the
-founder, without file names or code. Write `reply` and `reason` in {language}.
+into the draft and leave the backlog only when the founder saves it, so never say you retired them.
+Address the founder as "você" and never guess their gender (a live reply said "a fundadora"). `reason` is one short sentence per card, also for the
+founder, without file names or code. Write `reply` and `reason` in {language} only (a live reply
+slipped into Spanish).
 """
 
 
