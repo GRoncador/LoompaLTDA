@@ -29,7 +29,7 @@ from loompa.conversations import (
     MeetingMode,
 )
 from loompa.engine import EngineContext
-from loompa.sprints import SprintError
+from loompa.sprints import SprintBoard, SprintError
 
 console = Console()
 chat_app = typer.Typer(help="Conversas: reunião de sprint e brainstorm, com o Master Loompa.")
@@ -335,9 +335,14 @@ async def handle(
         return True
     elif command == "/sprint" and meeting and not current:
         result = await convs.commit(conv.id, start_sprint=True, goal=rest)
+        sprint = (
+            SprintBoard(ctx.store, ctx.slug).get(result.sprint_id) if result.sprint_id else None
+        )
+        # tamagotchi SP-007 said "8 histórias no backlog": 2 in the sprint and 6 retired
         console.print(
-            f"[green]✔[/green] {result.sprint_id} iniciado · "
-            f"{len(result.created) + len(result.existing)} histórias no backlog"
+            f"[green]✔[/green] {result.sprint_id} iniciado com "
+            f"{len(sprint.story_ids) if sprint else 0} história(s)"
+            + (f" · {len(result.retired)} card(s) aposentado(s)" if result.retired else "")
         )
         if run_after:
             await _run(ctx, until_idle=True)
