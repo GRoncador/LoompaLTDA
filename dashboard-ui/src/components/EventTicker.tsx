@@ -6,7 +6,7 @@ const LABEL: Record<string, string> = {
   "worktree.commit": "✅", "story.merged": "🚀", "kaizen.learning": "💡", "agent.state": "👤", "engine.started": "▶", "engine.stopped": "⏸", "scheduler.paused": "⛔",
 };
 
-export default function EventTicker({ events, agents = [] }: { events: LoompaEvent[]; agents?: Agent[] }) {
+export default function EventTicker({ events, agents = [], factory = "" }: { events: LoompaEvent[]; agents?: Agent[]; factory?: string }) {
   const last = events.slice(-6).reverse();
   // the Loompa who spoke, drawn like everywhere else, instead of one generic figure for all
   const roleOf = new Map(agents.map((a) => [a.name, a.role]));
@@ -16,16 +16,20 @@ export default function EventTicker({ events, agents = [] }: { events: LoompaEve
       {last.map((e, i) => (
         <span key={`${e.id ?? i}-${i}`} className="flex items-center gap-1 whitespace-nowrap">
           {e.agent && roleOf.has(e.agent) ? <LoompaFigure role={roleOf.get(e.agent)!} /> : <span>{LABEL[e.type] ?? "•"}</span>}
-          {e.story_id ?? ""} {e.agent ? `${e.agent.replace(/ Loompa$/, "")}:` : ""} {summarize(e)}
+          {e.agent ? e.agent.replace(/ Loompa$/, "") : ""}
+          {e.story_id && <b className="font-semibold text-slate-300">{e.story_id}</b>}
+          <span>: {summarize(e, factory)}</span>
         </span>
       ))}
     </footer>
   );
 }
 
-function summarize(e: LoompaEvent): string {
+function summarize(e: LoompaEvent, factory = ""): string {
   const p = e.payload ?? {};
   switch (e.type) {
+    // the greeting of a fresh connection says which factory you are looking at
+    case "hello": return `hello ${factory || e.factory || ""}`.trim();
     case "story.stage": return String(p.stage ?? "");
     case "inbox.new": return String(p.title ?? "").slice(0, 60);
     case "llm.call": return `${p.model} $${Number(p.cost_usd ?? 0).toFixed(4)}`;

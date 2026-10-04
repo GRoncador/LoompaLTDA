@@ -125,7 +125,7 @@ export default function App() {
           />
         </section>
       </main>
-      <EventTicker events={events} agents={overview?.agents ?? []} />
+      <EventTicker events={events} agents={overview?.agents ?? []} factory={overview?.factory.name ?? ""} />
       {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} kickoff={!!overview?.factory.kickoff} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
       {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
       {factoryOpen && slug && <FactoryModal slug={slug} onClose={() => setFactoryOpen(false)} onOpenSprint={(id) => { setFactoryOpen(false); setSprintsAt(id); }} onOpenStory={setStoryId} />}
