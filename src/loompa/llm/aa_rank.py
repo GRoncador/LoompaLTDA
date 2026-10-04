@@ -37,24 +37,66 @@ STALE_S = 7 * 24 * 3600
 MIN_COVERAGE = 0.6
 PICKS = 5
 
-# What each cluster's roles do, as AA benchmarks (weights sum to 1). Only the suite AA runs on new
-# models: since 2026-08 a release gets HLE, LCR, SciCode and Terminal-Bench v4.0 (GPQA and
-# tau-banking for about half), and none of IFBench, tau2, LiveCodeBench or Terminal-Bench Hard. A
-# profile built on the old suite ranked April models above their September successors (measured
-# 2026-10-04). Strategy: Master, Architect, Spec, Product Owner, Analyst; engineering: Worker,
-# Inspector; routine: Deployer and support.
+# What each cluster's roles do, as AA benchmarks (weights sum to 1), decided with the Founder on
+# 2026-10-04. Only the suite AA runs on new models: since 2026-08 a release gets HLE, LCR, SciCode
+# and Terminal-Bench v4.0 (tau-banking and GPQA for about half), and none of IFBench, tau2,
+# LiveCodeBench or Terminal-Bench Hard; a profile on the old suite ranked April models above their
+# September successors. Measured on models since 2026-06: Terminal-Bench v4.0 is the most
+# independent signal (0.42 with LCR, 0.62 with SciCode); HLE tracks the intelligence index (0.94);
+# GPQA tracks LCR (0.91) and is left out as a double count; AA's coding index is Terminal-Bench
+# v2.1 (1.0) and is not mixed with its parts.
 PROFILES: dict[str, dict[str, float]] = {
-    "strategy": {"hle": 0.4, "lcr": 0.4, "gpqa": 0.2},
-    "engineering": {"terminalbench_v4_0": 0.5, "scicode": 0.3, "lcr": 0.2},
-    "routine": {"lcr": 0.5, "terminalbench_v4_0": 0.25, "hle": 0.25},
-    "general": {"artificial_analysis_intelligence_index": 1.0},
+    # Worker: an agent in a terminal (the most independent signal), writing correct code, a tool
+    # history that grows to 200k characters; Inspector: judging against criteria with tools.
+    "engineering": {"terminalbench_v4_0": 0.45, "scicode": 0.25, "lcr": 0.15, "tau_banking": 0.15},
+    # Master, Architect, Spec, Product Owner, Analyst: broad reasoning, reading a spec, the repo and
+    # the conversation, keeping to rules over many turns (No Invention, meeting ops), repo tools.
+    "strategy": {"hle": 0.35, "lcr": 0.30, "tau_banking": 0.20, "terminalbench_v4_0": 0.15},
+    # Deployer and support, classify, wording: short, format-bound calls; the price decides more.
+    "routine": {"tau_banking": 0.35, "hle": 0.25, "lcr": 0.20, "scicode": 0.20},
 }
+# The single cluster mixes the three by the factory's own work: each cluster's share of the calls
+# in the last 30 days (`work_mix`), this default without data (contas: Worker and Inspector ~78% of
+# the cost). Not the intelligence index alone: that is AA's mix, heavier on knowledge and science.
+DEFAULT_MIX = {"engineering": 0.65, "strategy": 0.30, "routine": 0.05}
 PROFILE_LABEL = {
     "strategy": "Estratégia & Produto (Master, Architect, Spec, PO, Analyst)",
     "engineering": "Engenharia (Worker, Inspector)",
     "routine": "Rotina (Deployer e apoio)",
-    "general": "Geral (só o índice de inteligência)",
+    "general": "Geral (todos os Loompas, pesado pelo trabalho da fábrica)",
 }
+
+
+def general_weights(mix: dict[str, float] | None = None) -> dict[str, float]:
+    """The single cluster's weights: each cluster's profile times its share of the work."""
+    mix = {k: v for k, v in (mix or DEFAULT_MIX).items() if k in PROFILES and v > 0}
+    total = sum(mix.values()) or 1.0
+    out: dict[str, float] = {}
+    for cluster, share in mix.items():
+        for bench, w in PROFILES[cluster].items():
+            out[bench] = out.get(bench, 0.0) + w * share / total
+    return {k: round(v, 4) for k, v in out.items()}
+
+
+def work_mix(store: Any, factory: str, config: Any, days: int = 30) -> dict[str, float] | None:
+    """Each cluster's share of the factory's model calls (None without enough calls)."""
+    from datetime import UTC, datetime, timedelta
+
+    from loompa.config.schema import CLUSTER_ROLES
+
+    end = datetime.now(UTC)
+    rows = store.usage_window(factory, (end - timedelta(days=days)).isoformat(), end.isoformat())
+    of = {role: cluster for cluster, roles in CLUSTER_ROLES.items() for role in roles}
+    count: dict[str, int] = {}
+    for r in rows:
+        cluster = of.get(r["role"])
+        if cluster in PROFILES:
+            count[cluster] = count.get(cluster, 0) + 1
+    total = sum(count.values())
+    if total < 100:
+        return None
+    return {k: round(v / total, 3) for k, v in sorted(count.items())}
+
 
 # AA effort tags -> what the Loompa sends (`ModelCandidate.reasoning_effort`); "" = provider default,
 # "off" = thinking off. Xhigh has no Loompa label: it maps to max, the closest above high.
@@ -217,12 +259,14 @@ class Ranking:
     considered: int
     partial: int  # left out: less than MIN_COVERAGE of the profile's weight measured
     unpriced: list[Pick]  # rated well but AA has no price: outside ceiling and cost-benefit
+    weights: dict[str, float] = field(default_factory=dict)
+    mix: dict[str, float] = field(default_factory=dict)  # the single cluster's work mix
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "profile": self.profile,
             "label": PROFILE_LABEL.get(self.profile, self.profile),
-            "weights": PROFILES.get(self.profile, {}),
+            "weights": self.weights,
             "tier1": [p.as_dict() for p in self.tier1],
             "tier2": [p.as_dict() for p in self.tier2],
             "tier3": [p.as_dict() for p in self.tier3],
@@ -230,6 +274,7 @@ class Ranking:
             "considered": self.considered,
             "partial": self.partial,
             "unpriced": [p.as_dict() for p in self.unpriced],
+            "mix": self.mix,
         }
 
 
@@ -267,9 +312,10 @@ def rank(
     floor_share: float = 0.75,
     free: dict[str, list[str]] | None = None,
     picks: int = PICKS,
+    mix: dict[str, float] | None = None,
 ) -> Ranking:
     """`free`: AA id -> where it is offered free (see `free_offers`)."""
-    weights = PROFILES[profile]
+    weights = PROFILES[profile] if profile in PROFILES else general_weights(mix)
     best = {k: max((e.bench[k] for e in entries if k in e.bench), default=0.0) for k in weights}
     scored, partial = [], 0
     for e in entries:
@@ -282,10 +328,15 @@ def rank(
     t1 = _best_per_base([x for x in priced if x[0].price <= ceiling])[:picks]
     top = t1[0][1] if t1 else 0.0
     floor = round(top * floor_share, 1)
-    t2_pool = _best_per_base(
-        [x for x in priced if x[0].price <= ceiling and x[1] >= floor and x[0].price > 0]
-    )
-    t2 = sorted(t2_pool, key=lambda x: (-(x[1] / x[0].price), x[0].aa_id))[:picks]
+    # each model at its best-value effort above the floor (a lower effort may be the better buy)
+    pool = [x for x in priced if x[0].price <= ceiling and x[1] >= floor]
+    seen: set[str] = set()
+    t2 = []
+    for x in sorted(pool, key=lambda x: (-(x[1] / x[0].price), x[0].aa_id)):
+        if x[0].base not in seen:
+            seen.add(x[0].base)
+            t2.append(x)
+    t2 = t2[:picks]
     free = free or {}
     t3 = _best_per_base([x for x in scored if x[0].aa_id in free])[:picks]
     unpriced = _best_per_base([x for x in scored if x[0].price is None and x[1] >= floor])[:picks]
@@ -298,6 +349,8 @@ def rank(
         considered=len(entries),
         partial=partial,
         unpriced=[_pick(e, s, c) for e, s, c in unpriced],
+        weights=weights,
+        mix=(mix or DEFAULT_MIX) if profile not in PROFILES else {},
     )
 
 
@@ -333,7 +386,11 @@ def free_offers(entries: list[Entry], catalog: list[dict[str, Any]]) -> dict[str
 
 
 def suggest(
-    config: Any, cache_dir: Path | None = None, catalog: list[dict[str, Any]] | None = None
+    config: Any,
+    cache_dir: Path | None = None,
+    catalog: list[dict[str, Any]] | None = None,
+    *,
+    mix: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Every profile's ranking from the cached AA list (no network)."""
     cached = load(cache_dir)
@@ -348,15 +405,20 @@ def suggest(
     free = free_offers(entries, catalog)
     ceiling = config.models.tier1_ceiling
     floor = config.models.tier2_floor
-    profiles = list(PROFILES) if config.models.clusters_enabled else ["general"]
+    profiles = (
+        ["engineering", "strategy", "routine"] if config.models.clusters_enabled else ["general"]
+    )
     return {
         "fetched_at": cached.get("fetched_at"),
         "entries": len(entries),
         "ceiling": ceiling,
         "floor_share": floor,
         "attribution": "Notas: Artificial Analysis (artificialanalysis.ai)",
+        # AA prices per token; a higher effort spends more reasoning tokens, which AA does not give
+        "price_note": "O preço é por token: um esforço mais alto gasta mais tokens de raciocínio, "
+        "e a Artificial Analysis não informa quantos. O custo-benefício de uma variante Max é otimista.",
         "profiles": [
-            rank(entries, p, ceiling=ceiling, floor_share=floor, free=free).as_dict()
+            rank(entries, p, ceiling=ceiling, floor_share=floor, free=free, mix=mix).as_dict()
             for p in profiles
         ],
     }

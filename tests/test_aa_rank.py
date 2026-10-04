@@ -51,3 +51,16 @@ def test_tier3_lists_only_models_a_provider_offers_free():
     assert free == {"acme/mid": ["OpenRouter (acme/mid:free)"]}
     r = rank(entries, "engineering", free=free)
     assert [p.aa_id for p in r.tier3] == ["acme/mid"] and r.tier3[0].free_at
+
+
+def test_the_single_cluster_mixes_the_three_by_the_factorys_work():
+    from loompa.llm.aa_rank import PROFILES, general_weights
+
+    w = general_weights({"engineering": 0.8, "strategy": 0.2})
+    assert abs(sum(w.values()) - 1) < 1e-3
+    assert w["terminalbench_v4_0"] == round(0.8 * 0.45 + 0.2 * 0.15, 4)
+    assert "gpqa" not in w and all(
+        "gpqa" not in p for p in PROFILES.values()
+    )  # double count of LCR
+    r = rank(parse(RAW), "general", mix={"engineering": 1.0})
+    assert r.weights == PROFILES["engineering"] and r.mix == {"engineering": 1.0}

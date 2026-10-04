@@ -205,10 +205,15 @@ def models_aa(
             asyncio.run(aa_rank.refresh(key, tool.base_url))
         except Exception:  # noqa: BLE001 - the cached ranking (if any) is shown below
             console.print("[yellow]![/yellow] Não consegui consultar a Artificial Analysis agora.")
-    result = aa_rank.suggest(f.config)
+    from loompa.store import Store
+
+    db = f.paths.state_db
+    mix = aa_rank.work_mix(Store(db), f.slug, f.config) if db.is_file() else None
+    result = aa_rank.suggest(f.config, mix=mix)
     if not result["entries"]:
         console.print("Ainda não há dados da Artificial Analysis: use --refresh.")
         return
+    console.print(f"[dim]{result['price_note']}[/dim]")
     console.print(
         f"{result['entries']} modelos avaliados · teto do tier 1 US$ {result['ceiling']:.2f}/mi "
         f"· piso do tier 2 {result['floor_share']:.0%} do melhor · {result['attribution']}"
@@ -217,6 +222,11 @@ def models_aa(
         console.print(
             f"\n[bold]{p['label']}[/bold] [dim](fora por falta de benchmark: {p['partial']})[/dim]"
         )
+        weights = ", ".join(f"{k} {v:.0%}" for k, v in p["weights"].items())
+        console.print(f"[dim]pesos: {weights}[/dim]")
+        if p.get("mix"):
+            mix = ", ".join(f"{k} {v:.0%}" for k, v in p["mix"].items())
+            console.print(f"[dim]mistura do trabalho da fábrica: {mix}[/dim]")
         for tier, title in (
             ("tier1", "Tier 1"),
             ("tier2", "Tier 2 (custo-benefício)"),
