@@ -475,6 +475,7 @@ class MasterAgent(LoompaAgent):
         from loompa.agents.brainstorm import (
             BRAINSTORM_CONTRACT,
             BRAINSTORM_SYSTEM,
+            KICKOFF_RULES,
             consult,
             consult_requests,
             known_urls,
@@ -504,7 +505,8 @@ class MasterAgent(LoompaAgent):
                 origin="brainstorm",
                 polish=lambda reply: AnalystAgent.only_seen_urls(reply, seen),
                 max_tokens=2200,
-                contract=BRAINSTORM_CONTRACT,
+                contract=BRAINSTORM_CONTRACT
+                + (KICKOFF_RULES if conv.draft.kickoff is not None else ""),
             )
         finally:
             self.set_state("IDLE")
@@ -513,13 +515,64 @@ class MasterAgent(LoompaAgent):
         direction = str(turn.extra.get("direction") or "").strip()
         if direction:
             conv.draft.direction = founder_text(direction, 1200)
+        kickoff = conv.draft.kickoff
+        if kickoff is not None:
+            vision = str(turn.extra.get("vision") or "").strip()
+            if vision:
+                kickoff.vision = founder_text(vision, 800)
+            out = turn.extra.get("out_of_v1")
+            if isinstance(out, list):
+                kickoff.out_of_v1 = [founder_text(str(x), 200) for x in out if str(x).strip()][:10]
         conv.draft.ready = turn.extra.get("ready") is True and bool(
             conv.draft.items or conv.draft.direction
         )
+        if kickoff is not None:
+            from loompa.kickoff import missing
+
+            conv.draft.ready = conv.draft.ready and not missing(conv.draft)
         board.save(conv)
         for role, question in consult_requests(turn.extra.get("consult")):
             await consult(self.ctx, board, conv, role, question)
+        if (
+            kickoff is not None
+            and not kickoff.stacks
+            and (kickoff.vision or conv.draft.direction)
+            and conv.draft.items
+        ):
+            await self.kickoff_stack(conv)
         return turn
+
+    async def kickoff_stack(self, conv: Conversation) -> list[Any]:
+        """Plan 10.10: the Architect proposes the stack and one alternative once the kickoff has a
+        vision and v1 features; the founder picks one. Shown as the Architect's turn."""
+        from loompa.agents.architect import ArchitectAgent
+        from loompa.conversations import render_transcript
+        from loompa.kickoff import propose_stack, stack_text
+
+        board = ConversationBoard(self.ctx.store, self.ctx.slug)
+        kickoff = conv.draft.kickoff
+        if kickoff is None:
+            raise ConversationError("isso só vale no brainstorm de abertura")
+        options = await propose_stack(self.ctx, conv.draft, render_transcript(conv, limit=12))
+        name = ArchitectAgent(self.ctx).name
+        if not options:
+            text = (
+                "Não consegui propor a stack agora. Peça de novo em instantes "
+                "(ou diga qual linguagem você prefere)."
+            )
+        else:
+            kickoff.stacks, kickoff.chosen = options, None
+            lines = [
+                f"Proposta de stack para a primeira versão:\n1 (recomendada): {stack_text(options[0])}"
+            ]
+            if len(options) > 1:
+                lines.append(f"2 (alternativa): {stack_text(options[1])}")
+            lines.append("Diga qual prefere (1 ou 2); a escolhida vale para todo o projeto.")
+            text = founder_text("\n".join(lines), 2000)
+        conv.turns.append(Turn(who="agent", name=name, text=text))
+        board.save(conv)
+        self.ctx.emit("kickoff.stack_proposed", conversation_id=conv.id, options=len(options))
+        return options
 
     async def brief(self, conv: Conversation) -> str:
         """Open a Sprint Meeting with where the project stands and a suggested next step (plan

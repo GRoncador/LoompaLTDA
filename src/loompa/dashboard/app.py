@@ -420,6 +420,8 @@ def create_app(
     # -------------------------------------------------------------- overview
     @app.get("/api/factories/{slug}/overview")
     def overview(slug: str) -> dict[str, Any]:
+        from loompa.kickoff import needs_kickoff
+
         rt = hub.get(slug)
         ctx = rt.ctx
         stories = ctx.store.list_stories(slug)
@@ -467,6 +469,7 @@ def create_app(
                 "language": ctx.config.factory.language,
                 "engine": hub.engine_running(slug),
                 "dry_run": hub.dry_run,
+                "kickoff": needs_kickoff(ctx),  # plan 10.10: only the opening brainstorm
             },
             "columns": [
                 {"key": k, "label": label, "stories": columns[k]} for k, label in KANBAN_COLUMNS

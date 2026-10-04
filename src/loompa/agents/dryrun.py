@@ -138,6 +138,31 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                 "needs_decision": False,
             }
         )
+    if role == "architect" and "Propose the stack for this product" in messages[0].content:
+        option = {
+            "languages": ["Python"],
+            "frameworks": [],
+            "package_managers": ["uv"],
+            "test_frameworks": ["pytest"],
+            "test_command": "uv run pytest -q",
+            "lint_command": "",
+        }
+        return json.dumps(
+            {
+                "options": [
+                    {**option, "summary": "Simulação: Python com pytest", "reason": "simulação"},
+                    {
+                        **option,
+                        "languages": ["JavaScript"],
+                        "package_managers": ["npm"],
+                        "test_frameworks": ["node:test"],
+                        "test_command": "npm test",
+                        "summary": "Simulação: JavaScript com node:test",
+                        "reason": "simulação",
+                    },
+                ]
+            }
+        )
     if role == "architect":
         if "## Founder's guidance" in messages[-1].content:
             return json.dumps(

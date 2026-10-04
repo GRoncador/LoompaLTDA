@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { ChatReply, Consultant, Conversation, ConversationKind, DraftItem, MeetingMode, Opinion, SprintContext } from "../types";
+import type { ChatReply, Consultant, Conversation, ConversationKind, DraftItem, Kickoff, MeetingMode, Opinion, SprintContext } from "../types";
 import { Modal } from "./Modal";
 
 const COPY: Record<ConversationKind, { title: string; hint: string; placeholder: string; agent: string }> = {
@@ -37,8 +37,8 @@ function detail(e: unknown): string {
   try { return String(JSON.parse(json).detail ?? raw); } catch { return raw; }
 }
 
-export default function ChatModal({ slug, kind, resumeId, initialText, onBrainstorm, onClose }: {
-  slug: string; kind: ConversationKind; resumeId?: string; initialText?: string;
+export default function ChatModal({ slug, kind, resumeId, initialText, kickoff = false, onBrainstorm, onClose }: {
+  slug: string; kind: ConversationKind; resumeId?: string; initialText?: string; kickoff?: boolean;
   onBrainstorm?: (text: string) => void; onClose: () => void;
 }) {
   const [conv, setConv] = useState<Conversation | null>(null);
@@ -90,8 +90,12 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
       opening.current = true;
       setBusy(true); setWaitingFor("Master Loompa está preparando o parecer");
       api.openConversation(slug, "meeting", "").then((r) => { setConv(r.conversation); if (r.sprints) setSprints(r.sprints); }).catch((e) => setErr(detail(e))).finally(() => { setBusy(false); setWaitingFor(null); });
+    } else if (kind === "brainstorm" && kickoff && !initialText && !opening.current) {
+      // a new factory's opening (plan 10.10): the fixed first question is waiting in the session
+      opening.current = true;
+      api.openConversation(slug, "brainstorm", "").then((r) => { setConv(r.conversation); if (r.consultants) setConsultants(r.consultants); }).catch((e) => setErr(detail(e)));
     }
-  }, [slug, resumeId, kind]);
+  }, [slug, resumeId, kind, kickoff, initialText]);
   useEffect(() => { setGoal(conv?.draft.goal ?? ""); }, [conv?.draft.goal]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [conv?.turns.length, pending]);
 
@@ -129,7 +133,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
   };
   // a meeting opened and left before the founder said anything is not worth keeping
   const close = () => {
-    if (conv && conv.kind === "meeting" && conv.status === "open" && founderTurns === 0) api.discard(slug, conv.id).catch(() => {});
+    if (conv && (conv.kind === "meeting" || conv.draft.kickoff) && conv.status === "open" && founderTurns === 0) api.discard(slug, conv.id).catch(() => {});
     onClose();
   };
   // a brainstorm (ADR-0020): the founder asks a role directly, with the text box as the question
@@ -318,6 +322,38 @@ export default function ChatModal({ slug, kind, resumeId, initialText, onBrainst
 
 const ROLE_LABEL: Record<string, string> = { analyst: "Analyst", architect: "Architect" };
 
+/** Plan 10.10: what the opening of a new factory must settle besides the direction and the ideas
+ *  (the v1 features): the vision, what stays out of v1 and the stack the founder picks. */
+function KickoffBox({ k, editable, onEdit }: { k: Kickoff; editable: boolean; onEdit: (ops: Record<string, unknown>[]) => void }) {
+  return (
+    <div className="space-y-1.5 rounded-md border border-brand/50 bg-panel p-2">
+      <div className="text-[10px] uppercase tracking-wide text-brand">Abertura da fábrica</div>
+      <div><span className="text-slate-500">Visão: </span>{k.vision || <span className="text-slate-500">ainda não definida</span>}</div>
+      {k.out_of_v1.length > 0 && <div><span className="text-slate-500">Fora da v1: </span>{k.out_of_v1.join("; ")}</div>}
+      {k.stacks.length === 0 ? (
+        <div className="text-slate-500">Stack: o Architect propõe quando a visão e a primeira versão estiverem claras.</div>
+      ) : (
+        <div className="space-y-1">
+          <div className="text-[10px] uppercase tracking-wide text-slate-500">Stack{k.applied ? " · gravada na fábrica" : ""}</div>
+          {k.stacks.map((opt, n) => (
+            <div key={n} className={`rounded border p-1.5 ${k.chosen === n + 1 ? "border-emerald-700/70 bg-emerald-950/30" : "border-line"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-slate-100">{n === 0 ? "Recomendada" : "Alternativa"}: {opt.summary || [...opt.languages, ...opt.frameworks].join(", ")}</span>
+                {k.chosen === n + 1 ? (
+                  <span className="text-[11px] text-emerald-300">✔ escolhida</span>
+                ) : (
+                  <button className="btn-ghost px-2 py-0 text-[11px]" disabled={!editable || k.applied} onClick={() => onEdit([{ op: "choose_stack", option: n + 1 }])}>Escolher</button>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400">testes: <code>{opt.test_command}</code>{opt.reason ? ` · ${opt.reason}` : ""}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A brainstorm (ADR-0020): the direction and the ideas while it is a conversation, the opinions
  *  the roles gave, and, after the first OK, the Product Owner's split waiting for the second. */
 function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, onEdit, onEditSplit, onApprove, onReopen, onCommit, onDiscard }: {
@@ -359,6 +395,7 @@ function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, o
               <div className="text-[10px] uppercase tracking-wide text-slate-500">Rumo{draft?.ready ? " · o Master acha que está claro" : ""}</div>
               <div className="mt-0.5 whitespace-pre-wrap text-slate-100">{draft?.direction || <span className="text-slate-500">Ainda sem rumo. Conte a ideia na conversa.</span>}</div>
             </div>
+            {draft?.kickoff && <KickoffBox k={draft.kickoff} editable={editable} onEdit={onEdit} />}
             <ul className="space-y-1.5">
               {ideas.length === 0 && <li className="text-slate-500">Nenhuma ideia no rascunho ainda.</li>}
               {ideas.map((i) => <Item key={i.key} item={i} sprint={false} editable={editable} onEdit={onEdit} />)}

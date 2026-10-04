@@ -8,8 +8,8 @@ const TONE: Record<string, string> = {
 
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
 
-export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, onChat, onOpen, onCreate, onReorder, onUnpin }: {
-  onOpenSprint: (id: string) => void;
+export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, kickoff = false, onChat, onOpen, onCreate, onReorder, onUnpin }: {
+  onOpenSprint: (id: string) => void; kickoff?: boolean;
   columns: Column[]; agents?: Agent[]; sprint: SprintSummary | null; nextSprint: { id: string; goal: string; story_ids: string[] } | null;
   conversations: ConversationSummary[]; live: Record<string, StoryActivity>; now: number;
   onChat: (kind: ConversationKind, resumeId?: string) => void; onOpen: (id: string) => void;
@@ -74,8 +74,12 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
             </span>
           )}
           {/* a sprint starts only from a meeting, after the Product Owner's proposal (ADR-0017) */}
-          <button className="btn-primary text-xs" title="O Master abre com o estado do projeto; o Product Owner propõe o sprint" onClick={() => onChat("meeting")}>🗓 Reunião de Sprint</button>
-          <button className="btn-ghost text-xs" title="Discutir uma ideia com a fábrica" onClick={() => onChat("brainstorm")}>💡 Brainstorm</button>
+          <button className={`${kickoff ? "btn-ghost opacity-50" : "btn-primary"} text-xs`} disabled={kickoff}
+            title={kickoff ? "Comece pelo brainstorm de abertura: ele decide a visão, a primeira versão e a stack" : "O Master abre com o estado do projeto; o Product Owner propõe o sprint"}
+            onClick={() => onChat("meeting")}>🗓 Reunião de Sprint</button>
+          <button className={`${kickoff ? "btn-primary" : "btn-ghost"} text-xs`}
+            title={kickoff ? "Abertura da fábrica: visão, primeira versão e stack" : "Discutir uma ideia com a fábrica"}
+            onClick={() => onChat("brainstorm")}>{kickoff ? "💡 Brainstorm de abertura" : "💡 Brainstorm"}</button>
           {conversations.length > 0 && (
             <details className="relative">
               <summary className="btn-ghost cursor-pointer list-none text-xs" title="Conversas em aberto">💬 {conversations.length}</summary>

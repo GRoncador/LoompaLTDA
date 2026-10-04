@@ -135,6 +135,35 @@ class Approval(BaseModel):
     at: str = Field(default_factory=now_iso)
 
 
+class StackOption(BaseModel):
+    """One stack the Architect proposes at a greenfield kickoff (plan 10.10)."""
+
+    languages: list[str] = Field(default_factory=list)
+    frameworks: list[str] = Field(default_factory=list)
+    package_managers: list[str] = Field(default_factory=list)
+    test_frameworks: list[str] = Field(default_factory=list)
+    test_command: str = ""
+    lint_command: str = ""
+    summary: str = ""  # pt-BR, one line the founder reads
+    reason: str = ""  # pt-BR: why this one for this product
+
+
+class Kickoff(BaseModel):
+    """The opening of a greenfield factory with no code (plan 10.10): what the brainstorm must
+    settle before the first OK, on top of its direction and ideas (the v1 features)."""
+
+    vision: str = ""  # what it is, for whom, the problem it solves
+    out_of_v1: list[str] = Field(default_factory=list)
+    stacks: list[StackOption] = Field(default_factory=list)  # 1 = recommended, 2 = alternative
+    chosen: int | None = None  # 1-based index into `stacks`, the founder's pick
+    applied: bool = False  # the first OK wrote the stack into the factory
+
+    def stack(self) -> StackOption | None:
+        if self.chosen is None or not 1 <= self.chosen <= len(self.stacks):
+            return None
+        return self.stacks[self.chosen - 1]
+
+
 class Draft(BaseModel):
     goal: str = ""
     items: list[DraftItem] = Field(default_factory=list)
@@ -159,6 +188,7 @@ class Draft(BaseModel):
     next_opinion: int = 1
     approved: Approval | None = None
     split: list[DraftItem] | None = None
+    kickoff: Kickoff | None = None  # a greenfield factory's opening brainstorm (plan 10.10)
 
     def opinions(self) -> list[Opinion]:
         """The opinions still in play (not set aside by the founder, not failed)."""
@@ -334,6 +364,9 @@ def apply_ops(
         if brainstorm and op in ("dismiss", "restore"):
             _dismiss(draft, raw, op == "dismiss", report)
             continue
+        if op == "choose_stack":
+            _choose_stack(draft, raw, report)
+            continue
         if op == "add":
             _add(
                 draft,
@@ -371,6 +404,27 @@ def apply_ops(
         else:
             report.ignored.append(f"operação desconhecida: {op or '(vazia)'}")
     return report
+
+
+def _choose_stack(draft: Draft, raw: dict[str, Any], report: OpsReport) -> None:
+    """The founder's pick of a kickoff stack (plan 10.10): 1 = recommended, 2 = alternative."""
+    k = draft.kickoff
+    if k is None or not k.stacks:
+        report.ignored.append("ainda não há proposta de stack para escolher")
+        return
+    try:
+        n = int(raw.get("option") or raw.get("ref") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if not 1 <= n <= len(k.stacks):
+        report.ignored.append(f"a proposta de stack tem {len(k.stacks)} opção(ões)")
+        return
+    if k.applied and k.chosen != n:
+        report.ignored.append("a stack já foi gravada na fábrica no primeiro OK")
+        return
+    k.chosen = n
+    opt = k.stacks[n - 1]
+    report.changes.append(f"stack escolhida: {opt.summary or ', '.join(opt.languages)}")
 
 
 def _retire(
@@ -683,6 +737,27 @@ def render_brainstorm(draft: Draft) -> str:
     if draft.consults:
         lines.append("Opinions given (preliminary):")
         lines += [render_opinion(o, limit=500) for o in draft.consults[-8:]]
+    if draft.kickoff is not None:
+        lines.append(render_kickoff(draft.kickoff))
+    return "\n".join(lines)
+
+
+def render_kickoff(k: Kickoff) -> str:
+    """The kickoff's own fields, as the models read them (plan 10.10)."""
+    lines = [
+        "KICKOFF of a new product (no code yet). Before the founder's first OK the direction needs "
+        "a vision, the v1 features (the ideas) and a chosen stack.",
+        f"Vision: {k.vision or '(not set yet)'}",
+        "Out of v1: " + ("; ".join(k.out_of_v1) if k.out_of_v1 else "(nothing said yet)"),
+    ]
+    for n, opt in enumerate(k.stacks, 1):
+        tag = " · CHOSEN by the founder" if k.chosen == n else ""
+        lines.append(
+            f"Stack option {n}{tag}: {', '.join(opt.languages + opt.frameworks)} · tests: "
+            f"{opt.test_command or '?'} · {opt.summary}"
+        )
+    if not k.stacks:
+        lines.append("Stack: not proposed yet (the Architect proposes it).")
     return "\n".join(lines)
 
 

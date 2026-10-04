@@ -91,7 +91,13 @@ def meeting(
     from loompa.agents import MasterAgent
 
     ctx.index_memory()
-    result = asyncio.run(MasterAgent(ctx).meeting(text))
+    from loompa.conversations import ConversationError
+
+    try:
+        result = asyncio.run(MasterAgent(ctx).meeting(text))
+    except ConversationError as exc:  # e.g. a new factory opens with its kickoff brainstorm
+        console.print(f"[yellow]{exc}[/yellow] Use [bold]loompa chat brainstorm[/bold].")
+        raise typer.Exit(code=1) from None
     table = Table(title="Histórias criadas")
     table.add_column("id", style="cyan")
     table.add_column("título")

@@ -18,7 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from loompa.agents import Conversations
+from loompa.agents import Conversations, MasterAgent
 from loompa.cli.main import app, resolve_factory
 from loompa.cli.ops import _run, build_context
 from loompa.conversations import (
@@ -86,6 +86,7 @@ HELP = {
     ConversationKind.BRAINSTORM: (
         "/consultar analyst|architect <pergunta>  pede um parecer preliminar\n"
         "/deixar O1         deixa um parecer de lado (e /retomar O1 o traz de volta)\n"
+        "/stack 1|2         na abertura: escolhe a stack (sem número: nova proposta)\n"
         "/aprovar           aprova o rumo (1º OK): o Product Owner propõe os cards\n"
         "/voltar            descarta a proposta de cards e volta à conversa\n"
         "/backlog           grava a proposta do Product Owner (2º OK)\n"
@@ -105,6 +106,21 @@ HELP = {
 def print_brainstorm(conv: Conversation) -> None:
     draft = conv.draft
     console.print(f"[bold]Rumo:[/bold] {draft.direction or '[dim](ainda não definido)[/dim]'}")
+    k = draft.kickoff
+    if k is not None:  # plan 10.10
+        console.print(f"[bold]Visão:[/bold] {k.vision or '[dim](ainda não definida)[/dim]'}")
+        if k.out_of_v1:
+            console.print(f"[bold]Fora da v1:[/bold] {'; '.join(k.out_of_v1)}")
+        for n, opt in enumerate(k.stacks, 1):
+            mark = " [green]✔ escolhida[/green]" if k.chosen == n else ""
+            label = "recomendada" if n == 1 else "alternativa"
+            console.print(
+                f"  stack {n} ({label}): {opt.summary} · testes: {opt.test_command}{mark}"
+            )
+        if not k.stacks:
+            console.print(
+                "  [dim]Stack: o Architect propõe quando a visão e a v1 estiverem claras.[/dim]"
+            )
     for i in draft.items:
         console.print(
             f"  {i.key} · P{i.priority} · {i.title}"
@@ -280,6 +296,12 @@ async def handle(
     elif command in ("/deixar", "/retomar") and brainstorm and args:
         op = "dismiss" if command == "/deixar" else "restore"
         _show(convs.edit(conv.id, [{"op": op, "ref": a} for a in args]))
+    elif command == "/stack" and brainstorm and conv.draft.kickoff is not None:
+        if args:
+            _show(convs.edit(conv.id, [{"op": "choose_stack", "option": args[0]}]))
+        else:  # ask the Architect again
+            await MasterAgent(ctx).kickoff_stack(convs.board.require(conv.id))
+            say_aloud(convs, convs.board.require(conv.id))
     elif command == "/aprovar" and brainstorm:
         await convs.approve(conv.id)
         say_aloud(convs, convs.board.require(conv.id))
@@ -364,7 +386,11 @@ def _start(
 
     async def go() -> None:
         convs = Conversations(ctx)
-        conv = convs.open(kind)
+        try:
+            conv = convs.open(kind)
+        except ConversationError as exc:  # e.g. a new factory opens with its kickoff brainstorm
+            console.print(f"[yellow]{exc}[/yellow] Use [bold]loompa chat brainstorm[/bold].")
+            return
         if kind == ConversationKind.MEETING:
             await convs.brief(conv.id)  # the Master opens with where the project stands
             conv = convs.board.require(conv.id)

@@ -266,7 +266,22 @@ class Conversations:
         start with."""
         if kind == ConversationKind.REVIEW:
             raise ConversationError("a revisão do Product Owner nasce de uma história rápida")
+        from loompa.kickoff import GATE_TEXT, KICKOFF_QUESTION, needs_kickoff
+
+        kickoff = needs_kickoff(self.ctx)
+        if kickoff and kind == ConversationKind.MEETING:
+            raise ConversationError(GATE_TEXT)
         conv = self.board.create(kind, title)
+        if kickoff and kind == ConversationKind.BRAINSTORM:
+            # plan 10.10: the opening of a factory with no code; the first question is fixed
+            from loompa.conversations import Kickoff
+
+            conv.draft.kickoff = Kickoff()
+            conv.turns.append(
+                Turn(who="agent", name=self.agent_for(kind).name, text=KICKOFF_QUESTION)
+            )
+            self.board.save(conv)
+            self.ctx.emit("kickoff.opened", conversation_id=conv.id)
         if (
             kind == ConversationKind.MEETING
             and SprintBoard(self.ctx.store, self.ctx.slug).running() is None
@@ -401,12 +416,29 @@ class Conversations:
         conv = self._brainstorm(conversation_id)
         if not conv.draft.items and not conv.draft.direction:
             raise ConversationError("ainda não há um rumo para aprovar: conte a ideia primeiro")
+        kickoff = conv.draft.kickoff
+        if kickoff is not None:  # plan 10.10: checked in code before the first OK
+            from loompa.kickoff import apply_stack, missing
+
+            lacking = missing(conv.draft)
+            if lacking:
+                raise ConversationError(
+                    "Antes de aprovar a abertura, falta: " + "; ".join(lacking) + "."
+                )
+            apply_stack(self.ctx, kickoff, kickoff.vision or conv.draft.direction)
         conv.draft.approved = Approval(
             direction=conv.draft.direction, ideas=[i.key for i in conv.draft.items]
         )
         self.board.save(conv)
         self.ctx.emit("brainstorm.approved", conversation_id=conv.id, ideas=len(conv.draft.items))
         turn = await ProductOwnerAgent(self.ctx).propose_split(conv)
+        if kickoff is not None:
+            from loompa.kickoff import SKELETON_TITLE, add_skeleton
+
+            if add_skeleton(conv.draft) is not None and conv.turns:
+                conv.turns[-1].changes.insert(
+                    0, f"primeiro card: “{SKELETON_TITLE}”; os outros dependem dele"
+                )
         self.board.save(conv)
         return turn
 
@@ -462,6 +494,10 @@ class Conversations:
         title, description = title.strip(), description.strip()
         if not title:
             raise ConversationError("uma história precisa de título")
+        from loompa.kickoff import GATE_TEXT, needs_kickoff
+
+        if needs_kickoff(self.ctx):
+            raise ConversationError(GATE_TEXT)
         po = ProductOwnerAgent(self.ctx)
         said = "\n".join(p for p in (title, description) if p)
         verdict = await po.triage_request(title, description)
@@ -616,6 +652,11 @@ class Conversations:
                 po = ProductOwnerAgent(self.ctx)
                 result = await po.apply_split(conv)
                 closing = po.name, _split_summary(result, conv)
+                if conv.draft.kickoff is not None and result.created:
+                    from loompa.kickoff import DONE_KEY
+
+                    self.ctx.store.set(DONE_KEY, conv.id)  # the Sprint Meeting opens now
+                    self.ctx.emit("kickoff.done", conversation_id=conv.id)
         finally:
             self.board.save(conv)  # ids assigned before a failure survive for the retry
         conv.turns.append(Turn(who="agent", name=closing[0], text=closing[1]))

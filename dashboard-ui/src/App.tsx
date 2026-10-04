@@ -117,6 +117,7 @@ export default function App() {
           <Kanban
             onOpenSprint={setSprintsAt}
             columns={overview?.columns ?? []} agents={overview?.factory.engine ? overview.agents : []} sprint={overview?.sprint ?? null} nextSprint={overview?.next_sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now}
+            kickoff={!!overview?.factory.kickoff}
             onChat={(kind, resumeId) => setChat({ kind, resumeId })} onOpen={setStoryId}
             onCreate={createStory}
             onReorder={async (ids, dragged) => { if (slug) { try { await api.reorderBacklog(slug, ids, dragged); } catch (e) { setError(String(e)); } refresh(); } }}
@@ -125,7 +126,7 @@ export default function App() {
         </section>
       </main>
       <EventTicker events={events} />
-      {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
+      {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} kickoff={!!overview?.factory.kickoff} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
       {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
       {factoryOpen && slug && <FactoryModal slug={slug} onClose={() => setFactoryOpen(false)} onOpenSprint={(id) => { setFactoryOpen(false); setSprintsAt(id); }} onOpenStory={setStoryId} />}
       {productOpen && slug && <ProductFindingsModal slug={slug} onClose={() => setProductOpen(false)} onOpenStory={setStoryId} />}

@@ -157,6 +157,8 @@ export interface Conversation {
     direction?: string; ready?: boolean; consults?: Opinion[];
     approved?: { direction: string; ideas: string[]; reviewed: boolean; at: string } | null;
     split?: DraftItem[] | null;
+    /** plan 10.10: the opening brainstorm of a greenfield factory with no code */
+    kickoff?: Kickoff | null;
   };
   limits: string[];
   result: Partial<CommitResult>;
@@ -174,7 +176,7 @@ export interface ChatReply {
 }
 
 export interface Overview {
-  factory: { slug: string; name: string; mode: string; language: string; engine: boolean; dry_run: boolean };
+  factory: { slug: string; name: string; mode: string; language: string; engine: boolean; dry_run: boolean; kickoff?: boolean };
   columns: Column[];
   agents: Agent[];
   inbox: Message[];
@@ -376,3 +378,9 @@ export interface ProductFinding { title: string; kind: string; detail: string; s
 export interface ProviderModels { name: string; label: string; ok: boolean; models: string[]; detail: string; reason: string; checked_at: number }
 export interface ByokCheck { provider: string; openrouter_id: string; own_id: string; found: boolean | null }
 export interface AvailableDTO { providers: ProviderModels[]; byok: ByokCheck[] }
+
+export interface StackOption {
+  languages: string[]; frameworks: string[]; package_managers: string[]; test_frameworks: string[];
+  test_command: string; lint_command: string; summary: string; reason: string;
+}
+export interface Kickoff { vision: string; out_of_v1: string[]; stacks: StackOption[]; chosen: number | null; applied: boolean }
