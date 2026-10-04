@@ -214,6 +214,11 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   // is free to work — it only carries the branch of a story whose delivery you have not accepted
   // yet, or its dependencies are already delivered (11.5).
   const gate = open ? s.waiting : null;
+  // a card that waits is not being worked on: the stage tag goes quiet and no Loompa holds it,
+  // the same condition `working()` uses for the amber ring (11.5). `waiting.ready` is the card
+  // that is finished and green and only waits for your acceptance of the delivery before it;
+  // the others wait for a dependency that is not in the base yet.
+  const parked = open && s.waiting?.gate === "wait";
   const held = gate ? [...new Set([...gate.gone, ...gate.pending, ...gate.chain])] : [];
   const linked = !open || held.length ? [] : gate?.unmerged?.length ? gate.unmerged : s.depends_on ?? [];
   const size = COMPLEXITY[s.complexity] ?? COMPLEXITY.STANDARD;
@@ -271,7 +276,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
         )}
         {/* what the Loompa says it is doing, right above its figure and aligned with it; it
             may take two lines and nothing below moves because of that */}
-        {activity && (
+        {activity && !parked && (
           <div className="mt-1 break-words text-right text-[10px] text-slate-400" title={doing(activity).title}>
             {doing(activity).text}
             {/* the token counter never shares a line: it is the part that keeps moving */}
@@ -281,11 +286,11 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
         {/* the stage tag in the bottom-left corner, the Loompa in the bottom-right one */}
         {(AT_WORK.has(s.stage) || agent || stalled) && (
           <div className="mt-1.5 flex items-end gap-1 text-[10px]">
-            <Stage stage={s.stage} since={activity?.stage_since} now={now} />
+            <Stage stage={s.stage} since={activity?.stage_since} now={now} parked={parked} ready={!!s.waiting?.ready} />
             <span className="flex-1" />
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
-            ) : agent ? <Avatar agent={agent} tier={s.current_tier} model={activity?.model} /> : null}
+            ) : agent && !parked ? <Avatar agent={agent} tier={s.current_tier} model={activity?.model} /> : null}
           </div>
         )}
       </button>
@@ -395,13 +400,20 @@ const STAGE_TAG: Record<string, { text: string; cls: string; title: string }> = 
   REVIEW: { text: "entrega", cls: "bg-teal-500/20 text-teal-300 ring-1 ring-teal-500/40", title: "O Deployer está entregando" },
 };
 
-function Stage({ stage, since: at, now }: { stage: string; since?: string | null; now?: number }) {
+function Stage({ stage, since: at, now, parked = false, ready = false }: { stage: string; since?: string | null; now?: number; parked?: boolean; ready?: boolean }) {
   const tag = STAGE_TAG[stage];
   if (!tag) return null;
   const inStage = now !== undefined ? since(at, now) : null;
+  // while the card waits, the tag says that and nothing else: the colour of the etapa would
+  // read as "a Loompa is on it", and none is (11.5)
+  const shown = !parked
+    ? tag
+    : ready
+      ? { text: "pronta", cls: "bg-emerald-500/15 text-emerald-300/80 ring-1 ring-emerald-500/30", title: "Pronta e verde: nenhum Loompa trabalha nela, só falta o seu aceite da entrega anterior" }
+      : { text: tag.text, cls: "bg-slate-800 text-slate-400", title: "Parada nesta etapa: nenhum Loompa trabalha nela enquanto espera o que a segura" };
   return (
     <span className="flex shrink-0 items-center gap-1">
-      <span className={`chip px-1.5 py-0 text-[9px] ${tag.cls}`} title={tag.title}>{tag.text}</span>
+      <span className={`chip px-1.5 py-0 text-[9px] ${shown.cls}`} title={shown.title}>{shown.text}</span>
       {inStage !== null && <span className="tabular-nums text-slate-400" title={`Nesta etapa há ${ago(inStage)}`}>{ago(inStage)}</span>}
     </span>
   );
