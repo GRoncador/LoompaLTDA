@@ -259,11 +259,12 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             </span>
           </div>
         )}
+        {/* the stage tag keeps the bottom-left corner and the Loompa the bottom-right one,
+            whatever happens: only the text between them wraps, and it is never cut */}
         {(AT_WORK.has(s.stage) || agent || stalled) && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[10px]">
+          <div className="mt-1.5 flex items-end gap-1 text-[10px]">
             <Stage stage={s.stage} since={activity?.stage_since} now={now} />
-            {/* no truncation: what the Loompa is doing wraps, so it is always readable */}
-            <span className="min-w-0 flex-1 basis-24 break-words text-slate-500">{activity ? doing(activity) : ""}</span>
+            <span className="min-w-0 flex-1 break-words text-slate-500">{activity ? doing(activity) : ""}</span>
             {stalled ? (
               <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
             ) : agent ? <Avatar agent={agent} busy={!!activity && now !== undefined && (now - Date.parse(activity.last_at)) / 1000 <= 300} /> : null}
