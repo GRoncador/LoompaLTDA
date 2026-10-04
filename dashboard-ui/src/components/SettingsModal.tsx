@@ -1440,6 +1440,8 @@ const BENCH_LABEL: Record<string, string> = {
   hle: "HLE (raciocínio amplo)",
 };
 const MIX_LABEL: Record<string, string> = { engineering: "Engenharia", strategy: "Estratégia", routine: "Rotina" };
+// the same marks as the cluster cards of the models screen
+const PROFILE_ICON: Record<string, string> = { general: "🧩", strategy: "🏛️", engineering: "⚙️", routine: "📋" };
 
 /** One tier of the Artificial Analysis ranking (ADR-0025): the same table in the popup of a slot and
  *  in the Benchmark tab. `onUse` adds the "usar" column (the popup only). */
@@ -1521,7 +1523,7 @@ function SuggestPopup({ data, cluster, tier, onUse, onClose }: {
       <div className="w-full max-w-4xl space-y-2 rounded-lg border border-line bg-slate-900 p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="font-semibold text-slate-100">💡 {prof?.label ?? cluster} · {TIER_TITLE[tier] ?? tier}</div>
+            <div className="font-semibold text-slate-100">💡 {PROFILE_ICON[cluster] ?? ""} {prof?.label ?? cluster} · {TIER_TITLE[tier] ?? tier}</div>
             <div className="text-[11px] text-slate-400">{aaDate(data)} · {data.entries} modelos avaliados · {data.attribution}</div>
           </div>
           <button className="btn-ghost px-2 py-0 text-xs" onClick={onClose}>✕</button>
@@ -1590,7 +1592,7 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
       ) : data.profiles.map((prof) => (
         <div key={prof.profile} className="space-y-2 rounded-lg border border-line bg-panel p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div className="font-semibold text-slate-100">{prof.label}</div>
+            <div className="font-semibold text-slate-100">{PROFILE_ICON[prof.profile] ?? ""} {prof.label}</div>
             <div className="text-[11px] text-slate-500">piso do tier 2: {prof.floor} · {prof.partial} modelos de fora por falta de benchmark</div>
           </div>
           <Weights prof={prof} />

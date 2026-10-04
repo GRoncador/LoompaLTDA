@@ -446,7 +446,7 @@ def suggest(
     ceiling = config.models.tier1_ceiling
     floor = config.models.tier2_floor
     # every cluster's ranking, whatever the factory uses: each tier of each cluster asks its own
-    profiles = ["engineering", "strategy", "routine", "general"]
+    profiles = ["general", "strategy", "engineering", "routine"]  # the Founder's order (04/10)
     profiles_out = [
         rank(entries, p, ceiling=ceiling, floor_share=floor, free=free, mix=mix).as_dict()
         for p in profiles
