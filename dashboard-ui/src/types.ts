@@ -182,7 +182,7 @@ export interface Overview {
   columns: Column[];
   agents: Agent[];
   inbox: Message[];
-  finance: { today_usd: number; period: BudgetPeriod; period_usd: number; cap_usd: number; fraction: number; warn: boolean; exhausted: boolean; downgrade: boolean };
+  finance: { today_usd: number; period: BudgetPeriod; period_usd: number; cap_usd: number; fraction: number; warn: boolean; exhausted: boolean; downgrade: boolean; story_cap_usd?: number };
   kaizen_today: number;
   sprint: SprintSummary | null;
   next_sprint: { id: string; goal: string; story_ids: string[] } | null; // assembled, waiting (ADR-0018)
@@ -301,7 +301,7 @@ export interface Settings {
   role_clusters?: Record<string, string>;
   roles: Record<string, string>;
   role_tasks?: RoleTaskInfo[];
-  budget: { period: BudgetPeriod; cap_usd: number; warn_at_fraction: number; on_exceed: OnExceed };
+  budget: { period: BudgetPeriod; cap_usd: number; warn_at_fraction: number; on_exceed: OnExceed; story_cap_usd: number };
   schedule: { max_parallel: number };
   tools: { tavily: ToolInfo; artificial_analysis?: ToolInfo };
   secrets_files: { hub: string; factory: string };
@@ -318,7 +318,7 @@ export interface SettingsPatch {
   tier1_ceiling?: number;
   tier2_floor?: number;
   default_route?: "auto" | "openrouter";
-  budget?: { period?: BudgetPeriod; cap_usd?: number; warn_at_fraction?: number; on_exceed?: OnExceed };
+  budget?: { period?: BudgetPeriod; cap_usd?: number; warn_at_fraction?: number; on_exceed?: OnExceed; story_cap_usd?: number };
   max_parallel?: number;
   tools?: Record<string, { enabled?: boolean; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
 }

@@ -8,10 +8,11 @@ const TONE: Record<string, string> = {
 
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
 
-export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, kickoff = false, onChat, onOpen, onCreate, onReorder, onUnpin }: {
+export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, storyCap = 0, kickoff = false, onChat, onOpen, onCreate, onReorder, onUnpin }: {
   onOpenSprint: (id: string) => void; kickoff?: boolean;
   columns: Column[]; agents?: Agent[]; sprint: SprintSummary | null; nextSprint: { id: string; goal: string; story_ids: string[] } | null;
   conversations: ConversationSummary[]; live: Record<string, StoryActivity>; now: number;
+  storyCap?: number; // o teto por história da aba Orçamento (0 = sem teto)
   onChat: (kind: ConversationKind, resumeId?: string) => void; onOpen: (id: string) => void;
   onCreate: (title: string) => Promise<QuickStoryResult | null>; onReorder: (ids: string[], dragged: string | null) => Promise<void>; onUnpin: (id: string) => Promise<void>;
 }) {
@@ -131,10 +132,10 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                     onDrop={(e) => { e.preventDefault(); drop(); }}
                     onDragEnd={() => { if (!dropped.current) { setDragId(null); setPreview(null); } }}
                   >
-                    <Card s={s} onOpen={onOpen} onUnpin={onUnpin} />
+                    <Card s={s} cap={storyCap} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} running={working(s, live, now)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  <Card key={s.id} s={s} cap={storyCap} running={working(s, live, now)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
                 ),
               )}
             </div>
@@ -168,7 +169,7 @@ const COMPLEXITY: Record<string, { text: string; cls: string; title: string }> =
   COMPLEX: { text: "complexa", cls: "bg-fuchsia-900/50 text-fuchsia-300", title: "História complexa: mais tarefas, mais revisão e mais custo" },
 };
 
-function Card({ s, agent, activity, now, running = false, onOpen, onUnpin }: { s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
+function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnpin }: { s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; cap?: number; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
   const pinned = s.priority_pinned && s.stage === "BACKLOG";
   const kind = KIND_ICON[s.kind] ?? KIND_ICON.feature;
   const open = !["DONE", "CANCELLED"].includes(s.stage);
@@ -181,8 +182,9 @@ function Card({ s, agent, activity, now, running = false, onOpen, onUnpin }: { s
   const meta = [
     s.phase && !["BACKLOG", "AWAITING_FOUNDER", "DONE"].includes(s.stage) ? s.phase.replace("_", " ") : "",
     s.epic,
-    s.cost_usd > 0 ? `$${s.cost_usd.toFixed(2)}` : "",
   ].filter(Boolean);
+  // past the per-story cap the card stops and waits for the founder: the number says so first
+  const overCap = cap > 0 && s.cost_usd >= cap;
   const stalled = !!activity?.stalled;
   // what holds the card: short, red and naming the story that has to land first
   // the gate (when the server computed one) knows which are still missing; without it, the
@@ -195,11 +197,17 @@ function Card({ s, agent, activity, now, running = false, onOpen, onUnpin }: { s
         <span className="text-[12px] leading-none" title={kind.label}>{kind.icon}</span>
         <button className="hover:text-slate-300" onClick={() => onOpen(s.id)}>{s.id}</button>
         <span className={`chip px-1.5 py-0 text-[9px] ${size.cls}`} title={size.title}>{size.text}</span>
+        {s.sprint_id && <span className="rounded bg-sky-950/70 px-1 text-sky-500/80" title={`Sprint ${s.sprint_id}`}>{s.sprint_id}</span>}
         <span className="ml-auto flex items-center gap-1">
           {pinned && onUnpin && (
             <button className="text-[11px] opacity-80 hover:opacity-100" title="Posição fixada por você: o Product Owner não move este card. Clique para devolver a ordem a ele." onClick={() => onUnpin(s.id)}>📌</button>
           )}
-          {s.sprint_id && <span className="rounded bg-sky-900/40 px-1 text-sky-300" title={`Sprint ${s.sprint_id}`}>{s.sprint_id}</span>}
+          {s.cost_usd > 0 && (
+            <span className={`tabular-nums ${overCap ? "font-semibold text-amber-400" : "text-slate-500"}`}
+              title={overCap ? `US$ ${s.cost_usd.toFixed(2)} gastos: passou do teto de US$ ${cap.toFixed(2)} por história` : `US$ ${s.cost_usd.toFixed(2)} gastos nesta história`}>
+              ${s.cost_usd.toFixed(2)}
+            </span>
+          )}
         </span>
       </div>
       <button className="w-full text-left" onClick={() => onOpen(s.id)}>

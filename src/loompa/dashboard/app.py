@@ -489,6 +489,8 @@ def create_app(
                 "warn": budget.warn,
                 "exhausted": budget.exhausted,
                 "downgrade": budget.downgrade,
+                # the per-story cap, so a card can show its cost as past it (finance/story_cap.py)
+                "story_cap_usd": ctx.config.budget.story_cap_usd,
             },
             # product findings (Kaizen), not the factory's: no repeats, the founder's own day (8.4)
             "kaizen_today": len(_product_findings(ctx)),

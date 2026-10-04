@@ -172,6 +172,7 @@ class BudgetPatch(BaseModel):
     cap_usd: float | None = None
     warn_at_fraction: float | None = None
     on_exceed: str | None = None
+    story_cap_usd: float | None = None
 
 
 class SettingsPatch(BaseModel):

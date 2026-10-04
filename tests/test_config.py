@@ -285,3 +285,16 @@ def test_revision_4_ends_the_effort_experiment_but_keeps_a_share_someone_chose(t
         }
         (tmp_path / ".loompa" / "config.yaml").write_text(yaml.safe_dump(old), encoding="utf-8")
         assert load_config(tmp_path).schedule.effort_ab_low_share == expected
+
+
+def test_the_per_story_cap_comes_back_from_the_budget_tab(tmp_path: Path):
+    """The cap that pauses one story (finance/story_cap.py) is the founder's to set, and the
+    Kanban reads it to paint a card's cost as past it."""
+    from loompa.config.secrets import Secrets
+    from loompa.config.settings import BudgetPatch, SettingsPatch, apply_settings, describe_settings
+
+    cfg = default_config()
+    assert cfg.budget.story_cap_usd == 1.0
+    apply_settings(tmp_path, cfg, SettingsPatch(budget=BudgetPatch(story_cap_usd=2.5)))
+    assert cfg.budget.story_cap_usd == 2.5
+    assert describe_settings(cfg, Secrets())["budget"]["story_cap_usd"] == 2.5

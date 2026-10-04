@@ -1385,6 +1385,15 @@ function BudgetPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =>
           </label>
         </div>
         <label className="block text-xs text-slate-400">
+          Teto por história (US$)
+          <input type="number" min={0} step={0.5} className={`${input} mt-1`} value={b.story_cap_usd} onChange={(e) => setB({ ...b, story_cap_usd: Number(e.target.value) })} />
+          <span className="mt-0.5 block text-[11px] text-slate-500">
+            {b.story_cap_usd > 0
+              ? `Uma história que passa de US$ ${b.story_cap_usd.toFixed(2)} sem terminar para e espera a sua decisão; no Kanban o custo fica amarelo.`
+              : "Sem teto por história: nenhuma história para por causa do próprio custo."}
+          </span>
+        </label>
+        <label className="block text-xs text-slate-400">
           Avisar ao atingir (fração do teto)
           <input type="number" min={0} max={1} step={0.05} className={`${input} mt-1`} value={b.warn_at_fraction} onChange={(e) => setB({ ...b, warn_at_fraction: Number(e.target.value) })} />
           <span className="mt-0.5 block text-[11px] text-slate-500">
