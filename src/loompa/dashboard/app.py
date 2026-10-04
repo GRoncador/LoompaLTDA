@@ -961,11 +961,16 @@ def create_app(
     @app.post("/api/factories/{slug}/settings/providers/{name}/test")
     async def test_provider(slug: str, name: str, body: ProbeBody | None = None) -> dict[str, Any]:
         from loompa.llm import probe_provider, probe_tavily
+        from loompa.llm.probe import probe_artificial_analysis
 
         ctx = hub.get(slug).ctx
         ctx.reload_secrets()
         if name == "tavily":
             r = await probe_tavily(ctx.config.tools.tavily, secrets=ctx.secrets)
+        elif name == "artificial_analysis":
+            r = await probe_artificial_analysis(
+                ctx.config.tools.artificial_analysis, secrets=ctx.secrets
+            )
         else:
             r = await probe_provider(
                 ctx.config, name, secrets=ctx.secrets, model=body.model if body else None

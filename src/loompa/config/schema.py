@@ -551,8 +551,19 @@ def _tavily_default() -> McpServerConfig:
     )
 
 
+def _artificial_analysis_default() -> ToolProviderConfig:
+    """Plan 9.4: the Artificial Analysis free API, the source of the model ratings once its key is
+    set (100 requests a day; one call returns every model; attribution required)."""
+    return ToolProviderConfig(
+        api_key_env="ARTIFICIAL_ANALYSIS_API_KEY",
+        base_url="https://artificialanalysis.ai/api/v2",
+        console_url="https://artificialanalysis.ai/",
+    )
+
+
 class ToolsConfig(BaseModel):
     tavily: McpServerConfig = Field(default_factory=_tavily_default)
+    artificial_analysis: ToolProviderConfig = Field(default_factory=_artificial_analysis_default)
     mcp: dict[str, McpServerConfig] = Field(default_factory=dict)  # any other MCP server
 
     @model_validator(mode="after")

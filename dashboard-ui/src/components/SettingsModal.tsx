@@ -49,7 +49,9 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [scope, setScope] = useState<"hub" | "factory">("hub");
   const [probe, setProbe] = useState<Record<string, ProbeResult | "…">>({});
-  const [tavilyKey, setTavilyKey] = useState("");
+  // keys of the external tools (not model providers): Tavily search, Artificial Analysis ratings
+  const [toolKeys, setToolKeys] = useState<Record<string, string>>({});
+  const isTool = (name: string) => name === "tavily" || name === "artificial_analysis";
   const used = new Set(Object.values(s.matrix ?? {}).flatMap((t) => Object.values(t).flat()).map((c) => c.provider));
   const providers = onlyNeeded ? s.providers.filter((p) => used.has(p.name)) : s.providers;
 
@@ -58,10 +60,10 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
   const test = async (name: string) => {
     setProbe((p) => ({ ...p, [name]: "…" }));
     try {
-      const typed = (name === "tavily" ? tavilyKey : keys[name] ?? "").trim();
+      const typed = ((isTool(name) ? toolKeys[name] : keys[name]) ?? "").trim();
       if (typed) {
-        await onSave(name === "tavily" ? { tools: { tavily: { api_key: typed, scope } } } : { providers: { [name]: { api_key: typed, scope } } });
-        if (name === "tavily") setTavilyKey(""); else setKeys((k) => ({ ...k, [name]: "" }));
+        await onSave(isTool(name) ? { tools: { [name]: { api_key: typed, scope } } } : { providers: { [name]: { api_key: typed, scope } } });
+        if (isTool(name)) setToolKeys((k) => ({ ...k, [name]: "" })); else setKeys((k) => ({ ...k, [name]: "" }));
       }
       const r = await api.testProvider(slug, name); setProbe((p) => ({ ...p, [name]: r }));
     }
@@ -70,11 +72,11 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
   const saveKeys = async () => {
     const patch: SettingsPatch = { providers: {}, tools: {} };
     for (const [name, v] of Object.entries(keys)) if (v.trim()) patch.providers![name] = { api_key: v.trim(), scope };
-    if (tavilyKey.trim()) patch.tools!.tavily = { api_key: tavilyKey.trim(), scope };
+    for (const [name, v] of Object.entries(toolKeys)) if (v.trim()) patch.tools![name] = { api_key: v.trim(), scope };
     await onSave(patch);
-    setKeys({}); setTavilyKey("");
+    setKeys({}); setToolKeys({});
   };
-  const dirty = Object.values(keys).some((v) => v.trim()) || Boolean(tavilyKey.trim());
+  const dirty = [...Object.values(keys), ...Object.values(toolKeys)].some((v) => v.trim());
 
   /** One row of the list. Tavily is the same shape with a different subtitle: it is a search API,
    * not a model provider, and saying so in place is clearer than a footnote. */
@@ -171,9 +173,23 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
           env: s.tools.tavily.api_key_env,
           consoleUrl: s.tools.tavily.console_url,
           needsKey: true,
-          value: tavilyKey,
-          onChange: setTavilyKey,
+          value: toolKeys.tavily ?? "",
+          onChange: (v) => setToolKeys((k) => ({ ...k, tavily: v })),
           onClear: () => onSave({ tools: { tavily: { clear_key: true } } }),
+        })}
+        {!onlyNeeded && s.tools.artificial_analysis && row({
+          name: "artificial_analysis",
+          label: "Artificial Analysis",
+          note: "notas dos modelos (inteligência, código, agêntico) — não é provedor de modelos",
+          configured: s.tools.artificial_analysis.key.configured,
+          keyLabel: s.tools.artificial_analysis.key.label,
+          source: s.tools.artificial_analysis.key.source,
+          env: s.tools.artificial_analysis.api_key_env,
+          consoleUrl: s.tools.artificial_analysis.console_url,
+          needsKey: true,
+          value: toolKeys.artificial_analysis ?? "",
+          onChange: (v) => setToolKeys((k) => ({ ...k, artificial_analysis: v })),
+          onClear: () => onSave({ tools: { artificial_analysis: { clear_key: true } } }),
         })}
       </div>
 

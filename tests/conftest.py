@@ -27,6 +27,7 @@ def _key_env_names() -> tuple[str, ...]:
     cfg = default_config()
     named = [p.api_key_env for p in cfg.providers.values()]
     named += [s.api_key_env for s in cfg.tools.servers().values()]
+    named.append(cfg.tools.artificial_analysis.api_key_env)
     return tuple(sorted({n for n in named if n}))
 
 

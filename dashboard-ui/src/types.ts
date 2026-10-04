@@ -300,7 +300,7 @@ export interface Settings {
   role_tasks?: RoleTaskInfo[];
   budget: { period: BudgetPeriod; cap_usd: number; warn_at_fraction: number; on_exceed: OnExceed };
   schedule: { max_parallel: number };
-  tools: { tavily: { enabled: boolean; api_key_env: string; console_url: string; key: KeyStatus } };
+  tools: { tavily: ToolInfo; artificial_analysis?: ToolInfo };
   secrets_files: { hub: string; factory: string };
 }
 
@@ -386,3 +386,5 @@ export interface StackOption {
   test_command: string; lint_command: string; summary: string; reason: string;
 }
 export interface Kickoff { vision: string; out_of_v1: string[]; stacks: StackOption[]; chosen: number | null; applied: boolean }
+
+export interface ToolInfo { enabled: boolean; api_key_env: string; console_url: string; key: KeyStatus }

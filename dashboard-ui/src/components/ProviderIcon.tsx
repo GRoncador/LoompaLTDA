@@ -22,6 +22,7 @@ export const PROVIDER_NAMES: Record<string, string> = {
   minimax: "MiniMax",
   ollama: "Ollama (local)",
   tavily: "Tavily",
+  artificial_analysis: "Artificial Analysis",
 };
 
 export const VENDOR_NAMES: Record<string, string> = {
@@ -220,6 +221,13 @@ export function ProviderIcon({ provider, model, className = "w-4 h-4 inline-bloc
           <path d="M15.5 15.5L21 21" strokeLinecap="round"/>
         </svg>,
         "Tavily"
+      );
+    case "artificial_analysis":
+      return wrap(
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>
+        </svg>,
+        "Artificial Analysis"
       );
     default:
       return wrap(

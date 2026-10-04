@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, replace
 
 import httpx
 
-from loompa.config.schema import LoompaConfig, McpServerConfig
+from loompa.config.schema import LoompaConfig, McpServerConfig, ToolProviderConfig
 from loompa.llm.providers import (
     LLMError,
     Message,
@@ -206,6 +206,66 @@ async def probe_tavily(
             reason=result.reason,
         )
     return replace(rest, reason=result.reason)
+
+
+async def probe_artificial_analysis(
+    cfg: ToolProviderConfig,
+    *,
+    secrets: Mapping[str, str] | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> ProbeResult:
+    """Plan 9.4: one call to the free API (it returns every model, and counts one of the 100 a
+    day). Says how many models came with a rating; never shows the key."""
+    key = resolve_key(cfg.api_key_env, secrets)
+    if not key:
+        return ProbeResult("artificial_analysis", False, "chave não configurada")
+    url = f"{(cfg.base_url or 'https://artificialanalysis.ai/api/v2').rstrip('/')}/data/llms/models"
+    own = client is None
+    client = client or httpx.AsyncClient()
+    started = time.monotonic()
+    try:
+        resp = await client.get(url, headers={"x-api-key": key}, timeout=30.0)
+    except httpx.HTTPError as exc:
+        return ProbeResult(
+            "artificial_analysis",
+            False,
+            "sem conexão com a Artificial Analysis",
+            reason=type(exc).__name__,
+        )
+    finally:
+        if own:
+            await client.aclose()
+    ms = int((time.monotonic() - started) * 1000)
+    if resp.status_code in (401, 403):
+        return ProbeResult(
+            "artificial_analysis",
+            False,
+            "chave recusada pela Artificial Analysis",
+            reason=f"HTTP {resp.status_code}",
+        )
+    if resp.status_code == 429:
+        return ProbeResult(
+            "artificial_analysis",
+            True,
+            "chave válida; limite diário de consultas atingido",
+            reason="HTTP 429",
+        )
+    if resp.status_code >= 400:
+        return ProbeResult(
+            "artificial_analysis",
+            False,
+            "a Artificial Analysis devolveu um erro inesperado",
+            reason=f"HTTP {resp.status_code}",
+        )
+    try:
+        body = resp.json()
+        models = body.get("data") if isinstance(body, dict) else body
+        n = len(models) if isinstance(models, list) else 0
+    except ValueError:
+        n = 0
+    return ProbeResult(
+        "artificial_analysis", True, f"chave válida: {n} modelos com nota", latency_ms=ms
+    )
 
 
 async def _probe_tavily_rest(

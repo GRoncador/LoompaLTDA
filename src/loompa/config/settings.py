@@ -132,12 +132,16 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
         "schedule": {"max_parallel": config.schedule.max_parallel},
         "worker": {"backend": config.worker.backend},
         "tools": {
-            "tavily": {
-                "enabled": t.enabled,
-                "api_key_env": t.api_key_env,
-                "console_url": t.console_url,
-                "key": secrets.status(t.api_key_env),
+            name: {
+                "enabled": tool.enabled,
+                "api_key_env": tool.api_key_env,
+                "console_url": tool.console_url,
+                "key": secrets.status(tool.api_key_env),
             }
+            for name, tool in (
+                ("tavily", t),
+                ("artificial_analysis", config.tools.artificial_analysis),
+            )
         },
         "secrets_files": {
             "hub": str(hub_secrets_path()),
@@ -318,17 +322,21 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
             raise ValueError("worker_backend deve ser 'aci' ou 'opencode'")
         config.worker.backend = patch.worker_backend  # type: ignore[assignment]
         notes.append(f"backend do Worker: {patch.worker_backend}")
+    tools: dict[str, tuple[ToolProviderConfig, str]] = {
+        "tavily": (config.tools.tavily, "do Tavily"),
+        "artificial_analysis": (config.tools.artificial_analysis, "da Artificial Analysis"),
+    }
     for name, tp in patch.tools.items():
-        if name != "tavily":
+        if name not in tools:
             raise ValueError(f"ferramenta desconhecida: {name}")
-        tool: ToolProviderConfig = config.tools.tavily
+        tool, of = tools[name]
         if tp.enabled is not None:
             tool.enabled = tp.enabled
         if tp.clear_key:
             for scope in ("hub", "factory"):
                 store_key(root, tool.api_key_env, None, scope=scope)
-            notes.append("chave do Tavily removida")
+            notes.append(f"chave {of} removida")
         elif tp.api_key:
             store_key(root, tool.api_key_env, tp.api_key.strip(), scope=tp.scope)
-            notes.append("chave do Tavily guardada")
+            notes.append(f"chave {of} guardada")
     return notes
