@@ -176,8 +176,18 @@ function Card({ s, agent, activity, now, running = false, cap = 0, onOpen, onUnp
   // alerts: what needs a look, coloured and kept apart from the card's classification
   const alerts: { text: string; cls: string; title?: string }[] = [];
   if (s.blocked_reason) alerts.push({ text: BLOCKED_LABEL[s.blocked_reason] ?? "bloqueada", cls: "bg-amber-900/60 text-amber-200", title: "Esperando a sua resposta na Caixa de Entrada" });
-  if (s.qa_verdict === "CONCERNS") alerts.push({ text: "ressalvas", cls: "bg-orange-900/50 text-orange-200", title: "O Inspector aprovou com ressalvas" });
-  if (s.current_tier === "tier1" && open) alerts.push({ text: "escalada", cls: "bg-blue-900/60 text-blue-200", title: "Passou para os modelos mais fortes depois de tentativas sem sucesso" });
+  // the escalation ladder as one number: each failed attempt (Inspector FAIL, or a task the
+  // Worker could not finish) is one try, and tier 1 is the stronger models it climbed to
+  const failed = (s.attempts?.tier2 ?? 0) + (s.attempts?.tier1 ?? 0);
+  if (failed > 0) {
+    const t1 = s.current_tier === "tier1";
+    alerts.push({
+      text: `${failed + 1}ª tentativa${t1 ? " · T1" : ""}`,
+      cls: !open ? "bg-slate-800 text-slate-400" : t1 ? "bg-red-900/60 text-red-200" : "bg-amber-900/60 text-amber-200",
+      title: `${failed} ${failed === 1 ? "tentativa" : "tentativas"} sem sucesso${t1 ? ", agora com os modelos mais fortes (Tier 1)" : ""}. Depois de três, a história para e a decisão é sua.`,
+    });
+  }
+  if (s.qa_verdict === "CONCERNS") alerts.push({ text: "ressalvas", cls: open ? "bg-orange-900/50 text-orange-200" : "bg-slate-800 text-slate-400", title: "O Inspector aprovou com ressalvas: achados de severidade média ou baixa, que não impedem a entrega. Os médios viram oportunidades do Kaizen." });
   // past the per-story cap the card stops and waits for the founder: the number says so first
   const overCap = cap > 0 && s.cost_usd >= cap;
   const stalled = !!activity?.stalled;
