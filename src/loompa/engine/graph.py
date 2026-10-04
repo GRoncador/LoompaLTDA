@@ -350,7 +350,12 @@ async def node_spec_review(ctx: EngineContext, state: StoryState) -> StoryState:
 
 
 async def node_plan(ctx: EngineContext, state: StoryState) -> StoryState:
-    res = await ArchitectAgent(ctx).run(state)
+    # a story written on top of a delivery that is not in the base yet plans inside its own
+    # worktree, which starts from that branch: otherwise the Architect would plan against a
+    # repository without the code the story depends on (11.5)
+    on = base_branch_for(rows_by_id(ctx.store, ctx.slug), state.story_id)
+    at = _ensure_worktree(ctx, state).path if on else None
+    res = await ArchitectAgent(ctx).run(state, at=at)
     if not res.ok and state.handoff.get("plan"):
         state.spec_review_rounds = 0  # the rewritten spec gets its own review
         return goto(state, "spec")
@@ -898,11 +903,27 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
             state,
             BlockedReason.DEPENDENCY,
             f"built on {gone}, which was cancelled or sent back to the backlog",
-            executive=(
-                f"Esta história foi construída em cima de “{title}”, que saiu do sprint. "
-                "O trabalho está pronto, mas entregá-lo levaria junto o código daquela história."
-            ),
             resume="review",
+            message=FounderMessage(
+                factory=ctx.slug,
+                story_id=state.story_id,
+                kind=MessageKind.BLOCKED,
+                sender=MasterAgent.display,
+                title=f"“{state.title}” foi construída em cima de “{title}”, que saiu do sprint",
+                context=(
+                    "O trabalho desta história está pronto, mas ele foi escrito em cima da outra: "
+                    "entregá-lo agora levaria junto o código que você decidiu não usar."
+                ),
+                impact="Nada foi integrado ao produto. As demais frentes seguem normalmente.",
+                options=[
+                    Option(
+                        key="detach",
+                        label="Refazer esta história sem a que saiu",
+                        recommended=True,
+                    ),
+                    Option(key="skip", label="Devolver ao backlog"),
+                ],
+            ),
         )
     waits = merge_gate(rows, state.story_id)
     if waits:
@@ -1149,6 +1170,24 @@ def apply_founder_answer(
                 # story) reaches the stories built on this one: tamagotchi S-017 was approved with
                 # "reabrir_app goes to S-018", and S-018 never heard of it
                 state.note(f"Ao aprovar: {answer.text.strip()}")
+            if waits := merge_gate(rows_by_id(ctx.store, ctx.slug), state.story_id):
+                # belt and braces: `review` parks a story whose dependency is not in the base, so
+                # this delivery should not exist. If one ever does, the approval is kept and the
+                # merge waits for the dependency instead of carrying it along (11.5).
+                state.extra[WAIT_KEY] = {
+                    "gate": Gate.WAIT.value,
+                    "pending": waits,
+                    "founder": waits,
+                    "gone": [],
+                    "chain": [],
+                    "unmerged": waits,
+                    "label": f"aprovada · aguardando a entrega de {', '.join(waits)}",
+                }
+                state.blocked_reason = None
+                state.stage = Stage.REVIEW
+                state.phase = "review"
+                ctx.emit("story.waiting", story_id=state.story_id, pending=waits, stage="review")
+                return state
             wt = ctx.worktrees.get(state.story_id)
             if wt is not None:
                 try:

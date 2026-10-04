@@ -242,14 +242,16 @@ class ArchitectAgent(LoompaAgent):
     role = "architect"
     display = "Architect Loompa"
 
-    async def run(self, state: StoryState) -> AgentResult:
+    async def run(self, state: StoryState, *, at: Path | None = None) -> AgentResult:
+        """`at` is the checkout to plan against: the story's own worktree when it was started
+        from a dependency whose delivery is not in the base yet (11.5), else the repository."""
         self.set_state("WORKING", state, detail="escrevendo plan.md e tasks.md")
         paths = story_dir(self.ctx.root, state.story_id)
         spec = paths.spec.read_text(encoding="utf-8") if paths.spec.is_file() else ""
         precedents = self.precedents(
             f"{state.title}\n{spec[:1500]}", kinds=("adr", "learning", "constitution", "doc")
         )
-        outline = self._repo_outline()
+        outline = self._repo_outline(at=at)
         user = (
             f"# Story {state.story_id}: {state.title}\n\n## Spec\n{spec[:6000]}\n\n"
             + (
@@ -281,7 +283,7 @@ class ArchitectAgent(LoompaAgent):
         data = await self.ask_json_with_tools(
             SYSTEM.format(language=self.language) + EXPLORE_HINT,
             user,
-            self.explore_tools(),
+            self.explore_tools(at),
             story=state,
             task="architect.plan",
             # the re-plan of an escalated story is part of its tier-1 attempt (ADR-0016 §5)
@@ -531,8 +533,8 @@ class ArchitectAgent(LoompaAgent):
             )
         return AgentResult(ok=True, summary=f"{len(risks)} riscos, {len(extra)} mitigações")
 
-    def _repo_outline(self, max_entries: int = 80) -> str:
-        return repo_outline(self.ctx.root, max_entries)
+    def _repo_outline(self, max_entries: int = 80, *, at: Path | None = None) -> str:
+        return repo_outline(at or self.ctx.root, max_entries)
 
     # --------------------------------------------------------------- stewardship
     def write_adr(self, title: str, body: str, *, status: str = "accepted") -> str:

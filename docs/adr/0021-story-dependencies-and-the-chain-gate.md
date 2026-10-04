@@ -129,5 +129,11 @@ waits until that story is really merged (its new code arrives in the rebase befo
 If that story is cancelled or sent back to the backlog instead, the dependent *is* blocked for the
 founder: its work is finished, but delivering it would carry code nobody wants.
 
+Where the order is enforced, end to end: the dependent never reaches the inbox while the
+dependency is unmerged (it parks before `review`, so only one delivery at a time is a decision);
+the `plan` of a story built that way runs inside its worktree, so the Architect sees the
+dependency's code instead of a repository without it; and the approval path checks the merge gate
+again before merging, so an approval can never carry an unmerged dependency into the base.
+
 Risk accepted: the founder's "no" costs more than before — one finished story waits longer and may
 have to reconcile with the dependency's second version. Their silence costs much less.
