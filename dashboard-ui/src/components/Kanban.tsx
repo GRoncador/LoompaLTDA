@@ -8,11 +8,12 @@ const TONE: Record<string, string> = {
 
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
 
-export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, storyCap = 0, kickoff = false, onChat, onOpen, onCreate, onReorder, onUnpin }: {
+export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, storyCap = 0, engine = false, kickoff = false, onChat, onOpen, onCreate, onReorder, onUnpin }: {
   onOpenSprint: (id: string) => void; kickoff?: boolean;
   columns: Column[]; agents?: Agent[]; sprint: SprintSummary | null; nextSprint: { id: string; goal: string; story_ids: string[] } | null;
   conversations: ConversationSummary[]; live: Record<string, StoryActivity>; now: number;
   storyCap?: number; // o teto por história da aba Orçamento (0 = sem teto)
+  engine?: boolean; // a esteira está rodando: só então um card pode estar em execução
   onChat: (kind: ConversationKind, resumeId?: string) => void; onOpen: (id: string) => void;
   onCreate: (title: string) => Promise<QuickStoryResult | null>; onReorder: (ids: string[], dragged: string | null) => Promise<void>; onUnpin: (id: string) => Promise<void>;
 }) {
@@ -35,7 +36,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
     }
     // a card a Loompa is working on right now goes to the top of its column: the first cards
     // are the ones running, then the ones next in line (11.2)
-    return [...c.stories].sort((a, b) => Number(working(b, live, now)) - Number(working(a, live, now)));
+    return [...c.stories].sort((a, b) => Number(working(b, live, now, engine)) - Number(working(a, live, now, engine)));
   };
   const dragOver = (overId: string) => {
     if (!dragId || dragId === overId) return;
@@ -138,7 +139,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                     <Card s={s} cap={storyCap} hl={hl} onHl={setHl} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  <Card key={s.id} s={s} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now, engine)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
                 ),
               )}
             </div>
@@ -151,7 +152,9 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
 
 /** A card is being worked on when it sits in a working stage and the factory gave a sign of
  * life on it in the last five minutes. Those cards rise to the top and get the amber ring. */
-function working(s: StoryCard, live: Record<string, StoryActivity>, now: number): boolean {
+function working(s: StoryCard, live: Record<string, StoryActivity>, now: number, engine: boolean): boolean {
+  // the belt stopped: nothing is running, however recent the last sign of life was
+  if (!engine) return false;
   if (!AT_WORK.has(s.stage) || s.waiting?.gate === "wait") return false;
   const a = latest(s.activity, live[s.id]);
   if (!a || a.stalled) return false;
