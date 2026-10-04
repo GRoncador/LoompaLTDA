@@ -112,3 +112,14 @@ the hand-written `qwen/qwen3.8-max-0902 -> qwen3.8-max` wrong (OpenRouter's pinn
 Alibaba's moving alias), so revision 3 of the config drops it. A direct call the price table does not
 cover is metered at the maker's price on its card.
 
+## Amendment (2026-10-04): the effort A/B ends
+
+Read after contas SP-004 (3 of 3 stories delivered, US$ 0.375, US$ 0.125 per delivered story against
+US$ 0.51 in SP-003): tier 1 took 0% of the cost (59% on 2026-10-03), the Worker ran entirely on
+`mimo-v2.6-flash` through Xiaomi's own API with a 91% cache hit and no provider switch, and nothing
+escalated. The A/B had 1 task in the default arm and 3 in `low`, all three raised back to the
+default. Xiaomi's API takes the labels but the thinking length did not move with them in 24 sampled
+calls, and models.dev lists MiMo's reasoning as a toggle: while the Worker runs on MiMo the
+experiment cannot answer. `schedule.effort_ab_low_share` defaults to 0 and revision 4 of the config
+drops the old 0.5; the rest of ADR-0016's effort policy stays.
+

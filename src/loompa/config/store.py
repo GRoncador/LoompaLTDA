@@ -86,6 +86,10 @@ def _upgrade(data: dict) -> dict:
             pairs = block.get("byok_models") if isinstance(block, dict) else None
             if isinstance(pairs, dict) and pairs.get(or_id) == own:
                 del pairs[or_id]
+    if int(data.get("revision") or 0) < 4:  # 2026-10-04: the effort A/B ended (ADR-0024)
+        schedule = data.get("schedule")
+        if isinstance(schedule, dict) and schedule.get("effort_ab_low_share") == 0.5:
+            del schedule["effort_ab_low_share"]
     data["revision"] = max(int(data.get("revision") or 0), CONFIG_REVISION)
     return data
 

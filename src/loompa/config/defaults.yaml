@@ -1,7 +1,7 @@
 # Loompa LTDA default factory configuration.
 # Copied into <repo>/.loompa/config.yaml by `loompa init`; edit freely per factory.
 
-revision: 3                 # config/schema.py CONFIG_REVISION: which default changes this file has
+revision: 4                 # config/schema.py CONFIG_REVISION: which default changes this file has
 
 factory:
   name: ""

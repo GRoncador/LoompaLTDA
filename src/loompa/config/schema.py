@@ -82,7 +82,9 @@ class ScheduleConfig(BaseModel):
     # Experiment (cost review 2026-10-03): this share of the main tasks that run at the default
     # effort today (a later attempt, or tier 1) runs at `low` instead, which goes back to the
     # default on the first sign of trouble. `loompa costs` compares the two arms; 0 = off.
-    effort_ab_low_share: float = Field(0.5, ge=0, le=1)
+    # Off since 2026-10-04: the Worker's model (MiMo) ignores effort labels, measured; the
+    # experiment could not answer while it runs there. Raise it again to measure another model.
+    effort_ab_low_share: float = Field(0.0, ge=0, le=1)
 
 
 class WorkerConfig(BaseModel):
@@ -648,7 +650,7 @@ RETIRED_PROVIDERS: tuple[str, ...] = ("groq",)
 
 # Bumped when a default changes in a way an existing config.yaml must pick up (every save writes
 # the whole config, so an old default would otherwise stay forever); see config/store.py.
-CONFIG_REVISION = 3
+CONFIG_REVISION = 4
 
 
 class LoompaConfig(BaseModel):

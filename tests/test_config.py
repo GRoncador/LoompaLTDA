@@ -269,3 +269,19 @@ def test_the_route_of_each_slot_and_the_factory_default_survive_the_settings_scr
     assert view["models"]["default_route"] == "openrouter"
     assert view["matrix"]["general"]["tier1"][0]["route"] == "direct"
     assert "plain_effort" not in view["matrix"]["general"]["tier1"][0]
+
+
+def test_revision_4_ends_the_effort_experiment_but_keeps_a_share_someone_chose(tmp_path):
+    import yaml
+
+    from loompa.config.store import load_config
+
+    (tmp_path / ".loompa").mkdir()
+    for share, expected in ((0.5, 0.0), (0.3, 0.3)):
+        old = {
+            "revision": 3,
+            "models": {"full_output_tokens": 96000},
+            "schedule": {"effort_ab_low_share": share},
+        }
+        (tmp_path / ".loompa" / "config.yaml").write_text(yaml.safe_dump(old), encoding="utf-8")
+        assert load_config(tmp_path).schedule.effort_ab_low_share == expected
