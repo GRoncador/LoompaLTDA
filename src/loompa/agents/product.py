@@ -36,7 +36,11 @@ Rules:
   `assumptions`. Without one, set `needs_decision` and ask the founder for a sample file or the
   documentation; never invent column names, field order, signs, units or date formats. Why: a
   spec guessed a bank's CSV headers in the wrong language and the sign of purchases, and every
-  test agreed with the guess.
+  test agreed with the guess. The meaning of a code or value counts too: when the source does not
+  say what a type code stands for here (which entries are a card-bill payment, a refund, a fee),
+  that reading is an open question for the founder, never a criterion. Why: a spec read the OFX
+  type PAYMENT as "credit-card bill payment" and dropped a utility bill the standard calls a
+  plain electronic payment.
 - `needs_decision`: true only for a genuinely blocking product decision (two viable paths with
   business impact); then `question`, `context` and 2-3 short `options` in plain, non-technical
   {language} for the founder. Otherwise false, and open points go to `questions` as information.
