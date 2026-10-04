@@ -40,7 +40,9 @@ export interface StoryCard {
   activity?: StoryActivity | null;
   sprint_id?: string | null; // the sprint it is in, else the last one it went through (10.8)
   depends_on?: string[]; // cards it needs delivered first (ADR-0021)
-  waiting?: { gate: string; pending: string[]; founder: string[]; gone: string[]; chain: string[]; label: string } | null;
+  // o portão das dependências (ADR-0021 e 11.5): `unmerged` são as que ela já pode usar, porque
+  // estão construídas e aprovadas, faltando só o seu aceite; `ready` marca a que está pronta
+  waiting?: { gate: string; pending: string[]; founder: string[]; gone: string[]; chain: string[]; unmerged?: string[]; ready?: boolean; label: string } | null;
 }
 
 /** What a story at work is doing now (server snapshot, then advanced by live events). */

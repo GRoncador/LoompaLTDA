@@ -209,10 +209,13 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   // past the per-story cap the card stops and waits for the founder: the number says so first
   const overCap = cap > 0 && s.cost_usd >= cap;
   const stalled = !!activity?.stalled;
-  // what holds the card: short, red and naming the story that has to land first
-  // the gate (when the server computed one) knows which are still missing; without it, the
-  // card's own dependencies are the best we have
-  const blockers = !open ? [] : s.waiting ? [...new Set([...s.waiting.gone, ...s.waiting.pending, ...s.waiting.chain])] : s.depends_on ?? [];
+  // what the card hangs on, in two tones. Closed padlock, solid: something really holds it (a
+  // dependency missing, or its own delivery waiting behind another). Open padlock, outlined: it
+  // is free to work — it only carries the branch of a story whose delivery you have not accepted
+  // yet, or its dependencies are already delivered (11.5).
+  const gate = open ? s.waiting : null;
+  const held = gate ? [...new Set([...gate.gone, ...gate.pending, ...gate.chain])] : [];
+  const linked = !open || held.length ? [] : gate?.unmerged?.length ? gate.unmerged : s.depends_on ?? [];
   const size = COMPLEXITY[s.complexity] ?? COMPLEXITY.STANDARD;
   // the pointer answers by lifting the card a little, never by changing a title's weight: this
   // card under the mouse, or a story someone's sprint tag / blocker chip is pointing at
@@ -246,11 +249,15 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             {alerts.map((a) => <span key={a.text} className={`chip ${a.cls}`} title={a.title}>{a.text}</span>)}
           </div>
         )}
-        {blockers.length > 0 && (
+        {(held.length > 0 || linked.length > 0) && (
           <div className="mt-1">
-            <span className="chip bg-red-900/70 text-red-200" title={s.waiting?.label || "O plano desta história só é feito depois que estas forem entregues"}
-              onMouseEnter={() => onHl?.({ ids: blockers })} onMouseLeave={() => onHl?.({})}>
-              🔒 {blockers.join(", ")}
+            <span
+              className={`chip ${held.length ? "bg-red-900/70 text-red-200" : "border border-red-400/70 bg-transparent font-normal text-red-300"}`}
+              title={held.length
+                ? s.waiting?.label || "Esta história só segue depois que estas forem entregues"
+                : `Livre para trabalhar: escrita sobre ${linked.join(", ")}. Só a integração espera o seu aceite daquela entrega.`}
+              onMouseEnter={() => onHl?.({ ids: held.length ? held : linked })} onMouseLeave={() => onHl?.({})}>
+              {held.length ? "🔒" : "🔓"} {(held.length ? held : linked).join(", ")}
             </span>
           </div>
         )}
