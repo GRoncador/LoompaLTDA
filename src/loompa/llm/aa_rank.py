@@ -299,6 +299,8 @@ def _pick(e: Entry, s: float, c: float, **extra: Any) -> Pick:
         score=s,
         coverage=c,
         price=e.price,
+        # score per dollar for every pick (the founder compares it across tiers); None unpriced
+        value=round(s / e.price, 1) if e.price else None,
         speed=e.speed,
         ttft=e.ttft,
         **extra,
@@ -344,7 +346,7 @@ def rank(
     return Ranking(
         profile=profile,
         tier1=[_pick(e, s, c) for e, s, c in t1],
-        tier2=[_pick(e, s, c, value=round(s / e.price, 1)) for e, s, c in t2],
+        tier2=[_pick(e, s, c) for e, s, c in t2],
         tier3=[_pick(e, s, c, free_at=free[e.aa_id]) for e, s, c in t3],
         floor=floor,
         considered=len(entries),

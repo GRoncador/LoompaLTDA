@@ -241,6 +241,7 @@ def models_aa(
                 "esforço",
                 "nota",
                 "US$/mi",
+                "pts/$",
                 "onde é grátis" if tier == "tier3" else "",
             ):
                 table.add_column(col)
@@ -250,6 +251,7 @@ def models_aa(
                     {"none": "sem raciocínio", "": "padrão"}.get(x["effort"], x["effort"]),
                     f"{x['score']:.1f}",
                     f"{x['price']:.2f}" if x["price"] else "—",
+                    f"{x['value']:.0f}" if x.get("value") else "—",
                     ", ".join(x["free_at"]) if tier == "tier3" else "",
                 )
             if p[tier]:
