@@ -27,6 +27,7 @@ from loompa.dependencies import (
     awaiting_merge,
     find_cycle,
     merge_gate,
+    parked_before_review,
     plan_gate,
     rows_by_id,
     still_waiting,
@@ -503,4 +504,37 @@ async def test_a_rejected_delivery_holds_the_story_built_on_it(factory: Factory)
     assert rows[a]["stage"] != Stage.DONE and not awaiting_merge(rows[a])  # back to work
     assert merge_gate(rows, b) == [a]  # B keeps waiting: it carries A's commits
     assert still_waiting(rows, rows[b])
+    await ctx.aclose()
+
+
+async def test_a_chain_of_three_keeps_moving_while_the_founder_decides_the_first(
+    factory: Factory,
+):
+    """11.5: A delivered and waiting for the founder, B built on A's branch and C on B's. The
+    founder's answer is asked once, for A; the other two are finished, waiting only to merge."""
+    ctx = make_ctx(factory, dry_run=True)
+    po = ProductOwnerAgent(ctx)
+    a, b, c = (
+        po.add_item(t).story_id
+        for t in ("Guardar centavos", "Orçamento por categoria", "Relatório do mês")
+    )
+    po.set_dependencies(b, [a])
+    po.set_dependencies(c, [b])
+    MasterAgent(ctx).start_sprint([a, b, c])
+    for _ in range(4):  # the engine polls; each `run()` stops as soon as nothing runs
+        await Scheduler(ctx).run()
+
+    rows = rows_by_id(ctx.store, factory.slug)
+    assert awaiting_merge(rows[a])  # the only one asking the founder anything
+    assert [m.story_id for m in ctx.store.list_messages(factory.slug, "pending")] == [a]
+    for sid, dep in ((b, a), (c, b)):
+        state = load_state(ctx, sid)
+        assert state.plan_ready and parked_before_review(rows[sid])
+        assert state.extra[BUILT_ON_KEY] == dep  # each one written on the branch before it
+        assert merge_gate(rows, sid) == [dep]  # and none of them may merge first
+
+    # the panel puts the three where the founder looks for what their answer unblocks
+    from loompa.dashboard.app import board_column
+
+    assert [board_column(rows[sid]) for sid in (a, b, c)] == ["AWAITING_FOUNDER"] * 3
     await ctx.aclose()

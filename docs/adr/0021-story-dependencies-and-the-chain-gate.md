@@ -129,6 +129,15 @@ waits until that story is really merged (its new code arrives in the rebase befo
 If that story is cancelled or sent back to the backlog instead, the dependent *is* blocked for the
 founder: its work is finished, but delivering it would carry code nobody wants.
 
+A chain of three makes the rule sharper. With A delivered and waiting for the founder, B builds
+on A's branch and parks before `review`; C then builds on *B's* branch, because what the gate asks
+of a dependency is "is it built and green?" (`ready_to_merge`), not "did it already ask the founder
+something?". So the line keeps moving to the end of the chain and the founder is asked **once**,
+about A; B and C are finished, waiting only for their turn to merge. Each acceptance merges one and
+releases the next delivery. In the panel they sit under "Aguardando Você" (`board_column`), because
+that is where the founder looks for what their answer unblocks, while the engine's stage stays
+`REVIEW`.
+
 Where the order is enforced, end to end: the dependent never reaches the inbox while the
 dependency is unmerged (it parks before `review`, so only one delivery at a time is a decision);
 the `plan` of a story built that way runs inside its worktree, so the Architect sees the

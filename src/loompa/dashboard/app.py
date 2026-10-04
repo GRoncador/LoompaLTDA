@@ -41,7 +41,7 @@ from loompa.conversations import (
     ConversationStatus,
     MeetingMode,
 )
-from loompa.dependencies import WAIT_KEY, plan_gate
+from loompa.dependencies import WAIT_KEY, parked_before_review, plan_gate
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column, load_state
 from loompa.engine.lock import DryRunOnLiveFactory, EngineBusy, EngineLock
 from loompa.factory import Factory
@@ -439,7 +439,9 @@ def create_app(
                 card["waiting"] = plan_gate(rows, s["id"]).as_dict()
             if s["stage"] in LIVE_STAGES:  # only a story at work has something to show
                 card["activity"] = ctx.store.story_activity(s["id"])
-            columns[kanban_column(s["stage"])].append(card)
+            if parked_before_review(s):
+                card["waiting"] = (s["state"]["extra"][WAIT_KEY] | {"ready": True})
+            columns[board_column(s)].append(card)
         backend_services = {"ops", "finance", "kaizen"}
         agents = {
             a["name"]: a
@@ -1078,14 +1080,11 @@ def create_app(
         """Plan 9.4 (revised 04/10): the suggestion from Artificial Analysis alone, from the
         weekly cache. The factory's work mix weighs the single cluster; the house record and an
         OpenRouter id are shown next to each pick (help to fill a slot, never a filter)."""
-        from loompa.finance.house import house_scores, worker_house
         from loompa.llm import aa_rank
+        from loompa.models_sync import house_for
 
         ctx = hub.get(slug).ctx
-        try:
-            house = worker_house(house_scores(ctx.store, ctx.slug, ctx.config))
-        except Exception:  # noqa: BLE001
-            house = {}
+        house = house_for(ctx.store, ctx.slug, ctx.config)  # every factory of the hub
         tool = ctx.config.tools.artificial_analysis
         return {
             **aa_rank.suggest(
@@ -1407,6 +1406,16 @@ def create_app(
 LIVE_STAGES = frozenset(
     s.value for s in (Stage.SPEC, Stage.PLAN, Stage.DEV, Stage.TEST, Stage.REVIEW)
 )
+
+
+def board_column(row: dict[str, Any]) -> str:
+    """The kanban column of a story. A story that is finished and green, held only because a
+    delivery before it in the chain waits for the founder, is shown under "Aguardando Você":
+    nothing else is holding it, and that is where the founder looks for what their answer
+    unblocks (11.5). The engine's stage stays `REVIEW`."""
+    if parked_before_review(row):
+        return Stage.AWAITING_FOUNDER.value
+    return kanban_column(row["stage"])
 
 
 def _story_card(s: dict[str, Any]) -> dict[str, Any]:

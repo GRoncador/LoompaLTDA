@@ -114,6 +114,21 @@ def awaiting_merge(row: Mapping[str, Any]) -> bool:
     )
 
 
+def parked_before_review(row: Mapping[str, Any]) -> bool:
+    """Finished and green, parked before `review` because a delivery it was built on is not in
+    the base yet. It never asked the founder anything: it is the one before it that did."""
+    note = ((row.get("state") or {}).get("extra") or {}).get(WAIT_KEY) or {}
+    return bool(note.get("unmerged")) and row["stage"] not in TERMINAL
+
+
+def ready_to_merge(row: Mapping[str, Any]) -> bool:
+    """The story's code is written and the Inspector passed it; only the merge into the base is
+    missing — either because the founder has not accepted the delivery, or because the delivery
+    before it in the chain has not been accepted. Either way the next story may build on it, and
+    that is what keeps a chain of three moving while the founder decides the first (11.5)."""
+    return awaiting_merge(row) or parked_before_review(row)
+
+
 def chain_of(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> list[str]:
     """Every active story linked to `story_id` by dependencies, either way, itself included."""
     links: dict[str, set[str]] = {}
@@ -193,7 +208,7 @@ def plan_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> GateResul
         row = rows.get(dep)
         if row is None or row["stage"] in (Stage.CANCELLED, Stage.BACKLOG):
             out.gone.append(dep)
-        elif awaiting_merge(row):
+        elif ready_to_merge(row):
             out.unmerged.append(dep)  # built and approved by the Inspector: good enough to plan
         elif row["stage"] != Stage.DONE:
             out.pending.append(dep)
@@ -225,8 +240,8 @@ def merge_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> list[str
     """Dependencies this story must not merge over. Two cases, and the second is the one a
     rejected delivery creates:
 
-    * the dependency is a delivery the founder has not accepted yet — merging now would carry it
-      into the base;
+    * the dependency is built and green but not in the base — a delivery the founder has not
+      accepted, or one parked behind another in the chain. Merging now would carry it along;
     * the story's own branch *started from* that dependency's branch and the dependency is not in
       the base yet. That stays true when the founder asks for changes: the delivery goes back to
       `dev` and stops being "awaiting", but this story still carries its commits, so it waits
@@ -241,7 +256,7 @@ def merge_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> list[str
         row = rows.get(dep)
         if row is None:
             continue
-        if awaiting_merge(row) or (dep == on and row["stage"] != Stage.DONE):
+        if ready_to_merge(row) or (dep == on and row["stage"] != Stage.DONE):
             out.append(dep)
     return out
 
