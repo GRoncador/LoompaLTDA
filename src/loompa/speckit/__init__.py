@@ -1,5 +1,6 @@
 from loompa.speckit.artifacts import (
     NO_TEST_MARK,
+    REVIEW_MARK,
     SpecArtifacts,
     StorySpecPaths,
     render_constitution,
@@ -14,6 +15,7 @@ from loompa.speckit.artifacts import (
 
 __all__ = [
     "NO_TEST_MARK",
+    "REVIEW_MARK",
     "SpecArtifacts",
     "StorySpecPaths",
     "render_constitution",

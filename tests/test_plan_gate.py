@@ -47,6 +47,38 @@ def test_a_criterion_the_traceability_skipped_is_a_problem(tmp_path: Path):
     ]
 
 
+def test_a_change_the_program_never_runs_is_traced_to_the_review(tmp_path: Path):
+    """tamagotchi S-051 (plan 12.1): four stale comments, and 185 lines of tests that read the
+    test file as text, because the gate wanted a test per criterion."""
+    plan = (
+        "- Critério 1 → review: os comentários citam y 61..120\n"
+        "- Critério 2 → tests/consequencias.test.js (a suíte continua verde)\n"
+    )
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "consequencias.test.js").write_text("// y 56..66\n")
+
+    def problems(files: list[str]) -> list[str]:
+        return check_plan(
+            tmp_path,
+            acceptance=["a", "b"],
+            files=files,
+            tasks=["Editar os comentários de tests/consequencias.test.js"],
+            plan_md=plan,
+        ).problems
+
+    assert problems(["tests/consequencias.test.js"]) == []
+    assert problems(["README.md", "tests/"]) == []
+    assert problems(["tests/consequencias.test.js", "src/sprites.js"]) == [
+        "acceptance criterion 1 is traced to the review, but the story changes product code: "
+        "plan a test for it"
+    ]
+    from loompa.agents.architect import SIMPLE_SYSTEM, SYSTEM
+
+    for prompt in (SYSTEM, SIMPLE_SYSTEM):
+        assert "review: <what the diff must show>" in " ".join(prompt.split())
+
+
 def test_a_task_that_names_no_file_is_a_problem(tmp_path: Path):
     report = check_plan(
         tmp_path,

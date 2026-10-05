@@ -20,6 +20,9 @@ _TASK_LINE = re.compile(r"^\s*[-*]\s*\[( |x|X)\]\s*(?:(T\d+)[:.)]?\s*)?(.+?)\s*$
 # What a traceability line says for an acceptance criterion with no test planned for it.
 # `plan_check` reads it back to refuse the plan, so the two must agree (ADR-0026).
 NO_TEST_MARK = "**sem teste planejado**"
+# A criterion about text the product never runs (a comment, a document), checked by reading the
+# diff instead of by a test; `plan_check` accepts it only when the story touches no product code.
+REVIEW_MARK = "review:"
 
 
 def _template(name: str) -> str:

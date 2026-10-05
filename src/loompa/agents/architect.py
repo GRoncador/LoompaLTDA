@@ -57,9 +57,11 @@ Plan in this order:
    smoke, which renders it at desktop width and at 390 px, flags sideways scrolling, elements
    sticking out of their box and drawings cut at a canvas edge, and sends the founder the
    screenshots: trace such a criterion to that check plus at most one test of the markup or style
-   it needs, instead of many tests that parse the stylesheet.
+   it needs, instead of many tests that parse the stylesheet. A change the program never runs (a
+   comment, a document) gets no test that reads a source file as text: when the story edits only
+   tests or documents, trace such a criterion to `review: <what the diff must show>`.
 4. Traceability. For EACH acceptance criterion, by its number in the spec, the test file and test
-   that will prove it.
+   that will prove it (or `review: …`, above).
 5. Impact and rollback. `impact`: when existing code changes, what else uses it and how
    compatibility is kept; empty when the story only adds code. `rollback`: only when persisted
    data, a schema or a public contract changes, how to migrate and how to undo; otherwise empty.
@@ -116,10 +118,13 @@ Plan in this order:
    smoke, which renders it at desktop width and at 390 px, flags sideways scrolling, elements
    sticking out of their box and drawings cut at a canvas edge, and sends the founder the
    screenshots: trace such a criterion to that check plus at most one test of the markup or style
-   it needs, instead of many tests that parse the stylesheet.
+   it needs, instead of many tests that parse the stylesheet. A change the program never runs (a
+   comment, a document) gets no test that reads a source file as text: when the story edits only
+   tests or documents, trace such a criterion to `review: <what the diff must show>`.
 4. Traceability. For EACH acceptance criterion, by its number in the spec, the test file and test
-   that will prove it. A criterion with no planned test is a plan the factory refuses, so there is
-   no point leaving one out: if a criterion cannot be proved by a test, this story is not simple.
+   that will prove it (or `review: …`, above). A criterion with no planned test is a plan the
+   factory refuses, so there is no point leaving one out: if a criterion cannot be proved by a
+   test or that review, this story is not simple.
 `not_simple` is true when the work turns out to need the full plan: it changes a schema, a
 migration or a public contract; it needs a library the constitution does not allow; it cannot keep
 a rule of the constitution; it needs more than three tasks; or existing behaviour changes and what

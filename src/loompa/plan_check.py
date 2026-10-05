@@ -30,7 +30,7 @@ from pathlib import Path
 
 from loompa.agents.architect import FILE_REF, LEAVE_ALONE, PATH_REF
 from loompa.hygiene import is_test_path
-from loompa.speckit import NO_TEST_MARK
+from loompa.speckit import NO_TEST_MARK, REVIEW_MARK
 
 _TRACE_LINE = re.compile(r"^\s*[-*]\s*Crit[ée]rio\s+(\d+)\s*→\s*(.*)$", re.M)
 
@@ -54,12 +54,31 @@ def _product(paths: list[str]) -> list[str]:
     return [p for p in paths if not p.startswith(".loompa/")]
 
 
-def criteria_without_test(plan_md: str, criteria: list[str]) -> list[str]:
+_DOC_SUFFIXES = (".md", ".txt", ".rst")
+
+
+def touches_no_code(files: list[str]) -> bool:
+    """Every path the story may edit is a test or a document: what it changes is never run as
+    the product (a comment in a test file, a README)."""
+    product = _product(files)
+    return bool(product) and all(
+        is_test_path(p) or is_test_path(f"{p.rstrip('/')}/x") or p.endswith(_DOC_SUFFIXES)
+        for p in product
+    )
+
+
+def criteria_without_test(
+    plan_md: str, criteria: list[str], files: list[str] | None = None
+) -> list[str]:
     """Traceability holes, read back from the plan the Architect wrote (7.1): a criterion marked
-    without a planned test, and a criterion traceability skipped altogether."""
+    without a planned test, and a criterion traceability skipped altogether. A criterion traced
+    to the diff review (`review: …`) counts only when the story changes no product code:
+    tamagotchi S-051 fixed four comments and, held to a test per criterion, added 185 lines of
+    tests reading a test file as text (plan 12.1)."""
     if not criteria:
         return []
     seen: dict[int, str] = {int(n): body for n, body in _TRACE_LINE.findall(plan_md)}
+    reviewable = touches_no_code(files or [])
     out = []
     for n in range(1, len(criteria) + 1):
         body = seen.get(n)
@@ -67,6 +86,11 @@ def criteria_without_test(plan_md: str, criteria: list[str]) -> list[str]:
             out.append(f"acceptance criterion {n} is missing from the plan's traceability")
         elif NO_TEST_MARK in body or not body.strip():
             out.append(f"acceptance criterion {n} has no test planned for it")
+        elif body.strip().lower().startswith(REVIEW_MARK) and not reviewable:
+            out.append(
+                f"acceptance criterion {n} is traced to the review, but the story changes "
+                "product code: plan a test for it"
+            )
     return out
 
 
@@ -156,7 +180,7 @@ def check_plan(
 ) -> PlanReport:
     return PlanReport(
         problems=[
-            *criteria_without_test(plan_md, acceptance),
+            *criteria_without_test(plan_md, acceptance, files),
             *tasks_without_file(tasks),
             *edits_of_missing_files(root, tasks),
             *tests_appended_to_long_files(root, tasks),
