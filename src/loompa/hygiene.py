@@ -372,17 +372,45 @@ TEST_RATIO_MAX = 5
 TEST_RATIO_MIN_LINES = 150  # below this, a few careful tests are not worth a remark
 
 
-def test_ratio(files: list[_FileDiff]) -> dict[str, str] | None:
-    """A low-severity finding when the tests added outweigh the product change several times
-    over (ADR-0030). Tamagotchi SP-008 wrote ~3,100 test lines for ~430 of product: the Worker's
-    time went into them, they parsed the stylesheet instead of looking at the page, and every
-    story appended them to the same files. Low: the delivery is fine, the number is a signal."""
+# Past this, the Worker trims before the task's commit (12.1: tamagotchi S-060 delivered 864 test
+# lines for ~70 of product, and its legacy pixel-count tests then blocked S-061).
+TEST_TRIM_RATIO = 6
+TEST_TRIM_MIN_LINES = 300
+
+
+def _sizes(files: list[_FileDiff]) -> tuple[int, int]:
     tests = sum(len(f.added or []) for f in files if is_test_path(f.path))
     product = sum(
         len([a for a in f.added or [] if a.strip()])
         for f in files
         if f.path.endswith(PRODUCT_SUFFIXES) and not is_test_path(f.path)
     )
+    return tests, product
+
+
+def tests_to_trim(diff: str) -> str:
+    """What the Worker hears when the story's tests are several times its product change: the
+    whole story so far (committed tasks and this one), so a task that only writes the tests of
+    an earlier task's code is measured fairly. "" when the tests are in proportion."""
+    files = [f for f in _files(diff) if not f.deleted]
+    tests, product = _sizes(files)
+    if tests < TEST_TRIM_MIN_LINES or tests <= TEST_TRIM_RATIO * max(product, 1):
+        return ""
+    return (
+        f"Test size: this story adds {tests} lines of tests for {product} lines of product "
+        f"(over {TEST_TRIM_RATIO}x). Cut the tests this story added down to the behaviour, its "
+        "limits and its error paths: merge tests that walk the same path with other values, and "
+        "drop the ones that pin implementation details (exact pixels, counts of drawn points, "
+        "the text of a stylesheet or of a comment). Keep every acceptance criterion covered."
+    )
+
+
+def test_ratio(files: list[_FileDiff]) -> dict[str, str] | None:
+    """A low-severity finding when the tests added outweigh the product change several times
+    over (ADR-0030). Tamagotchi SP-008 wrote ~3,100 test lines for ~430 of product: the Worker's
+    time went into them, they parsed the stylesheet instead of looking at the page, and every
+    story appended them to the same files. Low: the delivery is fine, the number is a signal."""
+    tests, product = _sizes(files)
     if tests < TEST_RATIO_MIN_LINES or tests <= TEST_RATIO_MAX * max(product, 1):
         return None
     where = max((f for f in files if is_test_path(f.path)), key=lambda f: len(f.added or [])).path

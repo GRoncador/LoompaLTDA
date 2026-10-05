@@ -293,3 +293,22 @@ def test_tests_that_outweigh_the_change_many_times_are_a_low_finding():
     small = _added("src/a.js", 2, new=False) + _added("tests/a.test.js", 120)
     for diff in (fair, small):
         assert not [f for f in weak_tests(diff) if "lines of tests" in f["text"]]
+
+
+def test_a_story_with_tests_many_times_its_product_is_told_to_trim():
+    """12.1: tamagotchi S-060 delivered 864 test lines for ~70 of product."""
+    from loompa.hygiene import tests_to_trim
+
+    def diff(path: str, n: int) -> str:
+        body = "".join(f"+line {i}\n" for i in range(n))
+        return (
+            f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n"
+            f"@@ -0,0 +1,{n} @@\n{body}"
+        )
+
+    bloated = diff("src/lcd_screen.js", 70) + diff("tests/fim_de_jogo_lcd.test.js", 864)
+    message = tests_to_trim(bloated)
+    assert "864 lines of tests for 70 lines of product" in message
+    assert "exact pixels" in message and "acceptance criterion" in message
+    assert tests_to_trim(diff("src/a.js", 70) + diff("tests/a.test.js", 400)) == ""  # under 6x
+    assert tests_to_trim(diff("tests/a.test.js", 250)) == ""  # a few careful tests

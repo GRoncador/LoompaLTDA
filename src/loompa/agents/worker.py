@@ -20,7 +20,7 @@ from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
 from loompa.engine.state import Autonomy, StoryKind, StoryState
 from loompa.finance.story_cap import over_cap, story_spent
-from loompa.hygiene import new_files, scan_diff
+from loompa.hygiene import new_files, scan_diff, tests_to_trim
 from loompa.llm import Message
 from loompa.llm.router import TIER_ABOVE
 from loompa.speckit import story_dir, tasks_from_markdown
@@ -371,6 +371,16 @@ class WorkerAgent(LoompaAgent):
             "directory (tmp_path) and delete the file"
             for p in residue[:3]
         ]
+        story_diff = (
+            self.ctx.worktrees.diff(wt, max_chars=600_000)
+            + "\n"
+            + (self.ctx.worktrees.diff_working(wt, max_chars=600_000))
+        )
+        if trim := tests_to_trim(story_diff):
+            self.ctx.emit(
+                "worker.tests_trim", story_id=state.story_id, agent=self.name, task=number
+            )
+            missing.append(trim)
         # a red test is the reproducer's goal; a yolo story trusts hygiene and the Inspector
         if not reproducer and state.autonomy != Autonomy.YOLO:
             missing += await self._dod_check(state, wt, text, result.summary)
