@@ -285,3 +285,11 @@ async def test_a_plan_bigger_than_its_label_promotes_the_story(factory: Factory)
     assert state.route.index("plan_review") < state.route.index("preflight")
     assert script.seen["plan_review"]  # and it earned the review call
     await ctx.aclose()
+
+
+def test_test_files_do_not_make_a_plan_big(tmp_path: Path):
+    """12.1, S-061: three source files plus six old test files was promoted to COMPLEX."""
+    files = ["src/a.js", "src/b.js", "src/c.js", *(f"tests/t{i}.test.js" for i in range(6))]
+    files += [".loompa/specs/S-061/"]
+    report = check_plan(tmp_path, acceptance=[], files=files, tasks=["Criar src/a.js"], plan_md="")
+    assert report.signals == []

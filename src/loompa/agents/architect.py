@@ -266,7 +266,10 @@ does not need stays out). Decide what the plan needs so the Worker can follow th
 - `files`: extra paths (relative to the repo root) it must be allowed to create, edit or delete;
 - `tasks`: 0-3 extra atomic tasks (one commit each, with its check) that carry out the request.
 Add only what the guidance needs and never repeat a task already done. A plain clarification needs
-nothing new: return empty lists. The story's spec, plan and tasks under `.loompa/` are not in the
+nothing new: return empty lists. When the guidance lets old tests be adjusted and the current test
+run is given, open in one go every test file outside the plan's `files` that it shows failing
+because of this change. Why: tamagotchi S-061 asked the founder three times, one old test file at a
+time. The story's spec, plan and tasks under `.loompa/` are not in the
 repository the Worker edits, and the factory updates the spec's criteria itself when the founder
 changes them: never name a `.loompa/` path in `files` or ask a task to edit it. Why: a task told the
 Worker to "adjust criterion 6 of the spec in .loompa/specs/" and it spent 18 rounds looking for it.
@@ -476,7 +479,7 @@ class ArchitectAgent(LoompaAgent):
         return named
 
     async def amend(
-        self, state: StoryState, guidance: str, *, source: str = "founder"
+        self, state: StoryState, guidance: str, *, source: str = "founder", suite: str = ""
     ) -> AgentResult:
         """Widen the plan for the founder's guidance without re-planning the story: extra paths
         for the Worker's fence and extra tasks appended after the ones already done."""
@@ -502,7 +505,9 @@ class ArchitectAgent(LoompaAgent):
             + ("## Founder's guidance\n" if source == "founder" else "## The Worker's request\n")
             + f"{guidance[:3000]}\n\n"
             f"## Current plan\n{plan[:4000]}\n\n## Tasks\n{tasks_md[:3000]}\n\n"
-            f"## Paths the Worker may touch now\n" + "\n".join(state.allowed_paths)
+            f"## Paths the Worker may touch now\n"
+            + "\n".join(state.allowed_paths)
+            + (f"\n\n## Current test run in the story's worktree\n{suite[:4000]}" if suite else "")
         )
         data = await self.ask_json_with_tools(
             AMEND_SYSTEM.format(language=self.language) + EXPLORE_HINT,

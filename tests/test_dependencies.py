@@ -261,7 +261,16 @@ async def test_the_chain_specs_first_and_the_dependent_builds_on_the_approved_de
     assert sb.stage == Stage.AWAITING_FOUNDER and sb.blocked_reason == "delivery"
     assert WAIT_KEY not in sb.extra
     assert len([e for e in events(ctx, "spec.approved") if e["story_id"] == b]) == 1  # not redone
-    assert len([e for e in events(ctx, "story.stage") if e["story_id"] == b and e["payload"].get("node") == "node_plan"]) == 1  # planned once
+    assert (
+        len(
+            [
+                e
+                for e in events(ctx, "story.stage")
+                if e["story_id"] == b and e["payload"].get("node") == "node_plan"
+            ]
+        )
+        == 1
+    )  # planned once
     assert (factory.root / "loompa_dryrun").is_dir()
     await ctx.aclose()
 
@@ -548,14 +557,37 @@ def test_two_pending_deliveries_in_a_chain_let_the_next_story_start():
     branch carries both. The tip of the chain is a base that leaves nothing out."""
     ROUTE = ["spec", "spec_review", "plan", "dev", "test", "review"]
     rows = {
-        "S-054": {"id": "S-054", "stage": Stage.AWAITING_FOUNDER, "depends_on": [], "branch": "b54",
-                  "state": {"blocked_reason": "delivery", "qa_verdict": "PASS",
-                            "route": ROUTE, "resume_phase": "review"}},
-        "S-055": {"id": "S-055", "stage": Stage.REVIEW, "depends_on": ["S-054"], "branch": "b55",
-                  "state": {"qa_verdict": "PASS", "route": ROUTE, "phase": "review",
-                            "extra": {BUILT_ON_KEY: "S-054", WAIT_KEY: {"unmerged": ["S-054"]}}}},
-        "S-056": {"id": "S-056", "stage": Stage.PLAN, "depends_on": ["S-054", "S-055"],
-                  "branch": "", "state": {"route": ROUTE, "phase": "plan"}},
+        "S-054": {
+            "id": "S-054",
+            "stage": Stage.AWAITING_FOUNDER,
+            "depends_on": [],
+            "branch": "b54",
+            "state": {
+                "blocked_reason": "delivery",
+                "qa_verdict": "PASS",
+                "route": ROUTE,
+                "resume_phase": "review",
+            },
+        },
+        "S-055": {
+            "id": "S-055",
+            "stage": Stage.REVIEW,
+            "depends_on": ["S-054"],
+            "branch": "b55",
+            "state": {
+                "qa_verdict": "PASS",
+                "route": ROUTE,
+                "phase": "review",
+                "extra": {BUILT_ON_KEY: "S-054", WAIT_KEY: {"unmerged": ["S-054"]}},
+            },
+        },
+        "S-056": {
+            "id": "S-056",
+            "stage": Stage.PLAN,
+            "depends_on": ["S-054", "S-055"],
+            "branch": "",
+            "state": {"route": ROUTE, "phase": "plan"},
+        },
     }
     gate = plan_gate(rows, "S-056")
     assert gate.gate == Gate.OPEN and gate.unmerged == ["S-054", "S-055"]
@@ -584,12 +616,30 @@ def test_the_parked_card_says_nothing_is_missing():
 
     ROUTE = ["spec", "spec_review", "plan", "dev", "test", "review"]
     rows = {
-        "S-054": {"id": "S-054", "stage": Stage.AWAITING_FOUNDER, "depends_on": [], "branch": "b54",
-                  "state": {"blocked_reason": "delivery", "qa_verdict": "PASS",
-                            "route": ROUTE, "resume_phase": "review"}},
-        "S-055": {"id": "S-055", "stage": Stage.REVIEW, "depends_on": ["S-054"], "branch": "b55",
-                  "state": {"qa_verdict": "PASS", "route": ROUTE, "phase": "review",
-                            "extra": {BUILT_ON_KEY: "S-054", WAIT_KEY: note}}},
+        "S-054": {
+            "id": "S-054",
+            "stage": Stage.AWAITING_FOUNDER,
+            "depends_on": [],
+            "branch": "b54",
+            "state": {
+                "blocked_reason": "delivery",
+                "qa_verdict": "PASS",
+                "route": ROUTE,
+                "resume_phase": "review",
+            },
+        },
+        "S-055": {
+            "id": "S-055",
+            "stage": Stage.REVIEW,
+            "depends_on": ["S-054"],
+            "branch": "b55",
+            "state": {
+                "qa_verdict": "PASS",
+                "route": ROUTE,
+                "phase": "review",
+                "extra": {BUILT_ON_KEY: "S-054", WAIT_KEY: note},
+            },
+        },
     }
     assert parked_before_review(rows["S-055"]) and still_waiting(rows, rows["S-055"])
 
@@ -601,3 +651,25 @@ def test_the_parked_card_says_nothing_is_missing():
     shown = merge_parked_note(legacy["unmerged"], legacy["label"]) | {"ready": True}
     assert not shown["pending"] and not shown["founder"]
     assert shown["unmerged"] == ["S-054"] and shown["ready"]
+
+
+def test_a_story_waits_while_the_delivery_it_stands_on_is_reworked():
+    """12.1, tamagotchi S-061: it kept fixing tests on top of S-060 while S-060, failed by the
+    judge, was replanned from scratch — 102 minutes, three conflicts and an escalation."""
+    from loompa.dependencies import parent_in_rework
+
+    ROUTE = ["spec", "plan", "dev", "test", "review"]
+    rows = {
+        "S-060": {"id": "S-060", "stage": Stage.DEV, "depends_on": [], "branch": "b60",
+                  "state": {"route": ROUTE, "phase": "dev"}},
+        "S-061": {"id": "S-061", "stage": Stage.DEV, "depends_on": ["S-060"], "branch": "b61",
+                  "state": {"route": ROUTE, "phase": "dev", "extra": {BUILT_ON_KEY: "S-060"}}},
+    }  # fmt: skip
+    assert parent_in_rework(rows, "S-061") == "S-060"
+    rows["S-061"]["state"]["extra"][WAIT_KEY] = {"gate": "wait", "pending": ["S-060"]}
+    assert still_waiting(rows, rows["S-061"])  # parked in `dev` while S-060 is reworked
+    rows["S-060"]["stage"] = Stage.AWAITING_FOUNDER  # delivered again, green
+    rows["S-060"]["state"].update(blocked_reason="delivery", qa_verdict="PASS")
+    assert not parent_in_rework(rows, "S-061") and not still_waiting(rows, rows["S-061"])
+    rows["S-060"]["stage"] = Stage.REVIEW  # accepted and merging: not rework
+    assert not parent_in_rework(rows, "S-061")

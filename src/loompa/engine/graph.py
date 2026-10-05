@@ -57,6 +57,7 @@ from loompa.dependencies import (
     gone_under,
     merge_gate,
     merge_parked_note,
+    parent_in_rework,
     plan_gate,
     rows_by_id,
     sync_refs,
@@ -795,9 +796,36 @@ async def _widen_fence(ctx: EngineContext, state: StoryState, res: AgentResult) 
     return True
 
 
+async def _red_suite(ctx: EngineContext, wt: Worktree) -> str:
+    """The suite's summary in the story's worktree when it is red, for an amendment to see every
+    test the change breaks at once (12.1, S-061); "" when green or not runnable."""
+    if ctx.dry_run:
+        return ""
+    try:
+        out = (await ctx.aci_for(wt.path).call("run_tests", {})).output
+    except Exception:  # noqa: BLE001 - only context for the Architect
+        return ""
+    return out if "FAIL" in out[:200] else ""
+
+
 async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     # A worktree that cannot be prepared raises: the Ops Loompa tries again (three times, ADR-0016
     # §5) before the founder hears of it, as with any other failure of a step.
+    rows = rows_by_id(ctx.store, ctx.slug)
+    if moving := parent_in_rework(rows, state.story_id):
+        # parked in `dev` until the delivery it stands on is ready again; the plan gate decides
+        # when (it waits for a dependency that is neither done nor ready to merge)
+        state.extra[WAIT_KEY] = {
+            "gate": "wait",
+            "pending": [moving],
+            "founder": [],
+            "gone": [],
+            "chain": [],
+            "unmerged": [],
+            "label": f"aguardando {moving}, que voltou para ajustes",
+        }
+        ctx.emit("story.waiting", story_id=state.story_id, pending=[moving], parent_rework=True)
+        return state
     wt = _ensure_worktree(ctx, state)
     if "baseline" not in state.extra:
         if ctx.worktrees.changed_files(wt):
@@ -828,7 +856,7 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     guidance = state.extra.pop(AMEND_KEY, None)
     if guidance:
         try:
-            await ArchitectAgent(ctx).amend(state, guidance)
+            await ArchitectAgent(ctx).amend(state, guidance, suite=await _red_suite(ctx, wt))
         except LLMError as exc:  # the Worker still gets the guidance as a note
             ctx.emit("plan.amend_failed", story_id=state.story_id, error=str(exc)[:200])
     if (spent := over_cap(ctx, state)) is not None:

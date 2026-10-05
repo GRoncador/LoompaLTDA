@@ -354,6 +354,25 @@ def gone_under(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> str:
     return ""
 
 
+REWORK = (Stage.SPEC, Stage.PLAN, Stage.DEV, Stage.TEST)
+
+
+def parent_in_rework(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> str:
+    """A delivery this story was built on that went back to work (the founder asked for changes,
+    the judge failed it): the ground under this story is moving. tamagotchi S-061 kept fixing
+    tests on top of S-060 while S-060 was replanned from scratch: 102 minutes, three conflicts and
+    an escalation (12.1). Accepted and merging (REVIEW) is not rework."""
+    for on in parents(rows.get(story_id)):
+        row = rows.get(on)
+        if row is None:
+            continue
+        st = row.get("state") or {}
+        asking = row["stage"] == Stage.AWAITING_FOUNDER and st.get("blocked_reason") != "delivery"
+        if row["stage"] in REWORK or asking:
+            return on
+    return ""
+
+
 def still_waiting(rows: Mapping[str, Mapping[str, Any]], row: Mapping[str, Any]) -> bool:
     """A parked story that must stay parked. Where it parked says what it waits for: `unmerged`
     in the note means it is a finished story held before `review` until the delivery it was

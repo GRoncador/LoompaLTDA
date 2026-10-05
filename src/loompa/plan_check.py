@@ -166,7 +166,12 @@ def tests_appended_to_long_files(root: Path, tasks: list[str]) -> list[str]:
 
 
 def size_signals(tasks: list[str], files: list[str]) -> list[str]:
-    product = _product(files)
+    """Only product paths count: tamagotchi S-061 (12.1) changed three source files, and the six
+    old tests founder had let it adjust (pixel-exact ones) made it "9 paths", COMPLEX, and a
+    pre-flight that added two more test files."""
+    product = [
+        p for p in _product(files) if not is_test_path(p) and not is_test_path(f"{p.rstrip('/')}/x")
+    ]
     out = []
     if len(tasks) > MAX_TASKS:
         out.append(f"{len(tasks)} tasks (over {MAX_TASKS})")
