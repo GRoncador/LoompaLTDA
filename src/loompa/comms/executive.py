@@ -127,13 +127,33 @@ _GIT_COMMAND = re.compile(
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _TRAILING_NOISE = re.compile(r"\n{3,}")
 
+# The factory's own words, which the founder never needs (masculine nouns, so the article the
+# sentence already has still agrees): one list for the audit, the scrubber
+# and the factory's jargon detector (plan 8.6.7; a S-041 option said "versão guardada no branch"
+# after the detector already knew the word and the audit did not).
+TECH_WORDS: dict[str, str] = {
+    r"\bworktrees?\b": "espaço de trabalho",
+    r"\bbranch(?:es)?\b": "ramo de trabalho",
+    r"\bmerges?\b": "envio à versão principal",
+    r"\bcommits?\b": "registro",
+    r"\bchecklists?\b": "roteiro de verificação",
+    r"\brebase\b": "realinhamento",
+    r"\bpytest\b": "testes",
+    r"\blint\b": "verificador de estilo",
+    r"\bstack ?trace\b": "detalhe técnico",
+    r"\bdiffs?\b": "comparativo",
+    r"\bpull requests?\b": "pedido de revisão",
+    r"\bPRs?\b": "pedido de revisão",
+}
+TECH_WORD = re.compile("|".join(TECH_WORDS), re.I)
+
 # Jargon -> plain language (pt-BR and en variants kept short on purpose).
 _JARGON: dict[str, str] = {
-    r"\bstack ?trace\b": "detalhe técnico",
+    # before the single words: "merge conflict" reads better whole
+    r"\bmerge conflict\b": "conflito entre versões do código",
     r"\bnull ?pointer\b": "dado ausente",
     r"\bNoneType\b": "dado ausente",
     r"\bsegfault\b": "falha do programa",
-    r"\bmerge conflict\b": "conflito entre versões do código",
     r"\bregression\b": "algo que funcionava deixou de funcionar",
     r"\bregressão\b": "algo que funcionava deixou de funcionar",
     r"\bflaky test\b": "verificação instável",
@@ -147,6 +167,7 @@ _JARGON: dict[str, str] = {
     # "Bloqueio na criação de arquivo de testes para a tarefa T1")
     r"\btarefa T(\d{1,3})\b": r"tarefa \1",
     r"\bT(\d{1,3})\b": r"tarefa \1",
+    **TECH_WORDS,
 }
 
 _FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -161,6 +182,7 @@ _FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("absolute_path", re.compile(r"(?<![\w/])/(Users|home|var|tmp|opt)/[\w./\-]+")),
     ("hex_identifier", _HEX_ID),
     ("task_id", re.compile(r"\bT\d{1,3}\b")),
+    ("jargon", TECH_WORD),
     ("terminal_noise", re.compile(r"\$ (pytest|npm|pip|uv|ruff|git) ")),
     ("shell_prompt", re.compile(r"^\s*[\$#>] ", re.M)),
     ("ansi_escape", _ANSI),
@@ -294,9 +316,9 @@ def compose_delivery_message(
 ) -> FounderMessage:
     """The delivery plus, as independent decisions, every card the work suggested."""
     where = (
-        f"Pull request: {pr_url}"
+        f"Pedido de revisão: {pr_url}"
         if pr_url
-        else "A entrega está no branch da história, pronta para inspeção."
+        else "A entrega está guardada à parte, sem mexer no produto, pronta para inspeção."
     )
     return FounderMessage(
         factory=factory,

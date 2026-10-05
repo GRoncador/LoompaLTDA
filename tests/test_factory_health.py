@@ -437,3 +437,30 @@ def test_only_the_record_of_a_merged_story_counts_as_unrecorded(git_repo: Path):
         ".loompa/decisions/0003-s-001-login.md",
         ".loompa/specs/S-001/spec.md",
     ]
+
+
+async def test_the_audit_and_the_detector_share_one_jargon_list(factory: Factory):
+    """Plan 8.6.7: a S-041 option said "versão guardada no branch" after the detector already
+    knew the word and the founder-text audit did not."""
+    from loompa.comms import audit_executive_text
+    from loompa.comms.executive import TECH_WORDS
+
+    for pattern in TECH_WORDS:
+        word = pattern.replace(r"\b", "").split("(")[0].replace("?", "")
+        assert audit_executive_text(f"a {word} b"), word
+        assert by_signal(detect(window(Path("."), messages=[_ask(word)])))["comms.jargon"]
+    ctx = make_ctx(factory)
+    msg = ctx.inbox(_ask("branch"))
+    assert msg.options[0].label == "Manter a versão guardada no ramo de trabalho"
+    assert msg.executive_audit() == []
+    await ctx.aclose()
+
+
+def _ask(word: str) -> FounderMessage:
+    return FounderMessage(
+        factory="f",
+        kind=MessageKind.DECISION,
+        title="Como seguir?",
+        context="c",
+        options=[Option(key="a", label=f"Manter a versão guardada no {word}")],
+    )

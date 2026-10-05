@@ -257,6 +257,10 @@ class EngineContext:
             for d in msg.decisions:
                 d.title = sanitize_for_founder(d.title, max_chars=160)
                 d.context = sanitize_for_founder(d.context)
+            # the options too: "versão guardada no branch" reached the founder (plan 8.6.7)
+            for o in [*msg.options, *(o for d in msg.decisions for o in d.options)]:
+                o.label = sanitize_for_founder(o.label, max_chars=160)
+                o.description = sanitize_for_founder(o.description, max_chars=400)
         msg.factory = self.slug
         self.store.put_message(msg)
         self.emit(

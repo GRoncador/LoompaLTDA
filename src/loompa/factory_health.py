@@ -36,6 +36,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from loompa.comms.executive import TECH_WORD
 from loompa.store import now_iso
 
 SEVERITIES = ("high", "medium", "low")
@@ -67,11 +68,8 @@ REREADS = 3  # the same read or search, same arguments, in one task
 CONTEXT_GROWTH = 4.0  # last round's prompt over the first, in one task
 CONTEXT_MIN_TOKENS = 60_000  # ...when the last round is at least this big
 
-JARGON = re.compile(
-    r"\b(worktree|branch|merge|commit|checklist|rebase|pytest|lint|stack ?trace|T\d+|diff|"
-    r"pull request|PR)\b",
-    re.I,
-)
+# the founder-text audit's own list, plus the plan's task ids (plan 8.6.7: one source)
+JARGON = re.compile(rf"{TECH_WORD.pattern}|\bT\d+\b", re.I)
 PROCESS_TASK = re.compile(
     r"^\s*(fazer|realizar|executar|rodar|garantir|verificar|validar|confirmar|commitar|run|"
     r"commit|verify|ensure)\b",
