@@ -65,16 +65,16 @@ export default function App() {
       setLive((prev) => ({ ...prev, [sid]: advance(prev[sid] ?? snapshot(overviewRef.current, sid), e) }));
       setNow(Date.now());
     }
-    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "sprint.report", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "sprint.planned", "sprint.adjusted", "sprint.cancelled", "meeting.mode", "story.withdrawn", "story.restarted", "story.stalled"].includes(e.type)) {
+    if (["story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "engine.pausing", "engine.paused", "engine.resumed", "story.paused", "scheduler.dispatch", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "sprint.report", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "sprint.planned", "sprint.adjusted", "sprint.cancelled", "meeting.mode", "story.withdrawn", "story.restarted", "story.stalled"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
   const connected = useSocket(slug, onEvent);
 
   const switchFactory = async (s: string) => { setSlug(s); await api.activate(s).catch(() => {}); };
-  const toggleEngine = async () => {
-    if (!slug || !overview) return;
-    await api.engine(slug, overview.factory.engine ? "stop" : "start");
+  const engineAction = async (action: "start" | "pause" | "stop") => {
+    if (!slug) return;
+    await api.engine(slug, action);
     refresh();
   };
   const reply = async (m: Message, option_key: string | null, text: string | null, decisions: Record<string, string> = {}) => {
@@ -99,7 +99,7 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
-        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onToggleEngine={toggleEngine} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")} onFactory={() => setFactoryOpen(true)}
+        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onEngine={engineAction} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")} onFactory={() => setFactoryOpen(true)}
       />
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
       <main className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">

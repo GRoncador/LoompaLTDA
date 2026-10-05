@@ -21,7 +21,7 @@ from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa:
 from loompa.engine.state import Autonomy, StoryKind, StoryState
 from loompa.finance.story_cap import over_cap, story_spent
 from loompa.hygiene import cited_criteria, new_files, scan_diff, tests_to_trim
-from loompa.llm import Message
+from loompa.llm import EnginePaused, Message
 from loompa.llm.router import TIER_ABOVE
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.speckit.artifacts import mark_task_done
@@ -300,6 +300,9 @@ class WorkerAgent(LoompaAgent):
                 mark["outcome"] = "finished"
                 try:
                     yield mark
+                except EnginePaused:
+                    mark["outcome"] = "paused"  # the founder's pause, between two calls
+                    raise
                 except BaseException:
                     mark["outcome"] = "error"
                     raise

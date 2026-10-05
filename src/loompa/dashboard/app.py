@@ -165,6 +165,7 @@ class FactoryRuntime:
     factory: Factory
     ctx: EngineContext
     engine_task: asyncio.Task | None = None
+    scheduler: Scheduler | None = None  # the engine's, for pause/resume and what is in flight
     listeners: set[asyncio.Queue] = field(default_factory=set)
     chat_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
 
@@ -220,9 +221,13 @@ class Hub:
         raise HTTPException(404, "nenhuma fábrica registrada; rode `loompa init` em um projeto")
 
     async def start_engine(self, slug: str) -> None:
+        """Play: start the line, or resume it when it is paused (or still pausing)."""
         rt = self.get(slug)
         if rt.engine_task and not rt.engine_task.done():
+            if rt.scheduler is not None:
+                rt.scheduler.resume()
             return
+        rt.ctx.router.holding = False  # a stop during a pause left the gate closed
         holder = EngineLock(rt.ctx.factory.paths.loompa / "engine.lock").holder()
         if holder:
             raise HTTPException(409, str(EngineBusy(holder)))
@@ -237,6 +242,7 @@ class Hub:
                 await refresh_if_stale()
                 await aa_rank.weekly(rt.ctx)
             sched = Scheduler(rt.ctx)
+            rt.scheduler = sched
             rt.ctx.emit("engine.started")
             try:
                 await sched.run(until_idle=False, poll_interval=2.0)
@@ -249,13 +255,36 @@ class Hub:
 
         rt.engine_task = asyncio.create_task(loop(), name=f"engine:{slug}")
 
+    def pause_engine(self, slug: str) -> None:
+        """Pause: nothing new starts, the model calls in flight finish, then each story stops
+        where it was; Play resumes from there, with nothing redone."""
+        rt = self.get(slug)
+        if rt.scheduler is not None and rt.engine_task and not rt.engine_task.done():
+            rt.scheduler.pause()
+
+    def engine_state(self, slug: str) -> str:
+        """stopped | running | pausing (calls in flight finishing) | paused"""
+        rt = self.runtimes.get(slug)
+        if not (rt and rt.engine_task and not rt.engine_task.done()):
+            return "stopped"
+        return rt.scheduler.state if rt.scheduler is not None else "running"
+
+    def in_flight(self, slug: str) -> list[dict[str, Any]]:
+        rt = self.runtimes.get(slug)
+        if rt is None or rt.scheduler is None or self.engine_state(slug) == "stopped":
+            return []
+        return rt.scheduler.in_flight()
+
     async def stop_engine(self, slug: str) -> None:
+        """Stop: everything ends now, model calls in flight included (they are redone later)."""
         rt = self.get(slug)
         if rt.engine_task and not rt.engine_task.done():
             rt.engine_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await rt.engine_task
         rt.engine_task = None
+        rt.scheduler = None
+        rt.ctx.router.holding = False
 
     def engine_running(self, slug: str) -> bool:
         rt = self.runtimes.get(slug)
@@ -415,13 +444,21 @@ def create_app(
 
     @app.post("/api/factories/{slug}/engine/{action}")
     async def engine(slug: str, action: str) -> dict[str, Any]:
+        """Play (start, or resume a pause), pause (finish the calls in flight, then stop each
+        story where it is) and stop (end everything now, with the founder's confirmation)."""
         if action == "start":
             await hub.start_engine(slug)
+        elif action == "pause":
+            hub.pause_engine(slug)
         elif action == "stop":
             await hub.stop_engine(slug)
         else:
-            raise HTTPException(400, "action must be start|stop")
-        return {"engine": hub.engine_running(slug)}
+            raise HTTPException(400, "action must be start|pause|stop")
+        return {
+            "engine": hub.engine_running(slug),
+            "engine_state": hub.engine_state(slug),
+            "in_flight": hub.in_flight(slug),
+        }
 
     # -------------------------------------------------------------- overview
     @app.get("/api/factories/{slug}/overview")
@@ -483,6 +520,8 @@ def create_app(
                 "mode": ctx.config.factory.mode,
                 "language": ctx.config.factory.language,
                 "engine": hub.engine_running(slug),
+                "engine_state": hub.engine_state(slug),
+                "in_flight": hub.in_flight(slug),
                 "dry_run": hub.dry_run,
                 "kickoff": needs_kickoff(ctx),  # plan 10.10: only the opening brainstorm
             },

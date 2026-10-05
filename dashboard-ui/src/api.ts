@@ -40,7 +40,7 @@ export const api = {
       { method: "POST", body: JSON.stringify({ to_inbox: toInbox, tier1_ceiling: tier1Ceiling }) }
     ),
   overview: (slug: string) => req<Overview>(`/api/factories/${slug}/overview`),
-  engine: (slug: string, action: "start" | "stop") => req<{ engine: boolean }>(`/api/factories/${slug}/engine/${action}`, { method: "POST" }),
+  engine: (slug: string, action: "start" | "pause" | "stop") => req<{ engine: boolean; engine_state: string }>(`/api/factories/${slug}/engine/${action}`, { method: "POST" }),
   inbox: (slug: string, status = "pending") => req<Message[]>(`/api/factories/${slug}/inbox?status=${status}`),
   reply: (slug: string, id: string, body: { option_key?: string | null; text?: string | null; decisions?: Record<string, string> }) =>
     req<{ stage: string | null }>(`/api/factories/${slug}/inbox/${id}/reply`, { method: "POST", body: JSON.stringify(body) }),

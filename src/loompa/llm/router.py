@@ -19,6 +19,7 @@ from loompa.config.schema import LoompaConfig, ModelCandidate
 from loompa.finance import CostTracker, UsageRecord
 from loompa.llm.modelsdev import byok_table
 from loompa.llm.providers import (
+    EnginePaused,
     LLMError,
     LLMProvider,
     LLMResponse,
@@ -132,6 +133,7 @@ class ModelRouter:
         self.config = config
         self.tracker = tracker
         self.secrets = secrets
+        self.holding = False  # paused: no new call starts (the engine's pause)
         self.on_call = on_call
         # A candidate the provider says it does not have: a typo or a model that left the air.
         # The Ops Loompa turns it into one inbox note (loompa.models_sync.ModelWatch).
@@ -332,6 +334,8 @@ class ModelRouter:
         task: str | None = None,
         lift: bool = False,
     ) -> RoutedCall:
+        if self.holding:
+            raise EnginePaused(role)
         tier, cands = self.candidates(role, tier_override, complexity, task, lift)
         cands = self.direct_first(cands, reasoning_effort)
         with self.tracer.span(

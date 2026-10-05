@@ -3,7 +3,7 @@ import type { Agent, LoompaEvent } from "../types";
 
 const LABEL: Record<string, string> = {
   "story.stage": "→", "inbox.new": "📬", "llm.call": "🧠", "story.escalated": "⬆️", "story.retry": "🔁", "tool.call": "🔧",
-  "worktree.commit": "✅", "story.merged": "🚀", "kaizen.learning": "💡", "agent.state": "👤", "engine.started": "▶", "engine.stopped": "⏸", "scheduler.paused": "⛔",
+  "worktree.commit": "✅", "story.merged": "🚀", "kaizen.learning": "💡", "agent.state": "👤", "engine.started": "▶", "engine.stopped": "⏹", "engine.pausing": "⏸", "engine.paused": "⏸", "engine.resumed": "▶", "story.paused": "⏸", "scheduler.paused": "⛔",
 };
 
 export default function EventTicker({ events, agents = [], factory = "" }: { events: LoompaEvent[]; agents?: Agent[]; factory?: string }) {

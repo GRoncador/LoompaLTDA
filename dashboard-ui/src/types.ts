@@ -185,7 +185,8 @@ export interface ChatReply {
 }
 
 export interface Overview {
-  factory: { slug: string; name: string; mode: string; language: string; engine: boolean; dry_run: boolean; kickoff?: boolean };
+  factory: { slug: string; name: string; mode: string; language: string; engine: boolean; dry_run: boolean; kickoff?: boolean;
+    engine_state?: EngineState; in_flight?: InFlight[] };
   columns: Column[];
   agents: Agent[];
   inbox: Message[];
@@ -440,3 +441,7 @@ export interface TraceDetail {
   attrs: Record<string, unknown>;
   messages: TraceMessage[]; response: TraceMessage | null; result: TraceMessage | null;
 }
+
+/** stopped · running · pausing (the model calls in flight are finishing) · paused */
+export type EngineState = "stopped" | "running" | "pausing" | "paused";
+export interface InFlight { story: string; minutes: number; doing: string }

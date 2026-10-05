@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import signal
 from pathlib import Path
 
 import typer
@@ -153,13 +155,42 @@ async def _run(
         await refresh_if_stale()
         await aa_rank.weekly(ctx)  # plan 9.4: a week-old AA list, and a notice when picks change
     sched = Scheduler(ctx, max_parallel=max_parallel)
+    task = asyncio.create_task(sched.run(until_idle=until_idle, poll_interval=poll))
+    presses = 0
+
+    def on_interrupt() -> None:
+        """First Ctrl-C pauses (the model calls in flight finish, nothing is redone); the second
+        stops at once, like the panel's pause and stop."""
+        nonlocal presses
+        presses += 1
+        if presses == 1:
+            sched.pause()
+            console.print(
+                "[yellow]Pausando: as chamadas em andamento terminam e cada história para onde "
+                "estiver. Ctrl-C de novo para parar já.[/yellow]"
+            )
+        else:
+            task.cancel()
+
+    loop = asyncio.get_running_loop()
+    with contextlib.suppress(NotImplementedError):  # not on Windows: Ctrl-C stops at once there
+        loop.add_signal_handler(signal.SIGINT, on_interrupt)
     try:
-        return await sched.run(until_idle=until_idle, poll_interval=poll)
+        while not task.done():
+            await asyncio.sleep(0.5)
+            if sched.state == "paused":  # drained: nothing in flight to lose
+                task.cancel()
+        return await task
     except (KeyboardInterrupt, asyncio.CancelledError):
         console.print(
-            "[yellow]Interrompido — estado salvo nos checkpoints; rode `loompa run` para retomar.[/yellow]"
+            "[yellow]"
+            + ("Pausado" if sched.state == "paused" else "Interrompido")
+            + " — estado salvo; rode `loompa run` para retomar.[/yellow]"
         )
         return sched.completed
+    finally:
+        with contextlib.suppress(NotImplementedError, ValueError):
+            loop.remove_signal_handler(signal.SIGINT)
 
 
 @app.command()

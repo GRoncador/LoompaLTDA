@@ -42,6 +42,7 @@ from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.factory import ensure_gitignore
 from loompa.finance import BudgetStatus
 from loompa.finance.story_cap import story_spent
+from loompa.llm import EnginePaused
 from loompa.memory.sources import answer_document
 from loompa.models_sync import ModelSync
 from loompa.store import now_iso
@@ -139,6 +140,46 @@ class Scheduler:
     last_event: dict[str, str] = field(default_factory=dict)
     stalled: dict[str, float] = field(default_factory=dict)  # cancelled story -> minutes silent
     _tick: tuple[float, float] | None = None  # (wall, monotonic) at the last watch
+    # the founder's pause (12.x): nothing new is dispatched and no model call starts; the calls in
+    # flight finish and each story stops right after, resuming later where it was. `pause_reason`
+    # is "founder" or "budget" (a budget pause lifts itself when the budget allows again).
+    pausing: bool = False
+    pause_reason: str = ""
+    _paused_said: bool = False
+    started: dict[str, float] = field(default_factory=dict)  # story -> wall time dispatched
+
+    def pause(self, reason: str = "founder") -> None:
+        if self.pausing:
+            return
+        self.pausing, self.pause_reason, self._paused_said = True, reason, False
+        self.ctx.router.holding = True
+        self.ctx.emit("engine.pausing", reason=reason, running=sorted(self.running))
+
+    def resume(self) -> None:
+        if not self.pausing:
+            return
+        self.pausing, self.pause_reason = False, ""
+        self.ctx.router.holding = False
+        self.ctx.emit("engine.resumed")
+
+    @property
+    def state(self) -> str:
+        """running | pausing (calls in flight still finishing) | paused"""
+        if not self.pausing:
+            return "running"
+        return "pausing" if self.running else "paused"
+
+    def in_flight(self) -> list[dict[str, Any]]:
+        """What a stop would interrupt: each running story, since when, and what it last did."""
+        now = time.time()
+        return [
+            {
+                "story": sid,
+                "minutes": round((now - self.started.get(sid, now)) / 60, 1),
+                "doing": self.last_event.get(sid, ""),
+            }
+            for sid in sorted(self.running)
+        ]
 
     @property
     def slots(self) -> int:
@@ -194,12 +235,21 @@ class Scheduler:
     def _dispatch(self) -> int:
         st = self.budget_ok()
         if st.exhausted:
-            self.ctx.emit(
-                "scheduler.paused",
-                reason="budget_exhausted",
-                period=st.period,
-                period_cost_usd=st.period_cost_usd,
-            )
+            if not self.pausing:  # the same pause as the founder's: in-flight calls finish first
+                self.ctx.emit(
+                    "scheduler.paused",
+                    reason="budget_exhausted",
+                    period=st.period,
+                    period_cost_usd=st.period_cost_usd,
+                )
+                self.pause("budget")
+            return 0
+        if self.pause_reason == "budget":
+            self.resume()  # the founder raised the cap
+        if self.pausing:
+            if not self.running and not self._paused_said:
+                self._paused_said = True
+                self.ctx.emit("engine.paused", reason=self.pause_reason)
             return 0
         if st.downgrade and not self._downgraded:
             # The cap is spent but the founder chose to keep going on free models; the router
@@ -220,6 +270,7 @@ class Scheduler:
             )
             self.running[story["id"]] = task
             self.last_seen[story["id"]] = time.monotonic()
+            self.started[story["id"]] = time.time()
             self.ctx.emit("scheduler.dispatch", story_id=story["id"], running=len(self.running))
             n += 1
         return n
@@ -241,7 +292,13 @@ class Scheduler:
                 if minutes is not None:  # the watchdog's doing: an Ops incident like a crash
                     await self._on_runner_crash(sid, StoryStalled(sid, minutes, last))
                 continue
+            self.started.pop(sid, None)
             exc = task.exception()
+            if isinstance(exc, EnginePaused):
+                # paused between two model calls: nothing failed. It resumes at its last
+                # checkpoint; what it wrote is in its worktree and its finished tasks are marked
+                self.ctx.emit("story.paused", story_id=sid, after=last)
+                continue
             if exc is None:
                 self.crashes.pop(sid, None)
                 self.not_before.pop(sid, None)

@@ -31,6 +31,13 @@ def resolve_key(env_name: str, secrets: Mapping[str, str] | None = None) -> str:
     return os.environ.get(env_name, "")
 
 
+class EnginePaused(BaseException):  # noqa: N818 - a signal, not an error
+    """The founder paused the line: no new model call starts, the ones in flight finish. A
+    BaseException on purpose, like `CancelledError`: every `except Exception` an agent keeps for
+    an advisory call (triage, review) would otherwise read the pause as "the model is down" and
+    take its fallback path."""
+
+
 class LLMError(RuntimeError):
     def __init__(self, message: str, *, status: int | None = None, retryable: bool = False):
         super().__init__(message)

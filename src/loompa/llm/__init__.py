@@ -1,6 +1,7 @@
 from loompa.llm.probe import ProbeResult, probe_provider, probe_tavily
 from loompa.llm.providers import (
     AnthropicProvider,
+    EnginePaused,
     LLMError,
     LLMProvider,
     LLMResponse,
@@ -16,6 +17,7 @@ from loompa.llm.router import ModelRouter, RoutedCall
 
 __all__ = [
     "AnthropicProvider",
+    "EnginePaused",
     "LLMError",
     "model_not_found",
     "LLMProvider",

@@ -108,7 +108,21 @@ def test_meeting_run_inbox_flow(client: TestClient):
         time.sleep(0.2)
     else:
         pytest.fail("engine did not deliver both stories")
-    assert client.post("/api/factories/demo-hq/engine/stop").json()["engine"] is False
+    # pause → both wait for the founder, so it drains to "paused" quickly; play resumes
+    paused = client.post("/api/factories/demo-hq/engine/pause").json()
+    assert paused["engine_state"] in ("pausing", "paused")
+    for _ in range(50):
+        if (
+            client.get("/api/factories/demo-hq/overview").json()["factory"]["engine_state"]
+            == "paused"
+        ):
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("the pause never drained")
+    assert client.post("/api/factories/demo-hq/engine/start").json()["engine_state"] == "running"
+    stopped = client.post("/api/factories/demo-hq/engine/stop").json()
+    assert stopped["engine"] is False and stopped["engine_state"] == "stopped"
     ov = client.get("/api/factories/demo-hq/overview").json()
     waiting = next(c for c in ov["columns"] if c["key"] == "AWAITING_FOUNDER")["stories"]
     assert len(waiting) == 2 and all(s["blocked_reason"] == "delivery" for s in waiting)
