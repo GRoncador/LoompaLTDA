@@ -233,6 +233,10 @@ class DeployerAgent(LoompaAgent):
         return True
 
     def merge(self, state: StoryState, wt: Worktree) -> str:
+        if dropped := self.git.drop_factory_records(wt):
+            self.ctx.emit(
+                "deployer.records_dropped", story_id=state.story_id, agent=self.name, paths=dropped
+            )
         sha = self.git.merge_into_base(wt, message=f"feat({state.story_id.lower()}): {state.title}")
         state.merged_sha = sha
         # The branch is in the base now; kept, it only piles up (`contas` had one per delivery).

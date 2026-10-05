@@ -417,7 +417,11 @@ class WorktreeManager:
     )
 
     def commit_all(self, wt: Worktree, message: str) -> CommitResult | None:
-        self.git("add", "-A", "--", ".", *self.JUNK, cwd=wt.path)
+        """Commit a task's work on the story branch. Never the factory's own records under
+        `.loompa/`: the Deployer commits those in the main checkout with the merge (8.6.6), and
+        a branch carrying them collides with it (S-060: "untracked working tree files would be
+        overwritten by merge: .loompa/specs/S-060/tasks.md")."""
+        self.git("add", "-A", "--", ".", *self.JUNK, ":!.loompa", cwd=wt.path)
         staged = [
             f
             for f in self.git("diff", "--cached", "--name-only", cwd=wt.path).splitlines()
@@ -643,6 +647,33 @@ class WorktreeManager:
             if len(line) > 3:
                 names.add(line[3:].split(" -> ")[-1].strip('"'))
         return sorted(n for n in names if n.strip() and not n.startswith(".loompa/"))
+
+    def drop_factory_records(self, wt: Worktree) -> list[str]:
+        """Undo on the story branch whatever it changed under `.loompa/` (branches from before
+        `commit_all` left those out): each path goes back to the base's version, or out of the
+        branch when the base has none. One commit; the paths it touched."""
+        base = self.git("merge-base", wt.base, "HEAD", cwd=wt.path)
+        changed = [
+            p
+            for p in self.git(
+                "diff", "--name-only", base, "HEAD", "--", ".loompa", cwd=wt.path, check=False
+            ).splitlines()
+            if p.strip()
+        ]
+        for path in changed:
+            in_base = subprocess.run(
+                ["git", "cat-file", "-e", f"{base}:{path}"], cwd=wt.path, capture_output=True
+            )
+            if in_base.returncode == 0:
+                self.git("checkout", base, "--", path, cwd=wt.path)
+            else:
+                self.git("rm", "-q", "--cached", "--ignore-unmatch", "--", path, cwd=wt.path)
+        if changed:
+            self.git(
+                *_BOT, "commit", "-q", "-m", "chore: os registros da fábrica ficam fora da branch",
+                cwd=wt.path,
+            )  # fmt: skip
+        return changed
 
     def merge_into_base(self, wt: Worktree, *, message: str | None = None) -> str:
         """Merge the story branch into base in the main checkout. Never leaves a merge half-done

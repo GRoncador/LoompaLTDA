@@ -385,3 +385,27 @@ def test_the_diagnosis_does_not_see_the_factory_files_as_founder_work(git_repo: 
     (git_repo / "notes.txt").write_text("mine\n")
     status = WorktreeManager(git_repo).main_status()
     assert "notes.txt" in status and ".loompa" not in status
+
+
+def test_a_story_branch_never_carries_the_factory_records(git_repo):
+    """12.1, tamagotchi S-060: the branch committed `.loompa/specs/S-060/tasks.md` and the
+    merge stopped on "untracked working tree files would be overwritten by merge"."""
+    from loompa.worktrees import WorktreeManager
+
+    wm = WorktreeManager(git_repo)
+    wt = wm.create("S-001", title="registros")
+    (wt.path / ".loompa" / "specs" / "S-001").mkdir(parents=True)
+    (wt.path / ".loompa" / "specs" / "S-001" / "tasks.md").write_text("- [x] T1\n")
+    (wt.path / "app.py").write_text("x = 1\n")
+    wm.commit_all(wt, "feat: x")
+    tracked = wm.git("ls-files", cwd=wt.path).split()
+    assert "app.py" in tracked and not any(p.startswith(".loompa/") for p in tracked)
+    # an older branch that did carry them gets them back out before the merge
+    wm.git("add", "-f", ".loompa/specs/S-001/tasks.md", cwd=wt.path)
+    wm.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "old", cwd=wt.path)
+    assert wm.drop_factory_records(wt) == [".loompa/specs/S-001/tasks.md"]
+    assert ".loompa/specs/S-001/tasks.md" not in wm.git("ls-files", cwd=wt.path).split()
+    (git_repo / ".loompa" / "specs" / "S-001").mkdir(parents=True, exist_ok=True)
+    (git_repo / ".loompa" / "specs" / "S-001" / "tasks.md").write_text("- [ ] T1\n")  # main's copy
+    wm.as_role("deployer").merge_into_base(wt)
+    assert (git_repo / "app.py").read_text() == "x = 1\n"
