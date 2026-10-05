@@ -672,6 +672,25 @@ class WorktreeManager:
             raise
         return self.git("rev-parse", "--short", "HEAD")
 
+    def commit_records(self, paths: list[str], *, message: str) -> str | None:
+        """Commit the factory's record of a story (its spec, plan and ADR under `.loompa/`) in
+        the main checkout, and nothing else: whatever else is staged or edited there (the
+        founder's `config.yaml`) stays as it was. `contas` had 32 such files outside git, the
+        reason the code is as it is, lost in a fresh clone (plan 8.6.6). None when there was
+        nothing to record."""
+        self._require_deployer("git commit")
+        if self.base_merge_in_progress():
+            return None
+        rels = [p for p in paths if (self.repo_root / p).exists()]
+        if not rels:
+            return None
+        self.git("add", "--", *rels)
+        staged = self.git("diff", "--cached", "--name-only", "--", *rels, check=False)
+        if not staged.strip():
+            return None
+        self.git(*_BOT, "commit", "-q", "-m", message, "--", *rels)
+        return self.git("rev-parse", "--short", "HEAD")
+
     def open_pull_request(
         self, wt: Worktree, *, title: str, body: str, timeout: int = 120
     ) -> str | None:

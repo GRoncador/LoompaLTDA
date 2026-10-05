@@ -774,23 +774,46 @@ def git_state(w: Window) -> list[Finding]:
             )
         )
     dirty = [
-        ln[3:]
-        for ln in git("status", "--porcelain", "--", ".loompa").splitlines()
-        if ln[:2].strip()
+        path
+        for ln in git("status", "--porcelain", "-uall", "--", ".loompa").splitlines()
+        if ln[:2].strip() and _unrecorded(path := ln[3:].strip('"'), w.stories)
     ]
     if dirty:
         out.append(
             Finding(
                 signal="factory.loompa_dirty",
                 key="loompa-dir",
-                title="Mudanças da fábrica sem registro na pasta de controle",
-                detail=f"{len(dirty)} arquivos da fábrica com mudanças não salvas no repositório.",
+                title="Registro de histórias entregues fora do repositório",
+                detail=(
+                    f"{len(dirty)} arquivos de spec, plano ou decisão de histórias já mescladas "
+                    "sem commit na pasta de controle."
+                ),
                 area="factory",
                 severity="low",
                 evidence=[{"files": dirty[:10]}],
             )
         )
     return out
+
+
+_STORY_IN_PATH = re.compile(r"(?:^|/|-)(s-\d+)(?:/|-|$)", re.I)
+
+
+def _unrecorded(path: str, stories: dict[str, dict[str, Any]]) -> bool:
+    """A file under `.loompa/` the agents wrote for a story that is done, so the Deployer should
+    have committed it with the merge (plan 8.6.6). Not the founder's own files (`config.yaml`,
+    `constitution.md`, `risk.md`), nor the record of a story still in flight (plan 8.6.5)."""
+    rel = path.removeprefix(".loompa/")
+    if not rel.startswith(("specs/", "decisions/")):
+        return False
+    m = _STORY_IN_PATH.search(rel)
+    row = stories.get(m.group(1).upper()) if m else None
+    if not row or row.get("stage") != "DONE":
+        return False
+    try:
+        return bool(json.loads(row.get("state_json") or "{}").get("merged_sha"))
+    except (TypeError, ValueError):
+        return False
 
 
 # ------------------------------------------------------------------ signals from the trace

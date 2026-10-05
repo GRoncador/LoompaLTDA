@@ -36,6 +36,7 @@ from loompa.engine.lock import DryRunOnLiveFactory, EngineLock
 from loompa.engine.merge_queue import waits_its_turn
 from loompa.engine.phases import goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
+from loompa.factory import ensure_gitignore
 from loompa.finance import BudgetStatus
 from loompa.models_sync import ModelSync
 
@@ -373,6 +374,7 @@ class Scheduler:
         cycles = 0
         lock = EngineLock(self.ctx.factory.paths.loompa / "engine.lock")
         lock.acquire()
+        ensure_gitignore(self.ctx.root)  # older factories get the newer lines (plan 8.6.6)
         self.ctx.listeners.append(self._heard)
         try:
             while True:

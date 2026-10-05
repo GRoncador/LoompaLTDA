@@ -248,7 +248,42 @@ class DeployerAgent(LoompaAgent):
             **({"pruned": pruned} if pruned else {}),
         )
         self._learn_test_command()
+        self._record(state)
         return sha
+
+    def record_paths(self, story_id: str) -> list[str]:
+        """What the factory wrote about a story, relative to the repo: its spec folder, the ADRs
+        named after it, and the learnings log (plan 8.6.6)."""
+        paths = self.ctx.factory.paths
+        root = self.ctx.root
+        out = []
+        specs = paths.specs / story_id
+        if specs.is_dir():
+            out.append(str(specs.relative_to(root)))
+        if paths.decisions.is_dir():
+            out += [
+                str(p.relative_to(root))
+                for p in sorted(paths.decisions.glob(f"*-{story_id.lower()}-*.md"))
+            ]
+        if paths.learnings.is_file():
+            out.append(str(paths.learnings.relative_to(root)))
+        return out
+
+    def _record(self, state: StoryState) -> None:
+        """The story's spec, plan and ADR go into the repository with its merge. Advisory: a
+        record that cannot be committed never undoes a merge that happened."""
+        try:
+            sha = self.git.commit_records(
+                self.record_paths(state.story_id),
+                message=f"docs({state.story_id.lower()}): spec, plano e decisões da história",
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.ctx.emit(
+                "story.records_failed", story_id=state.story_id, agent=self.name, error=str(exc)
+            )
+            return
+        if sha:
+            self.ctx.emit("story.recorded", story_id=state.story_id, agent=self.name, sha=sha)
 
     def _learn_test_command(self) -> None:
         """A factory without a test command (a `custom` greenfield) gets one as soon as the

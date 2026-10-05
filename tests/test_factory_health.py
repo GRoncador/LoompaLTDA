@@ -414,3 +414,26 @@ def test_reads_per_task_against_the_baseline_and_a_role_that_is_not_the_worker(t
         {"story_id": "S-1", "role": "worker", "model": "m", "cost_usd": 0.1},
     ]
     assert by_signal(detect(window(tmp_path, usage=usage)))["finance.role_share"].key == "inspector"
+
+
+def test_only_the_record_of_a_merged_story_counts_as_unrecorded(git_repo: Path):
+    """Plan 8.6.5: the founder's `config.yaml` and the spec of a story in flight are not the
+    factory forgetting to record; the spec of a merged story left out of git is."""
+    import subprocess
+
+    loompa = git_repo / ".loompa"
+    for rel in ("config.yaml", "specs/S-001/spec.md", "specs/S-002/spec.md"):
+        (loompa / rel).parent.mkdir(parents=True, exist_ok=True)
+        (loompa / rel).write_text("x\n")
+    (loompa / "decisions").mkdir()
+    (loompa / "decisions" / "0003-s-001-login.md").write_text("adr\n")
+    subprocess.run(["git", "add", ".loompa/config.yaml"], cwd=git_repo, check=True)
+    stories = {
+        "S-001": {"stage": "DONE", "state_json": json.dumps({"merged_sha": "abc"})},
+        "S-002": {"stage": "DEV", "state_json": "{}"},
+    }
+    found = by_signal(detect(window(git_repo, stories=stories)))["factory.loompa_dirty"]
+    assert found.evidence[0]["files"] == [
+        ".loompa/decisions/0003-s-001-login.md",
+        ".loompa/specs/S-001/spec.md",
+    ]

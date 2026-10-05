@@ -116,10 +116,17 @@ async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
     assert len(ctx.worktrees.list()) == 2 and not (factory.root / "loompa_dryrun").exists()
     # founder approves one delivery in the evening review
     approve = next(m for m in msgs if m.story_id == "S-001")
+    config = factory.paths.loompa / "config.yaml"
+    config.write_text(config.read_text() + "# the founder's own edit\n")
     state = await Scheduler(ctx).aanswer(approve.id, FounderAnswer(option_key="approve"))
     assert state.stage == Stage.DONE and state.merged_sha
     assert (factory.root / "loompa_dryrun").is_dir()
-    assert "feat(s-001)" in git("log", "--oneline", "-1", cwd=factory.root)
+    log = git("log", "--oneline", "-2", cwd=factory.root)
+    assert "docs(s-001)" in log.splitlines()[0] and "feat(s-001)" in log.splitlines()[1]
+    # the merged story's record went in with it (plan 8.6.6); the founder's edit did not
+    tracked = git("ls-files", ".loompa", cwd=factory.root).split()
+    assert ".loompa/specs/S-001/spec.md" in tracked and ".loompa/specs/S-002/spec.md" not in tracked
+    assert ".loompa/config.yaml" in git("status", "--porcelain", cwd=factory.root)
     assert ctx.worktrees.get("S-001") is None and ctx.worktrees.get("S-002") is not None
     # the merged story's branch is gone; the other story's stays with its worktree
     branches = git("branch", "--list", "loompa/*", "--format=%(refname:short)", cwd=factory.root)
@@ -1314,7 +1321,7 @@ async def test_approvals_merge_one_at_a_time_in_the_order_given(factory: Factory
 
     await Scheduler(ctx).run()
     assert all(load_state(ctx, sid).stage == Stage.DONE for sid in ids.values())
-    merges = git("log", "--first-parent", "--format=%s", "-3", "main", cwd=factory.root)
+    merges = git("log", "--first-parent", "--merges", "--format=%s", "-3", "main", cwd=factory.root)
     assert [line.rsplit(": ", 1)[-1] for line in merges.splitlines()] == [
         "Página B",
         "Página A",

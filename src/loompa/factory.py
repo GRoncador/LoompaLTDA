@@ -147,7 +147,7 @@ GITIGNORE_LINES = (
 )
 
 
-def _ensure_gitignore(root: Path) -> None:
+def ensure_gitignore(root: Path) -> None:
     gi = root / ".gitignore"
     existing = gi.read_text(encoding="utf-8") if gi.is_file() else ""
     missing = [ln for ln in GITIGNORE_LINES if ln not in existing.splitlines()]
@@ -251,7 +251,7 @@ def bootstrap_factory(
     if not paths.learnings.is_file():
         paths.learnings.write_text(LEARNINGS_HEADER, encoding="utf-8")
     paths.onboarding_report.write_text(report, encoding="utf-8")
-    _ensure_gitignore(root)
+    ensure_gitignore(root)
 
     save_config(root, config)
     initial_commit = None
