@@ -508,8 +508,11 @@ async def node_plan_review(ctx: EngineContext, state: StoryState) -> StoryState:
         if paths.tasks.is_file()
         else []
     )
+    # the worktree, not the main checkout: a story built on a delivery not merged yet plans
+    # against that delivery's files (ADR-0027), and a size or a path is only true there
+    tree = Path(state.worktree) if state.worktree and Path(state.worktree).is_dir() else ctx.root
     report = check_plan(
-        ctx.root,
+        tree,
         acceptance=state.acceptance,
         files=state.allowed_paths,
         tasks=tasks,

@@ -43,6 +43,18 @@ Plan in this order:
    crosses many modules (a type or unit used everywhere, a rename) is several tasks, one module at
    a time, kept compatible in between (accept the old and the new form until the last task drops
    the old one) so each still leaves the suite green; never one task that rewrites everything.
+   Tests: new tests for this story go in a new test file of its own, next to the existing ones,
+   named after what it tests and so the test runner finds it (`tests/casca-retorno.test.js`),
+   never appended to an existing test file; an existing one changes only where its own tests
+   change. Why: parallel stories appending to the same file conflicted at every merge, and the
+   Worker re-reads a long file on every task. Keep tests proportional to the change: one test per
+   acceptance criterion, an edge case only where the criterion names it, and never a copy of the
+   current code's data as the expected value (tamagotchi S-053 wrote 689 test lines for 20 lines
+   of code). How the page looks (layout, size, position) is checked by the factory's browser
+   smoke, which renders it at desktop width and at 390 px, flags sideways scrolling, elements
+   sticking out of their box and drawings cut at a canvas edge, and sends the founder the
+   screenshots: trace such a criterion to that check plus at most one test of the markup or style
+   it needs, instead of many tests that parse the stylesheet.
 4. Traceability. For EACH acceptance criterion, by its number in the spec, the test file and test
    that will prove it.
 5. Impact and rollback. `impact`: when existing code changes, what else uses it and how
@@ -87,6 +99,18 @@ Plan in this order:
 3. Tasks. 1-3 atomic steps in build order; each becomes one commit, includes its tests and leaves
    the suite green. Each is {{"task": str, "verify": str}}: the task names the exact files it
    touches, and `verify` the check that proves it done (a test, a command).
+   Tests: new tests for this story go in a new test file of its own, next to the existing ones,
+   named after what it tests and so the test runner finds it (`tests/casca-retorno.test.js`),
+   never appended to an existing test file; an existing one changes only where its own tests
+   change. Why: parallel stories appending to the same file conflicted at every merge, and the
+   Worker re-reads a long file on every task. Keep tests proportional to the change: one test per
+   acceptance criterion, an edge case only where the criterion names it, and never a copy of the
+   current code's data as the expected value (tamagotchi S-053 wrote 689 test lines for 20 lines
+   of code). How the page looks (layout, size, position) is checked by the factory's browser
+   smoke, which renders it at desktop width and at 390 px, flags sideways scrolling, elements
+   sticking out of their box and drawings cut at a canvas edge, and sends the founder the
+   screenshots: trace such a criterion to that check plus at most one test of the markup or style
+   it needs, instead of many tests that parse the stylesheet.
 4. Traceability. For EACH acceptance criterion, by its number in the spec, the test file and test
    that will prove it. A criterion with no planned test is a plan the factory refuses, so there is
    no point leaving one out: if a criterion cannot be proved by a test, this story is not simple.

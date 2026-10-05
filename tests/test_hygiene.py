@@ -271,3 +271,25 @@ async def test_leftovers_are_dropped_even_after_the_inspector_looked_at_the_diff
     stat = ctx.worktrees.diff_stat(wt)
     assert "debug.txt" not in stat and "gastos.json" not in stat and "extra.py" in stat
     await ctx.aclose()
+
+
+def _added(path: str, lines: int, *, new: bool = True) -> str:
+    head = f"diff --git a/{path} b/{path}\n" + ("new file mode 100644\n" if new else "")
+    return head + f"--- a/{path}\n+++ b/{path}\n" + "".join(f"+linha {i}\n" for i in range(lines))
+
+
+def test_tests_that_outweigh_the_change_many_times_are_a_low_finding():
+    """ADR-0030: tamagotchi S-053 changed 20 lines and wrote 689 of tests; S-056 changed 53 lines
+    of CSS and wrote 409. A signal for the sprint, never a reason to fail a delivery."""
+    from loompa.hygiene import weak_tests
+
+    heavy = _added("src/sprites.js", 20, new=False) + _added("tests/sprites.test.js", 689)
+    found = [f for f in weak_tests(heavy) if "lines of tests" in f["text"]]
+    assert len(found) == 1 and found[0]["severity"] == "low"
+    assert found[0]["text"].startswith("689 lines of tests for 20 lines of product change")
+    css = _added("estilo.css", 53, new=False) + _added("tests/estilo.test.js", 409)
+    assert any("409 lines of tests for 53" in f["text"] for f in weak_tests(css))
+    fair = _added("src/a.js", 60, new=False) + _added("tests/a.test.js", 200)
+    small = _added("src/a.js", 2, new=False) + _added("tests/a.test.js", 120)
+    for diff in (fair, small):
+        assert not [f for f in weak_tests(diff) if "lines of tests" in f["text"]]

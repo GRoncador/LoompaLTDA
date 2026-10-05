@@ -1,10 +1,11 @@
 """Code-side gate over a plan before any token is spent reviewing it (ADR-0026).
 
-Three things a plan can carry that the repository already knows are wrong, each one cheap to
+Four things a plan can carry that the repository already knows are wrong, each one cheap to
 measure and expensive to find later: an acceptance criterion the traceability skips or plans no
 test for, a task that names no file at all (the plan prompt asks every task to name the files it
-touches), and a task that asks to *change* a file that does not exist — the plan was written
-against a repository that is not this one. `test` is the only place any of it surfaces today,
+touches), a task that asks to *change* a file that does not exist — the plan was written
+against a repository that is not this one — and a task that appends new tests to a test file that
+is already long (ADR-0030). `test` is the only place any of it surfaces today,
 after the whole implementation is written (`inspector._judge`), so the gate runs between `plan`
 and `dev` instead.
 
@@ -28,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from loompa.agents.architect import FILE_REF, LEAVE_ALONE, PATH_REF
+from loompa.hygiene import is_test_path
 from loompa.speckit import NO_TEST_MARK
 
 _TRACE_LINE = re.compile(r"^\s*[-*]\s*Crit[ée]rio\s+(\d+)\s*→\s*(.*)$", re.M)
@@ -105,6 +107,40 @@ def edits_of_missing_files(root: Path, tasks: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# A test file this long takes a new story's tests in a file of the story's own (`casca.test.js` and
+# `sprites.test.js` in tamagotchi were 1,500-2,100 lines when four stories appended to each).
+LONG_TEST_FILE = 400
+_ADD = re.compile(
+    r"\b(?:adicion|acrescent|cri(?:e|ar|ando)\b|escrev|inclu(?:a|ir)\b|complet|cobr(?:ir|a)\b"
+    r"|add|writ|creat|append|cover)",
+    re.I,
+)
+
+
+def tests_appended_to_long_files(root: Path, tasks: list[str]) -> list[str]:
+    """A task that adds new tests to a test file that is already long. Every story appending to
+    the same file made parallel stories conflict at each merge (tamagotchi SP-008), and the
+    Worker re-reads the file whole on every task. Changing tests the file already has is fine:
+    only a clause that adds and does not also say it changes something counts."""
+    out = []
+    for i, task in enumerate(tasks, 1):
+        for clause in re.split(r"(?<=[.;:])\s+|\n", task):
+            if not _ADD.search(clause) or _EDIT.search(clause) or LEAVE_ALONE.search(clause):
+                continue
+            for rel in PATH_REF.findall(clause):
+                path = root / rel
+                if not is_test_path(rel) or not path.is_file():
+                    continue
+                lines = path.read_text(encoding="utf-8", errors="ignore").count("\n")
+                if lines > LONG_TEST_FILE:
+                    out.append(
+                        f"task {i} adds tests to {rel}, already {lines} lines long: put this "
+                        "story's new tests in a new test file of its own, next to it and named "
+                        "so the test runner finds it"
+                    )
+    return list(dict.fromkeys(out))
+
+
 def size_signals(tasks: list[str], files: list[str]) -> list[str]:
     product = _product(files)
     out = []
@@ -123,6 +159,7 @@ def check_plan(
             *criteria_without_test(plan_md, acceptance),
             *tasks_without_file(tasks),
             *edits_of_missing_files(root, tasks),
+            *tests_appended_to_long_files(root, tasks),
         ],
         signals=size_signals(tasks, files),
     )

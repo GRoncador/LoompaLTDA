@@ -76,6 +76,42 @@ def test_changing_a_file_that_does_not_exist_is_a_problem_but_creating_one_is_no
     assert report.problems == ["task 3 changes app/antigo.py, which is not in the repository"]
 
 
+def test_new_tests_appended_to_a_long_test_file_are_a_problem(tmp_path: Path):
+    """ADR-0030: four stories appended a describe block each to tamagotchi's casca.test.js and
+    sprites.test.js (up to 2,100 lines), so every pair of parallel stories conflicted at merge and
+    the Worker re-read the file whole on each task. New tests go in a file of their own."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "casca.test.js").write_text("// x\n" * 900)
+    (tmp_path / "tests" / "curto.test.js").write_text("// x\n" * 40)
+    report = check_plan(
+        tmp_path,
+        acceptance=[],
+        files=["tests/"],
+        tasks=[
+            "Em tests/casca.test.js criar o describe('TestCascaCarcaOvo') com DOM falso",  # appends
+            "Em tests/casca.test.js ajustar o teste do critério 3",  # changes what is there
+            "Criar tests/casca-retorno.test.js com os testes da história",  # its own file
+            "Em tests/curto.test.js acrescentar o teste do critério 2",  # short file: fine
+        ],
+        plan_md="",
+    )
+    assert report.problems == [
+        "task 1 adds tests to tests/casca.test.js, already 900 lines long: put this story's new "
+        "tests in a new test file of its own, next to it and named so the test runner finds it"
+    ]
+
+
+def test_the_plan_prompts_ask_for_a_test_file_per_story_and_proportional_tests():
+    from loompa.agents.architect import SIMPLE_SYSTEM, SYSTEM
+    from loompa.agents.worker import SYSTEM as WORKER
+
+    for prompt in (SYSTEM, SIMPLE_SYSTEM):
+        text = " ".join(prompt.split())
+        assert "new test file of its own" in text and "one test per acceptance criterion" in text
+        assert "390 px" in text and "Respond with JSON only" in text
+    assert "fewest tests" in " ".join(WORKER.split())
+
+
 def test_a_plan_bigger_than_its_label_raises_a_signal(tmp_path: Path):
     small = check_plan(
         tmp_path, acceptance=[], files=["app/"], tasks=["Criar app/x.py"], plan_md=""

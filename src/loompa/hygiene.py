@@ -360,4 +360,35 @@ def weak_tests(diff: str) -> list[dict[str, str]]:
                 "exercises it",
             }
         )
+    if ratio := test_ratio(files):
+        findings.append(ratio)
     return findings
+
+
+# What a product change can be written in besides code: a page and its styles are the whole
+# change of many web stories (tamagotchi S-055/S-056 changed only CSS and HTML).
+PRODUCT_SUFFIXES = (*CODE_SUFFIXES, ".css", ".scss", ".sass", ".less", ".html", ".vue", ".svelte")
+TEST_RATIO_MAX = 5
+TEST_RATIO_MIN_LINES = 150  # below this, a few careful tests are not worth a remark
+
+
+def test_ratio(files: list[_FileDiff]) -> dict[str, str] | None:
+    """A low-severity finding when the tests added outweigh the product change several times
+    over (ADR-0030). Tamagotchi SP-008 wrote ~3,100 test lines for ~430 of product: the Worker's
+    time went into them, they parsed the stylesheet instead of looking at the page, and every
+    story appended them to the same files. Low: the delivery is fine, the number is a signal."""
+    tests = sum(len(f.added or []) for f in files if is_test_path(f.path))
+    product = sum(
+        len([a for a in f.added or [] if a.strip()])
+        for f in files
+        if f.path.endswith(PRODUCT_SUFFIXES) and not is_test_path(f.path)
+    )
+    if tests < TEST_RATIO_MIN_LINES or tests <= TEST_RATIO_MAX * max(product, 1):
+        return None
+    where = max((f for f in files if is_test_path(f.path)), key=lambda f: len(f.added or [])).path
+    return {
+        "severity": "low",
+        "file": where,
+        "text": f"{tests} lines of tests for {product} lines of product change (over "
+        f"{TEST_RATIO_MAX}x): one test per criterion is enough",
+    }
