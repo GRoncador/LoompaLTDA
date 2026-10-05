@@ -1,6 +1,6 @@
 # Brief → implementation map
 
-Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · ⚪ not started
+Status as of 2026-10-05 on branch `dev`. ✅ built & tested · 🟡 partial · ⚪ not started
 
 | Brief section | Status | Where |
 | --- | --- | --- |
@@ -37,7 +37,9 @@ Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · �
 | Plano set/2026 · Fase 8b (relatório de sprint e autodiagnóstico da fábrica) | ✅ relatório de sprint e aba Sprints (ADR-0019), autodiagnóstico `factory-health` e aba Fábrica (ADR-0022), export OTLP (ADR-0023); da revisão 8.6 só o item 1 foi feito, os itens 2 a 9 passaram ao plano de outubro (H3) | `sprint_report.py`, `factory_health.py`, `trace_export.py` |
 | Plano set/2026 · Fase 10 (reuniões como porta única do backlog) | ✅ portas do backlog com triagem do PO (ADR-0017), um sprint por vez (ADR-0018), brainstorm conduzido pelo Master (ADR-0020), dependências e portão da cadeia (ADR-0021), brainstorm de abertura (10.10); a tabela de consultores passou ao plano de outubro (16.8) | `backlog.py`, `sprints.py`, `dependencies.py`, `kickoff.py` |
 | Plano set/2026 · Fase 11 (Kanban profissional) | ✅ taxonomia do card, Loompa no card, drawer e histórico por etapa, ids pelo maior número usado | `dashboard-ui/` |
-| Plano out/2026 (`docs/PLANO-2026-10.md`) | ⚪ aberto em 05/10, substitui o de setembro: validação e dívidas herdadas (Fase 12), base de conhecimento da empresa e JEV em modo sombra (13), bancada de prompts (14), UX, front-end, portão de design e designer gráfico com cluster Imagem (15), gestão de produto com gerente de produtos, fases e épicos (16), growth com peças revisadas pelo Founder (17) | `docs/PLANO-2026-10.md` |
+| Plano out/2026 (`docs/PLANO-2026-10.md`) | 🟡 aberto em 05/10, substitui o de setembro: validação e dívidas herdadas (Fase 12), base de conhecimento da empresa e JEV em modo sombra (13), bancada de prompts (14), UX, front-end, portão de design e designer gráfico com cluster Imagem (15), gestão de produto com gerente de produtos, fases e épicos (16), growth com peças revisadas pelo Founder (17) | `docs/PLANO-2026-10.md` |
+| Plano out/2026 · Fase 12 (validação e dívidas herdadas) | ✅ 12.2: a duplicata do Kaizen era de código (cada tarefa da mesma história reportava de novo), achado já arquivado pela história não grava nem chama o PO; 12.3: itens 8.6.2-9 (achado que some sem correção fecha sozinho, hipótese datada e refeita, gravidade pelo impacto, `loompa_dirty` só do registro de histórias mescladas, spec/plano/ADR commitados com o merge, uma lista de jargão, `caffeinate -s` com história rodando, contexto contra o orçamento de compactação); 12.1 ao vivo no tamagotchi SP-009 com seis defeitos corrigidos no caminho (teste de comentário, testes inchados, título cortado no meio de caminho, regra do mesmo arquivo passando por cima do PO…) | `agents/kaizen.py`, `factory_health.py`, `agents/deployer.py`, `comms/executive.py`, `engine/awake.py`, `plan_check.py`, `hygiene.py`, `backlog.py` |
+| Plano out/2026 · Fase 13 (base de conhecimento e JEV) | ✅ embeddings multilíngues reais + BM25 (FTS5) fundidos (11 → 16 de 20 perguntas no top 5), documentos da empresa em `.loompa/company/` lidos inteiros por papel, relatórios/decisões/entregas na memória, `search_memory` por perfil, contratos restritos (LGPD); decisor JEV pela OpenRouter em `off`/`shadow`/`decide` (checagem frase × fonte na pesquisa, nota de utilidade dos precedentes em sombra), avaliação offline. ADR-0031, ADR-0032 | `memory/`, `company.py`, `memory/sources.py`, `agents/toolbox.py`, `decider.py`, `scripts/` |
 
 ## Deliberate divergences from the brief
 
@@ -45,8 +47,9 @@ Status as of 2026-09-30 on branch `dev`. ✅ built & tested · 🟡 partial · �
    custom engine was replaced by a `StateGraph` with LangGraph's SQLite checkpointer.
 2. **No LLM SDKs** — one OpenAI-compatible `httpx` adapter covers DeepSeek/Gemini/OpenRouter/Ollama;
    native Anthropic adapter is optional (ADR-0002). Model names are config, not code.
-3. **No ChromaDB/LanceDB** — SQLite + NumPy cosine; FastEmbed optional, hashed n-gram embedder
-   offline (ADR-0003).
+3. **No ChromaDB/LanceDB** — SQLite + NumPy cosine fused with SQLite FTS5 BM25; FastEmbed with a
+   multilingual model by default, hashed n-gram embedder as the offline fallback (ADR-0003,
+   ADR-0031).
 4. **No Next.js / shadcn** — Vite SPA embedded in the wheel so `pip install` ships the dashboard
    (ADR-0004).
 5. **Backlog cards do not auto-run** — they wait for a sprint (a Sprint Meeting after the Product
