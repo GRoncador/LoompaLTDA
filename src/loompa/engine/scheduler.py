@@ -29,6 +29,7 @@ from typing import Any
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent, StoryStalled, triage
 from loompa.comms import FounderAnswer, FounderMessage, MessageKind
 from loompa.dependencies import WAIT_KEY, in_chain, spec_passed, still_waiting
+from loompa.engine.awake import Awake
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, back_to_backlog, block
 from loompa.engine.langgraph_engine import GraphRuntime
@@ -376,10 +377,12 @@ class Scheduler:
         lock.acquire()
         ensure_gitignore(self.ctx.root)  # older factories get the newer lines (plan 8.6.6)
         self.ctx.listeners.append(self._heard)
+        awake = Awake(enabled=None if not self.ctx.dry_run else False)
         try:
             while True:
                 self._watch()
                 self._dispatch()
+                awake.hold(bool(self.running))
                 await self.close_sprints()
                 if not self.running:
                     wait = self.waiting_for()
@@ -400,6 +403,7 @@ class Scheduler:
             if self.running:
                 await asyncio.gather(*self.running.values(), return_exceptions=True)
             self.running.clear()
+            awake.release()
             if self._heard in self.ctx.listeners:
                 self.ctx.listeners.remove(self._heard)
             lock.release()
