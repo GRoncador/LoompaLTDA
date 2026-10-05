@@ -18,6 +18,7 @@ wall clock running ahead of the monotonic one, and told once.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import shutil
@@ -40,9 +41,10 @@ from loompa.engine.phases import goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.factory import ensure_gitignore
 from loompa.finance import BudgetStatus
-from loompa.finance.story_cap import CAP_BASE_KEY, story_spent
+from loompa.finance.story_cap import story_spent
 from loompa.memory.sources import answer_document
 from loompa.models_sync import ModelSync
+from loompa.store import now_iso
 
 log = logging.getLogger("loompa.scheduler")
 
@@ -498,15 +500,23 @@ class Scheduler:
         self.ctx.emit("story.reopened", story_id=story_id, stage=state.stage.value)
         return state
 
+    def has_run(self, story_id: str) -> bool:
+        """A model already worked on the story or it already cost something: its history and
+        cost are data for analysis, and a reset would cut them (the founder's rule, 12.1)."""
+        calls = self.ctx.store.usage_totals(self.ctx.slug, story_id=story_id).get("calls") or 0
+        return bool(calls) or story_spent(self.ctx, story_id) > 0
+
     async def restart_story(
-        self, story_id: str, reason: str = "", *, clean: bool = False
+        self, story_id: str, reason: str = "", *, keep_notes: bool = False
     ) -> StoryState:
-        """The founder starts a story over inside its sprint: spec, plan, code and branch are
-        discarded and it goes back to intake with only its request and the founder's notes.
-        Needed when the factory itself changed (new templates, gates) and a half-done story
-        would otherwise finish on artefacts the old version wrote. The story's cost cap counts
-        from here: what the discarded attempt spent is not the new one's. `clean` also drops the
-        notes the founder gave while it ran (answers to its blocks), as if it never ran."""
+        """The founder starts a story over. The rule for anything reset to its start: when a
+        model already ran on it or it cost something, the original is cancelled with its outcome
+        recorded and keeps its history, cost, spec and branch for analysis, and a fresh copy
+        (S-061 → S-061B) takes its place in the sprint and starts at intake; when nothing ran,
+        the same id is reset in place (worktree, branch and spec discarded). Returns the state
+        of the story that goes on."""
+        from loompa.agents.product_owner import ProductOwnerAgent
+
         if story_id in self.running:
             raise RuntimeError(f"{story_id} está rodando agora; pare a esteira antes")
         old = load_state(self.ctx, story_id)
@@ -514,7 +524,14 @@ class Scheduler:
             raise ValueError(f"{story_id} já está encerrada")
         if old.blocked_message_id:
             self.ctx.store.archive_message(old.blocked_message_id)
-        # A branch is only ever deleted by the Deployer (ADR-0008).
+        if self.has_run(story_id):
+            # the worktree goes (the copy gets its own); the branch stays for analysis
+            self.ctx.worktrees.as_role("deployer").remove(story_id, delete_branch=False)
+            new_id = ProductOwnerAgent(self.ctx).restart_as_copy(
+                story_id, reason, keep_notes=keep_notes
+            )
+            return load_state(self.ctx, new_id)
+        # nothing ran: reuse the id, back to the start (a branch only the Deployer deletes)
         self.ctx.worktrees.as_role("deployer").remove(story_id, delete_branch=True)
         specs = self.ctx.factory.paths.specs / story_id
         if specs.is_dir():
@@ -524,15 +541,68 @@ class Scheduler:
             title=old.title,
             description=old.description,
             epic=old.epic,
-            founder_notes=[*([] if clean else old.founder_notes), *([reason] if reason else [])],
+            founder_notes=[
+                *(old.founder_notes if keep_notes else []),
+                *([reason] if reason else []),
+            ],
         )
-        state.extra[CAP_BASE_KEY] = story_spent(self.ctx, story_id)
+        state.kind = old.kind
         goto(state, "intake")
         state.stage = Stage.SPEC  # like an admitted card: out of the backlog, intake classifies
         save_state(self.ctx, state, "restart")
         await runtime_for(self.ctx).inject_founder_answer(state)
-        self.ctx.emit("story.restarted", story_id=story_id, from_stage=old.stage.value)
+        self.ctx.emit(
+            "story.restarted", story_id=story_id, from_stage=old.stage.value, as_id=story_id
+        )
         return state
+
+    async def restart_sprint(self, sprint_id: str, reason: str = "") -> str:
+        """The founder starts a sprint over, by the same rule as a story: when any of its stories
+        already ran a model or cost something, the sprint is cancelled with its outcome recorded
+        (kv `sprint_outcome:<id>`) and keeps what it did, and a new sprint (SP-009 → SP-009B)
+        starts with each unfinished story restarted by its own rule; finished stories stay
+        delivered in the original. When nothing ran, the same sprint goes on with its stories
+        reset in place. Returns the id of the sprint that runs."""
+        from loompa.sprints import SprintBoard, SprintError, SprintStatus
+
+        board = SprintBoard(self.ctx.store, self.ctx.slug)
+        sprint = board.get(sprint_id)
+        if sprint is None or sprint.status != SprintStatus.RUNNING:
+            raise SprintError(f"{sprint_id} não está em andamento")
+        busy = [sid for sid in sprint.story_ids if sid in self.running]
+        if busy:
+            raise RuntimeError(f"{', '.join(busy)} está rodando agora; pare a esteira antes")
+        unfinished = [
+            sid
+            for sid in sprint.story_ids
+            if (row := self.ctx.store.get_story(sid)) and row["stage"] not in TERMINAL
+        ]
+        if not any(self.has_run(sid) for sid in sprint.story_ids):
+            for sid in unfinished:
+                await self.restart_story(sid, reason)
+            self.ctx.emit("sprint.restarted", sprint_id=sprint_id, as_id=sprint_id)
+            return sprint_id
+        new_id = self.ctx.store.next_restart_id(sprint_id, table="sprints")
+        board.close(sprint_id, cancelled=True)
+        self.ctx.store.set(
+            f"sprint_outcome:{sprint_id}",
+            json.dumps({"kind": "restarted", "as": new_id, "reason": reason, "at": now_iso()}),
+        )
+        members = [(await self.restart_story(sid, reason)).story_id for sid in unfinished]
+        fresh = sprint.model_copy(
+            update={
+                "id": new_id,
+                "status": SprintStatus.OPEN,
+                "story_ids": members,
+                "created_at": now_iso(),
+                "started_at": None,
+                "closed_at": None,
+            }
+        )
+        self.ctx.store.put_sprint(fresh.model_dump())
+        board.start(new_id, sprint.goal)
+        self.ctx.emit("sprint.restarted", sprint_id=sprint_id, as_id=new_id, stories=members)
+        return new_id
 
     async def withdraw_story(self, story_id: str, *, leave_sprint: bool = True) -> StoryState:
         """The founder takes a story out of the running sprint (ADR-0018): it waits in the

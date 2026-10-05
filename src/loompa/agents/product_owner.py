@@ -424,6 +424,9 @@ class ProductOwnerAgent(LoompaAgent):
     def set_priority(self, story_id: str, priority: int) -> None:
         self.backlog.set_priority(story_id, priority)
 
+    def restart_as_copy(self, story_id: str, reason: str = "", *, keep_notes: bool = False) -> str:
+        return self.backlog.restart_as_copy(story_id, reason, keep_notes=keep_notes)
+
     def set_status(self, story_id: str, status: Stage) -> None:
         self.backlog.set_status(story_id, status)
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -347,6 +348,20 @@ class Store:
 
     def next_story_id(self, factory: str) -> str:
         return f"S-{self._next_number('stories', 'S-', factory):03d}"
+
+    def next_restart_id(self, old_id: str, table: str = "stories") -> str:
+        """The id of a story (or sprint) started over as a fresh copy: the same number with the
+        next letter (S-061 → S-061B → S-061C), so the lineage reads in the id and the original
+        keeps its history and cost. `_next_number` reads only the digits, so ordinary ids go on
+        from the highest number as before."""
+        m = re.fullmatch(r"((?:S|SP)-\d+)([A-Z]?)", old_id)
+        if m is None:
+            raise ValueError(f"id inesperado: {old_id}")
+        base, letter = m.groups()
+        nxt = chr(ord(letter or "A") + 1)
+        while self._q(f"SELECT 1 FROM {table} WHERE id = ?", (f"{base}{nxt}",)):
+            nxt = chr(ord(nxt) + 1)
+        return f"{base}{nxt}"
 
     def _next_number(self, table: str, prefix: str, factory: str) -> int:
         """The highest number already used + 1, never the row count: a deleted row would make

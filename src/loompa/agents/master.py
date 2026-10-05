@@ -789,8 +789,12 @@ class MasterAgent(LoompaAgent):
             except Exception:  # noqa: BLE001 - the founder's cancel never fails on the report
                 log.exception("could not write the report of %s", running.id)
         for item in restarting:
-            await sched.restart_story(item.story_id, item.restart_reason)
-            result.restarted.append(item.story_id)
+            went_on = await sched.restart_story(item.story_id, item.restart_reason)
+            result.restarted.append(
+                item.story_id
+                if went_on.story_id == item.story_id
+                else f"{item.story_id} (como {went_on.story_id})"
+            )
         for item in joining:
             if not item.story_id:
                 added = po.add_item(

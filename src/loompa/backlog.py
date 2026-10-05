@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from loompa.comms.executive import clip
 from loompa.engine.state import TERMINAL, Stage, StoryKind, StoryState
+from loompa.store import now_iso
 
 if TYPE_CHECKING:
     from loompa.agents.base import LoompaAgent
@@ -74,6 +75,16 @@ class Admission:
     story_id: str
     created: bool  # False when an equivalent open card already existed
     duplicate_of: str | None = None
+
+
+RESTART_OF_KEY = "restart_of"  # state.extra of a copy: the story it starts over
+OUTCOME_KEY = "outcome"  # state.extra of a story that ended other than delivered: how and why
+
+
+def deps_of_row(row: dict) -> list[str]:
+    from loompa.dependencies import deps_of
+
+    return deps_of(row)
 
 
 def normalize_title(title: str) -> str:
@@ -364,6 +375,73 @@ class Backlog:
             story_id, stage=status.value, state=state.model_dump(mode="json")
         )
         self.ctx.emit("backlog.status", story_id=story_id, agent=self.agent, status=status.value)
+
+    def restart_as_copy(self, story_id: str, reason: str = "", *, keep_notes: bool = False) -> str:
+        """Start a story over without losing what it was: the original is cancelled with its
+        outcome recorded (restarted as the copy), keeping its history, cost, spec and branch for
+        analysis; the copy (S-061 → S-061B) is the same request from zero — title, description,
+        epic, priority, kind, dependencies and its place in the sprint — and is admitted at once.
+        Stories that depended on the original depend on the copy. Only the founder's request
+        travels: the answers given while the original ran stay with it unless `keep_notes`."""
+        from loompa.sprints import ACTIVE, SprintBoard
+
+        row = self._row(story_id)
+        if row["stage"] in TERMINAL:
+            raise BacklogError(f"{story_id} já está encerrada")
+        old = StoryState.from_row(row)
+        new_id = self.ctx.store.next_restart_id(story_id)
+        notes = [*(old.founder_notes if keep_notes else []), *([reason] if reason else [])]
+        fresh = StoryState(
+            story_id=new_id,
+            title=old.title,
+            description=old.description,
+            epic=old.epic,
+            founder_notes=notes,
+            extra={RESTART_OF_KEY: story_id},
+        )
+        fresh.kind = old.kind
+        self.ctx.store.upsert_story(
+            {
+                "id": new_id,
+                "factory": self.ctx.slug,
+                "title": old.title,
+                "description": old.description,
+                "epic": old.epic,
+                "stage": Stage.BACKLOG,
+                "priority": row["priority"],
+                "origin": row.get("origin") or "founder",
+                "state": fresh.model_dump(mode="json"),
+            }
+        )
+        self.ctx.emit(
+            "story.created", story_id=new_id, agent=self.agent, title=old.title, origin="restart"
+        )
+        if deps := deps_of_row(row):
+            self.ctx.store.update_story(new_id, depends_on=deps)
+        board = SprintBoard(self.ctx.store, self.ctx.slug)
+        sprint = board.sprint_of(story_id)
+        if sprint is not None and sprint.status in ACTIVE:
+            sprint.story_ids.append(new_id)  # the original stays listed: its cost is the sprint's
+            self.ctx.store.put_sprint(sprint.model_dump())
+        # the original: cancelled, with the outcome that says why and where the work went on
+        old.extra[OUTCOME_KEY] = {
+            "kind": "restarted",
+            "as": new_id,
+            "reason": reason,
+            "at": now_iso(),
+        }
+        self.ctx.store.update_story(story_id, state=old.model_dump(mode="json"))
+        self.set_status(story_id, Stage.CANCELLED)
+        for other in self.ctx.store.list_stories(self.ctx.slug):
+            deps = deps_of_row(other)
+            if story_id in deps and other["stage"] not in TERMINAL:
+                self.set_dependencies(other["id"], [new_id if d == story_id else d for d in deps])
+        if row["stage"] != Stage.BACKLOG:  # the original was in the pipeline: so is the copy
+            self.admit(new_id)
+        self.ctx.emit(
+            "story.restarted", story_id=story_id, agent=self.agent, as_id=new_id, reason=reason
+        )
+        return new_id
 
     def admit(self, story_id: str) -> bool:
         """Let a backlog card into the pipeline: it leaves BACKLOG and starts at intake.

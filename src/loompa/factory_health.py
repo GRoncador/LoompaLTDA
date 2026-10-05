@@ -98,7 +98,7 @@ class Finding:
 
     @property
     def signature(self) -> str:
-        key = re.sub(r"S-\d+|SP-\d+", "#", self.key.lower())  # a story id is not the problem
+        key = re.sub(r"sp?-\d+[a-z]?", "#", self.key.lower())  # a story id is not the problem
         return f"{self.signal}:{re.sub(r'[^a-z0-9#._~/-]+', '-', key).strip('-')}"
 
     def as_dict(self) -> dict[str, Any]:
@@ -799,7 +799,7 @@ def git_state(w: Window) -> list[Finding]:
     return out
 
 
-_STORY_IN_PATH = re.compile(r"(?:^|/|-)(s-\d+)(?:/|-|$)", re.I)
+_STORY_IN_PATH = re.compile(r"(?:^|/|-)(s-\d+[a-z]?)(?:/|-|$)", re.I)
 
 
 def _unrecorded(path: str, stories: dict[str, dict[str, Any]]) -> bool:

@@ -144,43 +144,49 @@ async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
     await ctx.aclose()
 
 
-async def test_the_founder_restarts_a_story_from_scratch(factory: Factory):
+async def test_a_story_that_ran_restarts_as_a_copy_and_keeps_its_history(factory: Factory):
+    """The founder's rule (12.1): reset to the start something a model already worked on, and
+    the original is closed with its outcome, history and cost; a copy starts from zero."""
+    from loompa.backlog import OUTCOME_KEY, RESTART_OF_KEY
+    from loompa.engine.scheduler import save_state
+
     ctx = make_ctx(factory, dry_run=True)
     sid = seed_story(ctx, "Página de login")
+    dependent = seed_story(ctx, "Exportar a sessão")
+    ctx.store.update_story(dependent, depends_on=[sid])
     await Scheduler(ctx).run()
     old = load_state(ctx, sid)
     assert old.stage == Stage.AWAITING_FOUNDER and old.commits
+    old.founder_notes = ["pode ajustar os testes antigos"]  # an answer given while it ran
+    save_state(ctx, old, "test")
     branch, delivery = old.branch, old.blocked_message_id
-    state = await Scheduler(ctx).restart_story(sid, "use os templates novos")
-    assert state.stage == Stage.SPEC and state.phase == "intake"
-    assert not state.spec_ready and not state.commits and not state.worktree
-    assert state.founder_notes == ["use os templates novos"]
-    assert ctx.worktrees.get(sid) is None and not (factory.paths.specs / sid).exists()
-    assert branch not in git("branch", "--list", branch, cwd=factory.root)
+    calls = ctx.store.usage_totals(factory.slug, story_id=sid)["calls"]
+    copy = await Scheduler(ctx).restart_story(sid, "use os templates novos")
+    assert copy.story_id == f"{sid}B" and copy.extra[RESTART_OF_KEY] == sid
+    assert copy.stage == Stage.SPEC and copy.founder_notes == ["use os templates novos"]
+    closed = load_state(ctx, sid)
+    assert closed.stage == Stage.CANCELLED and closed.extra[OUTCOME_KEY]["as"] == f"{sid}B"
+    assert ctx.store.usage_totals(factory.slug, story_id=sid)["calls"] == calls  # kept
+    assert (factory.paths.specs / sid).exists()  # its spec and plan stay for analysis
+    assert branch in git("branch", "--list", branch, cwd=factory.root)
+    assert ctx.worktrees.get(sid) is None
     assert ctx.store.get_message(delivery).status != MessageStatus.PENDING
-    # the graph thread follows the new state, not the old checkpoint
-    assert await Scheduler(ctx).run() == [sid]
-    again = load_state(ctx, sid)
-    assert again.stage == Stage.AWAITING_FOUNDER and again.blocked_reason == "delivery"
+    assert ctx.store.get_story(dependent)["depends_on"] == [f"{sid}B"]
+    await Scheduler(ctx).run()
+    again = load_state(ctx, f"{sid}B")
     assert again.spec_ready and again.plan_ready and len(again.commits) == 1
+    again_copy = await Scheduler(ctx).restart_story(f"{sid}B")
+    assert again_copy.story_id == f"{sid}C"
     await ctx.aclose()
 
 
-async def test_a_clean_restart_drops_the_answers_and_the_spent_cap(factory: Factory):
-    """12.1, tamagotchi S-061: the founder wanted it "as if it never ran"; the answers it got to
-    its blocks and what the discarded attempt spent stayed with it."""
-    from loompa.engine.scheduler import save_state
-    from loompa.finance.story_cap import CAP_BASE_KEY, story_spent
-
+async def test_a_story_nothing_ran_on_restarts_in_place(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     sid = seed_story(ctx, "Página de login")
-    await Scheduler(ctx).run()
-    old = load_state(ctx, sid)
-    old.founder_notes = ["pode ajustar os testes antigos"]
-    save_state(ctx, old, "test")
-    spent = story_spent(ctx, sid)
-    state = await Scheduler(ctx).restart_story(sid, clean=True)
-    assert state.founder_notes == [] and state.extra[CAP_BASE_KEY] == spent
+    state = await Scheduler(ctx).restart_story(sid, "comece pelo formulário")
+    assert state.story_id == sid and state.stage == Stage.SPEC and state.phase == "intake"
+    assert state.founder_notes == ["comece pelo formulário"]
+    assert ctx.store.get_story(f"{sid}B") is None
     await ctx.aclose()
 
 
@@ -1911,3 +1917,26 @@ async def test_dry_run_engine_refuses_a_factory_with_real_work(factory: Factory)
     with pytest.raises(DryRunOnLiveFactory):
         await Scheduler(ctx).run()
     ctx.close()
+
+
+async def test_a_sprint_that_ran_restarts_as_a_copy(factory: Factory):
+    """The same rule for a sprint: SP-001 closed with its outcome; SP-001B runs the copies."""
+    import json as _json
+
+    from loompa.agents import MasterAgent
+    from loompa.sprints import SprintBoard, SprintStatus
+
+    ctx = make_ctx(factory, dry_run=True)
+    master = MasterAgent(ctx)
+    await master.meeting("Página de login")
+    sprint = master.start_sprint()
+    await Scheduler(ctx).run()
+    new_id = await Scheduler(ctx).restart_sprint(sprint.id, "outra abordagem")
+    board = SprintBoard(ctx.store, ctx.slug)
+    assert new_id == f"{sprint.id}B" and board.get(sprint.id).status == SprintStatus.CANCELLED
+    fresh = board.get(new_id)
+    assert fresh.status == SprintStatus.RUNNING and fresh.story_ids == ["S-001B"]
+    outcome = _json.loads(ctx.store.get(f"sprint_outcome:{sprint.id}"))
+    assert outcome["as"] == new_id and outcome["reason"] == "outra abordagem"
+    assert board.get(sprint.id).story_ids == ["S-001"]  # the original keeps what it spent
+    await ctx.aclose()

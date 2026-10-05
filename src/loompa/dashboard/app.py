@@ -703,7 +703,9 @@ def create_app(
         from loompa.smoke import VIEWPORTS
 
         hub.get(slug)  # 404 for an unknown factory
-        if name not in {f"{v[0]}.png" for v in VIEWPORTS} or not re.fullmatch(r"S-\d+", story_id):
+        if name not in {f"{v[0]}.png" for v in VIEWPORTS} or not re.fullmatch(
+            r"S-\d+[A-Z]?", story_id
+        ):
             raise HTTPException(404, name)
         path = shots_dir(slug, story_id) / name
         if not path.is_file():

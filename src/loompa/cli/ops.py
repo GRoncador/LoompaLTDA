@@ -267,14 +267,18 @@ def sprint_add(
 
 @sprint_app.command("restart")
 def sprint_restart(
-    ids: list[str] = typer.Argument(..., help="Histórias a recomeçar do zero."),
+    ids: list[str] = typer.Argument(
+        ..., help="Histórias (ou um sprint, SP-…) a recomeçar do zero."
+    ),
     reason: str = typer.Option("", "--reason", "-r", help="Orientação para a nova tentativa."),
-    clean: bool = typer.Option(
-        False, "--limpo", help="Descarta também as respostas dadas durante a execução."
+    keep_notes: bool = typer.Option(
+        False, "--manter-notas", help="Leva as respostas dadas durante a execução para a nova."
     ),
     factory: str | None = typer.Option(None, "--factory", "-f"),
 ) -> None:
-    """Recomeça histórias em andamento: descarta spec, plano e código e volta ao início."""
+    """Recomeça histórias do zero. Se já rodou algum modelo ou gastou algo, a original é
+    encerrada com o histórico e uma cópia (S-061 → S-061B) recomeça; se não, a mesma volta ao
+    início."""
     f = resolve_factory(factory)
     holder = EngineLock(f.paths.loompa / "engine.lock").holder()
     if holder:
@@ -285,12 +289,31 @@ def sprint_restart(
     async def go() -> None:
         sched = Scheduler(ctx)
         for sid in ids:
+            if sid.upper().startswith("SP-"):
+                try:
+                    runs = await sched.restart_sprint(sid.upper(), reason)
+                except (KeyError, ValueError, RuntimeError) as exc:
+                    console.print(f"[red]✘[/red] {sid}: {exc}")
+                    continue
+                console.print(
+                    f"[green]✔[/green] {sid} volta ao início"
+                    if runs == sid.upper()
+                    else f"[green]✔[/green] {sid} encerrado com o histórico e o gasto; "
+                    f"{runs} recomeça do zero"
+                )
+                continue
             try:
-                await sched.restart_story(sid, reason, clean=clean)
+                state = await sched.restart_story(sid, reason, keep_notes=keep_notes)
             except (KeyError, ValueError) as exc:
                 console.print(f"[red]✘[/red] {sid}: {exc}")
                 continue
-            console.print(f"[green]✔[/green] {sid} volta ao início (especificação)")
+            if state.story_id == sid:
+                console.print(f"[green]✔[/green] {sid} volta ao início (nada tinha rodado)")
+            else:
+                console.print(
+                    f"[green]✔[/green] {sid} encerrada com o histórico e o gasto; "
+                    f"{state.story_id} recomeça do zero no lugar dela"
+                )
         await ctx.aclose()
 
     asyncio.run(go())

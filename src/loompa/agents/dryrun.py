@@ -28,7 +28,7 @@ def role_of(messages: list[Message]) -> str:
 def _story_title(messages: list[Message]) -> str:
     for m in messages:
         if m.role == "user":
-            mm = re.search(r"(?:Story|story)(?: (S-\d+))?[:—\- ]+\s*(.+)", m.content)
+            mm = re.search(r"(?:Story|story)(?: (S-\d+[A-Z]?))?[:—\- ]+\s*(.+)", m.content)
             if mm:
                 return mm.group(2).splitlines()[0].strip()
     return "história"
@@ -86,7 +86,7 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
     if role == "master":
         if "Classify the story" in messages[0].content:
             researching = re.search(
-                r"^# Story S-\d+: (pesquis|research)", messages[-1].content, re.I
+                r"^# Story S-\d+[A-Z]?: (pesquis|research)", messages[-1].content, re.I
             )
             return json.dumps(
                 {
