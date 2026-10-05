@@ -806,6 +806,7 @@ def create_app(
             "new": result.new,
             "back": result.back,
             "confirmed": result.confirmed,
+            "vanished": result.vanished,
         }
 
     @app.get("/api/factories/{slug}/product-findings")

@@ -376,7 +376,8 @@ export interface SprintListItem extends SprintSummary {
 /** A finding of the factory about itself (Fase 8.3), kept in the hub. */
 export interface FactoryFinding {
   signature: string; signal: string; area: string; severity: "high" | "medium" | "low"; title: string; detail: string;
-  status: "open" | "resolved"; provisional: number; hypothesis: string; fix: string; resolved_commit: string; resolved_at: string;
+  status: "open" | "resolved" | "vanished"; provisional: number; hypothesis: string; fix: string; resolved_commit: string; resolved_at: string;
+  hypothesis_at?: string; hypothesis_window?: string;
   first_seen: string; last_seen: string; seen_in: string; evidence: Record<string, unknown>[]; impact: Record<string, number>; stories: string[];
   factories: string[]; trend: { factory: string; sprint_id: string | null; at: string; seen: boolean }[];
 }

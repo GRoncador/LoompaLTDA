@@ -73,15 +73,17 @@ function FindingCard({ f, slug, onChanged, onOpenSprint, onOpenStory }: {
   const [commit, setCommit] = useState("");
   const sev = SEVERITY[f.severity] ?? SEVERITY.low;
   const resolved = f.status === "resolved";
+  const vanished = f.status === "vanished";
   const here = f.factories.includes(slug);
   return (
-    <li className={`rounded-md border border-line bg-panel p-2 text-xs ${resolved ? "opacity-70" : ""}`}>
+    <li className={`rounded-md border border-line bg-panel p-2 text-xs ${resolved || vanished ? "opacity-70" : ""}`}>
       <button className="w-full text-left" onClick={() => setOpen(!open)}>
         <div className="flex flex-wrap items-center gap-1 text-[10px]">
           <span className={`chip ${sev.cls}`}>{sev.label}</span>
           <span className="chip bg-slate-800 text-slate-400">{f.area}</span>
           {!!f.provisional && <span className="chip bg-indigo-900/50 text-indigo-200" title="Limiar ainda não calibrado: lê o rastro, que a Sprint 1 não tinha">provisório</span>}
           {resolved && <span className="chip bg-emerald-900/50 text-emerald-200">resolvido {f.resolved_commit}</span>}
+          {vanished && <span className="chip bg-slate-800 text-slate-300" title="Ausente nas duas últimas varreduras desta fábrica, sem correção registrada; volta a abrir se o sinal reaparecer">sumiu sem correção</span>}
           <span className="text-slate-500">visto em {f.seen_in}</span>
           <span className="ml-auto flex items-center gap-0.5" title="Varreduras, a mais recente à direita: ● visto · ○ ausente">
             {f.trend.map((t, i) => <span key={i} className={t.seen ? "text-amber-300" : "text-slate-600"} title={`${t.sprint_id ?? "período"} · ${t.factory}`}>{t.seen ? "●" : "○"}</span>)}
@@ -95,7 +97,7 @@ function FindingCard({ f, slug, onChanged, onOpenSprint, onOpenStory }: {
       </button>
       {open && (
         <div className="mt-2 space-y-1 border-t border-white/10 pt-2">
-          {f.hypothesis && <p className="text-sky-200"><span className="text-slate-500">hipótese do Ops:</span> {f.hypothesis}</p>}
+          {f.hypothesis && <p className="text-sky-200"><span className="text-slate-500">hipótese do Ops{f.hypothesis_at ? ` (escrita em ${f.hypothesis_at.slice(0, 10)}${f.hypothesis_window && f.hypothesis_window !== f.hypothesis_at.slice(0, 10) ? `, ${f.hypothesis_window}` : ""})` : ""}:</span> {f.hypothesis}</p>}
           {f.fix && <p className="text-sky-200"><span className="text-slate-500">correção sugerida (hipótese):</span> {f.fix}</p>}
           <div className="text-slate-500">evidência:</div>
           <ul className="space-y-0.5 text-slate-400">
@@ -119,7 +121,7 @@ function FindingCard({ f, slug, onChanged, onOpenSprint, onOpenStory }: {
             </div>
           )}
           <div className="flex items-center gap-2 pt-1">
-            {resolved ? (
+            {resolved || vanished ? (
               <button className="btn-ghost text-[11px]" onClick={async () => { await api.reopenFinding(f.signature); onChanged(); }}>Reabrir</button>
             ) : (
               <>

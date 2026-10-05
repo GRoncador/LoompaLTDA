@@ -17,7 +17,7 @@ from rich.table import Table
 
 from loompa.cli.main import app, resolve_factory
 from loompa.cli.ops import build_context
-from loompa.factory_health import export_markdown, hub_book, scan
+from loompa.factory_health import export_markdown, hub_book, scan, written_note
 from loompa.sprints import SprintBoard
 
 console = Console(emoji=False)  # a signature like "trace.guard_ignored:guard" is not an emoji code
@@ -57,7 +57,11 @@ def health_main(
         table.add_column(col)
     for r in rows:
         trend = "".join("●" if t["seen"] else "○" for t in r["trend"])
-        state = "" if r["status"] == "open" else " [green](resolvido)[/green]"
+        state = {
+            "open": "",
+            "resolved": " [green](resolvido)[/green]",
+            "vanished": " [dim](sumiu sem correção)[/dim]",
+        }.get(r["status"], "")
         table.add_row(
             r["signature"],
             SEVERITY.get(r["severity"], r["severity"]),
@@ -87,7 +91,7 @@ def health_show(signature: str) -> None:
     if row.get("impact"):
         console.print("impacto: " + ", ".join(f"{k} {v}" for k, v in row["impact"].items()))
     if row.get("hypothesis"):
-        console.print(f"[cyan]hipótese:[/cyan] {row['hypothesis']}")
+        console.print(f"[cyan]hipótese{written_note(row)}:[/cyan] {row['hypothesis']}")
     if row.get("fix"):
         console.print(f"[cyan]correção sugerida (hipótese):[/cyan] {row['fix']}")
     for ev in row.get("evidence") or []:
@@ -96,6 +100,8 @@ def health_show(signature: str) -> None:
         console.print(f"  • {json.dumps(rest, ensure_ascii=False)}" + (f"  → {cmd}" if cmd else ""))
     if row.get("resolved_commit"):
         console.print(f"[green]resolvido em {row['resolved_commit']}[/green]")
+    elif row["status"] == "vanished":
+        console.print(f"[dim]sumiu sem correção em {row['resolved_at'][:10]}[/dim]")
 
 
 @health_app.command("scan")
@@ -118,7 +124,8 @@ def health_scan(
         ctx.close()
     console.print(
         f"{len(result.findings)} achados ({len(result.new)} novos, {len(result.back)} voltaram, "
-        f"{len(result.confirmed)} correções confirmadas) entre {result.since[:16]} e "
+        f"{len(result.confirmed)} correções confirmadas, {len(result.vanished)} sumiram sem "
+        f"correção) entre {result.since[:16]} e "
         f"{result.until[:16]}."
     )
     for fnd in result.findings:

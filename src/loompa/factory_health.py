@@ -617,7 +617,11 @@ def spec_and_kaizen(w: Window) -> list[Finding]:
                 stories=sorted({e["story_id"] for e in revised if e["story_id"]}),
             )
         )
-    dup = Counter(str(e["payload"].get("title") or "")[:120] for e in w.of("backlog.duplicate"))
+    dup = Counter(
+        str(e["payload"].get("title") or "")[:120]
+        for e in w.of("backlog.duplicate")
+        if not e["payload"].get("repeat")  # folded into the story's own card (plan 12.2)
+    )
     repeated = {t: n for t, n in dup.items() if t and n >= DUPLICATE_FINDINGS}
     if repeated:
         out.append(
@@ -982,6 +986,14 @@ CREATE TABLE IF NOT EXISTS scans (
 CREATE INDEX IF NOT EXISTS ix_sightings_sig ON sightings(signature);
 """
 
+# columns added after the first hub databases were written (plan 12.3): name -> DDL
+MIGRATIONS = {
+    ("findings", "hypothesis_at"): "TEXT NOT NULL DEFAULT ''",
+    ("findings", "hypothesis_window"): "TEXT NOT NULL DEFAULT ''",
+    ("sightings", "scan_id"): "INTEGER",
+}
+VANISH_AFTER = 2  # scans of the same factory in a row without the finding (plan 8.6.9)
+
 
 class HealthBook:
     """The findings of every factory, in the hub (`~/.loompa/factory_health.db`)."""
@@ -996,19 +1008,44 @@ class HealthBook:
         conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA)
+        added = False
+        for (table, col), ddl in MIGRATIONS.items():
+            if col not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+                added |= col == "scan_id"
+        if added:  # a sighting and its scan were written with the same timestamp
+            conn.execute(
+                "UPDATE sightings SET scan_id = (SELECT id FROM scans WHERE "
+                "scans.factory = sightings.factory AND scans.at = sightings.seen_at)"
+            )
+            conn.commit()
         return conn
 
     def record(self, slug: str, w: Window, findings: Iterable[Finding]) -> dict[str, list[str]]:
-        """Save one scan. Returns which signatures are new, came back after a fix, or were
-        confirmed fixed (a resolved signal this window no longer shows)."""
+        """Save one scan. Returns which signatures are new, came back (after a fix, or after they
+        vanished), were confirmed fixed (a resolved signal this window no longer shows), changed
+        their evidence (the hypothesis written for the old numbers is stale), or vanished: absent
+        from this factory's last two scans with no fix recorded (plan 8.6.9)."""
         findings = list(findings)
         now = now_iso()
         seen = {f.signature for f in findings}
-        out: dict[str, list[str]] = {"new": [], "back": [], "confirmed": []}
+        out: dict[str, list[str]] = {
+            "new": [],
+            "back": [],
+            "confirmed": [],
+            "changed": [],
+            "vanished": [],
+        }
         with self._lock, self._conn() as conn:
+            scan_id = conn.execute(
+                "INSERT INTO scans (factory, sprint_id, window_start, window_end, found, at) "
+                "VALUES (?,?,?,?,?,?)",
+                (slug, w.sprint_id, w.since, w.until, len(findings), now),
+            ).lastrowid
             for f in findings:
                 row = conn.execute(
-                    "SELECT status, resolved_at FROM findings WHERE signature = ?", (f.signature,)
+                    "SELECT status, resolved_at, detail FROM findings WHERE signature = ?",
+                    (f.signature,),
                 ).fetchone()
                 if row is None:
                     out["new"].append(f.signature)
@@ -1030,10 +1067,16 @@ class HealthBook:
                 else:
                     if row["status"] == "resolved" and w.until > row["resolved_at"]:
                         out["back"].append(f.signature)  # it came back after the fix
+                    elif row["status"] == "vanished":
+                        out["back"].append(f.signature)  # it came back like any other
+                    elif row["detail"] != f.detail:
+                        out["changed"].append(f.signature)
                     conn.execute(
                         "UPDATE findings SET severity = ?, title = ?, detail = ?, provisional = ?, "
                         "last_seen = ?, status = CASE WHEN status = 'resolved' AND ? > resolved_at "
-                        "THEN 'open' ELSE status END WHERE signature = ?",
+                        "THEN 'open' WHEN status = 'vanished' THEN 'open' ELSE status END, "
+                        "resolved_at = CASE WHEN status = 'vanished' THEN '' ELSE resolved_at END "
+                        "WHERE signature = ?",
                         (
                             f.severity,
                             f.title,
@@ -1046,7 +1089,7 @@ class HealthBook:
                     )
                 conn.execute(
                     "INSERT INTO sightings (signature, factory, sprint_id, window_start, window_end, "
-                    "finding_json, seen_at) VALUES (?,?,?,?,?,?,?)",
+                    "finding_json, seen_at, scan_id) VALUES (?,?,?,?,?,?,?,?)",
                     (
                         f.signature,
                         slug,
@@ -1055,6 +1098,7 @@ class HealthBook:
                         w.until,
                         json.dumps(f.as_dict(), ensure_ascii=False),
                         now,
+                        scan_id,
                     ),
                 )
             for row in conn.execute(
@@ -1063,20 +1107,56 @@ class HealthBook:
             ):
                 if row["signature"] not in seen:
                     out["confirmed"].append(row["signature"])
-            conn.execute(
-                "INSERT INTO scans (factory, sprint_id, window_start, window_end, found, at) "
-                "VALUES (?,?,?,?,?,?)",
-                (slug, w.sprint_id, w.since, w.until, len(findings), now),
-            )
+            out["vanished"] = self._vanish(conn, slug, now)
         return out
 
-    def annotate(self, notes: dict[str, dict[str, str]]) -> None:
-        """The Ops model's hypothesis of cause and fix, per signature (always a hypothesis)."""
+    @staticmethod
+    def _vanish(conn: sqlite3.Connection, slug: str, now: str) -> list[str]:
+        """Close as "vanished" the open findings this factory showed and its last scans did not
+        (S-001's red base, a one-off conflict): open forever otherwise, and marking them with a
+        commit would invent the fix. Not while another factory still shows them."""
+        recent = [
+            r["id"]
+            for r in conn.execute(
+                "SELECT id FROM scans WHERE factory = ? ORDER BY id DESC LIMIT ?",
+                (slug, VANISH_AFTER),
+            )
+        ]
+        if len(recent) < VANISH_AFTER:
+            return []
+        gone = [
+            r["signature"]
+            for r in conn.execute(
+                "SELECT f.signature FROM findings f WHERE f.status = 'open' "
+                "AND EXISTS (SELECT 1 FROM sightings s WHERE s.signature = f.signature "
+                "AND s.factory = ?) AND COALESCE((SELECT MAX(s.scan_id) FROM sightings s "
+                "WHERE s.signature = f.signature), 0) < ?",
+                (slug, recent[-1]),
+            )
+        ]
+        for sig in gone:
+            conn.execute(
+                "UPDATE findings SET status = 'vanished', resolved_at = ? WHERE signature = ?",
+                (now, sig),
+            )
+        return gone
+
+    def annotate(self, notes: dict[str, dict[str, str]], *, window: str = "") -> None:
+        """The Ops model's hypothesis of cause and fix, per signature (always a hypothesis), with
+        when and over which window it was written: a hypothesis citing the numbers of an old
+        sprint read as current (plan 8.6.2)."""
         with self._lock, self._conn() as conn:
             for sig, note in notes.items():
                 conn.execute(
-                    "UPDATE findings SET hypothesis = ?, fix = ? WHERE signature = ?",
-                    (note.get("hypothesis", "")[:600], note.get("fix", "")[:600], sig),
+                    "UPDATE findings SET hypothesis = ?, fix = ?, hypothesis_at = ?, "
+                    "hypothesis_window = ? WHERE signature = ?",
+                    (
+                        note.get("hypothesis", "")[:600],
+                        note.get("fix", "")[:600],
+                        now_iso(),
+                        window,
+                        sig,
+                    ),
                 )
 
     def resolve(self, signature: str, commit: str) -> bool:
@@ -1173,6 +1253,15 @@ def _seen_in(row: dict[str, Any]) -> str:
     return ", ".join(dict.fromkeys(seen)) or ", ".join(row.get("factories") or []) or "—"
 
 
+def written_note(row: dict[str, Any]) -> str:
+    """ " (escrita em 2026-10-05, SP-008)": the hypothesis is dated, never read as current."""
+    at = str(row.get("hypothesis_at") or "")[:10]
+    where = str(row.get("hypothesis_window") or "")
+    if not at:
+        return ""
+    return f" (escrita em {at}" + (f", {where}" if where and where != at else "") + ")"
+
+
 def export_markdown(rows: list[dict[str, Any]]) -> str:
     """`factory-improvements.md`: what to bring to a Loompa development session."""
     day = datetime.now(UTC).date().isoformat()
@@ -1194,7 +1283,7 @@ def export_markdown(rows: list[dict[str, Any]]) -> str:
             f"- visto em: {r.get('seen_in') or _seen_in(r)}",
         ]
         if r.get("hypothesis"):
-            lines.append(f"- hipótese: {r['hypothesis']}")
+            lines.append(f"- hipótese{written_note(r)}: {r['hypothesis']}")
         if r.get("fix"):
             lines.append(f"- correção sugerida (hipótese): {r['fix']}")
         for ev in (r.get("evidence") or [])[:6]:
@@ -1205,6 +1294,8 @@ def export_markdown(rows: list[dict[str, Any]]) -> str:
             )
         if r.get("resolved_commit"):
             lines.append(f"- resolvido em `{r['resolved_commit']}` ({r['resolved_at'][:10]})")
+        elif r.get("status") == "vanished":
+            lines.append(f"- sumiu sem correção ({r['resolved_at'][:10]})")
         lines.append("")
     if not rows:
         lines.append("Nenhum achado aberto.")
@@ -1237,6 +1328,8 @@ class ScanResult:
     since: str
     until: str
     sprint_id: str | None = None
+    changed: list[str] = field(default_factory=list)
+    vanished: list[str] = field(default_factory=list)
 
 
 def hub_book() -> HealthBook:
@@ -1274,9 +1367,11 @@ async def scan(
     findings = detect(w)
     book = hub_book()
     changes = book.record(ctx.slug, w, findings)
-    fresh = [f for f in findings if f.signature in changes["new"]]
+    # a new finding gets a hypothesis, and so does one whose evidence moved (plan 8.6.2)
+    stale = set(changes["new"]) | set(changes["changed"]) | set(changes["back"])
+    fresh = [f for f in findings if f.signature in stale]
     if explain and fresh and not ctx.dry_run:
-        book.annotate(await _explain(ctx, fresh))
+        book.annotate(await _explain(ctx, fresh), window=w.sprint_id or w.until[:10])
     ctx.emit(
         "factory.health",
         sprint_id=w.sprint_id,
@@ -1284,6 +1379,7 @@ async def scan(
         new=len(changes["new"]),
         back=len(changes["back"]),
         confirmed=len(changes["confirmed"]),
+        vanished=len(changes["vanished"]),
     )
     return ScanResult(findings, **changes, since=w.since, until=w.until, sprint_id=w.sprint_id)
 

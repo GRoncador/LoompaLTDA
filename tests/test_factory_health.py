@@ -298,3 +298,84 @@ def test_a_salvaged_task_is_not_counted_as_cut(tmp_path: Path):
     found = by_signal(detect(window(tmp_path, mixed)))["worker.task_limit"]
     assert [(e["story"], e["calls"]) for e in found.evidence] == [("S-045", 55), ("S-041", 40)]
     assert "1 pararam no limite já prontas" in found.detail
+
+
+def test_a_finding_absent_from_two_scans_vanishes_and_comes_back(tmp_path: Path):
+    """Plan 8.6.9: one-off findings (S-001's red base) stayed open forever, and marking them
+    with a commit would invent the fix. Absent twice in a row in the same factory: vanished."""
+    book = HealthBook(tmp_path)
+    cut = [ev(i, "llm.cut", "S-001", model="m1", role="worker") for i in range(3)]
+    sig = "llm.cuts:m1/worker"
+
+    def scan(slug: str, sprint: str, events=()):
+        w = window(tmp_path, events, sprint_id=sprint)
+        return book.record(slug, w, detect(w))
+
+    assert scan("contas", "SP-001", cut)["new"] == [sig]
+    assert scan("tamagotchi", "SP-001")["vanished"] == []  # never seen there
+    assert scan("contas", "SP-002")["vanished"] == []  # absent once
+    assert scan("contas", "SP-003")["vanished"] == [sig]
+    assert book.findings(status="open") == []
+    (row,) = book.findings(status=None)
+    assert row["status"] == "vanished" and not row["resolved_commit"]
+    assert "sumiu sem correção" in export_markdown([row])
+    assert scan("contas", "SP-004", cut)["back"] == [sig]
+    assert book.findings(status="open")[0]["status"] == "open"
+
+
+def test_a_finding_still_seen_elsewhere_does_not_vanish(tmp_path: Path):
+    book = HealthBook(tmp_path)
+    cut = [ev(i, "llm.cut", "S-001", model="m1", role="worker") for i in range(3)]
+    for slug, sprint, events in [
+        ("contas", "SP-001", cut),
+        ("contas", "SP-002", ()),
+        ("tamagotchi", "SP-001", cut),
+        ("contas", "SP-003", ()),
+    ]:
+        w = window(tmp_path, events, sprint_id=sprint)
+        assert book.record(slug, w, detect(w))["vanished"] == []
+
+
+def test_a_hypothesis_is_dated_and_rewritten_when_the_evidence_moves(tmp_path: Path):
+    """Plan 8.6.2: the Ops hypothesis was written once and kept citing an old sprint's numbers."""
+    book = HealthBook(tmp_path)
+    sig = "llm.cuts:m1/worker"
+
+    def cuts(n: int, sprint: str):
+        w = window(
+            tmp_path,
+            [ev(i, "llm.cut", "S-001", model="m1", role="worker") for i in range(n)],
+            sprint_id=sprint,
+        )
+        return book.record("contas", w, detect(w))
+
+    assert cuts(3, "SP-001")["new"] == [sig]
+    book.annotate({sig: {"hypothesis": "h", "fix": "f"}}, window="SP-001")
+    assert cuts(3, "SP-002")["changed"] == []  # same numbers: the hypothesis stands
+    assert cuts(5, "SP-003")["changed"] == [sig]
+    (row,) = book.findings()
+    assert row["hypothesis_window"] == "SP-001" and row["hypothesis_at"]
+    assert f"hipótese (escrita em {row['hypothesis_at'][:10]}, SP-001): h" in export_markdown([row])
+
+
+def test_an_old_hub_database_gains_the_new_columns(tmp_path: Path):
+    import sqlite3
+
+    from loompa.factory_health import SCHEMA
+
+    old = SCHEMA.replace("    scan_id INTEGER,\n", "")
+    conn = sqlite3.connect(tmp_path / "factory_health.db")
+    conn.executescript(old)
+    conn.execute(
+        "INSERT INTO scans (factory, sprint_id, window_start, window_end, found, at) "
+        "VALUES ('contas', 'SP-001', 'a', 'b', 1, '2026-10-01T00:00:00.000+00:00')"
+    )
+    conn.execute(
+        "INSERT INTO sightings (signature, factory, sprint_id, window_start, window_end, "
+        "finding_json, seen_at) VALUES ('x', 'contas', 'SP-001', 'a', 'b', '{}', "
+        "'2026-10-01T00:00:00.000+00:00')"
+    )
+    conn.commit()
+    conn.close()
+    with HealthBook(tmp_path)._conn() as c:
+        assert c.execute("SELECT scan_id FROM sightings").fetchone()[0] == 1
