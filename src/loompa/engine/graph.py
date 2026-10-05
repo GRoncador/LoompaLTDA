@@ -11,6 +11,8 @@ runner checkpoints after each one. Which phases a story visits is its `route`, b
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -88,7 +90,7 @@ from loompa.risk import needs_preflight
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.sprints import SprintBoard
 from loompa.stack_check import STACK_KEY, foreign_files, mismatch_note
-from loompa.worktrees import GitError, Worktree
+from loompa.worktrees import GitError, MergeConflict, Worktree
 
 Node = Callable[[EngineContext, StoryState], Awaitable[StoryState]]
 
@@ -640,7 +642,9 @@ def _sync_refs(ctx: EngineContext, state: StoryState, wt: Worktree) -> list[str]
     written on top of that are not in the base yet, and then the base. The branch the worktree
     started from is a snapshot of when it was created, so a fix the founder asked for in one of
     those deliveries only reaches this story through this list (ADR-0027)."""
-    return sync_refs(rows_by_id(ctx.store, ctx.slug), state.story_id, ctx.worktrees.default_branch())
+    return sync_refs(
+        rows_by_id(ctx.store, ctx.slug), state.story_id, ctx.worktrees.default_branch()
+    )
 
 
 def _worktree_base(ctx: EngineContext, state: StoryState) -> str:
@@ -666,7 +670,11 @@ def _ensure_worktree(ctx: EngineContext, state: StoryState) -> Worktree:
         # but this story still carries its commits and must not merge before it (11.5). With an
         # integration branch the parents are already recorded in it, so there is no single one.
         dep = next(
-            (d for d in deps_of(rows.get(state.story_id)) if (rows.get(d) or {}).get("branch") == on),
+            (
+                d
+                for d in deps_of(rows.get(state.story_id))
+                if (rows.get(d) or {}).get("branch") == on
+            ),
             "",
         )
         if dep:
@@ -709,6 +717,35 @@ async def _resolve_with_retries(
         if deployer.finish_sync(state, wt, conflicts):
             return True
     return False
+
+
+async def _align_once(ctx: EngineContext, state: StoryState, guidance: str) -> AgentResult:
+    """The Product Owner aligns the criteria with the founder's request once per request. The
+    runner checkpoints only when `dev` ends, so an engine restart mid-dev replayed the alignment:
+    tamagotchi S-057 had its criteria rewritten eight times, each a little differently, and eight
+    copies appended to its spec. The answer is kept in the store under the request and the
+    criteria it was given, and a replay applies it as it was."""
+    digest = hashlib.sha1("\n".join([guidance, *state.acceptance]).encode()).hexdigest()[:16]
+    key = f"align:{ctx.slug}:{state.story_id}:{digest}"
+    if saved := ctx.store.get(key):
+        kept = json.loads(saved)
+        state.acceptance = list(kept["acceptance"])
+        return AgentResult(ok=kept["ok"], summary=kept["summary"], data=kept["data"])
+    revised = await ProductOwnerAgent(ctx).align_criteria(state, guidance)
+    if not (revised.data or {}).get("unavailable"):  # no answer: the next run asks again
+        ctx.store.set(
+            key,
+            json.dumps(
+                {
+                    "acceptance": state.acceptance,
+                    "ok": revised.ok,
+                    "summary": revised.summary,
+                    "data": revised.data or {},
+                },
+                ensure_ascii=False,
+            ),
+        )
+    return revised
 
 
 async def _widen_fence(ctx: EngineContext, state: StoryState, res: AgentResult) -> bool:
@@ -768,7 +805,9 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
                 )
         else:
             state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
-    elif (conflicts := DeployerAgent(ctx).sync_with_base(state, wt, _sync_refs(ctx, state, wt))) is not None:
+    elif (
+        conflicts := DeployerAgent(ctx).sync_with_base(state, wt, _sync_refs(ctx, state, wt))
+    ) is not None:
         merged = not conflicts or await _resolve_with_retries(ctx, state, wt, conflicts)
         if merged:
             # the base moved under a story going back to work: "already failing" moved too
@@ -777,7 +816,7 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
                     state, wt, at=base_path
                 )
     if align := state.extra.pop(ALIGN_KEY, None):
-        revised = await ProductOwnerAgent(ctx).align_criteria(state, align)
+        revised = await _align_once(ctx, state, align)
         if revised.ok:
             log_ = state.extra.setdefault(CRITERIA_ALIGNED_KEY, [])
             log_.extend((revised.data or {}).get("changes") or [])
@@ -1040,6 +1079,10 @@ async def climb(
 
 
 MERGE_FAILED_KEY = "approved_merge_failed"
+# What `apply_founder_answer` leaves under MERGE_FAILED_KEY when the approved branch cannot go
+# straight in although nothing failed: `review` brings it up to date first.
+BASE_MOVED = "the base moved since the delivery"
+INTEGRATING = "another approved story is being merged"
 
 MERGE_FAILED_EXECUTIVE = (
     "Você aprovou a entrega, mas não consegui integrá-la à versão principal do produto. "
@@ -1047,12 +1090,93 @@ MERGE_FAILED_EXECUTIVE = (
 )
 
 
+async def _bring_up_to_date(ctx: EngineContext, state: StoryState, wt: Worktree) -> str | None:
+    """Merge the base into an approved story and re-run the checks that need no model. The
+    founder accepted the behaviour on the base it was delivered on; only the combination with
+    what landed since is new, so a conflict goes to the Worker (as in `dev`) and the suite and the
+    smoke run again — no judge. None: ready to merge (or already up to date). Otherwise why not,
+    in English, for the log and the Worker."""
+    deployer = DeployerAgent(ctx)
+    conflicts = deployer.sync_with_base(state, wt, _sync_refs(ctx, state, wt))
+    if conflicts is None:
+        return None
+    if conflicts and not await _resolve_with_retries(ctx, state, wt, conflicts):
+        return "merging the base into the approved story left conflicts unresolved in: " + (
+            ", ".join(conflicts[:10])
+        )
+    ctx.emit("story.brought_up_to_date", story_id=state.story_id, conflicts=len(conflicts))
+    # "already failing" moved with the base, as when a story goes back to work
+    with ctx.worktrees.base_checkout(wt.base) as base_path:
+        state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt, at=base_path)
+    res = await InspectorAgent(ctx).run(state, wt, judge=False)
+    if not res.ok:
+        return "with the base merged in, the checks failed:\n" + res.summary[-1500:]
+    return None
+
+
 async def _merge_after_approval(
     ctx: EngineContext, state: StoryState, wt: Worktree, error: str
 ) -> StoryState:
-    """The founder approved and the merge into the base failed. The Deployer diagnoses the
-    failure and the code runs the action it picks (GIT_ACTIONS), three tries at most — the first
-    on its tier, the others on the tier above — before the founder hears of it (ADR-0016 §5)."""
+    """The founder approved and the branch could not go straight into the base: the base moved
+    since the delivery, another approval was being merged, or the merge failed. One story at a
+    time (`ctx.integration_lock`): tamagotchi SP-008 had two of these interleaved across their
+    awaits, each aborting the other's merge in the main checkout.
+
+    First the path that needs no judgement: the base is merged into the story, conflicts go to
+    the Worker, the checks run again, and the story is merged. A combination that fails its
+    checks goes back to `dev` like a delivery whose rebase conflicted (the founder then sees the
+    new delivery); conflicts the Worker could not resolve reach the founder as a conflict. Only a
+    git failure that is not a conflict (a lock, a checkout in the way) goes to the Deployer's
+    diagnosis, which picks one of GIT_ACTIONS, three tries at most (ADR-0016 §5)."""
+    async with ctx.integration_lock:
+        deployer = DeployerAgent(ctx)
+        for _ in range(ctx.config.schedule.ops_max_recoveries):
+            problem = await _bring_up_to_date(ctx, state, wt)
+            if problem:
+                state.extra.pop(MERGE_FAILED_KEY, None)
+                return await _approved_back_to_work(ctx, state, problem)
+            try:
+                deployer.merge(state, wt)
+            except MergeConflict as exc:  # the base moved again under the checks
+                error = str(exc)
+                continue
+            except GitError as exc:
+                error = str(exc)[-2000:]
+                break
+            return _merged(state)
+        return await _diagnose_merge(ctx, state, wt, error)
+
+
+def _merged(state: StoryState) -> StoryState:
+    state.extra.pop(MERGE_FAILED_KEY, None)
+    state.extra.pop(CONFLICT_RETRIES_KEY, None)
+    state.stage = Stage.DONE
+    state.phase = ""
+    return state
+
+
+async def _approved_back_to_work(ctx: EngineContext, state: StoryState, problem: str) -> StoryState:
+    """An approved story that does not hold up on the current base: its code must change, so it
+    is delivered again rather than merged on the strength of an approval of other code."""
+    unresolved = problem.startswith("merging the base")
+    if (
+        not unresolved
+        and "dev" in state.route
+        and state.extra.get(CONFLICT_RETRIES_KEY, 0) < ctx.config.schedule.ops_max_recoveries
+    ):
+        state.extra[CONFLICT_RETRIES_KEY] = state.extra.get(CONFLICT_RETRIES_KEY, 0) + 1
+        state.failure_history.append(problem)
+        ctx.emit("story.reintegrating", story_id=state.story_id, after="approval")
+        return goto(state, "dev")
+    return await block(ctx, state, BlockedReason.CONFLICT, problem, resume="review")
+
+
+async def _diagnose_merge(
+    ctx: EngineContext, state: StoryState, wt: Worktree, error: str
+) -> StoryState:
+    """A merge into the base that failed for a reason other than a conflict: the Deployer
+    diagnoses it and the code runs the action it picks (GIT_ACTIONS), three tries at most — the
+    first on its tier, the others on the tier above — before the founder hears of it."""
     deployer = DeployerAgent(ctx)
     tried = 0
     for n in range(ctx.config.schedule.ops_max_recoveries):
@@ -1065,24 +1189,21 @@ async def _merge_after_approval(
         try:
             if action == "clean_main_merge":
                 deployer.git.abort_base_merge()
-            elif action == "resync":
-                conflicts = deployer.sync_with_base(state, wt)
-                if conflicts and not await _resolve_with_retries(ctx, state, wt, conflicts):
-                    error = "merging the base into the story left conflicts unresolved"
-                    continue
+            elif action == "resync" and (problem := await _bring_up_to_date(ctx, state, wt)):
+                error = problem
+                continue
             deployer.merge(state, wt)
         except GitError as exc:
             error = str(exc)[-2000:]
             continue
-        state.stage = Stage.DONE
-        state.phase = ""
-        return state
+        return _merged(state)
     said = (
         f"Tentei resolver sozinho {tried} vez(es)"
         + (", incluindo com um modelo de IA mais forte. " if tried >= 2 else ". ")
         if tried
         else ""
     )
+    state.extra.pop(MERGE_FAILED_KEY, None)
     return await block(
         ctx,
         state,
@@ -1140,7 +1261,9 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
             ctx.emit("story.waiting", story_id=state.story_id, pending=waits, stage="review")
         return state
     wt = _ensure_worktree(ctx, state)
-    failed = state.extra.pop(MERGE_FAILED_KEY, None)
+    # read, not popped: the runner checkpoints when the node ends, and a restart in the middle of
+    # the integration must come back to it, not deliver the approved story again
+    failed = state.extra.get(MERGE_FAILED_KEY)
     if failed:
         return await _merge_after_approval(ctx, state, wt, str(failed))
     await KaizenAgent(ctx).capture(
@@ -1396,12 +1519,21 @@ def apply_founder_answer(
                 return state
             wt = ctx.worktrees.get(state.story_id)
             if wt is not None:
-                try:
-                    DeployerAgent(ctx).merge(state, wt)
-                except GitError as exc:
-                    # approved: `review` diagnoses and merges without asking again (ADR-0016 §5)
-                    state.note(f"Aprovado, mas a integração falhou: {exc}")
-                    state.extra[MERGE_FAILED_KEY] = str(exc)[-2000:]
+                pending = None
+                if ctx.integration_lock.locked():
+                    pending = INTEGRATING  # merges go in one at a time, in `review`
+                elif ctx.worktrees.behind_base(wt):
+                    # what was approved never ran next to what landed since: `review` merges the
+                    # base in and runs the checks before the merge (tamagotchi SP-008)
+                    pending = BASE_MOVED
+                else:
+                    try:
+                        DeployerAgent(ctx).merge(state, wt)
+                    except GitError as exc:
+                        pending = str(exc)[-2000:]
+                if pending:
+                    # approved: `review` integrates and merges without asking again (ADR-0016 §5)
+                    state.extra[MERGE_FAILED_KEY] = pending
                     goto(state, "review")
                     state.blocked_reason = None
                     return state

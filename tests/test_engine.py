@@ -1062,7 +1062,8 @@ def test_a_setup_problem_goes_to_the_founder_without_retrying(factory: Factory):
 
 def _approved_merge_fails_once(monkeypatch: pytest.MonkeyPatch, actions: list[str]):
     """A script whose Deployer diagnosis answers `actions` in turn, and a merge that fails the
-    first time it runs (a lock file another process held)."""
+    first two times it runs (a lock file another process held): once on the approval, once on
+    the retry `review` makes without a model before anything is diagnosed."""
     from loompa.agents.deployer import DeployerAgent
     from loompa.worktrees import GitError
 
@@ -1073,7 +1074,7 @@ def _approved_merge_fails_once(monkeypatch: pytest.MonkeyPatch, actions: list[st
 
     def flaky(self, state, wt):  # type: ignore[no-untyped-def]
         merges.append(1)
-        if len(merges) == 1:
+        if len(merges) <= 2:
             raise GitError("fatal: Unable to create '/repo/.git/index.lock': File exists.")
         return original(self, state, wt)
 
@@ -1110,7 +1111,7 @@ async def test_an_approved_merge_that_fails_is_diagnosed_and_merged_without_aski
     ctx = make_ctx(factory, script)
     sid = await _deliver_and_approve(ctx)
     state = load_state(ctx, sid)
-    assert state.stage == Stage.DONE and state.merged_sha and len(merges) == 2
+    assert state.stage == Stage.DONE and state.merged_sha and len(merges) == 3
     assert len(asked) == 1 and "index.lock" in asked[0] and "git status" in asked[0]
     diag = [
         e["payload"]
@@ -1140,7 +1141,8 @@ async def test_a_diagnosis_that_asks_or_cannot_be_read_goes_to_the_founder_plain
     ctx = make_ctx(factory, script)
     sid = await _deliver_and_approve(ctx)
     state = load_state(ctx, sid)
-    assert state.blocked_reason == "persistent_failure" and len(merges) == 1  # nothing was run
+    # the plain retry, then nothing the diagnosis said
+    assert state.blocked_reason == "persistent_failure" and len(merges) == 2
     diag = [
         e["payload"]
         for e in ctx.store.events_since(0, limit=10_000)
@@ -1150,6 +1152,180 @@ async def test_a_diagnosis_that_asks_or_cannot_be_read_goes_to_the_founder_plain
     assert told and "Você aprovou a entrega" in told[0]  # the Master words the facts
     msg = ctx.store.get_message(state.blocked_message_id)
     assert "Você aprovou a entrega" in msg.context and msg.executive_audit() == []
+    await ctx.aclose()
+
+
+def _calc_story(resolution: str, judged: list[int]) -> Callable[..., Any]:
+    """A story that marks `add` in app/calc.py; a conflict on it is resolved as `resolution`.
+    Every call of the Inspector's judge is counted in `judged`."""
+    story = "def add(a, b):\n    return a + b  # story\n"
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role == "worker":
+            if "You resolve git merge conflicts" in messages[0].content:
+                return json.dumps({"files": {"app/calc.py": resolution}})
+            if not tool_results(messages):
+                return [
+                    ToolCall("r", "read_file", {"path": "app/calc.py"}),
+                    ToolCall("w", "write_file", {"path": "app/calc.py", "content": story}),
+                ]
+            return [ToolCall("d", "done", {"summary": "ok"})]
+        if role == "architect" and "## Founder's guidance" not in messages[-1].content:
+            return json.dumps(
+                {
+                    "approach": "x",
+                    "files": ["app/"],
+                    "contracts": "",
+                    "risks": [],
+                    "tasks": ["Marcar add"],
+                    "adr_proposal": "",
+                }
+            )
+        if role == "inspector" and "## Diff" in messages[-1].content:
+            judged.append(1)
+        return dry_run_script(model, messages, tools)
+
+    return script
+
+
+async def _approve_after_the_base_moved(ctx: EngineContext, judged: list[int] | None = None) -> str:
+    """Deliver the calc story, land a change to the same line on main (another approval), then
+    approve the delivery — tamagotchi SP-008, where S-057 went in first. `judged` gets a marker
+    (0) where the approval happened."""
+    sid = seed_story(ctx, "Registrar")
+    await Scheduler(ctx).run()
+    delivery = next(
+        m for m in ctx.store.list_messages(ctx.slug, status="pending") if m.kind == "delivery"
+    )
+    root = ctx.root
+    (root / "app" / "calc.py").write_text("def add(a, b):\n    return a + b  # main\n")
+    git("add", "app/calc.py", cwd=root)
+    git("commit", "-qm", "feat: outra entrega", cwd=root)
+    if judged is not None:
+        judged.append(0)
+    await Scheduler(ctx).aanswer(delivery.id, FounderAnswer(option_key="approve"))
+    await Scheduler(ctx).run()
+    return sid
+
+
+def _main_checkout_clean(root: Path) -> bool:
+    return (
+        not (root / ".git" / "MERGE_HEAD").exists()
+        and "<<<<<<<" not in (root / "app" / "calc.py").read_text()
+    )
+
+
+async def test_an_approved_story_behind_the_base_is_brought_up_to_date_and_merged(
+    factory: Factory,
+):
+    """Tamagotchi SP-008: three approvals in 20 s, the first merged and the other two stopped
+    at the founder over conflicts the Worker resolves in seconds. Now the base is merged into
+    the approved story, the conflict goes to the Worker, the checks run again (no judge: the
+    behaviour was accepted) and the story is merged without asking again."""
+    both = "def add(a, b):\n    return a + b  # story + main\n"
+    judged: list[int] = []
+    ctx = make_ctx(factory, _calc_story(both, judged))
+    sid = await _approve_after_the_base_moved(ctx, judged)
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.DONE and state.merged_sha, state.failure_history
+    assert (factory.root / "app" / "calc.py").read_text() == both
+    assert _main_checkout_clean(factory.root)
+    assert judged[-1] == 0  # the checks ran again after the approval, the judge did not
+    events = ctx.store.events_since(0, limit=10_000)
+    types = [e["type"] for e in events]
+    assert "story.brought_up_to_date" in types and "deployer.diagnosis" not in types
+    after = types[types.index("story.brought_up_to_date") :]
+    assert "inspector.tests" in after
+    assert [
+        m for m in ctx.store.list_messages(ctx.slug, status="pending") if m.story_id == sid
+    ] == []
+    await ctx.aclose()
+
+
+async def test_an_approved_story_that_breaks_on_the_new_base_is_delivered_again(
+    factory: Factory,
+):
+    """The combination fails its tests: merging it on the strength of an approval of other code
+    would put a red suite in the product. It goes back to work and comes back as a delivery."""
+    broken = "def add(a, b):\n    return a - b  # story + main\n"
+    ctx = make_ctx(factory, _calc_story(broken, []))
+    sid = await _approve_after_the_base_moved(ctx)
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
+    assert not state.merged_sha
+    assert (
+        factory.root / "app" / "calc.py"
+    ).read_text() == "def add(a, b):\n    return a + b  # main\n"
+    reint = [
+        e["payload"]
+        for e in ctx.store.events_since(0, limit=10_000)
+        if e["type"] == "story.reintegrating"
+    ]
+    assert reint and reint[-1].get("after") == "approval"
+    assert any("the checks failed" in f for f in state.failure_history)
+    await ctx.aclose()
+
+
+async def test_approvals_take_turns_to_merge(factory: Factory):
+    """An approval that arrives while another approved story is being integrated does not merge
+    on its own: it waits for its turn in `review`."""
+    from loompa.engine.graph import INTEGRATING, MERGE_FAILED_KEY
+
+    ctx = make_ctx(factory)
+    sid = seed_story(ctx, "Entrega aprovada")
+    await Scheduler(ctx).run()
+    delivery = next(
+        m for m in ctx.store.list_messages(ctx.slug, status="pending") if m.kind == "delivery"
+    )
+    async with ctx.integration_lock:
+        state = await Scheduler(ctx).aanswer(delivery.id, FounderAnswer(option_key="approve"))
+        assert state.stage == Stage.REVIEW and not state.merged_sha
+        assert state.extra[MERGE_FAILED_KEY] == INTEGRATING
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.DONE and state.merged_sha
+    await ctx.aclose()
+
+
+async def test_the_criteria_are_aligned_once_per_request_even_across_restarts(factory: Factory):
+    """`dev` is checkpointed when it ends: an engine restart in the middle replayed the Product
+    Owner's alignment — tamagotchi S-057 had its criteria rewritten eight times, each a little
+    differently, with eight sections appended to its spec."""
+    from loompa.engine.graph import _align_once
+    from loompa.engine.state import StoryState
+    from loompa.speckit import story_dir
+
+    asked: list[int] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "product_owner" and "guardian of the spec" in messages[0].content:
+            asked.append(1)
+            return json.dumps(
+                {
+                    "criteria": [
+                        {
+                            "n": 1,
+                            "action": "rewrite",
+                            "new_text": "Aceita 12.50",
+                            "reason": "pedido",
+                        }
+                    ]
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    spec = story_dir(ctx.root, "S-077").spec
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text("# Spec\n")
+    before = StoryState(story_id="S-077", title="Valores", acceptance=["Rejeita 12.50"])
+    first = await _align_once(ctx, before.model_copy(deep=True), "aceite 12.50 com ponto")
+    replay = before.model_copy(deep=True)  # what the checkpoint still holds after a restart
+    second = await _align_once(ctx, replay, "aceite 12.50 com ponto")
+    assert len(asked) == 1 and first.ok and second.ok and second.data == first.data
+    assert replay.acceptance == ["Aceita 12.50"]
+    assert spec.read_text().count("Critérios revistos") == 1
     await ctx.aclose()
 
 

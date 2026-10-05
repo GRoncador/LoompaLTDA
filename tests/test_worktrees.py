@@ -314,3 +314,74 @@ def test_a_story_may_keep_editing_what_its_branch_already_changed(git_repo: Path
     fence = worker._fence(state, wt)
     assert fence[0] == "src/persistence.py" and "package.json" in fence
     assert worker._fence(StoryState(story_id="S-006", title="t"), wt) is None  # no plan, no fence
+
+
+def _diverged(git_repo: Path) -> tuple[WorktreeManager, object]:
+    """A story and the base that both changed the same line of README.md since they parted."""
+    from conftest import git
+
+    wm = WorktreeManager(git_repo)
+    wt = wm.create("S-010")
+    (wt.path / "README.md").write_text("# story version\n")
+    wm.commit_all(wt, "feat: story")
+    (git_repo / "README.md").write_text("# main version\n")
+    git("commit", "-qam", "feat: another delivery", cwd=git_repo)
+    return wm.as_role("deployer"), wt
+
+
+def _main_is_clean(git_repo: Path) -> bool:
+    from conftest import git
+
+    return (
+        not git("status", "--porcelain", "--untracked-files=no", cwd=git_repo)
+        and not (git_repo / ".git" / "MERGE_HEAD").exists()
+    )
+
+
+def test_a_merge_into_the_base_that_conflicts_never_touches_the_main_checkout(git_repo: Path):
+    """Tamagotchi SP-008: the failed merge stayed half-done in the main checkout, conflict
+    markers in the product's index.html, and the next approval's merge tripped over it."""
+    from loompa.worktrees import MergeConflict
+
+    deployer, wt = _diverged(git_repo)
+    head = deployer.git("rev-parse", "HEAD")
+    assert deployer.conflicts_with_base(wt.branch, "main") == ["README.md"]
+    with pytest.raises(MergeConflict) as exc:
+        deployer.merge_into_base(wt)
+    assert exc.value.files == ["README.md"]
+    assert _main_is_clean(git_repo) and deployer.git("rev-parse", "HEAD") == head
+    assert (git_repo / "README.md").read_text() == "# main version\n"
+
+
+def test_a_merge_that_fails_without_the_precheck_is_aborted(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A git older than 2.38 cannot answer `merge-tree --write-tree`: the merge itself finds
+    the conflict, and it is aborted before the error goes up."""
+    from loompa.worktrees import MergeConflict
+
+    deployer, wt = _diverged(git_repo)
+    monkeypatch.setattr(WorktreeManager, "conflicts_with_base", lambda self, b, base: None)
+    with pytest.raises(MergeConflict) as exc:
+        deployer.merge_into_base(wt)
+    assert exc.value.files == ["README.md"] and _main_is_clean(git_repo)
+
+
+def test_a_merge_left_half_done_in_main_is_refused_not_stacked(git_repo: Path):
+    """Someone else's merge in progress there is not the Deployer's to finish or discard: it
+    says so, and the diagnosis decides (`clean_main_merge`)."""
+    deployer, wt = _diverged(git_repo)
+    deployer.git("merge", wt.branch, check=False)  # conflicts, and stays half-done
+    assert deployer.base_merge_in_progress()
+    with pytest.raises(GitError, match="already in progress"):
+        deployer.merge_into_base(wt)
+    deployer.abort_base_merge()
+    assert _main_is_clean(git_repo)
+
+
+def test_the_diagnosis_does_not_see_the_factory_files_as_founder_work(git_repo: Path):
+    (git_repo / ".loompa").mkdir()
+    (git_repo / ".loompa" / "learnings.md").write_text("x\n")
+    (git_repo / "notes.txt").write_text("mine\n")
+    status = WorktreeManager(git_repo).main_status()
+    assert "notes.txt" in status and ".loompa" not in status

@@ -63,9 +63,35 @@ depende daquela história — e, desde 11.5, só pelo merge (seção 6).
 
 | Você escolhe | O que acontece | Efeito nas dependentes |
 |---|---|---|
-| **Aprovar e liberar** | o Deployer integra na base, apaga o branch da história e ela fica concluída. Se o merge falhar, ele diagnostica e tenta sozinho até 3 vezes antes de te perguntar (`conflict`) | destravam na hora: a próxima entrega da cadeia vem para a sua caixa |
+| **Aprovar e liberar** | o Deployer integra na base, apaga o branch da história e ela fica concluída. Se a base andou desde a entrega, primeiro ela é atualizada (seção 5.1) | destravam na hora: a próxima entrega da cadeia vem para a sua caixa |
 | **Aprovar escrevendo algo** | o texto vira anotação da história **e das que dependem dela** ("Ao aprovar: …") | idem |
 | **Pedir ajustes** | volta ao `dev` com o seu pedido; se houver plano, o Architect emenda as tarefas em vez de refazer tudo | **continuam esperando**: elas carregam os commits da versão que você recusou |
+
+### 5.1 Quando a base andou entre a entrega e o seu aceite
+
+Aprovar várias entregas de uma vez é o normal (no tamagotchi SP-008 foram três em 20 s). A primeira
+entra direto; as outras foram entregues sobre uma base que já não existe — o que você aprovou nunca
+rodou junto com o que entrou depois. Por isso o aceite não faz o merge direto quando:
+
+- a base tem commits que o branch da história não tem; ou
+- outra história aprovada está sendo integrada naquele momento (uma de cada vez — duas ao mesmo
+  tempo já abortaram o merge uma da outra no checkout principal).
+
+Nesses casos ela volta ao `review`, que, sem perguntar de novo:
+
+1. faz o merge da base **dentro do worktree da história** — nunca no checkout principal. Trechos em
+   que os dois lados só acrescentaram linhas (dois `describe` no fim do mesmo arquivo de teste)
+   ficam com os dois; o resto vai para o Worker, como no `dev`;
+2. roda de novo os testes, o lint e o smoke (sem o juiz: o comportamento você já aceitou; nova é
+   só a combinação);
+3. verde → merge na base, concluída. Vermelho → volta ao `dev` com a falha e vem para a sua caixa
+   como **nova entrega** (o código mudou além de um merge mecânico). Conflito que o Worker não
+   resolveu → `conflict` na sua caixa.
+
+O merge na base nunca deixa o checkout principal pela metade: o conflito é calculado antes
+(`git merge-tree`) e qualquer merge que falhe assim mesmo é abortado. Só uma falha de git que não é
+conflito (um lock, um arquivo no caminho) vai para o diagnóstico do Deployer, que escolhe uma ação e
+tenta até 3 vezes antes de te perguntar.
 
 Pesquisas (`research`) têm o mesmo par de opções, mas "pedir mais aprofundamento" volta ao nó de
 pesquisa e nada é integrado — pesquisa não mexe no código.

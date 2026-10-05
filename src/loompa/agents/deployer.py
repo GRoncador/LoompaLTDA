@@ -274,6 +274,9 @@ class DeployerAgent(LoompaAgent):
                 user,
                 story=state,
                 tier_override=TIER_ABOVE["tier2"] if attempt else None,
+                # one of four actions: tamagotchi S-054 spent 11k tokens and 220 s choosing
+                max_tokens=600,
+                reasoning_effort="low",
             )
             action = str(data.get("action") or "")
             reason = str(data.get("reason") or "")[:300]

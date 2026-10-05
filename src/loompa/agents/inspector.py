@@ -147,7 +147,10 @@ class InspectorAgent(LoompaAgent):
             )
         return base
 
-    async def run(self, state: StoryState, wt: Worktree) -> AgentResult:
+    async def run(self, state: StoryState, wt: Worktree, *, judge: bool = True) -> AgentResult:
+        """The quality gate. `judge=False` runs only the checks that need no model (tests,
+        lint, types, smoke, hygiene): what an approved story needs after the base was merged into
+        it — the founder already accepted the behaviour, only the combination is new."""
         self.set_state("TESTING", state, detail="rodando testes e linters")
         q = self.ctx.config.quality
         parts: list[str] = []
@@ -276,9 +279,9 @@ class InspectorAgent(LoompaAgent):
         criteria_ok = True
         failed: list[dict] = []
         findings: list[dict[str, str]] = []
-        if ok:
+        if ok and judge:
             findings = _numbered(weak_tests(full_diff))
-        if ok and state.acceptance and not self.ctx.dry_run:
+        if ok and judge and state.acceptance and not self.ctx.dry_run:
             judge = await self._judge(state, wt, "\n".join(parts), full_diff)
             failed = [c for c in judge.get("criteria", []) if not c.get("pass")]
             criteria_ok = not failed

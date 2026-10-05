@@ -31,6 +31,15 @@ class GitAuthorityError(GitError):
     """A role other than the Deployer tried an operation that changes shared history."""
 
 
+class MergeConflict(GitError):
+    """Merging a story into the base would conflict. Raised before the main checkout is touched
+    (or after the attempt was aborted): the base is exactly as it was."""
+
+    def __init__(self, branch: str, files: list[str]):
+        self.files = files
+        super().__init__(f"merging {branch} into the base conflicts in: {', '.join(files[:10])}")
+
+
 # Only the Deployer may change what the base branch holds or talk to the remote (ADR-0006 §5).
 DEPLOYER_ROLE = "deployer"
 DEPLOYER_ONLY = frozenset(
@@ -582,8 +591,31 @@ class WorktreeManager:
         self.git("merge", "--abort", check=False)
 
     def main_status(self) -> str:
-        """`git status --short --branch` of the main checkout, for the Deployer's diagnosis."""
-        return self.git("status", "--short", "--branch", check=False)
+        """`git status --short --branch` of the main checkout, for the Deployer's diagnosis.
+        `.loompa/` is left out: specs, learnings and config are the factory's own files, always
+        dirty there, and the diagnosis read them as the founder's work and asked every time
+        (tamagotchi SP-008)."""
+        return self.git("status", "--short", "--branch", "--", ".", ":!.loompa", check=False)
+
+    def base_merge_in_progress(self) -> bool:
+        return bool(self.git("rev-parse", "-q", "--verify", "MERGE_HEAD", check=False))
+
+    def conflicts_with_base(self, branch: str, base: str) -> list[str] | None:
+        """The files merging `branch` into `base` would leave in conflict, computed without a
+        checkout (`git merge-tree --write-tree`, git 2.38+). [] merges cleanly; None when this git
+        cannot tell, and the merge itself has to find out."""
+        proc = subprocess.run(
+            ["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", base, branch],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0:
+            return []
+        if proc.returncode != 1:  # an older git, or a ref that does not resolve
+            return None
+        # the first line is the tree written with markers; the conflicted paths follow
+        return [f for f in proc.stdout.splitlines()[1:] if f.strip()]
 
     def rebase_on_base(self, wt: Worktree) -> bool:
         """Try to rebase the story branch on its base; abort cleanly on conflict. A branch that
@@ -613,24 +645,31 @@ class WorktreeManager:
         return sorted(n for n in names if n.strip() and not n.startswith(".loompa/"))
 
     def merge_into_base(self, wt: Worktree, *, message: str | None = None) -> str:
-        """Fast-forward or merge the story branch into base in the main checkout."""
+        """Merge the story branch into base in the main checkout. Never leaves a merge half-done
+        there: a conflict is found before the checkout is touched (`MergeConflict`), and any merge
+        that fails anyway is aborted. Tamagotchi SP-008 left `index.html` with conflict markers
+        in the product and the next approval's merge tripping over them."""
         self._require_deployer("git merge")
+        if self.base_merge_in_progress():
+            raise GitError(
+                "a merge is already in progress in the main checkout (MERGE_HEAD exists)"
+            )
+        conflicts = self.conflicts_with_base(wt.branch, wt.base)
+        if conflicts:
+            raise MergeConflict(wt.branch, conflicts)
         current = self.git("rev-parse", "--abbrev-ref", "HEAD")
         if current != wt.base:
             self.git("checkout", "-q", wt.base)
         msg = message or f"merge: {wt.branch}"
-        self.git(
-            "-c",
-            "user.name=Loompa",
-            "-c",
-            "user.email=loompa@localhost",
-            "merge",
-            "--no-ff",
-            "-q",
-            "-m",
-            msg,
-            wt.branch,
-        )
+        try:
+            self.git(*_BOT, "merge", "--no-ff", "-q", "-m", msg, wt.branch)
+        except GitError:
+            left = self.git("diff", "--name-only", "--diff-filter=U", check=False).splitlines()
+            if self.base_merge_in_progress():
+                self.git("merge", "--abort", check=False)
+            if left:
+                raise MergeConflict(wt.branch, [f for f in left if f.strip()]) from None
+            raise
         return self.git("rev-parse", "--short", "HEAD")
 
     def open_pull_request(

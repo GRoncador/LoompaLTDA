@@ -1225,7 +1225,11 @@ class ProductOwnerAgent(LoompaAgent):
             )
         except Exception:  # noqa: BLE001 - advisory: the Worker still gets the request as a note
             self.set_state("IDLE")
-            return AgentResult(ok=False, summary="alinhamento de critérios indisponível")
+            return AgentResult(
+                ok=False,
+                summary="alinhamento de critérios indisponível",
+                data={"unavailable": True},
+            )
         return self._apply_revision(
             state,
             data,
