@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -693,6 +694,21 @@ def create_app(
             "story_id": state.story_id if state else None,
             "stage": state.stage.value if state else None,
         }
+
+    @app.get("/api/factories/{slug}/stories/{story_id}/shots/{name}")
+    def story_shot(slug: str, story_id: str, name: str) -> FileResponse:
+        """A screenshot the smoke took of the story's page (ADR-0030). Only the file names the
+        smoke writes: nothing else under the hub is reachable from here."""
+        from loompa.agents.inspector import shots_dir
+        from loompa.smoke import VIEWPORTS
+
+        hub.get(slug)  # 404 for an unknown factory
+        if name not in {f"{v[0]}.png" for v in VIEWPORTS} or not re.fullmatch(r"S-\d+", story_id):
+            raise HTTPException(404, name)
+        path = shots_dir(slug, story_id) / name
+        if not path.is_file():
+            raise HTTPException(404, name)
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
 
     @app.post("/api/factories/{slug}/inbox/{message_id}/archive")
     def archive(slug: str, message_id: str) -> dict[str, Any]:

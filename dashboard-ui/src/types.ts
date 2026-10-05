@@ -96,6 +96,7 @@ export interface Message {
   created_at: string;
   answer?: { option_key: string | null; text: string | null; answered_at: string } | null;
   sprint_id?: string | null; // a note about a sprint opens its report (8.2)
+  images?: string[]; // screenshots of the page with a delivery (ADR-0030)
 }
 
 export type ConversationKind = "meeting" | "brainstorm" | "review";

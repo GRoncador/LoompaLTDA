@@ -125,3 +125,106 @@ def test_a_drawing_cut_by_the_canvas_edge_is_a_problem():
     assert clipped_edges({"top": 1, "bottom": 1, "left": 1, "right": 1}) == []  # a frame
     assert clipped_edges({"top": 0, "bottom": 0, "left": 0, "right": 0}) == []
     assert clipped_edges({}) == []
+
+
+def _shell_page(root: Path, *, screen: int, shell: int, wide: int = 0) -> Path:
+    """A round shell (border-radius 50%) holding a canvas, as tamagotchi's egg holds its LCD;
+    `wide` adds a block wider than a phone."""
+    root.mkdir(parents=True)
+    extra = f'<div style="width:{wide}px;height:10px"></div>' if wide else ""
+    (root / "index.html").write_text(
+        '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">'
+        f'<div id="carca" style="width:{shell}px;height:{shell}px;border-radius:50%;'
+        'background:#ddd;display:flex;align-items:center;justify-content:center">'
+        f'<canvas id="tela" width="{screen}" height="{screen}"></canvas></div>{extra}'
+        "<script>const c = document.getElementById('tela').getContext('2d');"
+        f"c.fillStyle = '#8bac0f'; c.fillRect(0, 0, {screen}, {screen});"
+        "c.fillStyle = '#0f380f'; c.fillRect(20, 20, 10, 10);</script>"
+    )
+    return root
+
+
+def test_layout_problems_are_keyed_without_their_pixels():
+    from loompa.smoke import layout_problems
+
+    seen = {
+        "width": 390,
+        "content": 825,
+        "sticking": [{"el": "#tela-lcd", "box": "#carca-ovo", "corners": ["top-left"]}],
+    }
+    out = layout_problems("mobile", seen)
+    assert set(out) == {"mobile:scroll", "mobile:#tela-lcd>#carca-ovo"}
+    assert "content is 825 px wide" in out["mobile:scroll"]
+    assert (
+        "crosses" not in out["mobile:scroll"]
+        and "rounded edge" in out["mobile:#tela-lcd>#carca-ovo"]
+    )
+    assert layout_problems("mobile", {"width": 390, "content": 390, "sticking": []}) == {}
+
+
+@needs_chrome
+async def test_a_screen_crossing_its_rounded_shell_and_a_page_wider_than_a_phone_fail(
+    tmp_path: Path, monkeypatch
+):
+    """ADR-0030: tamagotchi S-054's first delivery put the LCD across the egg's rounded edge
+    (the rectangles fit: only the shape was crossed) and the page was wider than a phone; the
+    founder saw both, every test was green. Screenshots go to `shots_dir`."""
+    monkeypatch.setattr("loompa.smoke.SETTLE_S", 1.0)
+    shots = tmp_path / "shots"
+    bad = await smoke(
+        _shell_page(tmp_path / "bad", screen=300, shell=340, wide=700), SERVE, shots_dir=shots
+    )
+    assert any("#tela sticks out of #carca" in p and "rounded edge" in p for p in bad.problems)
+    assert any("at 390 px wide the page scrolls sideways" in p for p in bad.problems)
+    assert sorted(bad.shots) == ["desktop.png", "mobile.png"]
+    assert all((shots / n).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n" for n in bad.shots)
+    good = await smoke(_shell_page(tmp_path / "good", screen=200, shell=340), SERVE)
+    assert good.ok, good.report()
+    # what the base already has is the base's: the story is not failed for it
+    known = set(bad.layout)
+    again = await smoke(
+        _shell_page(tmp_path / "same", screen=300, shell=340, wide=700),
+        SERVE,
+        layout_baseline=known,
+    )
+    assert again.ok and any("the base already has" in n for n in again.notes)
+
+
+async def test_a_delivery_carries_the_screenshots_and_the_base_is_measured_once(
+    factory, monkeypatch
+):
+    """End to end (ADR-0030): the Inspector's smoke saves the screenshots under the hub, the
+    delivery lists them for the founder, and the base's layout is measured once per baseline."""
+    from loompa.agents.deployer import SHOTS_NOTE
+    from loompa.agents.inspector import shots_dir
+    from loompa.engine import Scheduler, load_state
+    from loompa.smoke import SmokeResult
+    from test_engine import make_ctx, seed_story
+
+    runs: list[str] = []
+
+    async def fake_smoke(root, command, *, chrome=None, shots_dir=None, layout_baseline=None):  # type: ignore[no-untyped-def]
+        runs.append("story" if shots_dir else "base")
+        out = SmokeResult(ran=True, rendered=True, layout={"mobile:scroll": "x"})
+        if shots_dir is not None:
+            shots_dir.mkdir(parents=True, exist_ok=True)
+            for name in ("desktop.png", "mobile.png"):
+                (shots_dir / name).write_bytes(b"\x89PNG\r\n\x1a\n")
+                out.shots.append(name)
+        out.problems = [] if layout_baseline == {"mobile:scroll"} else ["not compared to the base"]
+        return out
+
+    monkeypatch.setattr("loompa.agents.inspector.smoke", fake_smoke)
+    monkeypatch.setattr("loompa.agents.inspector.start_command", lambda root, cmd: "serve")
+    ctx = make_ctx(factory)
+    sid = seed_story(ctx, "Página")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.blocked_reason == "delivery", state.failure_history
+    assert runs == ["base", "story"]
+    assert state.extra["baseline"]["layout"] == ["mobile:scroll"]
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert msg.images == ["desktop.png", "mobile.png"] and SHOTS_NOTE in msg.context
+    assert msg.executive_audit() == []
+    assert (shots_dir(ctx.slug, sid) / "mobile.png").is_file()
+    await ctx.aclose()

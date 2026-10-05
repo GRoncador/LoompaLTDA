@@ -20,6 +20,7 @@ from loompa.aci import run_command, summarize_lint, summarize_tests, summarize_t
 from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance
 from loompa.agents.product_owner import CRITERIA_ALIGNED_KEY, CRITERIA_REVIEW_KEY
 from loompa.callers import callers_of_diff
+from loompa.config.secrets import hub_home
 from loompa.engine.state import StoryState
 from loompa.hygiene import (
     HygieneIssue,
@@ -107,6 +108,15 @@ def grade(criteria_ok: bool, findings: list[dict[str, str]], tooling_ok: bool) -
     if findings:
         return "CONCERNS"
     return "PASS"
+
+
+SHOTS_KEY = "shots"  # the screenshots of the last smoke run, for the delivery (ADR-0030)
+LAYOUT_KEY = "layout"  # in the baseline: layout problems the base already has
+
+
+def shots_dir(slug: str, story_id: str) -> Path:
+    """Where a story's screenshots live: under the hub, never in the product's repository."""
+    return hub_home() / "shots" / slug / story_id
 
 
 class InspectorAgent(LoompaAgent):
@@ -229,7 +239,11 @@ class InspectorAgent(LoompaAgent):
         smoke_cmd = start_command(wt.path, q.smoke_command) if ok and not self.ctx.dry_run else ""
         if smoke_cmd:
             self.set_state("TESTING", state, detail="abrindo o produto no navegador")
-            sm = await smoke(wt.path, smoke_cmd)
+            known = await self._layout_baseline(state, wt, smoke_cmd)
+            shots = shots_dir(self.ctx.slug, state.story_id)
+            shutil.rmtree(shots, ignore_errors=True)  # never a screenshot of an older run
+            sm = await smoke(wt.path, smoke_cmd, shots_dir=shots, layout_baseline=known)
+            state.extra[SHOTS_KEY] = sm.shots
             parts.append(sm.report())
             ok = ok and sm.ok
             others_ok = others_ok and sm.ok
@@ -335,6 +349,18 @@ class InspectorAgent(LoompaAgent):
                 ],
             },
         )
+
+    async def _layout_baseline(self, state: StoryState, wt: Worktree, smoke_cmd: str) -> set[str]:
+        """The layout problems the base already has, measured once per baseline: a page that
+        already scrolls sideways on a phone is not this story's doing (tamagotchi's main did, and
+        S-054 would have failed for it). Measured on a checkout of the base, like the tests'
+        baseline, and kept in it; a base that cannot be rendered counts as having none."""
+        baseline = state.extra.setdefault("baseline", {})
+        if LAYOUT_KEY not in baseline:
+            with self.ctx.worktrees.base_checkout(wt.base) as base_path:
+                sm = await smoke(base_path, smoke_cmd)
+            baseline[LAYOUT_KEY] = sorted(sm.layout) if sm.rendered else []
+        return set(baseline.get(LAYOUT_KEY) or [])
 
     async def _judge(
         self, state: StoryState, wt: Worktree, checks: str = "", full_diff: str | None = None

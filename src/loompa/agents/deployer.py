@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from loompa.agents.base import AgentResult, LoompaAgent
+from loompa.agents.inspector import SHOTS_KEY, shots_dir
 from loompa.agents.kaizen import KaizenAgent
 from loompa.agents.product_owner import CRITERIA_REVIEW_KEY
 from loompa.comms import (
@@ -22,8 +23,8 @@ You are the Deployer Loompa. Summarize this delivery for the founder, who is not
 {language}: 2-4 short sentences on what the product can do now and anything worth trying. Base it
 only on the Worker notes, commits and changed files below, and do not promise what they do not
 show. No file names, jargon or code.
-The factory checked tests, lint and that the page loads; nobody looked at how the product looks.
-So state appearance as what was changed ("o pet foi movido para o meio da tela"), never as a
+The factory checked tests, lint and that the page loads, and screenshots of the page go with this
+message; nobody judged whether it looks right. So state appearance as what was changed ("o pet foi movido para o meio da tela"), never as a
 verified result ("está bem centralizado", "ficou bonito"), and invite the founder to look: the
 Worker notes say what it meant to do, which the founder may find was not achieved (tamagotchi
 S-048 was announced "bem centralizado" while it sat at three quarters of the width).
@@ -32,6 +33,9 @@ changed for the user, say what was worked on in plain words.
 Respond with JSON only: {{"summary": str}}, the summary in {language}.
 """
 
+
+# Said under a delivery that carries screenshots (founder-facing, pt-BR).
+SHOTS_NOTE = "As imagens abaixo mostram a página como ela abriu no computador e num celular."
 
 # What the Deployer may do about a git failure it was not built for (ADR-0016 §5). The model only
 # picks one; the code runs it, through the Deployer's own git (ADR-0008).
@@ -92,6 +96,9 @@ class DeployerAgent(LoompaAgent):
             cost_usd=float(story.get("cost_usd") or 0.0),
             cards=KaizenAgent(self.ctx).suggested_cards(state),
         )
+        if shots := self._shots(state):
+            msg.images = shots
+            msg.context = f"{msg.context} {SHOTS_NOTE}".strip()
         self.ctx.inbox(msg)
         state.blocked_message_id = msg.id
         self.set_state("IDLE")
@@ -103,6 +110,11 @@ class DeployerAgent(LoompaAgent):
             commits=len(state.commits),
         )
         return AgentResult(ok=True, summary=state.delivery_summary, data={"message_id": msg.id})
+
+    def _shots(self, state: StoryState) -> list[str]:
+        """The screenshots the Inspector's smoke took of this version, still on disk."""
+        folder = shots_dir(self.ctx.slug, state.story_id)
+        return [n for n in state.extra.get(SHOTS_KEY) or [] if (folder / n).is_file()]
 
     def _drop_debris(self, state: StoryState, wt: Worktree) -> list[str]:
         """Untracked leftovers (a `debug.txt`, a `.orig`, a data file a test wrote at the root)

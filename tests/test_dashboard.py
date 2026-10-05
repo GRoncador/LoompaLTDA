@@ -524,13 +524,38 @@ def test_the_story_window_reads_the_trace_of_what_the_agent_did(client: TestClie
     path.parent.mkdir(parents=True, exist_ok=True)
     msg = {"t": "msg", "h": "h1", "role": "user", "content": "escreva a spec"}
     answer = {"t": "msg", "h": "h2", "role": "assistant", "content": "pronto", "tool_calls": []}
-    node = {"t": "span", "id": "n1", "kind": "node", "name": "spec", "start": "2026-10-04T10:00:00Z",
-            "end": "2026-10-04T10:01:00Z", "ms": 60000, "status": "ok", "attrs": {"tier": "tier2"}}
-    call = {"t": "span", "id": "c1", "parent": "n1", "kind": "llm", "name": "spec",
-            "start": "2026-10-04T10:00:10Z", "end": "2026-10-04T10:00:40Z", "ms": 30000, "status": "ok",
-            "attrs": {"agent": "Spec Loompa", "model": "x/mini", "input_tokens": 1200,
-                      "output_tokens": 300, "cost_usd": 0.0021, "finish_reason": "stop",
-                      "messages": ["h1"], "response": "h2"}}
+    node = {
+        "t": "span",
+        "id": "n1",
+        "kind": "node",
+        "name": "spec",
+        "start": "2026-10-04T10:00:00Z",
+        "end": "2026-10-04T10:01:00Z",
+        "ms": 60000,
+        "status": "ok",
+        "attrs": {"tier": "tier2"},
+    }
+    call = {
+        "t": "span",
+        "id": "c1",
+        "parent": "n1",
+        "kind": "llm",
+        "name": "spec",
+        "start": "2026-10-04T10:00:10Z",
+        "end": "2026-10-04T10:00:40Z",
+        "ms": 30000,
+        "status": "ok",
+        "attrs": {
+            "agent": "Spec Loompa",
+            "model": "x/mini",
+            "input_tokens": 1200,
+            "output_tokens": 300,
+            "cost_usd": 0.0021,
+            "finish_reason": "stop",
+            "messages": ["h1"],
+            "response": "h2",
+        },
+    }
     path.write_text("\n".join(json.dumps(r) for r in (msg, answer, call, node)) + "\n")
 
     out = client.get(f"/api/factories/demo-hq/stories/{sid}/trace").json()
@@ -558,3 +583,19 @@ def test_the_card_says_where_an_approved_story_stands_in_the_merge_queue():
     assert _queue_place(queue, "S-7") == {"position": 1, "total": 3}  # being merged now
     assert _queue_place(queue, "S-9") == {"position": 3, "total": 3}
     assert _queue_place(queue, "S-1") is None
+
+
+def test_the_screenshots_of_a_delivery_are_served_and_nothing_else_is(client: TestClient):
+    from loompa.agents.inspector import shots_dir
+
+    folder = shots_dir("demo-hq", "S-001")
+    folder.mkdir(parents=True)
+    (folder / "mobile.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (folder / "segredo.txt").write_text("x")
+    r = client.get("/api/factories/demo-hq/stories/S-001/shots/mobile.png")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    for bad in ("segredo.txt", "desktop.png", "..%2Fsegredo.txt"):
+        assert client.get(f"/api/factories/demo-hq/stories/S-001/shots/{bad}").status_code == 404
+    assert (
+        client.get("/api/factories/demo-hq/stories/..%2F..%2Fx/shots/mobile.png").status_code == 404
+    )

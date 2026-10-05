@@ -41,6 +41,25 @@ export default function Inbox(props: {
   );
 }
 
+const SHOT_LABEL: Record<string, string> = { "desktop.png": "Computador", "mobile.png": "Celular (390 px)" };
+
+/** The page as the smoke saw it, at each width: the founder looks before opening the product
+ * (ADR-0030). A click opens the full image. */
+function Shots({ m }: { m: Message }) {
+  const url = (name: string) => `/api/factories/${m.factory}/stories/${m.story_id}/shots/${name}`;
+  return (
+    <div className="mt-2 flex items-start gap-2">
+      {(m.images ?? []).map((name) => (
+        <a key={name} href={url(name)} target="_blank" rel="noreferrer" className="group block" title="Abrir a imagem inteira">
+          <img src={url(name)} alt={SHOT_LABEL[name] ?? name} loading="lazy"
+            className={`max-h-40 rounded border border-line object-cover object-top group-hover:border-slate-400 ${name === "mobile.png" ? "w-20" : "w-48"}`} />
+          <span className="mt-0.5 block text-center text-[10px] text-slate-400">{SHOT_LABEL[name] ?? name}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: Message } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint">) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -65,6 +84,7 @@ function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: 
         <>
           <p className="mt-2 whitespace-pre-line text-sm text-slate-300">{m.context}</p>
           {m.impact && <p className="mt-1 text-xs italic text-slate-400">{m.impact}</p>}
+          {m.story_id && (m.images?.length ?? 0) > 0 && <Shots m={m} />}
           {m.sprint_id && <button className="btn-ghost mt-2 text-xs" onClick={() => onOpenSprint(m.sprint_id!)}>📊 Ver o relatório do {m.sprint_id}</button>}
           {m.decisions.length > 0 && (
             <div className="mt-3 space-y-2 rounded-md border border-line bg-panel/60 p-2">

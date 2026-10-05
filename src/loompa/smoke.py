@@ -8,7 +8,13 @@ page. Every check here is code, no model:
 2. the page and every module it imports, followed through relative `import`s, answer 200;
 3. when a Chrome or Chromium is installed, the page is opened headless through the DevTools
    protocol: a JavaScript error is a problem, a `<canvas>` of one solid colour is a problem (nothing
-   was drawn), and a page with no text and no canvas is a problem.
+   was drawn), and a page with no text and no canvas is a problem;
+4. the page is laid out at desktop width and at 390 px (a phone), and looked at as a person would
+   (ADR-0030): a page that scrolls sideways, or a canvas, image or control sticking out of the box
+   that holds it, is a problem — tamagotchi S-054 put the screen half outside its egg-shaped shell
+   and S-056 had to fix a page wider than a phone, with every test green. A layout problem the base
+   already has is the base's, not the story's (`layout_baseline`), and a screenshot of each width is
+   saved for the founder when `shots_dir` is given.
 
 Without a browser the first two still run and the result says the page was not rendered.
 """
@@ -71,11 +77,107 @@ PAGE_PROBE = """(() => {
 })()"""
 
 
+# The widths the page is laid out at: a desktop window and a phone (390 px, the width the
+# tamagotchi founder asked the page to fit).
+VIEWPORTS = (("desktop", 1280, 900, False), ("mobile", 390, 844, True))
+SHOT_MAX_HEIGHT = 2400  # a long page is cut here: the screenshot is for a glance, not a scroll
+LAYOUT_SETTLE_S = 0.6
+# Run in the page at each width. A canvas, image or control whose box goes past the nearest
+# ancestor that draws a box (a background, a border, or clipping its overflow) sticks out of it.
+LAYOUT_PROBE = """(() => {
+  const name = (e) => {
+    if (e.id) return '#' + e.id;
+    const c = typeof e.className === 'string' ? e.className.trim().split(/\\s+/)[0] : '';
+    return e.tagName.toLowerCase() + (c ? '.' + c : '');
+  };
+  const draws = (e) => {
+    const s = getComputedStyle(e);
+    const bg = s.backgroundColor;
+    return s.overflowX !== 'visible' || s.overflowY !== 'visible' || s.backgroundImage !== 'none'
+      || (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)')
+      || ['Top', 'Right', 'Bottom', 'Left'].some((k) => parseFloat(s['border' + k + 'Width']) > 0);
+  };
+  // the corner radii of a box in px, scaled down as CSS does when they add up past a side
+  const radii = (e, b) => {
+    const s = getComputedStyle(e);
+    const px = (v, len) => v.endsWith('%') ? parseFloat(v) * len / 100 : parseFloat(v) || 0;
+    const get = (k) => { const [h, v] = s[k].split(' '); return [px(h, b.width), px(v || h, b.height)]; };
+    const r = {tl: get('borderTopLeftRadius'), tr: get('borderTopRightRadius'),
+               br: get('borderBottomRightRadius'), bl: get('borderBottomLeftRadius')};
+    const f = Math.min(1, b.width / (r.tl[0] + r.tr[0] || 1), b.width / (r.bl[0] + r.br[0] || 1),
+                       b.height / (r.tl[1] + r.bl[1] || 1), b.height / (r.tr[1] + r.br[1] || 1));
+    for (const k in r) r[k] = [r[k][0] * f, r[k][1] * f];
+    return r;
+  };
+  // is (x, y) inside the rounded box? 2 px of slack, the width of an antialiased edge
+  const inside = (x, y, b, r) => {
+    const t = 2;
+    if (x < b.left - t || x > b.right + t || y < b.top - t || y > b.bottom + t) return false;
+    const corners = [[r.tl, b.left + r.tl[0], b.top + r.tl[1], x < b.left + r.tl[0] && y < b.top + r.tl[1]],
+                     [r.tr, b.right - r.tr[0], b.top + r.tr[1], x > b.right - r.tr[0] && y < b.top + r.tr[1]],
+                     [r.br, b.right - r.br[0], b.bottom - r.br[1], x > b.right - r.br[0] && y > b.bottom - r.br[1]],
+                     [r.bl, b.left + r.bl[0], b.bottom - r.bl[1], x < b.left + r.bl[0] && y > b.bottom - r.bl[1]]];
+    for (const [[rx, ry], cx, cy, inCorner] of corners) {
+      if (!inCorner || rx < 1 || ry < 1) continue;
+      const dx = Math.max(0, Math.abs(x - cx) - t) / rx, dy = Math.max(0, Math.abs(y - cy) - t) / ry;
+      if (dx * dx + dy * dy > 1) return false;
+    }
+    return true;
+  };
+  // the screen's width: on a phone `innerWidth` grows to fit whatever overflows (857 for 390)
+  const out = {width: document.documentElement.clientWidth, content: document.documentElement.scrollWidth, sticking: []};
+  for (const el of document.querySelectorAll('canvas, img, video, svg, button, input, select, textarea')) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1 || getComputedStyle(el).position === 'fixed') continue;
+    let box = el.parentElement;
+    while (box && box !== document.body && box !== document.documentElement && !draws(box)) box = box.parentElement;
+    if (!box || box === document.body || box === document.documentElement) continue;
+    const b = box.getBoundingClientRect();
+    const over = {left: b.left - r.left, right: r.right - b.right, top: b.top - r.top, bottom: r.bottom - b.bottom};
+    const sides = Object.entries(over).filter(([, v]) => v > 2).map(([k, v]) => [k, Math.round(v)]);
+    if (sides.length) { out.sticking.push({el: name(el), box: name(box), sides}); continue; }
+    // inside the rectangle, maybe not inside the shape: an egg-shaped shell (tamagotchi S-054)
+    const rr = radii(box, b);
+    const cut = [['top-left', r.left, r.top], ['top-right', r.right, r.top],
+                 ['bottom-right', r.right, r.bottom], ['bottom-left', r.left, r.bottom]]
+      .filter(([, x, y]) => !inside(x, y, b, rr)).map(([k]) => k);
+    if (cut.length) out.sticking.push({el: name(el), box: name(box), corners: cut});
+  }
+  return JSON.stringify(out);
+})()"""
+
+
+def layout_problems(viewport: str, seen: dict) -> dict[str, str]:
+    """`{key: problem}` from one LAYOUT_PROBE reading. The key leaves the pixels out, so the same
+    problem on the base and on the story is recognised as one."""
+    width = int(seen.get("width") or 0)
+    out: dict[str, str] = {}
+    if width and int(seen.get("content") or 0) > width + 1:
+        out[f"{viewport}:scroll"] = (
+            f"at {width} px wide the page scrolls sideways: its content is "
+            f"{seen['content']} px wide"
+        )
+    for item in seen.get("sticking") or []:
+        el, box = item.get("el"), item.get("box")
+        if item.get("corners"):
+            where = f"its {', '.join(item['corners'])} corner(s) cross {box}'s rounded edge"
+        else:
+            where = "by " + " and ".join(
+                f"{px} px on the {side}" for side, px in item.get("sides") or []
+            )
+        out[f"{viewport}:{el}>{box}"] = f"at {width} px wide, {el} sticks out of {box}: {where}"
+    return out
+
+
 @dataclass
 class SmokeResult:
     ran: bool = False
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # every layout problem seen, the base's own included: what a baseline run records
+    layout: dict[str, str] = field(default_factory=dict)
+    rendered: bool = False
+    shots: list[str] = field(default_factory=list)  # file names written under `shots_dir`
 
     @property
     def ok(self) -> bool:
@@ -179,7 +281,14 @@ async def _check_modules(client: httpx.AsyncClient, base: str, page: str, out: S
         out.notes.append(f"{len(seen)} module(s) loaded")
 
 
-async def _render(chrome: str, url: str, out: SmokeResult) -> None:
+async def _render(
+    chrome: str,
+    url: str,
+    out: SmokeResult,
+    *,
+    shots_dir: Path | None = None,
+    layout_baseline: set[str] | None = None,
+) -> None:
     import websockets  # comes with uvicorn[standard], the dashboard's server
 
     port = _free_port()
@@ -234,6 +343,29 @@ async def _render(chrome: str, url: str, out: SmokeResult) -> None:
                 with contextlib.suppress(TimeoutError):
                     _collect(json.loads(await asyncio.wait_for(ws.recv(), left)), errors)
             probe = await call("Runtime.evaluate", expression=PAGE_PROBE, returnByValue=True)
+            for viewport, width, height, mobile in VIEWPORTS:
+                await call(
+                    "Emulation.setDeviceMetricsOverride",
+                    width=width,
+                    height=height,
+                    deviceScaleFactor=1,
+                    mobile=mobile,
+                )
+                end = loop.time() + LAYOUT_SETTLE_S
+                while (left := end - loop.time()) > 0:
+                    with contextlib.suppress(TimeoutError):
+                        _collect(json.loads(await asyncio.wait_for(ws.recv(), left)), errors)
+                seen_at = await call(
+                    "Runtime.evaluate", expression=LAYOUT_PROBE, returnByValue=True
+                )
+                out.layout.update(
+                    layout_problems(
+                        viewport, json.loads((seen_at.get("result") or {}).get("value") or "{}")
+                    )
+                )
+                if shots_dir is not None:
+                    await _screenshot(call, shots_dir / f"{viewport}.png", width, out)
+            out.rendered = True
         out.problems += [f"JavaScript error in the page: {e}" for e in dict.fromkeys(errors)][:5]
         value = ((probe.get("result") or {}).get("value")) or "{}"
         seen = json.loads(value)
@@ -254,10 +386,33 @@ async def _render(chrome: str, url: str, out: SmokeResult) -> None:
                 )
         if not canvases and not seen.get("text"):
             out.problems.append("the page shows no text and no canvas")
+        known = layout_baseline or set()
+        out.problems += [text for key, text in out.layout.items() if key not in known]
+        if already := [text for key, text in out.layout.items() if key in known]:
+            out.notes.append(f"{len(already)} layout problem(s) the base already has")
         out.notes.append(f"rendered in {Path(chrome).name}")
     finally:
         await _stop(proc)
         shutil.rmtree(profile, ignore_errors=True)
+
+
+async def _screenshot(call, path: Path, width: int, out: SmokeResult) -> None:  # type: ignore[no-untyped-def]
+    """The page as it is laid out now, whole up to SHOT_MAX_HEIGHT."""
+    import base64
+
+    metrics = await call("Page.getLayoutMetrics")
+    size = metrics.get("cssContentSize") or metrics.get("contentSize") or {}
+    height = min(int(size.get("height") or 800), SHOT_MAX_HEIGHT)
+    shot = await call(
+        "Page.captureScreenshot",
+        format="png",
+        captureBeyondViewport=True,
+        clip={"x": 0, "y": 0, "width": width, "height": height, "scale": 1},
+    )
+    if data := shot.get("data"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(base64.b64decode(data))
+        out.shots.append(path.name)
 
 
 def clipped_edges(edges: dict[str, float]) -> list[str]:
@@ -285,9 +440,18 @@ def _collect(msg: dict, errors: list[str]) -> None:
             errors.append(str(entry.get("text", ""))[:200])
 
 
-async def smoke(root: Path, command: str, *, chrome: str | None = None) -> SmokeResult:
+async def smoke(
+    root: Path,
+    command: str,
+    *,
+    chrome: str | None = None,
+    shots_dir: Path | None = None,
+    layout_baseline: set[str] | None = None,
+) -> SmokeResult:
     """Start `command` in `root`, check the page and its modules, render it when a browser is
-    found. The app and the browser are always stopped."""
+    found. The app and the browser are always stopped. `layout_baseline` are the layout problems
+    the base already has (keys of `SmokeResult.layout`); `shots_dir` gets one screenshot per
+    viewport."""
     out = SmokeResult(ran=True)
     port = _free_port()
     env = {**os.environ, "PORT": str(port)}
@@ -317,7 +481,7 @@ async def smoke(root: Path, command: str, *, chrome: str | None = None) -> Smoke
             await _check_modules(client, base, page, out)
         browser = chrome if chrome is not None else find_chrome()
         if browser:
-            await _render(browser, base, out)
+            await _render(browser, base, out, shots_dir=shots_dir, layout_baseline=layout_baseline)
         else:
             out.notes.append("no Chrome or Chromium found: the page was loaded but not rendered")
         return out
