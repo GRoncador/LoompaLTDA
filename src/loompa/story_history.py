@@ -40,6 +40,7 @@ OWNER = {
 EVENTS = (
     "spec.reviewed",
     "plan.checked",
+    "story.integrated",
     "plan.reviewed",
     "inspector.verdict",
     "story.escalated",
@@ -143,6 +144,12 @@ def summarize(
             return f"O Product Owner não aprovou a spec{why} e pediu a sua orientação."
         return f"Spec devolvida para ajuste{why}, rodada {cur.get('spec_review_rounds') or 1}."
     if node == "gate_plan":
+        if (_first(evs, "story.integrated") or {}).get("branch"):
+            deps = (_first(evs, "story.integrated") or {}).get("dependencies") or []
+            return (
+                f"Juntou {_plural(len(deps), 'entrega', 'entregas')} de que depende para "
+                "trabalhar em cima das duas."
+            )
         return "Esperando as histórias de que depende antes de planejar."
     if node == "gate_open":
         return "O que ela esperava ficou pronto: segue para o plano."

@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from loompa.agents import (
     AnalystAgent,
@@ -44,6 +46,7 @@ from loompa.comms import (
 )
 from loompa.dependencies import (
     BUILT_ON_KEY,
+    INTEGRATION_KEY,
     WAIT_KEY,
     Gate,
     base_branch_for,
@@ -54,6 +57,7 @@ from loompa.dependencies import (
     merge_parked_note,
     plan_gate,
     rows_by_id,
+    sync_refs,
 )
 from loompa.engine.context import EngineContext
 from loompa.engine.phases import (
@@ -164,6 +168,10 @@ async def gate_plan(ctx: EngineContext, state: StoryState) -> StoryState | None:
         state.extra.pop(WAIT_KEY, None)
         return None
     gate = plan_gate(rows, state.story_id)
+    if gate.gate == Gate.OPEN and gate.integrate:
+        blocked = await _integrate_dependencies(ctx, state, rows, gate.integrate)
+        if blocked is not None:
+            return blocked
     if gate.gate == Gate.OPEN:
         if state.extra.pop(WAIT_KEY, None) is not None:
             ctx.emit("story.unparked", story_id=state.story_id)
@@ -281,6 +289,58 @@ _STAGE_OF_PHASE = {
 
 
 # ------------------------------------------------------------------------------ nodes
+
+
+async def _integrate_dependencies(
+    ctx: EngineContext, state: StoryState, rows: dict[str, dict[str, Any]], deps: list[str]
+) -> StoryState | None:
+    """This story depends on deliveries that are built and green, none of them in the base and
+    none carrying the others: the Deployer merges them into one integration branch, which the
+    story's worktree then starts from (ADR-0027). None: the branch is ready, plan now.
+
+    A conflict between two deliveries the founder has not accepted is not the factory's to settle
+    — resolving it would reconcile, inside a third story's branch, code that may still be sent
+    back — so the story stops and asks. Accepting one of the deliveries settles it: one of them is
+    then in the base and this story starts from the other."""
+    branches = {d: str((rows.get(d) or {}).get("branch") or "") for d in deps}
+    missing = [d for d, b in branches.items() if not b]
+    if missing:  # nothing to start from: wait as before
+        ctx.emit("story.integration_skipped", story_id=state.story_id, without_branch=missing)
+        return None
+    conflicts = DeployerAgent(ctx).integrate_dependencies(state, branches)
+    if not conflicts:
+        return None
+    titles = [f"“{(rows.get(d) or {}).get('title', d)}”" for d in deps]
+    return await block(
+        ctx,
+        state,
+        BlockedReason.INTEGRATION,
+        f"deliveries {', '.join(deps)} conflict in {', '.join(conflicts[:5])}",
+        resume="plan",
+        message=FounderMessage(
+            factory=ctx.slug,
+            story_id=state.story_id,
+            kind=MessageKind.BLOCKED,
+            sender=MasterAgent.display,
+            title=f"“{state.title}” depende de duas entregas que se desencontram",
+            context=(
+                f"Esta história é feita em cima de {' e '.join(titles)}, e as duas mexeram no "
+                "mesmo lugar do produto. Juntar as duas sem você ter aceito nenhuma seria decidir "
+                "no seu lugar qual das duas vale."
+            ),
+            impact="A entrega está pausada; as demais seguem normalmente.",
+            options=[
+                Option(
+                    key="wait",
+                    label="Vou aceitar uma das entregas primeiro",
+                    recommended=True,
+                    description="Esta história espera e segue sozinha depois do seu aceite.",
+                ),
+                Option(key="skip", label="Deixar para depois (volta ao backlog)"),
+                Option(key="drop", label="Cancelar esta entrega"),
+            ],
+        ),
+    )
 
 
 async def node_intake(ctx: EngineContext, state: StoryState) -> StoryState:
@@ -566,23 +626,50 @@ async def node_preflight(ctx: EngineContext, state: StoryState) -> StoryState:
     return advance(state)
 
 
+def _sync_refs(ctx: EngineContext, state: StoryState, wt: Worktree) -> list[str]:
+    """What `node_dev` brings into the story's branch before it works again: the deliveries it was
+    written on top of that are not in the base yet, and then the base. The branch the worktree
+    started from is a snapshot of when it was created, so a fix the founder asked for in one of
+    those deliveries only reaches this story through this list (ADR-0027)."""
+    return sync_refs(rows_by_id(ctx.store, ctx.slug), state.story_id, ctx.worktrees.default_branch())
+
+
+def _worktree_base(ctx: EngineContext, state: StoryState) -> str:
+    """The branch this story's worktree starts from: its integration branch when its pending
+    deliveries needed one (ADR-0027), else the single pending delivery's branch (11.5), else ""
+    for the base. Read from `state` and not from the row, because the integration is recorded in
+    the same run that creates the worktree."""
+    integration = state.extra.get(INTEGRATION_KEY) or {}
+    branch = str(integration.get("branch") or "")
+    return branch or base_branch_for(rows_by_id(ctx.store, ctx.slug), state.story_id)
+
+
 def _ensure_worktree(ctx: EngineContext, state: StoryState) -> Worktree:
     if not ctx.worktrees.get(state.story_id) and not ctx.worktrees.head_is_valid():
         DeployerAgent(ctx).bootstrap_repo()
     existing = ctx.worktrees.get(state.story_id)
-    on = ""
-    if existing is None:
+    on = _worktree_base(ctx, state)
+    if existing is None and on:
         # a dependency whose delivery the founder has not accepted yet is not in the base: the
         # story starts from its branch, so it is written on top of that code (11.5)
         rows = rows_by_id(ctx.store, ctx.slug)
-        on = base_branch_for(rows, state.story_id)
-        if on:
-            # remembered: after the founder asks for changes the dependency stops being "awaiting",
-            # but this story still carries its commits and must not merge before it (11.5)
-            dep = next((d for d in deps_of(rows.get(state.story_id)) if (rows.get(d) or {}).get("branch") == on), "")
+        # remembered: after the founder asks for changes the dependency stops being "awaiting",
+        # but this story still carries its commits and must not merge before it (11.5). With an
+        # integration branch the parents are already recorded in it, so there is no single one.
+        dep = next(
+            (d for d in deps_of(rows.get(state.story_id)) if (rows.get(d) or {}).get("branch") == on),
+            "",
+        )
+        if dep:
             state.extra[BUILT_ON_KEY] = dep
-            ctx.emit("story.built_on", story_id=state.story_id, branch=on, dependency=dep)
+        ctx.emit("story.built_on", story_id=state.story_id, branch=on, dependency=dep)
     wt = existing or ctx.worktrees.create(state.story_id, title=state.title, base=on or None)
+    if existing is not None and on and wt.base != on:
+        # `WorktreeManager.get` cannot know what a worktree was created from, and it answers with
+        # the default branch. Everything that reads `wt.base` — the baseline the Inspector takes
+        # on the base, a sync — would then look at a tree without the code this story was written
+        # on top of.
+        wt = replace(wt, base=on)
     state.worktree = str(wt.path)
     state.branch = wt.branch
     return wt
@@ -602,7 +689,8 @@ async def _resolve_with_retries(
         tier = start if n <= 1 else TIER_ABOVE[start]
         if n:
             ctx.emit("worktree.sync_retry", story_id=state.story_id, attempt=n, tier=tier)
-            conflicts = deployer.sync_with_base(state, wt) or []  # the last try was aborted
+            # the last try was aborted; the same refs, so a parent's fixes are not dropped
+            conflicts = deployer.sync_with_base(state, wt, _sync_refs(ctx, state, wt)) or []
             if not conflicts:
                 return True
         await WorkerAgent(ctx, tier_override=tier).resolve_conflicts(
@@ -671,7 +759,7 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
                 )
         else:
             state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt)
-    elif (conflicts := DeployerAgent(ctx).sync_with_base(state, wt)) is not None:
+    elif (conflicts := DeployerAgent(ctx).sync_with_base(state, wt, _sync_refs(ctx, state, wt))) is not None:
         merged = not conflicts or await _resolve_with_retries(ctx, state, wt, conflicts)
         if merged:
             # the base moved under a story going back to work: "already failing" moved too
@@ -1264,6 +1352,11 @@ def apply_founder_answer(
         if reason == BlockedReason.DEPENDENCY:
             _drop_gone_dependencies(ctx, state)
         back_to_backlog(ctx, state, priority=SKIPPED_PRIORITY)
+    elif reason == BlockedReason.INTEGRATION:
+        # "wait": the founder accepts one of the deliveries, and the story goes back to the gate,
+        # which parks it until then; with one of them merged, it starts from the other's branch
+        state.extra.pop(INTEGRATION_KEY, None)
+        goto(state, resume or "plan")
     elif reason == BlockedReason.DEPENDENCY:  # "detach": go on without what left the sprint
         for dep, title in _drop_gone_dependencies(ctx, state):
             state.note(

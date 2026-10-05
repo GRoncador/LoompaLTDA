@@ -14,8 +14,14 @@ the delivery, counts as delivered for this gate (11.5): the founder's day was be
 bottleneck, and nothing is lost by building on code the Inspector passed. The dependent starts its
 worktree from that branch, so it has the code. What the founder's approval still holds is the
 merge: a story whose dependency is not in the base yet parks before `review` (`merge_gate`),
-because merging it would drag the unapproved delivery into the base with it. Only one dependency
-may be in that state, since a worktree starts from one branch.
+because merging it would drag the unapproved delivery into the base with it.
+
+Several dependencies may be in that state at once (ADR-0027). When one of their branches already
+carries the others (a chain), the story starts from that tip. When they are separate lines of work,
+the Deployer builds an *integration* branch — the base plus each of them — and the story starts
+from it, so it has all of their code; its deliveries are then this story's parents, and it merges
+only after every one of them is in the base. A conflict between two deliveries the founder has not
+accepted is not resolved by the factory: the story stops and asks.
 """
 
 from __future__ import annotations
@@ -29,6 +35,9 @@ from loompa.engine.state import TERMINAL, Stage
 
 WAIT_KEY = "waiting"  # state.extra: parked at the gate before `plan`, with what it waits for
 BUILT_ON_KEY = "built_on"  # state.extra: the story whose branch this worktree started from (11.5)
+# state.extra: {"branch": str, "deps": [story ids]} — the integration branch this story's worktree
+# started from, when its pending deliveries were separate lines of work (ADR-0027).
+INTEGRATION_KEY = "integration"
 LIVE = (Stage.SPEC, Stage.PLAN, Stage.DEV, Stage.TEST, Stage.REVIEW, Stage.AWAITING_FOUNDER)
 
 
@@ -171,6 +180,8 @@ class GateResult:
     gone: list[str] = field(default_factory=list)  # cancelled, or back in the backlog
     chain: list[str] = field(default_factory=list)  # chain stories whose spec is not approved
     unmerged: list[str] = field(default_factory=list)  # approved deliveries not in the base yet
+    # ...of those, the ones that need an integration branch built before the story can start
+    integrate: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -180,6 +191,7 @@ class GateResult:
             "gone": self.gone,
             "chain": self.chain,
             "unmerged": self.unmerged,
+            "integrate": self.integrate,
             "label": self.label(),
         }
 
@@ -233,11 +245,13 @@ def plan_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> GateResul
                 out.founder.append(dep)
     if len(out.unmerged) > 1 and not tip_of(rows, out.unmerged):
         # a worktree starts from one branch. When the pending deliveries are a chain, its tip
-        # carries them all; when they are separate lines of work, the story would be missing one
-        # of them, so it waits for the founder, as before.
-        out.pending.extend(out.unmerged)
-        out.founder.extend(out.unmerged)
-        out.unmerged = []
+        # carries them all; when they are separate lines of work, the Deployer merges them into an
+        # integration branch and the story starts from that (ADR-0027). The gate stays open: the
+        # founder's acceptance is no longer what the story waits for, only a conflict between the
+        # two deliveries is.
+        carried = set(integration_of(me).get("deps") or [])
+        if not carried >= set(out.unmerged):
+            out.integrate = sorted(out.unmerged)
     out.chain = [
         sid for sid in chain_of(rows, story_id) if sid != story_id and not spec_passed(rows[sid])
     ]
@@ -248,20 +262,48 @@ def plan_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> GateResul
     return out
 
 
+def _extra(row: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    return ((row or {}).get("state") or {}).get("extra") or {}
+
+
 def built_on(row: Mapping[str, Any] | None) -> str:
     """The story whose branch this one's worktree started from, when there is one (11.5)."""
-    extra = ((row or {}).get("state") or {}).get("extra") or {}
-    return str(extra.get(BUILT_ON_KEY) or "")
+    return str(_extra(row).get(BUILT_ON_KEY) or "")
+
+
+def integration_of(row: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The integration branch this story's worktree started from, as `{"branch", "deps"}`, or
+    `{}` (ADR-0027)."""
+    raw = _extra(row).get(INTEGRATION_KEY)
+    if not isinstance(raw, Mapping) or not raw.get("branch"):
+        return {}
+    deps = raw.get("deps")
+    return {
+        "branch": str(raw["branch"]),
+        "deps": [str(d) for d in deps] if isinstance(deps, list) else [],
+    }
+
+
+def parents(row: Mapping[str, Any] | None) -> list[str]:
+    """The stories whose commits this one's branch holds from the start: the delivery it was
+    written on top of, or the deliveries its integration branch merged (ADR-0027)."""
+    one = built_on(row)
+    out = [one] if one else []
+    return [*out, *(d for d in integration_of(row).get("deps") or [] if d not in out)]
 
 
 def branch_carries(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> set[str]:
-    """The stories whose commits a story's branch already holds: itself and the chain of branches
-    it was started from (`built_on`), which is how a chain's tip carries everything before it."""
+    """The stories whose commits a story's branch already holds: itself and everything its
+    parents' branches carry, which is how a chain's tip — or an integration branch — carries
+    everything before it."""
     seen: set[str] = set()
-    cur = story_id
-    while cur and cur not in seen:
+    queue = [story_id]
+    while queue:
+        cur = queue.pop()
+        if not cur or cur in seen:
+            continue
         seen.add(cur)
-        cur = built_on(rows.get(cur))
+        queue.extend(parents(rows.get(cur)))
     return seen
 
 
@@ -290,23 +332,26 @@ def merge_gate(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> list[str
     me = rows.get(story_id)
     if me is None:
         return []
-    on = built_on(me)
+    carried = set(parents(me))
     out = []
     for dep in deps_of(me):
         row = rows.get(dep)
         if row is None:
             continue
-        if ready_to_merge(row) or (dep == on and row["stage"] != Stage.DONE):
+        if ready_to_merge(row) or (dep in carried and row["stage"] != Stage.DONE):
             out.append(dep)
     return out
 
 
 def gone_under(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> str:
-    """The story this one was built on, when it was cancelled or sent back to the backlog: its
-    code will never reach the base, so this one cannot be delivered as it stands (11.5)."""
-    on = built_on(rows.get(story_id))
-    row = rows.get(on) if on else None
-    return on if row is not None and row["stage"] in (Stage.CANCELLED, Stage.BACKLOG) else ""
+    """A story this one was built on that was cancelled or sent back to the backlog: its code will
+    never reach the base, so this one cannot be delivered as it stands (11.5). With an integration
+    branch there may be several parents; the first one found is enough to stop the delivery."""
+    for on in parents(rows.get(story_id)):
+        row = rows.get(on)
+        if row is not None and row["stage"] in (Stage.CANCELLED, Stage.BACKLOG):
+            return on
+    return ""
 
 
 def still_waiting(rows: Mapping[str, Mapping[str, Any]], row: Mapping[str, Any]) -> bool:
@@ -328,8 +373,25 @@ def base_branch_for(rows: Mapping[str, Mapping[str, Any]], story_id: str) -> str
     pending = merge_gate(rows, story_id)
     if not pending:
         return ""
+    integration = integration_of(rows.get(story_id))
+    if integration and set(integration["deps"]) >= set(pending):
+        return str(integration["branch"])
     tip = pending[0] if len(pending) == 1 else tip_of(rows, pending)
     return str((rows.get(tip) or {}).get("branch") or "") if tip else ""
+
+
+def sync_refs(rows: Mapping[str, Mapping[str, Any]], story_id: str, base: str) -> list[str]:
+    """The branches to merge into a story's branch before it goes back to work: the deliveries it
+    was written on top of that are not in the base yet — their own fixes must reach this story,
+    and the branch it started from is a snapshot of the moment it was created — and then the base.
+    Once a parent is merged, its code arrives with the base and its branch drops off this list."""
+    out = []
+    for dep in parents(rows.get(story_id)):
+        row = rows.get(dep)
+        branch = str((row or {}).get("branch") or "")
+        if row is not None and row["stage"] != Stage.DONE and branch and branch != base:
+            out.append(branch)
+    return [*out, base]
 
 
 def rows_by_id(store: Any, slug: str) -> dict[str, dict[str, Any]]:

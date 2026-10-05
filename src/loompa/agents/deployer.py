@@ -11,6 +11,7 @@ from loompa.comms import (
     compose_delivery_message,
     sanitize_for_founder,
 )
+from loompa.dependencies import INTEGRATION_KEY
 from loompa.engine.state import StoryState
 from loompa.hygiene import is_debris, is_stray_data, new_files
 from loompa.llm.router import TIER_ABOVE
@@ -142,16 +143,20 @@ class DeployerAgent(LoompaAgent):
         )
         return True
 
-    def sync_with_base(self, state: StoryState, wt: Worktree) -> list[str] | None:
-        """Bring a story that is going back to work up to date with the base: a fix merged in
-        the meantime (the red suite that failed every story, say) must reach it before its
-        next test run. The base is merged into the story branch. None: nothing to do;
-        []: merged; a list: files in conflict, waiting for `finish_sync`."""
+    def sync_with_base(
+        self, state: StoryState, wt: Worktree, refs: list[str] | None = None
+    ) -> list[str] | None:
+        """Bring a story that is going back to work up to date: a fix merged in the meantime (the
+        red suite that failed every story, say) must reach it before its next test run. `refs` are
+        the branches to merge in, in order, the base last (`dependencies.sync_refs`); by default
+        just the story's base. None: nothing to do; []: merged; a list: files in conflict, waiting
+        for `finish_sync`."""
         if self.git.merge_in_progress(wt):
             # an interrupted run stopped mid-merge: start the integration over, never commit
             # conflict markers as work in progress
             self.git.abort_merge(wt)
-        if not self.git.behind_base(wt):
+        todo = [r for r in (refs or [wt.base]) if self.git.behind_base(wt, r)]
+        if not todo:
             return None
         if self.git.status(wt):
             # work left uncommitted (an interrupted run, a task cut short) is kept as a commit:
@@ -161,11 +166,44 @@ class DeployerAgent(LoompaAgent):
             )
             if commit:
                 state.commits.append(commit.sha)
-        conflicts = self.git.merge_base_into(wt)
-        self.ctx.emit(
-            "worktree.synced", story_id=state.story_id, agent=self.name, conflicts=conflicts
-        )
+        conflicts: list[str] = []
+        for ref in todo:
+            conflicts = self.git.merge_base_into(wt, ref)
+            self.ctx.emit(
+                "worktree.synced",
+                story_id=state.story_id,
+                agent=self.name,
+                ref=ref,
+                conflicts=conflicts,
+            )
+            if conflicts:  # resolved by the caller, which then calls `finish_sync`
+                break
         return conflicts
+
+    def integrate_dependencies(self, state: StoryState, deps: dict[str, str]) -> list[str]:
+        """One branch holding the deliveries `state` depends on, none of which is in the base yet
+        and none of which carries the others (ADR-0027). `deps` is `{story_id: branch}`. Returns
+        the files in conflict; [] means the branch is ready and recorded in `state.extra`."""
+        name = self.git.integration_branch(state.story_id)
+        conflicts = self.git.integrate(name, [deps[d] for d in sorted(deps)])
+        if conflicts:
+            self.ctx.emit(
+                "story.integration_conflict",
+                story_id=state.story_id,
+                agent=self.name,
+                dependencies=sorted(deps),
+                files=conflicts[:10],
+            )
+            return conflicts
+        state.extra[INTEGRATION_KEY] = {"branch": name, "deps": sorted(deps)}
+        self.ctx.emit(
+            "story.integrated",
+            story_id=state.story_id,
+            agent=self.name,
+            branch=name,
+            dependencies=sorted(deps),
+        )
+        return []
 
     def finish_sync(self, state: StoryState, wt: Worktree, files: list[str]) -> bool:
         """Commit the merge once the conflicts were resolved; abort it when markers remain,

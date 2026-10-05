@@ -563,11 +563,12 @@ def test_two_pending_deliveries_in_a_chain_let_the_next_story_start():
     assert merge_gate(rows, "S-056") == ["S-054", "S-055"]  # still merges after both
 
     # the same two, but separate lines of work (S-055 built on a third story): no branch carries
-    # both, so the story waits for the founder, as before
+    # both, so the gate asks for an integration branch instead of waiting (ADR-0027)
     rows["S-055"]["depends_on"] = ["S-050"]
     rows["S-055"]["state"]["extra"][BUILT_ON_KEY] = "S-050"
     apart = plan_gate(rows, "S-056")
-    assert apart.gate == Gate.WAIT and apart.pending == ["S-054", "S-055"]
+    assert apart.gate == Gate.OPEN and apart.integrate == ["S-054", "S-055"]
+    assert apart.pending == [] and apart.founder == []
     assert base_branch_for(rows, "S-056") == ""
 
 

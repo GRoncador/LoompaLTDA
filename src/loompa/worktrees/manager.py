@@ -204,6 +204,47 @@ class WorktreeManager:
     def path_for(self, story_id: str) -> Path:
         return self.dir / story_id
 
+    def integration_branch(self, story_id: str) -> str:
+        return f"{self.branch_prefix}integration/{story_id.lower()}"
+
+    def integrate(self, name: str, branches: list[str]) -> list[str]:
+        """Build `name` from the base plus every branch in `branches`, so a story that depends on
+        several deliveries none of which is in the base yet has one branch to start from (ADR-0027).
+        Deployer only (it merges). Returns [] when they all merged cleanly, else the files in
+        conflict — and then nothing is left behind: the branch and its checkout are removed,
+        because two deliveries that conflict are the founder's call, not the factory's.
+        """
+        self._require_deployer("git merge")
+        base = self.default_branch()
+        path = self.dir / f"_integration-{uuid.uuid4().hex[:8]}"
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.git("branch", "-D", name, check=False)  # a previous attempt, or an older set
+        self.git("worktree", "add", "-q", "-b", name, str(path), base)
+        at = Worktree(story_id="", path=path, branch=name, base=base)
+        conflicts: list[str] = []
+        try:
+            for branch in branches:
+                self.git(
+                    *_BOT,
+                    "merge",
+                    "--no-ff",
+                    "-m",
+                    f"merge {branch} into {name}",
+                    branch,
+                    cwd=path,
+                    check=False,
+                )
+                conflicts = self.conflicted_files(at)
+                if conflicts:
+                    self.git("merge", "--abort", cwd=path, check=False)
+                    break
+        finally:
+            self.git("worktree", "remove", "--force", str(path), check=False)
+            self.git("worktree", "prune", check=False)
+            if conflicts:
+                self.git("branch", "-D", name, check=False)
+        return conflicts
+
     def create(self, story_id: str, *, title: str = "", base: str | None = None) -> Worktree:
         if not self.head_is_valid():
             raise GitError(
@@ -411,10 +452,11 @@ class WorktreeManager:
             "log", "--oneline", f"-{limit}", f"{wt.base}..HEAD", cwd=wt.path, check=False
         ).splitlines()
 
-    def behind_base(self, wt: Worktree) -> bool:
-        """True when the base branch has commits the story branch does not (a merge landed)."""
+    def behind_base(self, wt: Worktree, ref: str | None = None) -> bool:
+        """True when `ref` (the story's base by default) has commits the story branch does not: a
+        merge landed on the base, or a delivery this story was written on top of moved on."""
         try:
-            self.git("merge-base", "--is-ancestor", wt.base, "HEAD", cwd=wt.path)
+            self.git("merge-base", "--is-ancestor", ref or wt.base, "HEAD", cwd=wt.path)
         except GitError:
             return True
         return False
@@ -436,11 +478,12 @@ class WorktreeManager:
         {"uv.lock", "poetry.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock"}
     )
 
-    def merge_base_into(self, wt: Worktree) -> list[str]:
-        """Merge the base into the story branch (Deployer only). Returns the files still in
-        conflict (lockfiles already settled on the base's copy); [] means the merge is committed.
-        A merge, not a rebase: conflicts are resolved once, not once per story commit, and the
-        delivery's rebase is then a no-op because the base is already in the branch."""
+    def merge_base_into(self, wt: Worktree, ref: str | None = None) -> list[str]:
+        """Merge `ref` (the story's base by default) into the story branch (Deployer only).
+        Returns the files still in conflict (lockfiles already settled on the other copy);
+        [] means the merge is committed. A merge, not a rebase: conflicts are resolved once, not
+        once per story commit, and the delivery's rebase is then a no-op because the base is
+        already in the branch."""
         self._require_deployer("git merge")
         self.git(
             *_BOT,
@@ -449,7 +492,7 @@ class WorktreeManager:
             "merge",
             "--no-ff",
             "--no-commit",
-            wt.base,
+            ref or wt.base,
             cwd=wt.path,
             check=False,
         )

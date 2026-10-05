@@ -514,7 +514,8 @@ async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Facto
     assert rounds == ["work", "resolve", "work"]
     events = ctx.store.events_since(0, limit=10_000)
     synced = [e["payload"] for e in events if e["type"] == "worktree.synced"]
-    assert synced == [{"conflicts": ["app/calc.py"]}]  # uv.lock settled on the base's copy
+    # uv.lock settled on the base's copy; `ref` is what was merged in (ADR-0027)
+    assert synced == [{"ref": "main", "conflicts": ["app/calc.py"]}]
     assert any(e["type"] == "worktree.merged_base" for e in events)
     wt = Path(state.worktree)
     calc = (wt / "app" / "calc.py").read_text()

@@ -43,6 +43,8 @@ class BlockedReason(StrEnum):
     CONFLICT = "conflict"  # merge conflict with base
     WAIVER = "waiver"  # Inspector found a serious concern the tests do not catch; founder decides
     DEPENDENCY = "dependency"  # a story it depends on was cancelled or left the sprint (ADR-0021)
+    # two deliveries it depends on change the same lines and neither is in the base (ADR-0027)
+    INTEGRATION = "integration"
     COST_CAP = "cost_cap"  # spent its cap without finishing (finance/story_cap.py)
     STACK = "stack"  # re-planned and still writes code outside the product's language
 
