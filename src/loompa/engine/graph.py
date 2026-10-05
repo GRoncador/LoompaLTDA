@@ -537,7 +537,10 @@ async def node_plan_review(ctx: EngineContext, state: StoryState) -> StoryState:
     if report.problems:
         # the second plan still carries them: the Architect and the Worker see them as the story's
         # last failure instead of the founder hearing about paths and criterion numbers
-        state.failure_history.append("Plan checks still failing: " + "; ".join(report.problems[:8]))
+        # never "a file is missing": the Worker made an empty stub to satisfy it (12.1, S-061)
+        kept = [p for p in report.problems if "not in the repository" not in p]
+        if kept:
+            state.failure_history.append("Plan checks still failing: " + "; ".join(kept[:8]))
     _promote_from_plan(ctx, state, report.signals)
     state.handoff.pop("plan_review", None)  # consumed by the re-plan that just passed
     if not _plan_needs_review(state, report):

@@ -293,3 +293,16 @@ def test_test_files_do_not_make_a_plan_big(tmp_path: Path):
     files += [".loompa/specs/S-061/"]
     report = check_plan(tmp_path, acceptance=[], files=files, tasks=["Criar src/a.js"], plan_md="")
     assert report.signals == []
+
+
+def test_a_clause_that_creates_a_file_and_adjusts_others_is_not_a_missing_file(tmp_path: Path):
+    """12.1, S-061: "create tests/novo_ovo_lcd.test.js and adjust the old tests" was read as
+    changing a missing file; carried into the history, the Worker made an empty stub."""
+    report = check_plan(
+        tmp_path,
+        acceptance=[],
+        files=["tests/"],
+        tasks=["Criar tests/novo_ovo_lcd.test.js com os testes novos e ajustar os testes antigos"],
+        plan_md="",
+    )
+    assert report.problems == []

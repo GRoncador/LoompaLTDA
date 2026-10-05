@@ -124,6 +124,10 @@ def edits_of_missing_files(root: Path, tasks: list[str]) -> list[str]:
         for clause in re.split(r"(?<=[.;:])\s+|\n", task):
             if not _EDIT.search(clause) or LEAVE_ALONE.search(clause):
                 continue
+            # "create tests/novo.test.js and adjust tests/old.test.js": the new file is created
+            # (12.1, S-061: flagged as "changes a missing file", the Worker made an empty stub)
+            if _ADD.search(clause):
+                continue
             for rel in PATH_REF.findall(clause):
                 if rel.startswith(".loompa/") or (root / rel).exists():
                     continue
