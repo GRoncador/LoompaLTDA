@@ -201,6 +201,34 @@ async def test_findings_go_in_as_written_when_the_product_owner_is_unavailable(f
     await ctx.aclose()
 
 
+async def test_a_finding_the_story_already_filed_is_folded_in(factory: Factory):
+    """tamagotchi S-048 (plan 12.2): four tasks reported the same stale comment; the Product
+    Owner pointed each at S-051, yet every round wrote another learning and paid a triage."""
+    script = po_answers(
+        **{"Triage the findings": {"findings": [{"key": "F1", "duplicate_of": "S-002"}]}}
+    )
+    ctx = make_ctx(factory, script)
+    po = ProductOwnerAgent(ctx)
+    po.add_item("Exportar CSV", priority=200)  # S-001
+    state = StoryState(story_id="S-009", title="Relatório")
+    first = {"kind": "tech_debt", "title": "Comentário obsoleto em a.test.js", "detail": "x"}
+    [card] = await KaizenAgent(ctx).capture(state, items=[first])
+    assert card == "S-002"
+    learned = len(ctx.store.list_learnings())
+    same = {"kind": "tech_debt", "title": "comentário  obsoleto em a.test.js", "detail": "y"}
+    reworded = {"kind": "tech_debt", "title": "Comentário velho em a.test.js", "detail": "z"}
+    created = await KaizenAgent(ctx).capture(state, items=[same])
+    assert created == ["S-002"] and len(script.seen["Triage the findings"]) == 1  # no call
+    created = await KaizenAgent(ctx).capture(state, items=[reworded])  # the PO says S-002
+    assert created == ["S-002"] and len(script.seen["Triage the findings"]) == 2
+    assert len(ctx.store.list_learnings()) == learned  # no second learning
+    assert ctx.factory.paths.learnings.read_text(encoding="utf-8").count("(card S-002)") == 1
+    assert [e["payload"].get("repeat") for e in events(ctx, "backlog.duplicate")] == [True, True]
+    assert same.get("_captured") and reworded.get("_captured")
+    assert state.finding_cards == ["S-002"]
+    await ctx.aclose()
+
+
 # ---------------------------------------------------------------------- quick story (10.6)
 
 

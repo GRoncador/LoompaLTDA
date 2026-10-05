@@ -37,6 +37,10 @@ def without_label(title: str) -> str:
     return title.strip()
 
 
+def _normal(title: str) -> str:
+    return " ".join(without_label(title).lower().split())
+
+
 class KaizenAgent(LoompaAgent):
     role = "kaizen"
     display = "Kaizen Loompa"
@@ -56,6 +60,19 @@ class KaizenAgent(LoompaAgent):
         ]
         if not fresh:
             return []
+        # tamagotchi S-048: four tasks of one story each reported the same stale comment; the
+        # Product Owner pointed all four at S-051, yet every round paid a triage call and wrote
+        # another learning line (plan 12.2). A finding this story already filed is folded in.
+        own = self._filed_by(state.story_id)
+        created: list[str] = []
+        for item in list(fresh):
+            card = own.get(_normal(str(item.get("title") or "")))
+            if card:
+                self._fold_repeat(state, item, card)
+                fresh.remove(item)
+                created.append(card)
+        if not fresh:
+            return created
         po = ProductOwnerAgent(self.ctx)
         keyed = {f"F{i}": item for i, item in enumerate(fresh, 1)}
         verdicts = await po.triage_findings(
@@ -71,7 +88,6 @@ class KaizenAgent(LoompaAgent):
             ],
         )
         filed: dict[str, str] = {}  # finding key -> card id, for findings that point at another
-        created: list[str] = []
         lines = []
         for key, item in keyed.items():
             kind = item.get("kind") or "opportunity"
@@ -98,6 +114,11 @@ class KaizenAgent(LoompaAgent):
                     f"{title} _(não virou card: só processo, sem mudança no produto)_"
                 )
                 item["_captured"] = "1"
+                continue
+            if covered and covered not in keyed and covered in own.values():
+                filed[key] = covered
+                self._fold_repeat(state, item, covered)
+                created.append(covered)
                 continue
             if covered and covered not in keyed:
                 self.ctx.emit(
@@ -155,6 +176,27 @@ class KaizenAgent(LoompaAgent):
                 self.ctx.factory.paths.learnings, kind="learning", doc_id="learnings.md"
             )
         return created
+
+    def _filed_by(self, story_id: str) -> dict[str, str]:
+        """The findings this story already turned into (or pointed at) a card: title -> card."""
+        return {
+            _normal(row["title"]): row["created_story_id"]
+            for row in self.ctx.store.list_learnings()
+            if row["story_id"] == story_id and row["created_story_id"]
+        }
+
+    def _fold_repeat(self, state: StoryState, item: dict[str, str], card: str) -> None:
+        """A finding this story already filed: no second learning, line or card."""
+        self.ctx.emit(
+            "backlog.duplicate",
+            story_id=card,
+            agent=self.name,
+            title=str(item.get("title") or "").strip()[:140],
+            repeat=True,
+        )
+        item["_captured"] = "1"
+        if card not in state.finding_cards:
+            state.finding_cards.append(card)
 
     def suggested_cards(self, state: StoryState) -> list[dict]:
         """Backlog cards this story raised that the founder has not decided on yet: what a
