@@ -405,6 +405,25 @@ def tests_to_trim(diff: str) -> str:
     )
 
 
+_CRITERION = re.compile(r"crit[ée]rios?\s+(\d{1,3})(?:\s*[–-]\s*(\d{1,3}))?", re.I)
+
+
+def cited_criteria(diff: str) -> set[int]:
+    """The acceptance criteria the story's added tests name ("critério 13", "critérios 9–10").
+    A trim that leaves a criterion with no test is how S-060's cache criterion lost its only
+    test (mutation check, 12.1): 7 of 11 planted defects caught after the trim, 10 before."""
+    found: set[int] = set()
+    for f in _files(diff):
+        if f.deleted or not is_test_path(f.path):
+            continue
+        for line in f.added or []:
+            for a, b in _CRITERION.findall(line):
+                lo, hi = int(a), int(b or a)
+                if hi - lo <= 20:
+                    found |= set(range(lo, hi + 1))
+    return found
+
+
 def test_ratio(files: list[_FileDiff]) -> dict[str, str] | None:
     """A low-severity finding when the tests added outweigh the product change several times
     over (ADR-0030). Tamagotchi SP-008 wrote ~3,100 test lines for ~430 of product: the Worker's

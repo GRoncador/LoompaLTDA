@@ -312,3 +312,17 @@ def test_a_story_with_tests_many_times_its_product_is_told_to_trim():
     assert "exact pixels" in message and "acceptance criterion" in message
     assert tests_to_trim(diff("src/a.js", 70) + diff("tests/a.test.js", 400)) == ""  # under 6x
     assert tests_to_trim(diff("tests/a.test.js", 250)) == ""  # a few careful tests
+
+
+def test_the_criteria_the_tests_name_are_read_from_the_diff():
+    from loompa.hygiene import cited_criteria
+
+    diff = (
+        "diff --git a/tests/fim.test.js b/tests/fim.test.js\n--- a/tests/fim.test.js\n"
+        "+++ b/tests/fim.test.js\n@@ -0,0 +1,3 @@\n"
+        "+  it('critério 13 — cache preservado', () => {\n"
+        "+  it('critérios 9–10 — Recomeçar', () => {\n"
+        "diff --git a/src/a.js b/src/a.js\n--- a/src/a.js\n+++ b/src/a.js\n@@ -0,0 +1 @@\n"
+        "+// critério 99 is not a test\n"
+    )
+    assert cited_criteria(diff) == {9, 10, 13}

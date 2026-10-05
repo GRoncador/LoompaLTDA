@@ -20,7 +20,7 @@ from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
 from loompa.engine.state import Autonomy, StoryKind, StoryState
 from loompa.finance.story_cap import over_cap, story_spent
-from loompa.hygiene import new_files, scan_diff, tests_to_trim
+from loompa.hygiene import cited_criteria, new_files, scan_diff, tests_to_trim
 from loompa.llm import Message
 from loompa.llm.router import TIER_ABOVE
 from loompa.speckit import story_dir, tasks_from_markdown
@@ -326,6 +326,7 @@ class WorkerAgent(LoompaAgent):
         repro = state.extra.get(REPRO_KEY) or {}
         reproducer = repro.get("status") == "pending" and repro.get("task") == number
         task_aci = aci
+        cited_before = cited_criteria(self._story_diff(wt))
         if reproducer:  # 7.7: tests only, and the code proves them red before the fix
             fence = writable_tests(state.allowed_paths) or ["tests/"]
             task_aci = self.ctx.aci_for(wt.path, allowed_paths=fence, diff_base=wt.base)
@@ -371,12 +372,7 @@ class WorkerAgent(LoompaAgent):
             "directory (tmp_path) and delete the file"
             for p in residue[:3]
         ]
-        story_diff = (
-            self.ctx.worktrees.diff(wt, max_chars=600_000)
-            + "\n"
-            + (self.ctx.worktrees.diff_working(wt, max_chars=600_000))
-        )
-        if trim := tests_to_trim(story_diff):
+        if trim := tests_to_trim(self._story_diff(wt)):
             self.ctx.emit(
                 "worker.tests_trim", story_id=state.story_id, agent=self.name, task=number
             )
@@ -409,6 +405,33 @@ class WorkerAgent(LoompaAgent):
             if followup.blocked_reason or unfinished(followup):
                 return followup
             result.summary = f"{result.summary} / {followup.summary}"
+        # a rewrite or a trim must not leave a criterion with no test (12.1, S-060's cache)
+        if lost := sorted(cited_before - cited_criteria(self._story_diff(wt))):
+            self.ctx.emit(
+                "worker.criteria_lost",
+                story_id=state.story_id,
+                agent=self.name,
+                task=number,
+                criteria=lost,
+            )
+            restore = await self._run_task(
+                state,
+                aci,
+                number,
+                text
+                + "\n\nThe tests of acceptance criteria "
+                + ", ".join(str(n) for n in lost)
+                + " were removed and no other test covers them now. Add back one focused test "
+                "for each (the behaviour the criterion states, not its pixels), named after it.",
+                spec,
+                plan,
+                tasks_md,
+                outline=outline,
+                changed=self.ctx.worktrees.diff_stat(wt),
+                label="self_check",
+            )
+            if restore.blocked_reason or unfinished(restore):
+                return restore
         self._drop_residue(state, wt, number, task_aci.test_residue | aci.test_residue)
         kind = "test" if reproducer else "feat"
         commit = self.ctx.worktrees.commit_all(wt, f"{kind}({state.story_id.lower()}): {text[:60]}")
@@ -423,6 +446,14 @@ class WorkerAgent(LoompaAgent):
                 task=number,
             )
         return result
+
+    def _story_diff(self, wt: Worktree) -> str:
+        """The whole story so far: its committed tasks and what the current one changed."""
+        return (
+            self.ctx.worktrees.diff(wt, max_chars=600_000)
+            + "\n"
+            + self.ctx.worktrees.diff_working(wt, max_chars=600_000)
+        )
 
     async def _salvage(
         self, state: StoryState, wt: Worktree, aci: ACI, number: int, text: str, result: AgentResult
