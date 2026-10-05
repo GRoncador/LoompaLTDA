@@ -52,7 +52,7 @@ class SupportAgent(LoompaAgent):
         precedents = self.precedents(request)
         data = await self.ask_json(
             PROMPTS[self.role].format(language=self.language),
-            f"# Founder's request\n{request}\n\n## Constitution (excerpt)\n{self.constitution(3000)}\n\n{precedents}",
+            f"# Founder's request\n{request}\n\n{self.grounding(3000)}\n\n{precedents}",
             max_tokens=2500,
             # ADR-0016: copy is writing; LGPD and SQL decide something and think at the default
             reasoning_effort="low" if self.role in LIGHT_SUPPORT_ROLES else None,

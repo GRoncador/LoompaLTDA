@@ -496,7 +496,7 @@ class ProductOwnerAgent(LoompaAgent):
             f"## Founder's request\n{request}\n\n"
             + (f"## Conversation since\n{conversation}\n\n" if conversation else "")
             + f"## Backlog\n{render_backlog(self._cards(), delivered=delivered)}\n\n"
-            + f"## Constitution (excerpt)\n{self.constitution(3000)}\n\n"
+            + f"{self.grounding(3000)}\n\n"
             + self.precedents(request, kinds=("constitution", "adr", "doc"))
         )
         try:
@@ -729,7 +729,7 @@ class ProductOwnerAgent(LoompaAgent):
         board = ConversationBoard(self.ctx.store, self.ctx.slug)
         cards = board.cards()
         user = (
-            f"## Constitution (excerpt)\n{self.constitution(2000)}\n\n"
+            f"{self.grounding(2000)}\n\n"
             f"## Backlog\n{render_backlog(cards, delivered=board.delivered())}\n\n"
             + (
                 f"{render_running(self.ctx, conv.draft.sprint_id)}\n\n"
@@ -854,7 +854,7 @@ class ProductOwnerAgent(LoompaAgent):
             "## Cards to review\n"
             + "\n\n".join(lines)
             + (f"\n\n{render_delivered(delivered)}" if delivered else "")
-            + f"\n\n## Constitution (excerpt)\n{self.constitution(1500)}"
+            + f"\n\n{self.grounding(1500)}"
         )
         self.set_state("WORKING", detail=f"revisando {len(picked)} cards antigos")
         try:
@@ -968,7 +968,7 @@ class ProductOwnerAgent(LoompaAgent):
             f"## Brainstorm\n{render_brainstorm(draft)}\n\n"
             f"## Conversation so far\n{render_transcript(conv)}\n\n"
             f"## Backlog\n{render_backlog(cards, delivered=board.delivered())}\n\n"
-            f"## Constitution (excerpt)\n{self.constitution(2500)}"
+            f"{self.grounding(2500)}"
         )
         self.set_state("WORKING", detail="dividindo o rumo do brainstorm em cards")
         try:
@@ -1084,7 +1084,7 @@ class ProductOwnerAgent(LoompaAgent):
             + delivered_brief(self.ctx.store, state.story_id)
             + f"## Spec under review\n{spec[:6000]}\n\n"
             + f"## Declared dependencies\n{declared_dependencies(self.ctx.root) or '(none)'}\n\n"
-            + f"## Constitution (excerpt)\n{self.constitution(3000)}"
+            + f"{self.grounding(3000)}"
         )
         return await self._verdict(
             state,
@@ -1114,7 +1114,7 @@ class ProductOwnerAgent(LoompaAgent):
             + "## Automatic checks\n"
             + ("\n".join(f"- {p}" for p in problems) or "- nothing measured against the plan")
             + f"\n\n## Plan under review\n{plan[:6000]}\n\n## Tasks\n{tasks[:3000]}\n\n"
-            + f"## Constitution (excerpt)\n{self.constitution(2500)}"
+            + f"{self.grounding(2500)}"
         )
         return await self._verdict(
             state,

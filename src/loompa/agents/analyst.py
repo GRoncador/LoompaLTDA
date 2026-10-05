@@ -234,7 +234,7 @@ class AnalystAgent(LoompaAgent):
                 else ""
             )
             + f"## Tools\n{web_line}\nRepository tools (read-only): list_dir, search, find_symbol, read_file.\n\n"
-            f"## Constitution (excerpt)\n{self.constitution(2500)}\n\n{precedents}"
+            f"{self.grounding(2500)}\n\n{precedents}"
         )
 
     # ---------------------------------------------------------------- checking

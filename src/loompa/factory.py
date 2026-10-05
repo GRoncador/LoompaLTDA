@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from loompa.company import ensure_templates
 from loompa.config import (
     LOOMPA_DIR,
     ConfigStore,
@@ -77,6 +78,11 @@ class FactoryPaths:
     @property
     def reports(self) -> Path:
         return self.loompa / "reports"
+
+    @property
+    def company(self) -> Path:
+        """The founder's canonical documents, read whole by the roles that need them (13.2)."""
+        return self.loompa / "company"
 
     @property
     def state_db(self) -> Path:
@@ -248,6 +254,7 @@ def bootstrap_factory(
 
     if overwrite_constitution or not paths.constitution.is_file():
         paths.constitution.write_text(constitution, encoding="utf-8")
+    ensure_templates(paths.loompa)
     if not paths.learnings.is_file():
         paths.learnings.write_text(LEARNINGS_HEADER, encoding="utf-8")
     paths.onboarding_report.write_text(report, encoding="utf-8")

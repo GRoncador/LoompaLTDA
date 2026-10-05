@@ -112,7 +112,7 @@ class ProductAgent(LoompaAgent):
             )
             + self._builds_on(state)
             + delivered_brief(self.ctx.store, state.story_id)
-            + f"## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
+            + f"{self.grounding(4000)}\n\n{precedents}"
         )
         data = await self.ask_json_with_tools(
             SYSTEM.format(language=self.language) + EXPLORE_HINT,

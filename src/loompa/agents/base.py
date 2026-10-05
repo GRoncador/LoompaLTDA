@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from loompa.agents.loopguard import REPEAT_PREFIX, LoopGuard
 from loompa.agents.toolbox import READ_TOOLS, Toolbox, prune_tool_history
+from loompa.company import company_block
 from loompa.engine.context import EngineContext
 from loompa.engine.state import StoryState
 from loompa.llm import LLMError, LLMResponse, Message
@@ -121,6 +122,12 @@ class LoompaAgent:
     def constitution(self, max_chars: int = 6000) -> str:
         text = self.ctx.factory.constitution_text()
         return text[:max_chars]
+
+    def grounding(self, max_chars: int = 6000) -> str:
+        """The constitution excerpt, then the company documents this role reads whole (13.2)."""
+        block = f"## Constitution (excerpt)\n{self.constitution(max_chars)}"
+        company = company_block(self.ctx.factory.paths.loompa, self.role)
+        return f"{block}\n\n{company}" if company else block
 
     def precedents(self, query: str, *, kinds: tuple[str, ...] | None = None) -> str:
         try:

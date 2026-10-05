@@ -10,6 +10,8 @@ from typing import Any
 
 from loompa.aci import ACI
 from loompa.comms import FounderMessage
+from loompa.company import DOCS as COMPANY_DOCS
+from loompa.company import filled as company_text
 from loompa.config import LoompaConfig, Secrets
 from loompa.config.secrets import install_log_redaction, redact_secrets
 from loompa.factory import Factory
@@ -296,6 +298,14 @@ class EngineContext:
         n += self.memory.index_file(p.learnings, kind="learning", doc_id="learnings.md")
         n += self.memory.index_directory(p.decisions, kind="adr", relative_to=p.loompa)
         n += self.memory.index_directory(p.specs, kind="spec", relative_to=p.loompa)
+        for doc in COMPANY_DOCS:  # the founder's documents, by their own kind (13.2)
+            text = company_text(p.loompa, doc.kind)
+            if text:
+                n += self.memory.upsert_document(
+                    f"company/{doc.file}", text, kind=doc.kind, title=doc.file
+                )
+            else:
+                self.memory.delete_document(f"company/{doc.file}")
         for name in ("docs", "doc", "adr", "adrs"):
             n += self.memory.index_directory(self.root / name, kind="doc", relative_to=self.root)
         for name in ("README.md", "CONTRIBUTING.md", "ARCHITECTURE.md"):

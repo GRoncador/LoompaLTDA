@@ -367,7 +367,7 @@ class ArchitectAgent(LoompaAgent):
                 else ""
             )
             + (REPRODUCER_NOTE if state.kind == StoryKind.BUGFIX and not state.commits else "")
-            + f"## Repository outline\n{outline}\n\n## Constitution (excerpt)\n{self.constitution(4000)}\n\n{precedents}"
+            + f"## Repository outline\n{outline}\n\n{self.grounding(4000)}\n\n{precedents}"
         )
         # A SIMPLE story gets the short form (ADR-0028): same `files`, `tasks` and traceability —
         # everything the engine reads — without the alternatives, impact, rollback, constitution

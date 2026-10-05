@@ -194,7 +194,7 @@ class MasterAgent(LoompaAgent):
                 if state.founder_notes
                 else ""
             )
-            + f"## Constitution (excerpt)\n{self.constitution(1500)}"
+            + f"{self.grounding(1500)}"
         )
         out = Classification()
         try:
@@ -444,7 +444,7 @@ class MasterAgent(LoompaAgent):
         self.set_state("WORKING", detail="reunião com o Founder")
         current = conv.mode == MeetingMode.CURRENT
         try:
-            context = f"## Constitution (excerpt)\n{self.constitution(2500)}\n\n" + self.precedents(
+            context = f"{self.grounding(2500)}\n\n" + self.precedents(
                 text, kinds=("constitution", "adr", "learning", "doc")
             )
             if current:
@@ -490,7 +490,7 @@ class MasterAgent(LoompaAgent):
         try:
             context = (
                 f"## Who you can consult\n{render_consultants()}\n\n"
-                f"## Constitution (excerpt)\n{self.constitution(2500)}\n\n"
+                f"{self.grounding(2500)}\n\n"
                 + self.precedents(
                     f"{conv.draft.direction}\n{text}",
                     kinds=("constitution", "adr", "learning", "spec", "doc"),

@@ -766,7 +766,7 @@ class WorkerAgent(LoompaAgent):
         stable = (
             SYSTEM.format(language=self.language)
             + f"\n## Story {state.story_id} — {state.title}\n\n## Allowed paths\n{json.dumps(state.allowed_paths, ensure_ascii=False)}\n\n"
-            f"## Spec\n{spec[:4000]}\n\n## Plan\n{plan[:4000]}\n\n## Constitution (excerpt)\n{self.constitution(3000)}\n"
+            f"## Spec\n{spec[:4000]}\n\n## Plan\n{plan[:4000]}\n\n{self.grounding(3000)}\n"
             + (
                 f"\n## Repository outline (at the start of this run)\n{outline}\n"
                 if outline

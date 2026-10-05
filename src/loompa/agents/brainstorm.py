@@ -278,7 +278,7 @@ async def consult(
                 f"## Conversation so far\n{render_transcript(conv, limit=10)}\n\n"
                 f"## Backlog\n{render_backlog(board.cards(), limit=40, delivered=board.delivered())}\n\n"
                 f"## Tools\n{tools}\n\n"
-                f"## Constitution (excerpt)\n{agent.constitution(2500)}\n\n"
+                f"{agent.grounding(2500)}\n\n"
                 + agent.precedents(
                     f"{conv.draft.direction}\n{question}",
                     kinds=("constitution", "adr", "learning", "spec", "doc"),

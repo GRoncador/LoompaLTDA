@@ -28,6 +28,7 @@ from typing import Any
 
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent, StoryStalled, triage
 from loompa.comms import FounderAnswer, FounderMessage, MessageKind
+from loompa.company import ensure_templates
 from loompa.dependencies import WAIT_KEY, in_chain, spec_passed, still_waiting
 from loompa.engine.awake import Awake
 from loompa.engine.context import EngineContext
@@ -376,6 +377,7 @@ class Scheduler:
         lock = EngineLock(self.ctx.factory.paths.loompa / "engine.lock")
         lock.acquire()
         ensure_gitignore(self.ctx.root)  # older factories get the newer lines (plan 8.6.6)
+        ensure_templates(self.ctx.factory.paths.loompa)  # and the company templates (13.2)
         self.ctx.listeners.append(self._heard)
         awake = Awake(enabled=None if not self.ctx.dry_run else False)
         try:
