@@ -300,3 +300,26 @@ async def test_the_worker_can_delete_a_file_inside_its_plan_only(factory: Factor
     reader = Toolbox.for_role(ctx, "inspector")
     assert not (await reader.call("delete_file", {"path": "app/calc.py"})).ok
     await ctx.aclose()
+
+
+async def test_a_tool_call_without_a_name_never_reaches_the_history(factory: Factory):  # noqa: F811
+    """12.1, tamagotchi S-061: a nameless call in the history made every provider answer 400
+    ("tool_calls[1] is missing a function name"), and the plan amendment failed on all models."""
+    script, seen = scripted_loop(
+        [
+            [ToolCall("c1", "list_dir", {"path": "app"}), ToolCall("c2", "", {})],
+            [ToolCall("c3", "", {})],
+            "terminei",
+        ]
+    )
+    ctx = make_ctx(factory, script)
+    agent = Prober(ctx)
+    messages = [Message("system", "s"), Message("user", "u")]
+    res = await agent.tool_loop(
+        messages, agent.explore_tools(), story=StoryState(story_id="S-1", title="t")
+    )
+    assert res.ended_by == "text" and res.tool_calls == 1
+    sent = [tc.name for m in seen[-1] for tc in m.tool_calls]
+    assert sent == ["list_dir"]  # the nameless ones were never sent back
+    assert "had no tool name" in seen[-1][-1].content
+    await ctx.aclose()

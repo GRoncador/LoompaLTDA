@@ -110,6 +110,10 @@ def lifted(story: StoryState | None) -> bool:
     return bool(story is not None and story.extra.get(TIER_LIFT_KEY))
 
 
+NAMELESS_NOTE = (
+    "error: your last tool call had no tool name, so nothing ran. Call the tool again with its "
+    "name, or answer if you are done."
+)
 _SHADOW: set[asyncio.Task] = set()  # shadow calls in flight: kept so they are not collected
 
 
@@ -291,6 +295,22 @@ class LoompaAgent:
                 )
                 resp = routed.response
                 last_text = resp.text or last_text
+                # A call with no tool name (seen from mimo-v2.6-flash) is refused by every
+                # provider once it is part of the history ("tool_calls[1] is missing a function
+                # name", HTTP 400): tamagotchi S-061's plan amendment failed on all models, so
+                # the founder's OK never reached the fence. It is dropped and the model told.
+                nameless = [c for c in resp.tool_calls if not (c.name or "").strip()]
+                if nameless:
+                    resp.tool_calls = [c for c in resp.tool_calls if (c.name or "").strip()]
+                    self.ctx.emit(
+                        "tool.nameless", story_id=story_id, agent=self.name, dropped=len(nameless)
+                    )
+                    if not resp.tool_calls:
+                        messages += [
+                            Message("assistant", resp.text or "(tool call without a name)"),
+                            Message("user", NAMELESS_NOTE),
+                        ]
+                        continue
                 round_span.set(tool_calls=len(resp.tool_calls))
                 if not resp.tool_calls:
                     if nudge and i < max_iterations - 1 and "done" not in (resp.text or "").lower():
