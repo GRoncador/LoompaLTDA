@@ -186,6 +186,9 @@ def effort_arm(state: StoryState, number: int, share: float) -> str:
     return "low" if draw < share else "default"
 
 
+TRIMMED_KEY = "tests_trimmed"  # the story's tests were cut down once already
+
+
 class WorkerAgent(LoompaAgent):
     role = "worker"
     display = "Worker Loompa"
@@ -372,7 +375,15 @@ class WorkerAgent(LoompaAgent):
             "directory (tmp_path) and delete the file"
             for p in residue[:3]
         ]
-        if trim := tests_to_trim(self._story_diff(wt)):
+        # once per story, at its last task: checked on every task, each task that added its own
+        # tests paid an 18-minute trim and the next task added more (12.1, S-060 at tier 1)
+        last = number >= (state.tasks_total or number)
+        if (
+            last
+            and not state.extra.get(TRIMMED_KEY)
+            and (trim := tests_to_trim(self._story_diff(wt)))
+        ):
+            state.extra[TRIMMED_KEY] = True
             self.ctx.emit(
                 "worker.tests_trim", story_id=state.story_id, agent=self.name, task=number
             )
