@@ -8,7 +8,7 @@ const SEVERITY: Record<string, { label: string; cls: string }> = {
   medium: { label: "média", cls: "bg-amber-900/60 text-amber-200" },
   low: { label: "baixa", cls: "bg-slate-800 text-slate-300" },
 };
-const IMPACT: Record<string, string> = { calls: "chamadas", minutes: "min", usd: "US$" };
+const IMPACT: Record<string, string> = { calls: "chamadas", minutes: "min", usd: "US$", times: "vezes" };
 
 /** The factory's self-diagnosis (Fase 8.4): problems of Loompa itself, measured in code and kept
  *  in the hub. Not the product's improvements (those are Kaizen cards in the backlog). */

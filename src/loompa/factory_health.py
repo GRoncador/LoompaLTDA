@@ -51,7 +51,12 @@ BASELINE_RED = 2  # the judge finding the base already red on one story
 FALLTHROUGHS = 3  # a model given up for another, in the window
 DUPLICATE_FINDINGS = 2  # the same Kaizen finding met again (gastos.json: 4)
 COST_SHARE = 0.70  # one role's share of the window's cost (the Worker: 78%)
-TOOL_SHARE = 0.60  # one tool's share of what tools put in the context (read_file: 69%)
+EXPECTED_COST_ROLE = "worker"  # the Worker writes the code: its share is expected (plan 8.6.3)
+READS_PER_TASK = 25  # read_file calls per Worker task, the baseline after 97166f5 (plan 8.6.3)
+# severity from the measured impact (plan 8.6.3), not from the kind of signal: (high, medium)
+SEVERITY_USD = (1.0, 0.2)
+SEVERITY_MINUTES = (60.0, 15.0)
+SEVERITY_CALLS = (150, 30)  # model or tool calls spent on the problem
 STALL_EVENTS = 1
 RUNAWAYS_PER_MODEL_ROLE = 2  # loops or ceiling cuts of one model in one role (PO: 6 of 9 calls)
 SLOW_MODEL_S = 120.0  # a model's mean seconds per call in a role, to be called slow…
@@ -513,7 +518,7 @@ def per_story_counts(w: Window) -> list[Finding]:
                 detail="; ".join(f"{s}: {n} {what}" for s, n in sorted(hit.items())),
                 area=area,
                 severity=severity,
-                impact={"calls": sum(hit.values())},
+                impact={"times": sum(hit.values())},  # events, not calls: severity stays
                 evidence=[
                     {
                         "story": s,
@@ -634,7 +639,7 @@ def spec_and_kaizen(w: Window) -> list[Finding]:
                 ),
                 area="kaizen",
                 severity="low",
-                impact={"calls": sum(repeated.values())},
+                impact={"times": sum(repeated.values())},
                 evidence=[{"title": t, "times": n} for t, n in repeated.items()][:6],
             )
         )
@@ -664,6 +669,9 @@ def hygiene(w: Window) -> list[Finding]:
 
 
 def cost_concentration(w: Window) -> list[Finding]:
+    """One role holding most of the cost, when it is not the Worker (which writes the code, so
+    its share is expected), and Worker tasks reading more files than the baseline. The share of
+    `read_file` in the tool tokens is expected too: what matters is the volume per task."""
     out = []
     total = sum(float(u.get("cost_usd") or 0) for u in w.usage)
     by_role: Counter[str] = Counter()
@@ -671,7 +679,7 @@ def cost_concentration(w: Window) -> list[Finding]:
         by_role[u["role"]] += float(u.get("cost_usd") or 0)
     if total > 0:
         role, cost = by_role.most_common(1)[0]
-        if cost / total >= COST_SHARE:
+        if cost / total >= COST_SHARE and role != EXPECTED_COST_ROLE:
             out.append(
                 Finding(
                     signal="finance.role_share",
@@ -684,29 +692,34 @@ def cost_concentration(w: Window) -> list[Finding]:
                     evidence=[{"role": r, "usd": round(c, 4)} for r, c in by_role.most_common(4)],
                 )
             )
-    tools: Counter[str] = Counter()
+    tasks = w.of("worker.task")
+    reads: Counter[str] = Counter()
     for e in w.of("tool.call"):
-        tools[e["payload"].get("tool", "?")] += int(e["payload"].get("tokens") or 0)
-    read = sum(tools.values())
-    if read:
-        tool, tokens = tools.most_common(1)[0]
-        if tokens / read >= TOOL_SHARE:
-            out.append(
-                Finding(
-                    signal="finance.tool_share",
-                    key=tool,
-                    title=f"Uma ferramenta concentra o que entra no contexto: {tool}",
-                    detail=f"{tool} = {tokens / read:.0%} dos tokens que as ferramentas devolveram.",
-                    area="worker",
-                    severity="low",
-                    impact={
-                        "calls": len(
-                            [e for e in w.of("tool.call") if e["payload"].get("tool") == tool]
-                        )
-                    },
-                    evidence=[{"tool": t, "tokens": n} for t, n in tools.most_common(4)],
-                )
+        if e["payload"].get("tool") == "read_file" and "worker" in str(e.get("agent")).lower():
+            reads[e["story_id"] or ""] += 1
+    if tasks and sum(reads.values()) / len(tasks) > READS_PER_TASK:
+        mean = sum(reads.values()) / len(tasks)
+        out.append(
+            Finding(
+                signal="worker.reads_per_task",
+                key="read_file",
+                title="O Worker leu mais arquivos por tarefa que a linha de base",
+                detail=(
+                    f"{mean:.0f} leituras por tarefa em média ({sum(reads.values())} em "
+                    f"{len(tasks)} tarefas), contra {READS_PER_TASK} da linha de base."
+                ),
+                area="worker",
+                severity="low",
+                impact={"calls": sum(reads.values()) - READS_PER_TASK * len(tasks)},
+                evidence=[
+                    {"story": sid, "reads": n, "command": _trace_cmd(sid)}
+                    for sid, n in reads.most_common(6)
+                    if sid
+                ],
+                stories=sorted(sid for sid in reads if sid),
+                provisional=True,
             )
+        )
     return out
 
 
@@ -941,8 +954,29 @@ def detect(w: Window) -> list[Finding]:
             logging.getLogger(__name__).exception(
                 "factory-health signal %s failed", signal.__name__
             )
+    for f in found:
+        f.severity = severity_of(f)
     rank = {s: i for i, s in enumerate(SEVERITIES)}
     return sorted(found, key=lambda f: (rank.get(f.severity, 9), -sum(f.impact.values())))
+
+
+def severity_of(f: Finding) -> str:
+    """The severity from what the problem cost (plan 8.6.3): "raciocínio sem fim" was always
+    high with two calls and the fall-through working. US$, minutes and calls each have a high
+    and a medium mark; a finding with no measured impact keeps the signal's own severity."""
+    marks = (
+        (f.impact.get("usd"), SEVERITY_USD),
+        (f.impact.get("minutes"), SEVERITY_MINUTES),
+        (f.impact.get("calls"), SEVERITY_CALLS),
+    )
+    measured = [(float(v), m) for v, m in marks if v is not None]
+    if not measured:
+        return f.severity
+    if any(v >= high for v, (high, _) in measured):
+        return "high"
+    if any(v >= medium for v, (_, medium) in measured):
+        return "medium"
+    return "low"
 
 
 # ------------------------------------------------------------------------------ the hub

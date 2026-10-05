@@ -117,8 +117,8 @@ def test_signals_measure_what_sprint_one_found(tmp_path: Path):
     assert found["worktrees.sync"].severity == "high"
     assert found["scheduler.stalled"].impact["minutes"] == 50.0
     assert "4x" in found["kaizen.duplicates"].detail
-    assert found["finance.role_share"].key == "worker"
-    assert found["finance.tool_share"].key == "read_file"
+    # expected, not findings (plan 8.6.3): the Worker holding the cost, read_file the tokens
+    assert "finance.role_share" not in found and "finance.tool_share" not in found
     assert set(found["comms.jargon"].evidence[0]["words"]) == {"worktree", "checklist", "t1"}
     assert detect(window(tmp_path)) == []  # a quiet window finds nothing
     assert found["worker.task_limit"].signature == "worker.task_limit:limit"
@@ -379,3 +379,38 @@ def test_an_old_hub_database_gains_the_new_columns(tmp_path: Path):
     conn.close()
     with HealthBook(tmp_path)._conn() as c:
         assert c.execute("SELECT scan_id FROM sightings").fetchone()[0] == 1
+
+
+def test_severity_comes_from_the_measured_impact(tmp_path: Path):
+    """Plan 8.6.3: "raciocínio sem fim" was always high with two calls and the fall-through
+    working; a signal without a measured impact keeps its own severity."""
+    two = [
+        ev(1, "llm.loop", "S-044", model="ds", role="product_owner"),
+        ev(2, "llm.loop", "S-044", model="ds", role="product_owner"),
+    ]
+    assert by_signal(detect(window(tmp_path, two)))["llm.runaway"].severity == "low"
+    stalled = [ev(1, "story.stalled", "S-031", silent_min=70)]
+    assert by_signal(detect(window(tmp_path, stalled)))["scheduler.stalled"].severity == "high"
+    sync = [ev(i, "worktree.sync_failed", "S-007") for i in range(2)]
+    found = by_signal(detect(window(tmp_path, sync)))["worktrees.sync"]
+    assert found.severity == "high" and found.impact == {"times": 2}
+
+
+def test_reads_per_task_against_the_baseline_and_a_role_that_is_not_the_worker(tmp_path: Path):
+    def read(i: int) -> dict:
+        return {
+            **ev(i, "tool.call", "S-001", tool="read_file", tokens=10),
+            "agent": "Worker Loompa",
+        }
+
+    tasks = [ev(900, "worker.task", "S-001", task=1), ev(901, "worker.task", "S-001", task=2)]
+    calm = by_signal(detect(window(tmp_path, [*tasks, *(read(i) for i in range(40))])))
+    assert "worker.reads_per_task" not in calm
+    busy = [*tasks, *(read(i) for i in range(70))]
+    found = by_signal(detect(window(tmp_path, busy)))["worker.reads_per_task"]
+    assert found.impact["calls"] == 20 and "35 leituras por tarefa" in found.detail
+    usage = [
+        {"story_id": "S-1", "role": "inspector", "model": "m", "cost_usd": 0.9},
+        {"story_id": "S-1", "role": "worker", "model": "m", "cost_usd": 0.1},
+    ]
+    assert by_signal(detect(window(tmp_path, usage=usage)))["finance.role_share"].key == "inspector"
