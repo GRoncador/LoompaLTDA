@@ -464,3 +464,31 @@ def _ask(word: str) -> FounderMessage:
         context="c",
         options=[Option(key="a", label=f"Manter a versão guardada no {word}")],
     )
+
+
+def test_context_is_measured_against_the_compaction_budget(tmp_path: Path):
+    """Plan 8.6.4: the history grows whole up to `context_compact_chars` on purpose (cache), so
+    7k -> 61k tokens is expected; a prompt past the budget is not."""
+    traces = tmp_path / ".loompa" / "traces"
+    traces.mkdir(parents=True)
+
+    def task(prompts: list[int]) -> None:
+        spans = [
+            {"t": "span", "id": "t1", "parent": None, "story": "S-031", "kind": "task",
+             "name": "T5", "start": T0, "attrs": {"task": 5}},
+            *(
+                {"t": "span", "id": f"l{i}", "parent": "t1", "story": "S-031", "kind": "llm",
+                 "name": "call", "start": T0, "attrs": {"input_tokens": n}}
+                for i, n in enumerate(prompts)
+            ),
+        ]  # fmt: skip
+        (traces / "S-031.jsonl").write_text("\n".join(json.dumps(s) for s in spans))
+
+    events = [ev(1, "worker.task", "S-031", repeats=0)]
+    task([7_000, 30_000, 61_000])  # grew 8x, inside the 200k-char budget (~50k tokens + slack)
+    assert "trace.context_growth" not in by_signal(detect(window(tmp_path, events)))
+    task([7_000, 40_000, 70_000])
+    found = by_signal(detect(window(tmp_path, events)))["trace.context_growth"]
+    assert "Orçamento: 200k caracteres" in found.detail and "70k" in found.detail
+    w = window(tmp_path, events, limits={"context_compact_chars": 400_000})
+    assert "trace.context_growth" not in by_signal(detect(w))

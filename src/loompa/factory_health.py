@@ -65,8 +65,13 @@ SLOW_MODEL_RATIO = 3.0  # …and this many times the fastest model in the same r
 SLOW_MIN_CALLS = 3
 # provisional: read from the trace, no Sprint 1 data (calibrate with Sprint 2)
 REREADS = 3  # the same read or search, same arguments, in one task
-CONTEXT_GROWTH = 4.0  # last round's prompt over the first, in one task
-CONTEXT_MIN_TOKENS = 60_000  # ...when the last round is at least this big
+# The history grows whole up to `schedule.context_compact_chars` on purpose (8676c96, the
+# prompt cache), so 7k -> 61k tokens is expected; the signal is a prompt past that budget, i.e.
+# the compaction did not hold (plan 8.6.4). Chars over tokens, and the slack for the system
+# prompt and the tool list the compaction does not count.
+CHARS_PER_TOKEN = 4
+CONTEXT_OVER_BUDGET = 1.25
+DEFAULT_COMPACT_CHARS = 200_000
 
 # the founder-text audit's own list, plus the plan's task ids (plan 8.6.7: one source)
 JARGON = re.compile(rf"{TECH_WORD.pattern}|\bT\d+\b", re.I)
@@ -824,6 +829,8 @@ def trace_signals(w: Window) -> list[Finding]:
     from loompa.trace import read_trace, trace_dir
 
     rereads, ignored, growth, swapped = [], [], [], []
+    budget = w.limits.get("context_compact_chars") or DEFAULT_COMPACT_CHARS
+    ceiling = CONTEXT_OVER_BUDGET * budget / CHARS_PER_TOKEN
     for sid in sorted({e["story_id"] for e in w.events if e["story_id"]}):
         trace = read_trace(trace_dir(w.root) / f"{sid}.jsonl")
         for root in trace.tree():
@@ -860,12 +867,8 @@ def trace_signals(w: Window) -> list[Finding]:
                 worst = max(calls.values(), default=0)
                 if worst >= REREADS:
                     rereads.append((sid, task, worst))
-                if (
-                    len(prompts) >= 3
-                    and prompts[-1] >= CONTEXT_MIN_TOKENS
-                    and prompts[-1] >= CONTEXT_GROWTH * max(prompts[0], 1)
-                ):
-                    growth.append((sid, task, prompts[0], prompts[-1]))
+                if prompts and max(prompts) > ceiling:
+                    growth.append((sid, task, prompts[0], max(prompts)))
     out = []
     if rereads:
         out.append(
@@ -908,9 +911,13 @@ def trace_signals(w: Window) -> list[Finding]:
             Finding(
                 signal="trace.context_growth",
                 key="context",
-                title="Contexto que cresce rodada após rodada na mesma tarefa",
-                detail="; ".join(
-                    f"{s} T{t}: {a // 1000}k → {b // 1000}k tokens" for s, t, a, b in growth[:4]
+                title="Contexto passou do orçamento de compactação na mesma tarefa",
+                detail=(
+                    f"Orçamento: {budget // 1000}k caracteres (~{budget // CHARS_PER_TOKEN // 1000}k "
+                    "tokens). "
+                    + "; ".join(
+                        f"{s} T{t}: {a // 1000}k → {b // 1000}k tokens" for s, t, a, b in growth[:4]
+                    )
                 ),
                 area="worker",
                 severity="low",
@@ -1418,6 +1425,7 @@ async def scan(
         w.limits = {
             "worker_max_iterations": sched.worker_max_iterations,
             "worker_repeat_limit": sched.worker_repeat_limit,
+            "context_compact_chars": sched.context_compact_chars,
         }
     findings = detect(w)
     book = hub_book()
