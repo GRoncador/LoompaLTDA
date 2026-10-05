@@ -75,11 +75,14 @@ def plan(
 
 
 def house_for(store: Any, factory: str, config: LoompaConfig) -> dict[str, dict[str, Any]]:
-    """The Worker's house record for the suggestion; empty when nothing was measured."""
-    from loompa.finance.house import house_scores, worker_house
+    """The Worker's house record for the suggestion, over every factory of the hub (04/10); this
+    factory's own when the hub has none. Empty when nothing was measured."""
+    from loompa.finance.house import house_scores, hub_house_scores, worker_house
 
     try:
-        return worker_house(house_scores(store, factory, config))
+        return worker_house(hub_house_scores()) or worker_house(
+            house_scores(store, factory, config)
+        )
     except Exception:  # noqa: BLE001 - the suggestion stands on the external index alone
         return {}
 

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-from loompa.config.store import default_config
-from loompa.finance.house import MIN_TASKS, house_scores, worker_house
+from loompa.config.store import ConfigStore, default_config, save_config
+from loompa.finance.house import MIN_TASKS, house_scores, hub_house_scores, worker_house
 from loompa.llm.modelsdev import hub_cache_dir
 from loompa.store import Store
 
 
-def call(store: Store, story: str, provider: str, model: str, cost: float = 0.01) -> None:
+def call(
+    store: Store, story: str, provider: str, model: str, cost: float = 0.01, factory: str = "f"
+) -> None:
     store.record_usage(
-        factory="f",
+        factory=factory,
         story_id=story,
         agent="Worker",
         role="worker",
@@ -28,9 +31,15 @@ def call(store: Store, story: str, provider: str, model: str, cost: float = 0.01
     )
 
 
-def task(store: Store, story: str, n: int, ended_by: str) -> None:
+def task(store: Store, story: str, n: int, ended_by: str, factory: str = "f") -> None:
     store.emit(
-        "f", "worker.task", story_id=story, task=n, ended_by=ended_by, tool_calls=4, duration_s=60
+        factory,
+        "worker.task",
+        story_id=story,
+        task=n,
+        ended_by=ended_by,
+        tool_calls=4,
+        duration_s=60,
     )
 
 
@@ -101,3 +110,48 @@ def test_a_flagged_model_goes_to_the_end_of_its_tier_without_touching_the_scale(
     assert [c["model"] for c in weighed.tiers["tier2"]] == ["b/weak", "c/third", "a/strong"]
     strong = weighed.summary["tier2"][-1]
     assert strong["house"]["flagged"] and strong["score"] == plain.summary["tier2"][0]["score"]
+
+
+def factory_with(tmp: Path, slug: str, work: list[tuple[str, str]]) -> Store:
+    """A factory registered in the hub, with one Worker task per (model, ended_by)."""
+    root = tmp / slug
+    config = default_config()
+    config.factory.slug = slug
+    save_config(root, config)
+    ConfigStore().register(root, config)
+    store = Store(root / ".loompa" / "state.db")
+    for i, (model, ended_by) in enumerate(work):
+        sid = f"S-{i:03}"
+        call(store, sid, "openrouter", model, factory=slug)
+        task(store, sid, 1, ended_by, factory=slug)
+    return store
+
+
+def test_the_house_score_sums_every_factory_of_the_hub(tmp_path: Path):
+    """Founder, 04/10: a model's record grows with every factory that used it. Neither factory
+    alone has enough tasks to judge; together they do, and the worse model is flagged."""
+    half = MIN_TASKS // 2
+    glm, mimo = "z-ai/glm-5.3-flash", "xiaomi/mimo-v2.6-flash"
+    a = factory_with(tmp_path, "contas", [(mimo, "done")] * half + [(glm, "limit")] * half)
+    b = factory_with(tmp_path, "tama", [(mimo, "done")] * half + [(glm, "done")] * half)
+    assert not any(s.enough for s in house_scores(a, "contas", default_config()))
+    gone = default_config()
+    gone.factory.slug = "gone"
+    ConfigStore().register(tmp_path / "gone", gone)  # registered, folder deleted: skipped
+
+    scores = {s.model: s for s in hub_house_scores() if s.role == "worker"}
+    assert scores[mimo].tasks == MIN_TASKS and scores[mimo].done_rate == 1.0
+    assert scores[glm].tasks == MIN_TASKS and scores[glm].done == half
+    assert scores[glm].flagged and not scores[mimo].flagged
+    a.close()
+    b.close()
+
+
+def test_house_for_falls_back_to_the_factory_alone_without_a_hub():
+    from loompa.models_sync import house_for
+
+    store = Store(":memory:")
+    for i in range(MIN_TASKS):
+        call(store, f"S-{i:03}", "openrouter", "z-ai/glm-5.3-flash")
+        task(store, f"S-{i:03}", 1, "done")
+    assert house_for(store, "f", default_config())["z-ai/glm-5.3-flash"]["tasks"] == MIN_TASKS

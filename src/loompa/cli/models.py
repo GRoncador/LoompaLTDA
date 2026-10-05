@@ -208,8 +208,12 @@ def models_aa(
     from loompa.store import Store
 
     db = f.paths.state_db
-    mix = aa_rank.work_mix(Store(db), f.slug, f.config) if db.is_file() else None
-    result = aa_rank.suggest(f.config, mix=mix)
+    from loompa.models_sync import house_for
+
+    store = Store(db) if db.is_file() else None
+    mix = aa_rank.work_mix(store, f.slug, f.config) if store else None
+    house = house_for(store, f.slug, f.config) if store else {}
+    result = aa_rank.suggest(f.config, mix=mix, house=house)
     if not result["entries"]:
         console.print("Ainda não há dados da Artificial Analysis: use --refresh.")
         return

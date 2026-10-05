@@ -126,13 +126,48 @@ def house_scores(
         s.done += ended in DONE
         s.tool_calls += int(p.get("tool_calls") or 0)
         s.seconds += float(p.get("duration_s") or 0)
-    workers = [s for s in scores.values() if s.role == "worker" and s.enough]
+    return _finish(list(scores.values()))
+
+
+def _finish(scores: list[HouseScore]) -> list[HouseScore]:
+    """Flag the clearly worse Worker models (enough tasks, below FLAG_SHARE of the best) and sort."""
+    workers = [s for s in scores if s.role == "worker" and s.enough]
     best = max((s.done_rate or 0.0 for s in workers), default=0.0)
-    for s in workers:
-        s.flagged = best > 0 and (s.done_rate or 0.0) < FLAG_SHARE * best
-    for s in scores.values():
+    for s in scores:
+        s.flagged = s in workers and best > 0 and (s.done_rate or 0.0) < FLAG_SHARE * best
         s.cost_usd = round(s.cost_usd, 6)
-    return sorted(scores.values(), key=lambda s: (s.role, -s.calls, s.model))
+    return sorted(scores, key=lambda s: (s.role, -s.calls, s.model))
+
+
+def hub_house_scores(days: int = 30) -> list[HouseScore]:
+    """The house score over every factory registered in the hub (Founder, 2026-10-04): a model's
+    record grows with every factory that used it. Each factory is read from its own database, with
+    its own config to tie a maker's id to the OpenRouter id; the rows are summed per role and
+    model and flagged on the total. A factory whose folder is gone is skipped."""
+    from pathlib import Path
+
+    from loompa.config.store import ConfigStore, load_config
+
+    merged: dict[tuple[str, str], HouseScore] = {}
+    for ref in ConfigStore().load().factories:
+        root = Path(ref.path)
+        db = root / ".loompa" / "state.db"
+        if not db.is_file():
+            continue
+        try:
+            config = load_config(root)
+            store = Store(db)
+            try:
+                rows = house_scores(store, ref.slug, config, days)
+            finally:
+                store.close()
+        except Exception:  # noqa: BLE001 - one unreadable factory never hides the others
+            continue
+        for h in rows:
+            m = merged.setdefault((h.role, h.model), HouseScore(role=h.role, model=h.model))
+            for name in ("calls", "cost_usd", "cut", "tasks", "done", "tool_calls", "seconds"):
+                setattr(m, name, getattr(m, name) + getattr(h, name))
+    return _finish(list(merged.values()))
 
 
 def worker_house(scores: list[HouseScore]) -> dict[str, dict[str, Any]]:
