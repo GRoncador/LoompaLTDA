@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import warnings
 from pathlib import Path
 from typing import Protocol
 
@@ -65,12 +66,13 @@ def model_cache_dir() -> Path:
 
 class FastEmbedEmbedder:
     def __init__(self, model_name: str, *, cache_dir: Path | None = None):
-        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")  # not in the engine's log
         from fastembed import TextEmbedding  # type: ignore[import-not-found]
 
-        self._model = TextEmbedding(
-            model_name=model_name, cache_dir=str(cache_dir or model_cache_dir())
-        )
+        with warnings.catch_warnings():  # fastembed's notes on pooling changes, not for the founder
+            warnings.simplefilter("ignore", UserWarning)
+            self._model = TextEmbedding(
+                model_name=model_name, cache_dir=str(cache_dir or model_cache_dir())
+            )
         self.name = model_name
         self.dim = len(next(iter(self._model.embed(["dim probe"]))))
 
