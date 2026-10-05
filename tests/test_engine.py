@@ -1152,6 +1152,16 @@ async def test_a_diagnosis_that_asks_or_cannot_be_read_goes_to_the_founder_plain
     assert told and "Você aprovou a entrega" in told[0]  # the Master words the facts
     msg = ctx.store.get_message(state.blocked_message_id)
     assert "Você aprovou a entrega" in msg.context and msg.executive_audit() == []
+    # "try again" is still an approved story: merged, not delivered for a second approval
+    await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="retry"))
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.DONE and state.merged_sha and len(merges) == 3
+    assert not [
+        m
+        for m in ctx.store.list_messages(ctx.slug, status="pending")
+        if m.story_id == sid and m.kind == "delivery"
+    ]
     await ctx.aclose()
 
 

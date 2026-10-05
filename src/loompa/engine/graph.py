@@ -1084,6 +1084,9 @@ MERGE_FAILED_KEY = "approved_merge_failed"
 BASE_MOVED = "the base moved since the delivery"
 INTEGRATING = "another approved story is being merged"
 
+# how `_diagnose_merge` opens its block: a "try again" on it is still an approved story
+MERGE_FAILED_TECHNICAL = "Approved, but merging into the base failed"
+
 MERGE_FAILED_EXECUTIVE = (
     "Você aprovou a entrega, mas não consegui integrá-la à versão principal do produto. "
     "{tried}Preferi pedir sua orientação em vez de arriscar mexer em algo que é seu."
@@ -1208,7 +1211,7 @@ async def _diagnose_merge(
         ctx,
         state,
         BlockedReason.PERSISTENT_FAILURE,
-        f"Approved, but merging into the base failed: {error}",
+        f"{MERGE_FAILED_TECHNICAL}: {error}",
         resume="review",
         executive=MERGE_FAILED_EXECUTIVE.format(tried=said),
     )
@@ -1581,6 +1584,11 @@ def apply_founder_answer(
         state.attempts_tier1 = 0
         state.current_tier = "tier2"
         goto(state, resume or "dev")
+        last = str((state.extra.get(LAST_BLOCK_KEY) or {}).get("fp") or "")
+        if key == "retry" and resume == "review" and MERGE_FAILED_TECHNICAL.lower() in last:
+            # the delivery was approved before the merge failed: `review` integrates it again
+            # instead of delivering it for a second approval (tamagotchi S-053, S-054)
+            state.extra[MERGE_FAILED_KEY] = "the founder asked to try the merge again"
         if note and state.phase == "dev" and "plan" in state.route:
             # what the founder wrote may withdraw part of the plan: the Architect amends the
             # tasks, or the Worker's self-check keeps asking for it (`contas` S-030)
