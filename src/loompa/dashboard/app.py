@@ -44,6 +44,7 @@ from loompa.conversations import (
 from loompa.dependencies import WAIT_KEY, merge_parked_note, parked_before_review, plan_gate
 from loompa.engine import KANBAN_COLUMNS, EngineContext, Scheduler, Stage, kanban_column, load_state
 from loompa.engine.lock import DryRunOnLiveFactory, EngineBusy, EngineLock
+from loompa.engine.merge_queue import merge_queue
 from loompa.factory import Factory
 from loompa.finance import period_start_iso, today_start_iso
 from loompa.sprints import SprintBoard, SprintError
@@ -432,9 +433,11 @@ def create_app(
         columns: dict[str, list[dict[str, Any]]] = {k: [] for k, _ in KANBAN_COLUMNS}
         sprint_of = sprint_report.current_sprints(ctx.store, slug)  # read, never stored (10.8)
         rows = {s["id"]: s for s in stories}
+        queue = merge_queue(rows)
         for s in stories:
             card = _story_card(s)
             card["sprint_id"] = sprint_of.get(s["id"])
+            card["merge_queue"] = _queue_place(queue, s["id"])
             if (s.get("state") or {}).get("extra", {}).get(WAIT_KEY):  # computed now (ADR-0021)
                 card["waiting"] = plan_gate(rows, s["id"]).as_dict()
             if s["stage"] in LIVE_STAGES:  # only a story at work has something to show
@@ -525,10 +528,10 @@ def create_app(
             if (specs / f"{name}.md").is_file()
         }
         card = _story_card(row)
+        all_rows = {r["id"]: r for r in ctx.store.list_stories(slug)}
+        card["merge_queue"] = _queue_place(merge_queue(all_rows), story_id)
         if (row.get("state") or {}).get("extra", {}).get(WAIT_KEY):  # computed now (ADR-0021)
-            card["waiting"] = plan_gate(
-                {r["id"]: r for r in ctx.store.list_stories(slug)}, story_id
-            ).as_dict()
+            card["waiting"] = plan_gate(all_rows, story_id).as_dict()
         if parked_before_review(row):  # the drawer says the same as the card (11.5)
             note = row["state"]["extra"][WAIT_KEY]
             card["waiting"] = merge_parked_note(
@@ -1416,6 +1419,13 @@ def create_app(
 LIVE_STAGES = frozenset(
     s.value for s in (Stage.SPEC, Stage.PLAN, Stage.DEV, Stage.TEST, Stage.REVIEW)
 )
+
+
+def _queue_place(queue: list[str], story_id: str) -> dict[str, int] | None:
+    """Where an approved story stands in the merge queue (ADR-0029); None when it is not in it."""
+    if story_id not in queue:
+        return None
+    return {"position": queue.index(story_id) + 1, "total": len(queue)}
 
 
 def board_column(row: dict[str, Any]) -> str:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -42,9 +41,6 @@ class EngineContext:
     closed: bool = False
     woke_at: float | None = None  # time.monotonic() when the engine last saw the machine wake
     _mcp: McpHub | None = field(default=None, repr=False)
-    # One approved story at a time is brought up to date and merged into the base: two of them
-    # interleaved across their awaits aborted each other's merges (tamagotchi SP-008).
-    integration_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     @property
     def mcp(self) -> McpHub:

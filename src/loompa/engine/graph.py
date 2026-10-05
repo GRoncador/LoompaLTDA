@@ -62,6 +62,7 @@ from loompa.dependencies import (
     sync_refs,
 )
 from loompa.engine.context import EngineContext
+from loompa.engine.merge_queue import MergeLock, dequeue, enqueue, merge_queue, queued
 from loompa.engine.phases import (
     Phase,
     advance,
@@ -1078,9 +1079,8 @@ async def climb(
     )
 
 
-MERGE_FAILED_KEY = "approved_merge_failed"
-# What `apply_founder_answer` leaves under MERGE_FAILED_KEY when the approved branch cannot go
-# straight in although nothing failed: `review` brings it up to date first.
+# Why an approved story waits in the merge queue instead of merging on the spot
+QUEUE_AHEAD = "approved stories ahead of it are waiting for their merge"
 BASE_MOVED = "the base moved since the delivery"
 INTEGRATING = "another approved story is being merged"
 
@@ -1120,10 +1120,12 @@ async def _bring_up_to_date(ctx: EngineContext, state: StoryState, wt: Worktree)
 async def _merge_after_approval(
     ctx: EngineContext, state: StoryState, wt: Worktree, error: str
 ) -> StoryState:
-    """The founder approved and the branch could not go straight into the base: the base moved
-    since the delivery, another approval was being merged, or the merge failed. One story at a
-    time (`ctx.integration_lock`): tamagotchi SP-008 had two of these interleaved across their
-    awaits, each aborting the other's merge in the main checkout.
+    """The head of the merge queue (`engine/merge_queue.py`): an approved story that could not
+    go straight into the base — others were queued ahead of it, the base moved since the
+    delivery, another merge was running, or the merge failed. The Scheduler runs one queued story
+    at a time, in the order approved, and the whole integration holds the merge lock, so nothing
+    reaches the base between its checks and its merge (tamagotchi SP-008 had two interleaved,
+    each aborting the other's merge in the main checkout).
 
     First the path that needs no judgement: the base is merged into the story, conflicts go to
     the Worker, the checks run again, and the story is merged. A combination that fails its
@@ -1131,13 +1133,16 @@ async def _merge_after_approval(
     new delivery); conflicts the Worker could not resolve reach the founder as a conflict. Only a
     git failure that is not a conflict (a lock, a checkout in the way) goes to the Deployer's
     diagnosis, which picks one of GIT_ACTIONS, three tries at most (ADR-0016 §5)."""
-    async with ctx.integration_lock:
+    async with MergeLock.for_repo(ctx.worktrees):
         deployer = DeployerAgent(ctx)
         for _ in range(ctx.config.schedule.ops_max_recoveries):
             problem = await _bring_up_to_date(ctx, state, wt)
             if problem:
-                state.extra.pop(MERGE_FAILED_KEY, None)
+                dequeue(state.extra)
                 return await _approved_back_to_work(ctx, state, problem)
+            if ctx.worktrees.behind_base(wt):
+                # the last word before the merge: what goes in is exactly what was checked
+                continue
             try:
                 deployer.merge(state, wt)
             except MergeConflict as exc:  # the base moved again under the checks
@@ -1151,7 +1156,7 @@ async def _merge_after_approval(
 
 
 def _merged(state: StoryState) -> StoryState:
-    state.extra.pop(MERGE_FAILED_KEY, None)
+    dequeue(state.extra)
     state.extra.pop(CONFLICT_RETRIES_KEY, None)
     state.stage = Stage.DONE
     state.phase = ""
@@ -1206,7 +1211,7 @@ async def _diagnose_merge(
         if tried
         else ""
     )
-    state.extra.pop(MERGE_FAILED_KEY, None)
+    dequeue(state.extra)
     return await block(
         ctx,
         state,
@@ -1266,9 +1271,8 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     wt = _ensure_worktree(ctx, state)
     # read, not popped: the runner checkpoints when the node ends, and a restart in the middle of
     # the integration must come back to it, not deliver the approved story again
-    failed = state.extra.get(MERGE_FAILED_KEY)
-    if failed:
-        return await _merge_after_approval(ctx, state, wt, str(failed))
+    if entry := queued(state.extra):
+        return await _merge_after_approval(ctx, state, wt, str(entry.get("why") or ""))
     await KaizenAgent(ctx).capture(
         state
     )  # findings never get lost: sweep what no earlier phase filed
@@ -1464,6 +1468,29 @@ def _drop_gone_dependencies(ctx: EngineContext, state: StoryState) -> list[tuple
     return [(d, (rows.get(d) or {}).get("title", d)) for d in gone]
 
 
+def _merge_now(ctx: EngineContext, state: StoryState, wt: Worktree) -> str | None:
+    """Merge an approved story on the spot when that cannot jump the queue or skip a check: no
+    approved story is waiting ahead of it, its branch already holds the base, and nobody else is
+    touching the base. None when merged; otherwise why it goes to the merge queue instead.
+    Runs in whichever process took the answer (the dashboard, the CLI, the engine)."""
+    if merge_queue(rows_by_id(ctx.store, ctx.slug)):
+        return QUEUE_AHEAD
+    lock = MergeLock.for_repo(ctx.worktrees)
+    if not lock.try_acquire():
+        return INTEGRATING
+    try:
+        if ctx.worktrees.behind_base(wt):
+            # what was approved never ran next to what landed since: the queue merges the base
+            # in and runs the checks before the merge (tamagotchi SP-008)
+            return BASE_MOVED
+        DeployerAgent(ctx).merge(state, wt)
+    except GitError as exc:
+        return str(exc)[-2000:]
+    finally:
+        lock.release()
+    return None
+
+
 def apply_founder_answer(
     ctx: EngineContext, state: StoryState, msg: FounderMessage, answer: FounderAnswer
 ) -> StoryState:
@@ -1521,25 +1548,20 @@ def apply_founder_answer(
                 ctx.emit("story.waiting", story_id=state.story_id, pending=waits, stage="review")
                 return state
             wt = ctx.worktrees.get(state.story_id)
-            if wt is not None:
-                pending = None
-                if ctx.integration_lock.locked():
-                    pending = INTEGRATING  # merges go in one at a time, in `review`
-                elif ctx.worktrees.behind_base(wt):
-                    # what was approved never ran next to what landed since: `review` merges the
-                    # base in and runs the checks before the merge (tamagotchi SP-008)
-                    pending = BASE_MOVED
-                else:
-                    try:
-                        DeployerAgent(ctx).merge(state, wt)
-                    except GitError as exc:
-                        pending = str(exc)[-2000:]
-                if pending:
-                    # approved: `review` integrates and merges without asking again (ADR-0016 §5)
-                    state.extra[MERGE_FAILED_KEY] = pending
-                    goto(state, "review")
-                    state.blocked_reason = None
-                    return state
+            if wt is not None and (why := _merge_now(ctx, state, wt)):
+                # approved: it waits for its turn in the merge queue, and `review` integrates and
+                # merges it without asking again (ADR-0016 §5, ADR-0029)
+                seq = enqueue(state.extra, why)
+                goto(state, "review")
+                state.blocked_reason = None
+                ctx.emit(
+                    "merge.queued",
+                    story_id=state.story_id,
+                    seq=seq,
+                    why=why[:200],
+                    ahead=len(merge_queue(rows_by_id(ctx.store, ctx.slug))),
+                )
+                return state
             state.stage = Stage.DONE
             state.phase = ""
         elif state.kind == StoryKind.RESEARCH:
@@ -1586,9 +1608,9 @@ def apply_founder_answer(
         goto(state, resume or "dev")
         last = str((state.extra.get(LAST_BLOCK_KEY) or {}).get("fp") or "")
         if key == "retry" and resume == "review" and MERGE_FAILED_TECHNICAL.lower() in last:
-            # the delivery was approved before the merge failed: `review` integrates it again
-            # instead of delivering it for a second approval (tamagotchi S-053, S-054)
-            state.extra[MERGE_FAILED_KEY] = "the founder asked to try the merge again"
+            # the delivery was approved before the merge failed: back in the merge queue, not
+            # delivered for a second approval (tamagotchi S-053, S-054)
+            enqueue(state.extra, "the founder asked to try the merge again")
         if note and state.phase == "dev" and "plan" in state.route:
             # what the founder wrote may withdraw part of the plan: the Architect amends the
             # tasks, or the Worker's self-check keeps asking for it (`contas` S-030)

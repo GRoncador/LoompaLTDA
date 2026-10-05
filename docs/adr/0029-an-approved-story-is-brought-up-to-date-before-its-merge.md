@@ -33,16 +33,36 @@ raises `MergeConflict` without touching the checkout. A merge that fails anyway 
 error not foreseen) is aborted before the error goes up. A merge already in progress there is
 refused rather than stacked on; whose it is, and whether to abort it, stays the diagnosis' call.
 
-### 2. Approved stories merge one at a time
+### 2. A merge queue: one at a time, in the order approved
 
-`EngineContext.integration_lock` covers the whole post-approval integration (sync, checks,
-merge). An approval that arrives while it is held does not merge directly: it goes to `review`
-and waits its turn.
+The first version of this ADR used an `asyncio.Lock` in the engine. It guarded nothing the
+founder did: the dashboard runs with `--no-engine` next to `loompa run`, and `loompa inbox
+answer` is a third process, so an approval merged directly in a process whose lock was always
+free, and could land on the base while the engine was between an integration's checks and its
+merge. `engine/merge_queue.py` replaces it:
+
+- **`MergeLock`** is an advisory `flock` on `<git dir>/loompa-merge.lock`. The engine holds it for
+  a whole integration (sync, checks, merge); an approval needs it for its instant merge. A second
+  holder is refused even in the same process, and the OS releases it if the holder dies. It
+  lives in the git dir because it guards the repository and must never be committed.
+- **The queue** is `MERGE_QUEUE_KEY` in the story's state, `{"seq", "why"}`, with the sequence
+  number taken at approval. It lives in the shared store, so every process sees it.
+- **An approval merges on the spot only when** no approved story is queued ahead of it, its
+  branch already holds the base, and it gets the lock without waiting. Otherwise it is queued,
+  which keeps the order.
+- **Only the engine works the queue.** `Scheduler._eligible` dispatches the head and nothing
+  else while a queued story runs. A story outside `review` (blocked for the founder, back in the
+  backlog, done) is not in the queue, whatever its state still says, so it never holds the line.
+- **Before the merge, the branch must still hold the base.** If not, it is integrated again. With
+  the lock held through the checks this cannot happen, but it is the last word on "what goes in is
+  what was checked".
+
+Order only decides who resolves a conflict: stories that depend on each other are already ordered
+by the merge gate (ADR-0021), and every story is checked against the base it actually lands on.
 
 ### 3. Catching up is a rule, not a model's choice
 
-The approval merges directly only when the branch already contains the base. Otherwise
-`review` merges the base into the story in its worktree (the same `sync_with_base` as `dev`:
+When a story's turn comes, `review` merges the base into the story in its worktree (the same `sync_with_base` as `dev`:
 append-only blocks settled without a model, the rest to the Worker), re-runs the checks that need
 no model (`InspectorAgent.run(judge=False)`: tests, lint, types, smoke, hygiene), and merges.
 No judge: the founder accepted the behaviour; only the combination is new.

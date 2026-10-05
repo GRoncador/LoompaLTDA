@@ -42,6 +42,7 @@ export interface StoryCard {
   depends_on?: string[]; // cards it needs delivered first (ADR-0021)
   // o portão das dependências (ADR-0021 e 11.5): `unmerged` são as que ela já pode usar, porque
   // estão construídas e aprovadas, faltando só o seu aceite; `ready` marca a que está pronta
+  merge_queue?: { position: number; total: number } | null; // approved, waiting for its merge (ADR-0029)
   waiting?: { gate: string; pending: string[]; founder: string[]; gone: string[]; chain: string[]; unmerged?: string[]; ready?: boolean; label: string } | null;
 }
 

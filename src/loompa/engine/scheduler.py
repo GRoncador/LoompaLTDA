@@ -33,6 +33,7 @@ from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, back_to_backlog, block
 from loompa.engine.langgraph_engine import GraphRuntime
 from loompa.engine.lock import DryRunOnLiveFactory, EngineLock
+from loompa.engine.merge_queue import waits_its_turn
 from loompa.engine.phases import goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.finance import BudgetStatus
@@ -149,6 +150,7 @@ class Scheduler:
             and s["id"] not in self.running
             and s["stage"] != Stage.BACKLOG  # cards wait for a sprint
             and not still_waiting(rows, s)  # parked before `plan` or before `review` (11.5)
+            and not waits_its_turn(rows, s["id"], self.running)  # the merge queue, head first
         ]
         return sorted(out, key=lambda s: 0 if in_chain(rows, s["id"]) and not spec_passed(s) else 1)
 

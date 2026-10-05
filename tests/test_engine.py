@@ -1277,25 +1277,80 @@ async def test_an_approved_story_that_breaks_on_the_new_base_is_delivered_again(
     await ctx.aclose()
 
 
-async def test_approvals_take_turns_to_merge(factory: Factory):
-    """An approval that arrives while another approved story is being integrated does not merge
-    on its own: it waits for its turn in `review`."""
-    from loompa.engine.graph import INTEGRATING, MERGE_FAILED_KEY
+async def test_approvals_merge_one_at_a_time_in_the_order_given(factory: Factory):
+    """The merge queue (ADR-0029). Approvals reach the factory from the dashboard and the CLI
+    too, so nothing merges on the spot while anyone holds the merge lock, nor ahead of a story
+    already waiting; the engine then merges the queue head first, one at a time."""
+    from loompa.engine.graph import INTEGRATING, QUEUE_AHEAD
+    from loompa.engine.merge_queue import MERGE_QUEUE_KEY, MergeLock, merge_queue
 
     ctx = make_ctx(factory)
-    sid = seed_story(ctx, "Entrega aprovada")
+    ids = {title: seed_story(ctx, title) for title in ("Página A", "Página B", "Página C")}
     await Scheduler(ctx).run()
-    delivery = next(
-        m for m in ctx.store.list_messages(ctx.slug, status="pending") if m.kind == "delivery"
-    )
-    async with ctx.integration_lock:
-        state = await Scheduler(ctx).aanswer(delivery.id, FounderAnswer(option_key="approve"))
-        assert state.stage == Stage.REVIEW and not state.merged_sha
-        assert state.extra[MERGE_FAILED_KEY] == INTEGRATING
+    deliveries = {
+        m.story_id: m
+        for m in ctx.store.list_messages(ctx.slug, status="pending")
+        if m.kind == "delivery"
+    }
+    assert set(deliveries) == set(ids.values())
+
+    async def approve(title: str):  # type: ignore[no-untyped-def]
+        msg = deliveries[ids[title]]
+        return await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="approve"))
+
+    other = MergeLock.for_repo(ctx.worktrees)  # another process merging right now
+    assert other.try_acquire()
+    c = await approve("Página C")
+    a = await approve("Página A")
+    other.release()
+    b = await approve("Página B")  # the lock is free and B is up to date: it still queues
+    assert [s.stage for s in (c, a, b)] == [Stage.REVIEW] * 3
+    whys = [s.extra[MERGE_QUEUE_KEY]["why"] for s in (c, a, b)]
+    assert whys == [INTEGRATING, QUEUE_AHEAD, QUEUE_AHEAD]
+    rows = {r["id"]: r for r in ctx.store.list_stories(ctx.slug)}
+    assert merge_queue(rows) == [ids["Página C"], ids["Página A"], ids["Página B"]]
+    queued = [r["id"] for r in Scheduler(ctx).runnable() if r["id"] in ids.values()]
+    assert queued == [ids["Página C"]]  # only the head runs
+
     await Scheduler(ctx).run()
-    state = load_state(ctx, sid)
-    assert state.stage == Stage.DONE and state.merged_sha
+    assert all(load_state(ctx, sid).stage == Stage.DONE for sid in ids.values())
+    merges = git("log", "--first-parent", "--format=%s", "-3", "main", cwd=factory.root)
+    assert [line.rsplit(": ", 1)[-1] for line in merges.splitlines()] == [
+        "Página B",
+        "Página A",
+        "Página C",
+    ]
+    assert not (factory.root / ".git" / "MERGE_HEAD").exists()
     await ctx.aclose()
+
+
+def test_a_story_that_left_review_never_holds_the_merge_queue():
+    from loompa.engine.merge_queue import MERGE_QUEUE_KEY, merge_queue, waits_its_turn
+
+    def row(sid: str, stage: str, seq: int) -> dict[str, Any]:
+        return {"id": sid, "stage": stage, "state": {"extra": {MERGE_QUEUE_KEY: {"seq": seq}}}}
+
+    rows = {
+        "S-1": row("S-1", "AWAITING_FOUNDER", 1),  # blocked: it left the queue
+        "S-2": row("S-2", "BACKLOG", 2),  # sent back
+        "S-3": row("S-3", "REVIEW", 3),
+        "S-4": row("S-4", "REVIEW", 4),
+    }
+    assert merge_queue(rows) == ["S-3", "S-4"]
+    assert not waits_its_turn(rows, "S-3", set()) and waits_its_turn(rows, "S-4", set())
+    assert waits_its_turn(rows, "S-3", {"S-4"})  # one queued story worked on at a time
+
+
+def test_the_merge_lock_is_refused_to_a_second_holder_even_in_the_same_process(git_repo: Path):
+    from loompa.engine.merge_queue import MergeLock
+    from loompa.worktrees import WorktreeManager
+
+    first, second = (MergeLock.for_repo(WorktreeManager(git_repo)) for _ in range(2))
+    assert first.path.parent.name == ".git"  # guards the repository, never committed
+    assert first.try_acquire() and not second.try_acquire()
+    first.release()
+    assert second.try_acquire()
+    second.release()
 
 
 async def test_the_criteria_are_aligned_once_per_request_even_across_restarts(factory: Factory):

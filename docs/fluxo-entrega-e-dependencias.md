@@ -69,15 +69,19 @@ depende daquela história — e, desde 11.5, só pelo merge (seção 6).
 
 ### 5.1 Quando a base andou entre a entrega e o seu aceite
 
-Aprovar várias entregas de uma vez é o normal (no tamagotchi SP-008 foram três em 20 s). A primeira
-entra direto; as outras foram entregues sobre uma base que já não existe — o que você aprovou nunca
-rodou junto com o que entrou depois. Por isso o aceite não faz o merge direto quando:
+Aprovar várias entregas de uma vez é o normal (no tamagotchi SP-008 foram três em 20 s). Elas
+entram por uma **fila de merge**: uma de cada vez, na ordem em que você aprovou. O aceite só faz o
+merge na hora quando:
 
-- a base tem commits que o branch da história não tem; ou
-- outra história aprovada está sendo integrada naquele momento (uma de cada vez — duas ao mesmo
-  tempo já abortaram o merge uma da outra no checkout principal).
+- não há nenhuma aprovada esperando na frente dela;
+- o branch dela já contém a base (o que você aprovou é exatamente o que vai entrar);
+- ninguém está mexendo na base naquele instante — vale para o painel, a linha de comando e o motor,
+  que são processos diferentes (a trava é um arquivo dentro do `.git`).
 
-Nesses casos ela volta ao `review`, que, sem perguntar de novo:
+Senão ela entra na fila, e só o motor trabalha a fila, sempre pela primeira. Uma história que sai da
+fila (volta ao `dev`, vem para a sua caixa) não segura as outras.
+
+Quando chega a vez dela, o `review`, sem perguntar de novo:
 
 1. faz o merge da base **dentro do worktree da história** — nunca no checkout principal. Trechos em
    que os dois lados só acrescentaram linhas (dois `describe` no fim do mesmo arquivo de teste)

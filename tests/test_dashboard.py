@@ -549,3 +549,12 @@ def test_the_story_window_reads_the_trace_of_what_the_agent_did(client: TestClie
     assert span["messages"][0]["content"] == "escreva a spec"
     assert span["response"]["content"] == "pronto"
     assert client.get(f"/api/factories/demo-hq/stories/{sid}/trace/nope").status_code == 404
+
+
+def test_the_card_says_where_an_approved_story_stands_in_the_merge_queue():
+    from loompa.dashboard.app import _queue_place
+
+    queue = ["S-7", "S-3", "S-9"]
+    assert _queue_place(queue, "S-7") == {"position": 1, "total": 3}  # being merged now
+    assert _queue_place(queue, "S-9") == {"position": 3, "total": 3}
+    assert _queue_place(queue, "S-1") is None

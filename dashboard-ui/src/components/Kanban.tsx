@@ -150,12 +150,18 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
   );
 }
 
+/** An approved story waiting behind another in the merge queue: nobody works on it until its
+ * turn (ADR-0029). The head of the queue is being merged, so it is at work like any other. */
+function behindInQueue(s: StoryCard): boolean {
+  return (s.merge_queue?.position ?? 0) > 1;
+}
+
 /** A card is being worked on when it sits in a working stage and the factory gave a sign of
  * life on it in the last five minutes. Those cards rise to the top and get the amber ring. */
 function working(s: StoryCard, live: Record<string, StoryActivity>, now: number, engine: boolean): boolean {
   // the belt stopped: nothing is running, however recent the last sign of life was
   if (!engine) return false;
-  if (!AT_WORK.has(s.stage) || s.waiting?.gate === "wait") return false;
+  if (!AT_WORK.has(s.stage) || s.waiting?.gate === "wait" || behindInQueue(s)) return false;
   const a = latest(s.activity, live[s.id]);
   if (!a || a.stalled) return false;
   return (now - Date.parse(a.last_at)) / 1000 <= 300;
@@ -196,6 +202,16 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
       title: `${failed} ${failed === 1 ? "tentativa" : "tentativas"} sem sucesso${t1 ? ", agora com os modelos mais fortes (Tier 1)" : ""}. Depois de três, a história para e a decisão é sua.`,
     });
   }
+  if (s.merge_queue) {
+    const first = s.merge_queue.position === 1;
+    alerts.push({
+      text: first ? "integrando" : `fila de merge · ${s.merge_queue.position}º`,
+      cls: "bg-emerald-900/50 text-emerald-200",
+      title: first
+        ? "Aprovada: está sendo integrada à versão principal agora (atualizada com o que entrou depois e testada de novo)."
+        : `Aprovada: entra na versão principal depois das ${s.merge_queue.position - 1} aprovadas antes dela, uma de cada vez, na ordem em que você aprovou.`,
+    });
+  }
   if (s.qa_verdict === "CONCERNS") {
     // the kind of the worst finding fits in four letters and says where to look
     const found = [...(s.qa_findings ?? [])].sort((a, b) => SEVERITY.indexOf(b.severity) - SEVERITY.indexOf(a.severity));
@@ -218,7 +234,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   // the same condition `working()` uses for the amber ring (11.5). `waiting.ready` is the card
   // that is finished and green and only waits for your acceptance of the delivery before it;
   // the others wait for a dependency that is not in the base yet.
-  const parked = open && s.waiting?.gate === "wait";
+  const parked = open && (s.waiting?.gate === "wait" || behindInQueue(s));
   const held = gate ? [...new Set([...gate.gone, ...gate.pending, ...gate.chain])] : [];
   const linked = !open || held.length ? [] : gate?.unmerged?.length ? gate.unmerged : s.depends_on ?? [];
   const size = COMPLEXITY[s.complexity] ?? COMPLEXITY.STANDARD;
