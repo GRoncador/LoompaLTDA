@@ -155,6 +155,8 @@ class Toolbox:
             self.allowed -= {MEMORY_TOOL}
         self.mcp = mcp
         self.seen_urls: set[str] = set()  # URLs that came back from web tools (source check)
+        # what a web tool returned around each URL: whether it supports a sentence (13.6)
+        self.source_text: dict[str, str] = {}
         self.diagnosis_required = diagnosis
         self.diagnosis = ""  # the `reason` of the first write, once given
 
@@ -208,7 +210,10 @@ class Toolbox:
         if self.mcp is not None and self.mcp.owns(name):
             result = await self.mcp.call(name, args)
             if result.ok:
-                self.seen_urls |= extract_urls(result.output)
+                urls = extract_urls(result.output)
+                self.seen_urls |= urls
+                for url in urls:
+                    self.source_text.setdefault(url, result.output[:SOURCE_CHARS])
             return result
         if name not in self.allowed:
             return ToolResult(
@@ -257,6 +262,7 @@ class Toolbox:
 
 # ---------------------------------------------------------------------------- helpers
 
+SOURCE_CHARS = 6000
 MEMORY_HITS = 5
 MEMORY_CHARS = 900
 

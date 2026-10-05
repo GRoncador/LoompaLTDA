@@ -384,7 +384,11 @@ class MemoryStore:
         exclude: tuple[str, ...] = (),
     ) -> str:
         """Compact Markdown block with precedents, ready to inject into an agent prompt."""
-        hits = self.search(query, top_k=top_k, kinds=kinds, exclude=exclude)
+        return self.render(
+            self.search(query, top_k=top_k, kinds=kinds, exclude=exclude), max_chars=max_chars
+        )
+
+    def render(self, hits: list[MemoryHit], *, max_chars: int = 3000) -> str:
         if not hits:
             return ""
         lines = [

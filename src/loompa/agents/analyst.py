@@ -16,6 +16,7 @@ for a preliminary opinion (`agents/brainstorm.py`, ADR-0020).
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,6 +25,7 @@ from typing import Any
 
 from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.agents.toolbox import EXPLORE_TOOLS, normalize_url
+from loompa.decider import SUPPORTS, Answer, build_decider, keeps
 from loompa.engine.state import StoryState
 from loompa.mcp import McpSession
 from loompa.speckit import render_research, story_dir
@@ -95,6 +97,9 @@ def web_limitation(unavailable: dict[str, str], what: str = "pesquisa") -> str:
     )
 
 
+CLAIM_CHECKS = 12  # sentence-source pairs checked per report
+
+
 class AnalystAgent(LoompaAgent):
     role = "analyst"
     display = "Analyst Loompa"
@@ -155,6 +160,7 @@ class AnalystAgent(LoompaAgent):
                 max_tokens=3500,
             )
             seen, used_web = set(box.seen_urls), box.used_web
+            source_text = dict(box.source_text)
             unavailable = dict(web.unavailable)
             web_available = web.available
 
@@ -176,6 +182,7 @@ class AnalystAgent(LoompaAgent):
             used_web=used_web,
             unavailable=unavailable,
         )
+        report = await self.check_claims(state, report, source_text)
         paths.research.write_text(
             render_research(
                 story_id=state.story_id,
@@ -301,6 +308,67 @@ class AnalystAgent(LoompaAgent):
             "web_used": used_web,
             "follow_ups": follow_ups,
         }
+
+    async def check_claims(
+        self, state: StoryState, report: dict[str, Any], source_text: dict[str, str]
+    ) -> dict[str, Any]:
+        """Does each cited source say what its sentence claims (13.6)? Asked of the decision
+        model, one sentence and one source per call. In `shadow` mode the answers only go to
+        the trace (`decider.shadow`); in `decide` mode a source confidently judged not to
+        support its sentence is dropped like an unseen one. A source whose text this run never
+        saw (read from the repository, say) is left alone."""
+        decider = build_decider(self.ctx)
+        if decider is None:
+            return report
+        cfg = self.ctx.config.decider
+        pairs = [
+            (f, src)
+            for f in report["findings"]
+            for src in f["sources"]
+            if normalize_url(src) in source_text
+        ][:CLAIM_CHECKS]
+
+        async def ask(f: dict[str, Any], src: str) -> Answer | None:
+            state_text = (
+                f"Sentence:\n{f['text'][:600]}\n\nSource ({src}):\n"
+                f"{source_text[normalize_url(src)][:3000]}"
+            )
+            got = await decider.decide(
+                state_text,
+                {"supports": SUPPORTS},
+                purpose="research_claim",
+                story_id=state.story_id,
+            )
+            return got["supports"] if got else None
+
+        answers = await asyncio.gather(*(ask(f, src) for f, src in pairs))
+        unsupported = 0
+        for (f, src), a in zip(pairs, answers, strict=True):
+            if a is None:
+                continue
+            self.ctx.emit(
+                "decider.shadow",
+                story_id=state.story_id,
+                purpose="research_claim",
+                source=src,
+                supports=a.value,
+                confidence=round(a.confidence, 3),
+                mode=cfg.mode,
+            )
+            if cfg.mode == "decide" and not a.value and keeps(a, cfg.threshold):
+                f["sources"].remove(src)
+                report["dropped_sources"].append(src)
+                unsupported += 1
+        if unsupported:
+            report["sources"] = [
+                s for s in report["sources"] if any(s in f["sources"] for f in report["findings"])
+            ]
+            report["sourced"] = sum(1 for f in report["findings"] if f["sources"])
+            report["limitations"].append(
+                f"{unsupported} fonte(s) citada(s) não sustentavam a frase a que estavam ligadas "
+                "e foram retiradas dela."
+            )
+        return report
 
     def _verified(self, source: str, seen_urls: set[str]) -> bool:
         return verified_source(self.ctx.root, source, seen_urls)

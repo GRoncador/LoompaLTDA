@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -19,6 +20,7 @@ from loompa.agents.toolbox import (
     prune_tool_history,
 )
 from loompa.company import company_block
+from loompa.decider import build_decider, useful_question
 from loompa.engine.context import EngineContext
 from loompa.engine.state import StoryState
 from loompa.llm import LLMError, LLMResponse, Message
@@ -108,6 +110,9 @@ def lifted(story: StoryState | None) -> bool:
     return bool(story is not None and story.extra.get(TIER_LIFT_KEY))
 
 
+_SHADOW: set[asyncio.Task] = set()  # shadow calls in flight: kept so they are not collected
+
+
 class LoompaAgent:
     role: str = "worker"
     display: str = "Loompa"
@@ -141,11 +146,48 @@ class LoompaAgent:
         reads = profile_for(self.role).memory_kinds
         exclude = tuple(k for k in RESTRICTED_KINDS if k not in reads)
         try:
-            return self.ctx.memory.recall(
+            hits = self.ctx.memory.search(
                 query, top_k=self.ctx.config.memory.top_k, kinds=kinds, exclude=exclude
             )
+            self._shadow_filter(query, hits)
+            return self.ctx.memory.render(hits)
         except Exception:  # noqa: BLE001 - memory is best-effort
             return ""
+
+    def _shadow_filter(self, query: str, hits: list) -> None:
+        """13.6 in shadow: the decision model scores how useful each pushed passage is, beside
+        the prompt and without changing it; the scores go to the trace (`decider.shadow`) to be
+        compared with what the role then used. Dropping passages needs the answer before the
+        prompt is built, which waits for the Founder's verdict on the shadow sprint."""
+        decider = build_decider(self.ctx)
+        if decider is None or not hits:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        state = f"Task:\n{query[:800]}\n\nPassages:\n" + "\n\n".join(
+            f"[{i}] ({h.chunk.kind}) {h.chunk.text.strip()[:500]}" for i, h in enumerate(hits, 1)
+        )
+        questions = {f"p{i}": useful_question(i) for i in range(1, len(hits) + 1)}
+
+        async def run() -> None:
+            got = await decider.decide(state, questions, purpose="memory_filter")
+            if got:
+                self.ctx.emit(
+                    "decider.shadow",
+                    purpose="memory_filter",
+                    agent=self.name,
+                    role=self.role,
+                    passages=[
+                        [h.chunk.doc_id, got[f"p{i}"].value, round(got[f"p{i}"].confidence, 3)]
+                        for i, h in enumerate(hits, 1)
+                    ],
+                )
+
+        task = loop.create_task(run())
+        _SHADOW.add(task)
+        task.add_done_callback(_SHADOW.discard)
 
     def set_state(
         self, state: str, story: StoryState | None = None, *, model: str = "", detail: str = ""

@@ -640,6 +640,19 @@ class MemoryConfig(BaseModel):
     top_k: int = Field(6, ge=1)
 
 
+class DeciderConfig(BaseModel):
+    """A decision model for narrow typed questions (plan 13.6, `loompa/decider.py`). `off`:
+    never called. `shadow`: answers beside the current path and only goes to the trace, to be
+    compared. `decide`: answers above `threshold` stand, the rest stay with the LLM. The Founder
+    moves a factory from shadow to decide; nothing does it alone."""
+
+    mode: Literal["off", "shadow", "decide"] = "off"
+    provider: str = "openrouter"  # whose key and credits pay for it
+    model: str = "typesafe/jev-1.13"
+    threshold: float = Field(0.9, ge=0.5, le=1.0)
+    timeout_s: float = Field(20.0, gt=0)
+
+
 class DashboardConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(8765, ge=1, le=65535)
@@ -696,6 +709,7 @@ class LoompaConfig(BaseModel):
     pricing: dict[str, Price] = Field(default_factory=dict)
     quality: QualityConfig = Field(default_factory=QualityConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    decider: DeciderConfig = Field(default_factory=DeciderConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     trace: TraceConfig = Field(default_factory=TraceConfig)
     stack: StackProfile = Field(default_factory=StackProfile)
