@@ -613,3 +613,38 @@ async def test_a_finding_that_changes_nothing_in_the_product_is_not_filed(factor
     assert all(item.get("_captured") for item in items)  # never offered again
     assert "só processo" in ctx.factory.paths.learnings.read_text(encoding="utf-8")
     await ctx.aclose()
+
+
+async def test_the_po_judgment_beats_the_same_file_rule(factory: Factory):  # noqa: F811
+    """13.6: S-060's "the game-over loop duplicates the drawing loop" (src/lcd_screen.js) was
+    folded into S-059's import cycle in the same file, after the PO had said it was new."""
+    script = po_answers(
+        **{"Triage the findings": {"findings": [{"key": "F1", "duplicate_of": ""}]}}
+    )
+    ctx = make_ctx(factory, script)
+    po = ProductOwnerAgent(ctx)
+    cycle = po.add_item(
+        "[Oportunidade] Quebrar o ciclo de imports em src/lcd_screen.js", origin="kaizen"
+    ).story_id
+    state = StoryState(story_id="S-060", title="Fim de jogo")
+    [card] = await KaizenAgent(ctx).capture(
+        state,
+        items=[
+            {
+                "kind": "opportunity",
+                "title": "_pintarFimDeJogo duplica o laço",
+                "detail": "src/lcd_screen.js",
+            }
+        ],
+    )
+    assert card != cycle
+    # unread (the PO unavailable), the file rule still folds it in
+    down = po_answers(**{"Triage the findings": RuntimeError("fora do ar")})
+    ctx2 = make_ctx(factory, down)
+    [again] = await KaizenAgent(ctx2).capture(
+        StoryState(story_id="S-061", title="x"),
+        items=[{"kind": "opportunity", "title": "Outra coisa em src/lcd_screen.js", "detail": ""}],
+    )
+    assert again in (cycle, card)
+    await ctx.aclose()
+    await ctx2.aclose()

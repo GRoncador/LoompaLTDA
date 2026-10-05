@@ -406,6 +406,7 @@ class ProductOwnerAgent(LoompaAgent):
         kind: str = "",
         extra: dict | None = None,
         after: str | None = None,
+        judged: bool = False,
     ) -> Admission:
         return self.backlog.add_item(
             title,
@@ -417,6 +418,7 @@ class ProductOwnerAgent(LoompaAgent):
             kind=kind,
             extra=extra,
             after=after,
+            judged=judged,
         )
 
     def set_priority(self, story_id: str, priority: int) -> None:

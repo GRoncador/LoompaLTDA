@@ -144,6 +144,7 @@ class KaizenAgent(LoompaAgent):
                         )
                     },
                     after=after if after not in keyed else None,
+                    judged=verdict.reviewed,  # the PO read it: its "not a duplicate" stands
                 ).story_id
             filed[key] = new_id
             self.ctx.store.add_learning(

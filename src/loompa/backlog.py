@@ -110,14 +110,19 @@ class Backlog:
         self.agent = owner.name
 
     # ------------------------------------------------------------------ reads
-    def find_duplicate(self, title: str, *, origin: str = "", text: str = "") -> str | None:
-        """Id of an open card with the same (normalized) title. For Kaizen findings, also an
-        open Kaizen card about the same file: one leftover file once came back as four cards
-        worded by the Worker, the Kaizen loop and two Inspector findings (`contas` S-005)."""
+    def find_duplicate(
+        self, title: str, *, origin: str = "", text: str = "", judged: bool = False
+    ) -> str | None:
+        """Id of an open card with the same (normalized) title. For Kaizen findings nobody read,
+        also an open Kaizen card about the same file: one leftover file once came back as four
+        cards worded by the Worker, the Kaizen loop and two Inspector findings (`contas` S-005).
+        Not once the Product Owner has `judged` the finding by meaning: two problems in the same
+        file are often different, and the file rule folded 16 of 34 tamagotchi findings into
+        cards about something else (S-060's duplicated loop into S-059's import cycle, 13.6)."""
         key = normalize_title(title)
         if not key:
             return None
-        files = file_tokens(f"{title} {text}") if origin == "kaizen" else set()
+        files = file_tokens(f"{title} {text}") if origin == "kaizen" and not judged else set()
         for row in self.ctx.store.list_stories(self.ctx.slug):
             if row["stage"] in TERMINAL:
                 continue
@@ -151,6 +156,7 @@ class Backlog:
         kind: str = "",
         extra: dict[str, Any] | None = None,
         after: str | None = None,
+        judged: bool = False,
     ) -> Admission:
         """Create a card in the backlog, or point at the open card that already says the same.
         `after` slots the new card right after that waiting card (`TOP`: first) without moving
@@ -158,7 +164,7 @@ class Backlog:
         title = clip(title, 120)
         if not title:
             raise BacklogError("uma história precisa de título")
-        dup = self.find_duplicate(title, origin=origin, text=description)
+        dup = self.find_duplicate(title, origin=origin, text=description, judged=judged)
         if dup:
             self.ctx.emit("backlog.duplicate", story_id=dup, agent=self.agent, title=title)
             return Admission(dup, created=False, duplicate_of=dup)
