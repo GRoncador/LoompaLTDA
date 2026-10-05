@@ -1377,6 +1377,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "fastembed" },
     { name = "httpx" },
     { name = "httpx2" },
     { name = "langgraph" },
@@ -1395,16 +1396,12 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "anthropic" },
-    { name = "fastembed" },
     { name = "faster-whisper" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
 ]
 anthropic = [
     { name = "anthropic" },
-]
-embeddings = [
-    { name = "fastembed" },
 ]
 trace = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
@@ -1432,7 +1429,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.30" },
     { name = "fastapi", specifier = ">=0.111" },
-    { name = "fastembed", marker = "extra == 'embeddings'", specifier = ">=0.3" },
+    { name = "fastembed", specifier = ">=0.3" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx2", specifier = ">=2.13" },

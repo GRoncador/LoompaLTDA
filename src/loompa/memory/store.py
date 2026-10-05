@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS memory_chunks (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_chunks_doc ON memory_chunks(doc_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+    text, tokenize = 'unicode61 remove_diacritics 2'
+);
 CREATE TABLE IF NOT EXISTS memory_docs (
     doc_id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -39,6 +42,82 @@ CREATE TABLE IF NOT EXISTS memory_docs (
     updated_at TEXT NOT NULL
 );
 """
+
+
+# Hybrid recall (plan 13.1): the vector ranking and a BM25 ranking over the same chunks, fused by
+# reciprocal rank. On 20 paraphrased questions over tamagotchi-retro's record, the right document
+# was in the top 5 for 11 with hashed n-grams alone, 12 with the multilingual MiniLM alone, 14
+# with hashed n-grams + BM25 and 16 with MiniLM + BM25 (`scripts/memory_recall_eval.py`).
+RRF_K = 60
+CANDIDATES = 50
+_WORD = re.compile(r"\w+", re.UNICODE)
+_STOPWORDS = frozenset(
+    [
+        "o",
+        "a",
+        "os",
+        "as",
+        "um",
+        "uma",
+        "uns",
+        "umas",
+        "de",
+        "do",
+        "da",
+        "dos",
+        "das",
+        "e",
+        "é",
+        "em",
+        "no",
+        "na",
+        "nos",
+        "nas",
+        "que",
+        "se",
+        "por",
+        "para",
+        "com",
+        "como",
+        "ao",
+        "à",
+        "aos",
+        "às",
+        "quando",
+        "qual",
+        "quais",
+        "onde",
+        "mais",
+        "sem",
+        "ou",
+        "the",
+        "of",
+        "an",
+        "to",
+        "and",
+        "is",
+        "in",
+        "on",
+        "for",
+        "with",
+        "by",
+        "be",
+        "it",
+        "this",
+        "that",
+        "from",
+        "as",
+        "at",
+        "or",
+        "not",
+    ]
+)
+
+
+def fts_query(text: str) -> str:
+    """Any of the query's words, each quoted (FTS5 syntax never comes from the query)."""
+    words = [w for w in _WORD.findall(text.lower()) if len(w) > 2 and w not in _STOPWORDS]
+    return " OR ".join(f'"{w}"' for w in dict.fromkeys(words))
 
 
 @dataclass
@@ -93,6 +172,19 @@ class MemoryStore:
         self._conn.executescript(SCHEMA)
         self._lock = threading.RLock()
         self._cache: tuple[np.ndarray, list[int]] | None = None
+        self._backfill_fts()
+
+    def _backfill_fts(self) -> None:
+        """A memory written before the lexical index gets it from the chunks it already has."""
+        with self._lock:
+            have = self._conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()[0]
+            if have or not self._conn.execute("SELECT 1 FROM memory_chunks LIMIT 1").fetchone():
+                return
+            self._conn.execute(
+                "INSERT INTO memory_fts (rowid, text) SELECT id, title || ' ' || text "
+                "FROM memory_chunks"
+            )
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -123,6 +215,7 @@ class MemoryStore:
                 return 0
             vecs = self.embedder.embed([f"{title}\n{c}" for c in chunks])
             now = datetime.now(UTC).isoformat()
+            self._forget_fts(doc_id)
             self._conn.execute("DELETE FROM memory_chunks WHERE doc_id = ?", (doc_id,))
             self._conn.executemany(
                 "INSERT INTO memory_chunks (doc_id, kind, title, chunk_index, text, metadata_json, embedding, content_hash, embedder, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -143,6 +236,11 @@ class MemoryStore:
                 ],
             )
             self._conn.execute(
+                "INSERT INTO memory_fts (rowid, text) SELECT id, title || ' ' || text "
+                "FROM memory_chunks WHERE doc_id = ?",
+                (doc_id,),
+            )
+            self._conn.execute(
                 "INSERT OR REPLACE INTO memory_docs (doc_id, kind, title, content_hash, updated_at) VALUES (?,?,?,?,?)",
                 (doc_id, kind, title, content_hash, now),
             )
@@ -150,8 +248,15 @@ class MemoryStore:
             self._cache = None
             return len(chunks)
 
+    def _forget_fts(self, doc_id: str) -> None:
+        self._conn.execute(
+            "DELETE FROM memory_fts WHERE rowid IN (SELECT id FROM memory_chunks WHERE doc_id = ?)",
+            (doc_id,),
+        )
+
     def delete_document(self, doc_id: str) -> None:
         with self._lock:
+            self._forget_fts(doc_id)
             self._conn.execute("DELETE FROM memory_chunks WHERE doc_id = ?", (doc_id,))
             self._conn.execute("DELETE FROM memory_docs WHERE doc_id = ?", (doc_id,))
             self._conn.commit()
@@ -216,23 +321,31 @@ class MemoryStore:
         kinds: tuple[str, ...] | None = None,
         min_score: float = 0.0,
     ) -> list[MemoryHit]:
+        """The chunks that best answer `query`: the vector and the BM25 rankings fused by
+        reciprocal rank. `score` is the cosine similarity, for display and `min_score`."""
         with self._lock:
             mat, ids = self._matrix()
             if not ids:
                 return []
-            q = self.embedder.embed([query])[0]
+            q = getattr(self.embedder, "embed_query", self.embedder.embed)([query])[0]
             scores = mat @ q
-            order = np.argsort(-scores)
+            row_of = {cid: i for i, cid in enumerate(ids)}
+            fused: dict[int, float] = {}
+            for rank, idx in enumerate(np.argsort(-scores)[:CANDIDATES]):
+                fused[ids[idx]] = 1 / (RRF_K + rank)
+            for rank, cid in enumerate(self._lexical(query)):
+                if cid in row_of:  # a chunk of another embedder waits for its reindex
+                    fused[cid] = fused.get(cid, 0.0) + 1 / (RRF_K + rank)
             hits: list[MemoryHit] = []
-            for idx in order:
+            for cid in sorted(fused, key=lambda c: -fused[c]):
                 if len(hits) >= top_k:
                     break
-                score = float(scores[idx])
+                score = float(scores[row_of[cid]])
                 if score < min_score:
-                    break
+                    continue
                 row = self._conn.execute(
                     "SELECT doc_id, kind, title, chunk_index, text, metadata_json FROM memory_chunks WHERE id = ?",
-                    (ids[idx],),
+                    (cid,),
                 ).fetchone()
                 if row is None or (kinds and row[1] not in kinds):
                     continue
@@ -243,6 +356,22 @@ class MemoryStore:
                     )
                 )
             return hits
+
+    def _lexical(self, query: str) -> list[int]:
+        match = fts_query(query)
+        if not match:
+            return []
+        try:
+            return [
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT rowid FROM memory_fts WHERE memory_fts MATCH ? "
+                    "ORDER BY bm25(memory_fts) LIMIT ?",
+                    (match, CANDIDATES),
+                )
+            ]
+        except sqlite3.OperationalError:  # an FTS5 build without bm25, or a malformed query
+            return []
 
     def recall(
         self,

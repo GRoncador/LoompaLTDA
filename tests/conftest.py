@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from loompa.config import ConfigStore, default_config
+from loompa.memory.embedders import HASH_ONLY_ENV
 
 # Cheapest sensible model per provider for the live smoke test.
 LIVE_DEFAULT_MODEL = {
@@ -126,6 +127,13 @@ def isolated_loompa_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Story worktrees live under the hub (`~/.loompa/worktrees`): no test may create them in
     the real one. The `hub` fixture narrows this further to its own folder."""
     monkeypatch.setenv("LOOMPA_HOME", str(tmp_path / "loompa-home"))
+
+
+@pytest.fixture(autouse=True)
+def hashed_memory(monkeypatch: pytest.MonkeyPatch):
+    """The real embedder downloads a 220 MB model on first use (plan 13.1): tests never touch
+    the network, and the memory's behaviour is the same with hashed n-grams."""
+    monkeypatch.setenv(HASH_ONLY_ENV, "1")
 
 
 @pytest.fixture(autouse=True)

@@ -629,8 +629,13 @@ class QualityConfig(BaseModel):
     require_spec_before_code: bool = True
 
 
+# Multilingual (the founder's documents are pt-BR), 220 MB, 384 dimensions; with the BM25 ranking it
+# found the right document for 16 of 20 questions against 11 with hashed n-grams (plan 13.1).
+DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
 class MemoryConfig(BaseModel):
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL
     chunk_size: int = Field(800, ge=100)
     top_k: int = Field(6, ge=1)
 
@@ -676,7 +681,7 @@ RETIRED_PROVIDERS: tuple[str, ...] = ("groq",)
 
 # Bumped when a default changes in a way an existing config.yaml must pick up (every save writes
 # the whole config, so an old default would otherwise stay forever); see config/store.py.
-CONFIG_REVISION = 4
+CONFIG_REVISION = 5
 
 
 class LoompaConfig(BaseModel):

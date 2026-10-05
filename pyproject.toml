@@ -33,10 +33,13 @@ dependencies = [
     # The client is written against the 2.x API (`mcp.Client`, httpx2 transport); 1.x lacks both.
     "mcp>=2.2,<3",
     "httpx2>=2.13",
+    # organizational memory's embedder (plan 13.1): without it every factory fell back to hashed
+    # n-grams, which match letters, not meaning
+    "fastembed>=0.3",
 ]
 
 [project.optional-dependencies]
-embeddings = ["fastembed>=0.3"]
+embeddings = []  # kept so `loompa-core[embeddings]` still installs; fastembed is a core dependency
 voice = ["faster-whisper>=1.0"]
 anthropic = ["anthropic>=0.30"]
 # export the per-story trace by OTLP (Phoenix, Langfuse…); off until `trace.otlp.endpoint` is set

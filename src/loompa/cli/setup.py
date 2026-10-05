@@ -186,6 +186,27 @@ def _check_trace_export(f: Factory) -> None:
     console.print(f"[green]✓[/green] Rastro também enviado por OTLP para {endpoint}.")
 
 
+def _check_memory(f: Factory) -> None:
+    """The organizational memory's embedder (plan 13.1): every factory ran on hashed n-grams for
+    weeks because the real one was never installed, and nothing said so. Never blocking."""
+    from loompa.memory import get_embedder
+
+    model = f.config.memory.embedding_model
+    with console.status("Carregando o modelo da memória (a primeira vez baixa ~220 MB)…"):
+        emb = get_embedder(model)
+    if emb.name == model:
+        console.print(f"[green]✓[/green] Memória da fábrica: {model}.")
+        return
+    console.print(
+        "[yellow]![/yellow] Memória da fábrica: o modelo de busca por sentido não carregou; "
+        "ela segue funcionando, mas compara letras em vez de sentido. "
+        "Confira a conexão (o primeiro uso baixa o modelo) e rode [bold]uv tool upgrade "
+        "loompa-core[/bold]."
+    )
+    if getattr(emb, "fallback_reason", ""):
+        console.print(f"[dim]  motivo: {emb.fallback_reason}[/dim]")
+
+
 @app.command()
 def doctor(
     factory: str | None = typer.Option(None, "--factory", "-f"),
@@ -204,6 +225,7 @@ def doctor(
                 probes[r.name] = (r.ok, r.detail)
     print_checklist(services, console, probes)
     _check_trace_export(f)
+    _check_memory(f)
     failing = [
         s
         for s in services

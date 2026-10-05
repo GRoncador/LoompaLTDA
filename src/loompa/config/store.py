@@ -90,6 +90,10 @@ def _upgrade(data: dict) -> dict:
         schedule = data.get("schedule")
         if isinstance(schedule, dict) and schedule.get("effort_ab_low_share") == 0.5:
             del schedule["effort_ab_low_share"]
+    if int(data.get("revision") or 0) < 5:  # 2026-10-05: English-only embedder (plan 13.1)
+        memory = data.get("memory")
+        if isinstance(memory, dict) and memory.get("embedding_model") == "BAAI/bge-small-en-v1.5":
+            del memory["embedding_model"]
     data["revision"] = max(int(data.get("revision") or 0), CONFIG_REVISION)
     return data
 

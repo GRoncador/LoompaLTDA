@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -25,6 +27,7 @@ class HashEmbedder:
 
     def __init__(self, dim: int = 384):
         self.dim = dim
+        self.fallback_reason = ""
 
     def _features(self, text: str) -> list[str]:
         toks = [t.lower() for t in _TOKEN.findall(text)]
@@ -49,25 +52,52 @@ class HashEmbedder:
         return out
 
 
+# Set to use hashed n-grams whatever the configuration says (the test suite: no download).
+HASH_ONLY_ENV = "LOOMPA_MEMORY_HASH_ONLY"
+
+
+def model_cache_dir() -> Path:
+    """Where embedding models are kept: the hub, never the system temp folder, which the OS
+    empties (fastembed's default re-downloaded the model after every reboot)."""
+    home = os.environ.get("LOOMPA_HOME")
+    return (Path(home) if home else Path.home() / ".loompa") / "models"
+
+
 class FastEmbedEmbedder:
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, *, cache_dir: Path | None = None):
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")  # not in the engine's log
         from fastembed import TextEmbedding  # type: ignore[import-not-found]
 
-        self._model = TextEmbedding(model_name=model_name)
+        self._model = TextEmbedding(
+            model_name=model_name, cache_dir=str(cache_dir or model_cache_dir())
+        )
         self.name = model_name
         self.dim = len(next(iter(self._model.embed(["dim probe"]))))
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        vecs = np.asarray(list(self._model.embed(texts)), dtype=np.float32)
-        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-        norms[norms == 0] = 1
-        return vecs / norms
+        """Documents. Models trained with prefixes ("passage: ", "query: ") get theirs."""
+        return _unit(self._model.passage_embed(texts))
+
+    def embed_query(self, texts: list[str]) -> np.ndarray:
+        return _unit(self._model.query_embed(texts))
+
+
+def _unit(vectors) -> np.ndarray:
+    vecs = np.asarray(list(vectors), dtype=np.float32)
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    return vecs / norms
 
 
 def get_embedder(model_name: str | None = None, *, prefer_local_hash: bool = False) -> Embedder:
-    if not prefer_local_hash and model_name:
+    """The configured model, or hashed n-grams when it cannot load (no network for the first
+    download, a broken install): memory is best-effort and never stops the factory. The fallback
+    says why in `fallback_reason`, which `loompa doctor` shows."""
+    if not prefer_local_hash and model_name and not os.environ.get(HASH_ONLY_ENV):
         try:
             return FastEmbedEmbedder(model_name)
-        except Exception:  # noqa: BLE001 - fastembed missing or model download failed
-            pass
+        except Exception as exc:  # noqa: BLE001 - fastembed missing or model download failed
+            fallback = HashEmbedder()
+            fallback.fallback_reason = f"{type(exc).__name__}: {exc}"[:300]
+            return fallback
     return HashEmbedder()
