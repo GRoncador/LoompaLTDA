@@ -77,7 +77,7 @@ Considered and rejected: dropping `plan` for SIMPLE. `plan` is not a document st
 `state.allowed_paths` (the only paths the Worker may touch) and `tasks.md`. Removing it would leave
 a story with no fence and no task list. What a simple story overpays for is the artifact's
 ceremony (alternatives, impact, rollback, ADR proposal), and that is a separate change to the
-prompt, not to the route.
+prompt, not to the route — made in ADR-0028.
 
 ## Consequences
 

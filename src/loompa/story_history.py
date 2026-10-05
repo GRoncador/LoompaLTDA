@@ -41,6 +41,7 @@ EVENTS = (
     "spec.reviewed",
     "plan.checked",
     "story.integrated",
+    "plan.not_simple",
     "plan.reviewed",
     "inspector.verdict",
     "story.escalated",
@@ -156,6 +157,9 @@ def summarize(
     if node == "node_plan":
         if asked:
             return "O plano parou numa dúvida para você."
+        if _first(evs, "plan.not_simple"):
+            # the short form was not enough: the story is being planned again, in full (ADR-0028)
+            return "A história é maior do que parecia: o plano está sendo refeito por inteiro."
         return f"Plano com {_plural(total, 'tarefa', 'tarefas')}."
     if node == "node_plan_review":
         # counts only: what the checks found names files and criterion numbers (ADR-0026), and

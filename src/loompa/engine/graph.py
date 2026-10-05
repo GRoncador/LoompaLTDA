@@ -29,7 +29,7 @@ from loompa.agents import (
     ProductOwnerAgent,
     WorkerAgent,
 )
-from loompa.agents.architect import REPLANNED_KEY
+from loompa.agents.architect import FULL_PLAN_KEY, LEAN_KEY, REPLANNED_KEY
 from loompa.agents.base import AgentResult
 from loompa.agents.inspector import test_origin
 from loompa.agents.product_owner import CRITERIA_ALIGNED_KEY, CRITERIA_REVIEW_KEY
@@ -424,6 +424,15 @@ async def node_plan(ctx: EngineContext, state: StoryState) -> StoryState:
     if not res.ok and state.handoff.get("plan"):
         state.spec_review_rounds = 0  # the rewritten spec gets its own review
         return goto(state, "spec")
+    lean = state.extra.pop(LEAN_KEY, False)
+    if lean and (state.extra.get(FULL_PLAN_KEY) or needs_preflight(state.allowed_paths)):
+        # the short form left out exactly what this plan needs: the impact on what uses the code
+        # it changes, the rollback of a schema or a contract, the constitution it has to argue
+        # with. The story is planned again, in full, over the same spec (ADR-0028).
+        why = state.extra.get(FULL_PLAN_KEY) or "o plano toca schema, migração ou contrato"
+        state.extra[FULL_PLAN_KEY] = why
+        ctx.emit("plan.not_simple", story_id=state.story_id, why=why)
+        return goto(state, "plan")
     if (
         state.autonomy != Autonomy.PREFLIGHT
         and ctx.config.schedule.autonomy == "auto"
