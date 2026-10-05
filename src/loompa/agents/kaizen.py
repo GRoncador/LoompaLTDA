@@ -14,7 +14,7 @@ from loompa.agents.base import LoompaAgent
 from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.backlog import TRIAGE_KEY, Triage
 from loompa.engine.state import Stage, StoryState
-from loompa.sprints import SprintBoard
+from loompa.sprints import SprintBoard, SprintStatus
 
 KIND_LABEL = {
     "bug": "Bug colateral",
@@ -167,6 +167,8 @@ class KaizenAgent(LoompaAgent):
             if d.chosen
         }
         board = SprintBoard(self.ctx.store, self.ctx.slug)
+        own = board.sprint_of(state.story_id)
+        running = own.id if own is not None and own.status == SprintStatus.RUNNING else ""
         cards = []
         for sid in state.finding_cards:
             row = self.ctx.store.get_story(sid)
@@ -180,6 +182,7 @@ class KaizenAgent(LoompaAgent):
                     "title": row["title"],
                     "detail": (row["description"] or "").split("\n\n")[0],
                     "priority": row["priority"],
+                    "sprint": running,  # the sprint it may join; never the next one
                 }
             )
         return cards

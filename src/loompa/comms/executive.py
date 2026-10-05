@@ -255,21 +255,30 @@ def compose_decision_message(
     )
 
 
-CARD_OPTIONS = ("sprint", "backlog", "drop")
+CARD_OPTIONS = ("backlog", "sprint", "drop")
 
 
 def card_decision(card: dict) -> Decision:
-    """The founder's choice about one suggested card (a finding raised while delivering)."""
-    urgent = int(card.get("priority") or 500) <= 250  # bugs come in at 250
+    """The founder's choice about one suggested card (a finding raised while delivering).
+
+    The next sprint is the Sprint Meeting's call (ADR-0018), so a finding never offers it: it
+    goes to the backlog (the default), is dropped or, when the story that raised it belongs to
+    the running sprint (`card["sprint"]`), joins that sprint. Joining is recommended only for a
+    collateral bug of this work; anything broader is better weighed with the rest of the backlog.
+    """
+    sprint = str(card.get("sprint") or "")
+    urgent = bool(sprint) and int(card.get("priority") or 500) <= 250  # bugs come in at 250
+    options = [Option(key="backlog", label="Enviar ao backlog", recommended=not urgent)]
+    if sprint:
+        options.append(
+            Option(key="sprint", label=f"Incluir neste sprint ({sprint})", recommended=urgent)
+        )
+    options.append(Option(key="drop", label="Ignorar"))
     return Decision(
         id=str(card["id"]),
         title=sanitize_for_founder(f"Achado: {card.get('title', '')}", max_chars=160),
         context=sanitize_for_founder(str(card.get("detail") or ""), max_chars=300),
-        options=[
-            Option(key="sprint", label="Incluir no próximo sprint", recommended=urgent),
-            Option(key="backlog", label="Manter no backlog", recommended=not urgent),
-            Option(key="drop", label="Descartar"),
-        ],
+        options=options,
     )
 
 

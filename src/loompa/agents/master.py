@@ -1019,7 +1019,7 @@ class MasterAgent(LoompaAgent):
         if findings:
             lines.append(
                 f"Achados aguardando um sprint no backlog: {len(findings)}. "
-                "Decida na próxima entrega ou ao montar o próximo sprint."
+                "Eles entram num sprint pela reunião de sprint."
             )
         for tip in self.ctx.tracker.suggestions()[:2]:
             lines.append(f"Dica de custo: {sanitize_for_founder(tip, max_chars=200)}")

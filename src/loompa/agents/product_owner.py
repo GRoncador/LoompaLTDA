@@ -458,17 +458,23 @@ class ProductOwnerAgent(LoompaAgent):
         return self.backlog.admit(story_id)
 
     def resolve_finding(self, story_id: str, choice: str) -> bool:
-        """Apply the founder's decision on a suggested card: `sprint` puts it in the sprint
-        being planned, `backlog` leaves it where it is, `drop` cancels it. Returns False when the
-        card is no longer waiting in the backlog (someone already decided)."""
+        """Apply the founder's decision on a suggested card: `sprint` puts it in the running
+        sprint and starts it there (never in the next one: that is the Sprint Meeting's call),
+        `backlog` leaves it where it is, `drop` cancels it. Returns False when the card is no
+        longer waiting in the backlog (someone already decided) or no sprint is running."""
         row = self.ctx.store.get_story(story_id)
         if row is None or row["stage"] != Stage.BACKLOG:
             return False
         if choice == "sprint":
+            board = SprintBoard(self.ctx.store, self.ctx.slug)
+            running = board.running()
+            if running is None:  # the sprint ended meanwhile: the card stays in the backlog
+                return False
             try:
-                SprintBoard(self.ctx.store, self.ctx.slug).add(story_id)
+                board.add(story_id, running.id)
             except SprintError:  # already in a sprint: nothing to plan
                 return False
+            self.admit(story_id)
         elif choice == "drop":
             self.set_status(story_id, Stage.CANCELLED)
         elif choice != "backlog":

@@ -203,7 +203,7 @@ def test_index_without_bundle(client: TestClient):
     assert client.get("/api/nope").status_code == 404
 
 
-def test_reply_carries_decisions_and_sprints_are_listed(client: TestClient):
+def test_reply_carries_decisions(client: TestClient):
     from loompa.agents import ProductOwnerAgent
     from loompa.comms import FounderMessage, MessageKind, card_decision
 
@@ -219,18 +219,17 @@ def test_reply_carries_decisions_and_sprints_are_listed(client: TestClient):
     )
     pending = client.get("/api/factories/demo-hq/inbox").json()
     assert [d["id"] for d in pending[0]["decisions"]] == [card]
-    # only the card is decided: the message stays pending, the card lands in the sprint draft
+    # only the card is decided: the message stays pending, the card stays in the backlog
     r = client.post(
-        f"/api/factories/demo-hq/inbox/{msg.id}/reply", json={"decisions": {card: "sprint"}}
+        f"/api/factories/demo-hq/inbox/{msg.id}/reply", json={"decisions": {card: "backlog"}}
     )
     assert r.status_code == 200 and r.json()["story_id"] is None
     assert (
-        client.get("/api/factories/demo-hq/inbox").json()[0]["decisions"][0]["chosen"] == "sprint"
+        client.get("/api/factories/demo-hq/inbox").json()[0]["decisions"][0]["chosen"] == "backlog"
     )
-    sprints = client.get("/api/factories/demo-hq/sprints").json()
-    assert sprints[0]["status"] == "open" and sprints[0]["story_ids"] == [card]
-    ov = client.get("/api/factories/demo-hq/overview").json()
-    assert ov["sprint"]["id"] == "SP-001" and ov["sprint"]["progress"]["total"] == 1
+    # no sprint is running, so the card is not offered one, and the next is never planned here
+    assert [o["key"] for o in pending[0]["decisions"][0]["options"]] == ["backlog", "drop"]
+    assert client.get("/api/factories/demo-hq/sprints").json() == []
 
 
 def test_models_sync_endpoints(client: TestClient, monkeypatch):

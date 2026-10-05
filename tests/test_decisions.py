@@ -8,12 +8,13 @@ import pytest
 
 from loompa.agents import MasterAgent
 from loompa.agents.dryrun import dry_run_script, role_of
+from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.comms import FounderAnswer, MessageStatus, compose_delivery_message
 from loompa.engine import Scheduler, Stage, load_state
 from loompa.factory import Factory
 from loompa.llm import Message, ToolCall
 from loompa.sprints import SprintBoard
-from test_engine import factory, make_ctx, seed_story, tool_results  # noqa: F401
+from test_engine import factory, make_ctx, tool_results  # noqa: F401
 
 
 def finder(model: str, messages: list[Message], tools: Any) -> Any:
@@ -50,7 +51,8 @@ def finder(model: str, messages: list[Message], tools: Any) -> Any:
 
 async def deliver(factory: Factory):
     ctx = make_ctx(factory, finder)
-    sid = seed_story(ctx, "Cadastro")
+    sid = ProductOwnerAgent(ctx).add_item("Cadastro").story_id
+    MasterAgent(ctx).start_sprint([sid])  # findings may join only the running sprint
     await Scheduler(ctx).run()
     state = load_state(ctx, sid)
     assert state.blocked_reason == "delivery"
@@ -64,8 +66,9 @@ async def test_delivery_offers_each_finding_as_its_own_decision(factory: Factory
     assert [d.id for d in msg.decisions] == [bug, debt]
     assert msg.executive_audit() == [] and [o.key for o in msg.options] == ["approve", "changes"]
     by_id = {d.id: d for d in msg.decisions}
-    assert [o.key for o in by_id[bug].options] == ["sprint", "backlog", "drop"]
-    assert next(o for o in by_id[bug].options if o.recommended).key == "sprint"  # bugs: urgent
+    assert [o.key for o in by_id[bug].options] == ["backlog", "sprint", "drop"]
+    assert by_id[bug].options[1].label == "Incluir neste sprint (SP-001)"  # never the next one
+    assert next(o for o in by_id[bug].options if o.recommended).key == "sprint"  # collateral bug
     assert next(o for o in by_id[debt].options if o.recommended).key == "backlog"
     assert by_id[bug].title.startswith("Achado: [Bug colateral]")
     await ctx.aclose()
@@ -79,9 +82,10 @@ async def test_one_answer_settles_the_delivery_and_every_card(factory: Factory):
     )
     assert answered.stage == Stage.DONE  # the delivery itself
     assert ctx.store.get_story(debt)["stage"] == Stage.CANCELLED
-    assert ctx.store.get_story(bug)["stage"] == Stage.BACKLOG  # planned, not started
-    draft = SprintBoard(ctx.store, factory.slug).open_sprint()
-    assert draft is not None and draft.story_ids == [bug]
+    assert ctx.store.get_story(bug)["stage"] == Stage.SPEC  # joined the running sprint
+    board = SprintBoard(ctx.store, factory.slug)
+    assert board.open_sprint() is None  # the next sprint is the Sprint Meeting's call
+    assert board.running().story_ids == [sid, bug]
     stored = ctx.store.get_message(msg.id)
     assert stored.status == MessageStatus.ANSWERED
     assert {d.id: d.chosen for d in stored.decisions} == {bug: "sprint", debt: "drop"}
@@ -91,9 +95,6 @@ async def test_one_answer_settles_the_delivery_and_every_card(factory: Factory):
         "sprint",
         "drop",
     }
-    # the finding planned into the sprint runs when the founder starts it
-    sprint = MasterAgent(ctx).start_sprint()
-    assert sprint.story_ids == [bug] and ctx.store.get_story(bug)["stage"] == Stage.SPEC
     await ctx.aclose()
 
 
@@ -111,7 +112,7 @@ async def test_answering_only_the_cards_leaves_the_delivery_pending(factory: Fac
     )
     assert done.stage == Stage.DONE
     assert ctx.store.get_story(bug)["stage"] == Stage.BACKLOG  # already decided: not overruled
-    assert SprintBoard(ctx.store, factory.slug).open_sprint().story_ids == [debt]
+    assert SprintBoard(ctx.store, factory.slug).running().story_ids == [sid, debt]
     await ctx.aclose()
 
 
@@ -145,6 +146,19 @@ async def test_a_decided_card_is_not_asked_again_on_the_next_delivery(factory: F
     assert second.id != msg.id
     assert [d.id for d in second.decisions] == [debt]  # only what is still undecided
     await ctx.aclose()
+
+
+def test_a_finding_outside_a_running_sprint_goes_to_the_backlog_or_is_ignored():
+    msg = compose_delivery_message(
+        factory="f",
+        story_id="S-1",
+        story_title="X",
+        summary="ok",
+        cards=[{"id": "S-2", "title": "Bug", "detail": "d", "priority": 250, "sprint": ""}],
+    )
+    (decision,) = msg.decisions
+    assert [o.key for o in decision.options] == ["backlog", "drop"]
+    assert decision.options[0].recommended and decision.options[0].label == "Enviar ao backlog"
 
 
 def test_delivery_without_findings_has_no_decisions():

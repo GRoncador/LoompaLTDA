@@ -421,8 +421,8 @@ class Scheduler:
             choice = answer.decisions.get(decision.id)
             if not choice or decision.chosen or choice not in {o.key for o in decision.options}:
                 continue
-            po.resolve_finding(decision.id, choice)
-            decision.chosen = choice
+            if po.resolve_finding(decision.id, choice):  # e.g. the sprint ended meanwhile
+                decision.chosen = choice
 
     async def _apply_answer(self, message_id: str, answer: FounderAnswer) -> StoryState | None:
         msg = self.ctx.store.get_message(message_id)

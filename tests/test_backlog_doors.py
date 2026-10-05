@@ -487,22 +487,16 @@ async def test_a_proposal_that_fails_leaves_the_draft_and_says_so(factory: Facto
     await ctx.aclose()
 
 
-async def test_a_meeting_sees_what_the_inbox_planned_and_can_leave_it_out(factory: Factory):
+def test_the_inbox_never_plans_the_next_sprint(factory: Factory):
+    """A finding joins only the running sprint; the next one is the Sprint Meeting's call."""
     ctx = make_ctx(factory, dry_run=True)
     po = ProductOwnerAgent(ctx)
     finding = po.add_item("[Débito técnico] limpar", origin="kaizen").story_id
-    po.resolve_finding(finding, "sprint")  # the founder said "sprint" on a delivery
-    chats = Conversations(ctx)
-    conv = chats.open(ConversationKind.MEETING)
-    assert [(i.key, i.in_sprint) for i in conv.draft.items] == [(finding, True)]
-    await chats.say(conv.id, "Login")
-    chats.edit(conv.id, [{"op": "update", "ref": finding, "in_sprint": False}])
-    await chats.propose(conv.id)
-    result = await chats.commit(conv.id, start_sprint=True)
-    sprint = SprintBoard(ctx.store, ctx.slug).get(result.sprint_id)
-    assert finding not in sprint.story_ids  # left out in the meeting, it was not dispatched
+    assert po.resolve_finding(finding, "sprint") is False  # no sprint running
+    board = SprintBoard(ctx.store, ctx.slug)
+    assert board.sprint_of(finding) is None and board.open_sprint() is None
     assert ctx.store.get_story(finding)["stage"] == Stage.BACKLOG
-    await ctx.aclose()
+    ctx.close()
 
 
 def test_the_cli_keeps_an_unreviewed_start(factory: Factory):
