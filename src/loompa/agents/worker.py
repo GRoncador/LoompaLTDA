@@ -46,10 +46,12 @@ How to work:
    why: the Architect reviews the plan once before the founder is asked.
    When you fix a failure, the `reason` of your first edit states the root cause you found, not the
    symptom.
-   Write the fewest tests that prove the task: one per criterion it covers, an edge case only where
-   the task or the criterion names it, in the test file the task names (a new one when it says
-   so). Never paste the current code's data into a test as the expected value, and do not test how
-   the page looks by parsing the stylesheet: the factory renders the page in a browser for that.
+   Test behaviour, by risk, in the test file the task names (a new one when it says so): what the
+   task's criteria ask, plus the limits and error paths of the code you changed (empty, zero, the
+   maximum and one past it, invalid input). Leave out the same path repeated with other values, an
+   implementation detail pinned (an exact pixel, the stylesheet's text) and the current code's
+   data pasted in as the expected value: they break on the next legitimate change and catch no
+   bug. How the page looks is checked by the factory in a browser.
 3. Each write reports syntax errors and undefined names at once, under `[quick check]`: fix those
    first. Then run `run_tests` (and `run_lint` when configured) until they pass. For mechanical lint
    findings (import order, spacing, formatting) call `fix_lint` instead of editing by hand.

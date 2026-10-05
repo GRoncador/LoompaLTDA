@@ -390,5 +390,6 @@ def test_ratio(files: list[_FileDiff]) -> dict[str, str] | None:
         "severity": "low",
         "file": where,
         "text": f"{tests} lines of tests for {product} lines of product change (over "
-        f"{TEST_RATIO_MAX}x): one test per criterion is enough",
+        f"{TEST_RATIO_MAX}x): test the behaviour and its limits, not the same path again or "
+        "details of the implementation",
     }

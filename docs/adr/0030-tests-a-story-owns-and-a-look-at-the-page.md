@@ -42,14 +42,27 @@ like the other plan problems (ADR-0026). The check now runs against the story's 
 than the main checkout: a story built on an unmerged delivery plans against that delivery's files
 (ADR-0027).
 
-### 2. Tests in proportion to the change
+### 2. Tests in proportion to the change: behaviour by risk, never the implementation
 
-- **Prompts.** The plan prompts ask for one test per acceptance criterion, an edge case only where
-  the criterion names it, and never a copy of the current code's data as the expected value. The
-  Worker's prompt asks for "the fewest tests that prove the task", and not to test appearance by
-  parsing the stylesheet.
+- **Prompts.** The plan prompts and the Worker's prompt ask for tests of behaviour, chosen by
+  risk:
+  - **In:** each acceptance criterion, plus the limits and error paths of the code the story
+    changes (empty, zero, the maximum and one past it, invalid input). Edge cases are where bugs
+    live: `contas` lost rounds to an OFX code read wrongly and to "12.50" with a point.
+  - **Out:** the same path repeated with other values; an implementation detail pinned (an exact
+    pixel, the stylesheet's text), which Google's testing guidance calls a change-detector test;
+    and a copy of the current code's data as the expected value (S-053 embedded the whole "before"
+    sprite grids). These break on the next legitimate change and catch no bug: the tests pinning
+    the pet's pixels broke when S-048 resized it, and left an obsolete-comment card (S-051) behind.
+
+  How the page looks is left to the browser smoke (decision 3).
+
+  *Revised the same day.* The first wording said "an edge case only where the criterion names
+  it". That threw away the tests that find bugs. The SP-008 bloat was never edge cases; it was the
+  three kinds above.
 - **Finding.** `hygiene.test_ratio` adds a low-severity finding when the tests added pass 150 lines
-  and 5 times the product lines. Product counts CSS, HTML, Vue and Svelte too, since a web story's
+  and 5 times the product lines. Its text points at the same distinction: behaviour and its limits,
+  not the same path again or implementation details. Product counts CSS, HTML, Vue and Svelte too, since a web story's
   whole change can be style. Low severity makes the verdict CONCERNS but files no Kaizen card: it
   is a signal for the sprint, not a reason to fail a delivery.
 

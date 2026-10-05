@@ -47,10 +47,13 @@ Plan in this order:
    named after what it tests and so the test runner finds it (`tests/casca-retorno.test.js`),
    never appended to an existing test file; an existing one changes only where its own tests
    change. Why: parallel stories appending to the same file conflicted at every merge, and the
-   Worker re-reads a long file on every task. Keep tests proportional to the change: one test per
-   acceptance criterion, an edge case only where the criterion names it, and never a copy of the
-   current code's data as the expected value (tamagotchi S-053 wrote 689 test lines for 20 lines
-   of code). How the page looks (layout, size, position) is checked by the factory's browser
+   Worker re-reads a long file on every task. Test behaviour, by risk: each acceptance criterion,
+   plus the limits and the error paths of the code the story changes (empty, zero, the maximum and
+   one past it, invalid input) — that is where bugs live (an OFX code read wrongly, "12.50" with a
+   point). Leave out what costs and protects nothing: the same path repeated with other values, an
+   implementation detail pinned (an exact pixel, the stylesheet's text) and a copy of the current
+   code's data as the expected value. Tamagotchi S-053 wrote 689 test lines for 20 lines of code,
+   and the tests pinning the pet's pixels broke on the next legitimate change. How the page looks (layout, size, position) is checked by the factory's browser
    smoke, which renders it at desktop width and at 390 px, flags sideways scrolling, elements
    sticking out of their box and drawings cut at a canvas edge, and sends the founder the
    screenshots: trace such a criterion to that check plus at most one test of the markup or style
@@ -103,10 +106,13 @@ Plan in this order:
    named after what it tests and so the test runner finds it (`tests/casca-retorno.test.js`),
    never appended to an existing test file; an existing one changes only where its own tests
    change. Why: parallel stories appending to the same file conflicted at every merge, and the
-   Worker re-reads a long file on every task. Keep tests proportional to the change: one test per
-   acceptance criterion, an edge case only where the criterion names it, and never a copy of the
-   current code's data as the expected value (tamagotchi S-053 wrote 689 test lines for 20 lines
-   of code). How the page looks (layout, size, position) is checked by the factory's browser
+   Worker re-reads a long file on every task. Test behaviour, by risk: each acceptance criterion,
+   plus the limits and the error paths of the code the story changes (empty, zero, the maximum and
+   one past it, invalid input) — that is where bugs live (an OFX code read wrongly, "12.50" with a
+   point). Leave out what costs and protects nothing: the same path repeated with other values, an
+   implementation detail pinned (an exact pixel, the stylesheet's text) and a copy of the current
+   code's data as the expected value. Tamagotchi S-053 wrote 689 test lines for 20 lines of code,
+   and the tests pinning the pet's pixels broke on the next legitimate change. How the page looks (layout, size, position) is checked by the factory's browser
    smoke, which renders it at desktop width and at 390 px, flags sideways scrolling, elements
    sticking out of their box and drawings cut at a canvas edge, and sends the founder the
    screenshots: trace such a criterion to that check plus at most one test of the markup or style

@@ -107,9 +107,14 @@ def test_the_plan_prompts_ask_for_a_test_file_per_story_and_proportional_tests()
 
     for prompt in (SYSTEM, SIMPLE_SYSTEM):
         text = " ".join(prompt.split())
-        assert "new test file of its own" in text and "one test per acceptance criterion" in text
-        assert "390 px" in text and "Respond with JSON only" in text
-    assert "fewest tests" in " ".join(WORKER.split())
+        assert "new test file of its own" in text and "390 px" in text
+        # edge cases stay (limits and error paths); what goes is what pins the implementation
+        assert (
+            "the limits and the error paths" in text and "an implementation detail pinned" in text
+        )
+        assert "Respond with JSON only" in text
+    worker = " ".join(WORKER.split())
+    assert "limits and error paths" in worker and "an implementation detail pinned" in worker
 
 
 def test_a_plan_bigger_than_its_label_raises_a_signal(tmp_path: Path):
