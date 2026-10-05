@@ -1091,7 +1091,20 @@ async def climb(
             # test). Once per story, the Architect re-plans with the failures in hand.
             state.extra[REPLANNED_KEY] = True
             state.plan_review_rounds = 0  # the re-plan gets its own gate round (ADR-0026)
-            ctx.emit("story.replanned", story_id=state.story_id)
+            # and a clean branch: the new plan is not built on the old plan's commits (12.1)
+            kept = ""
+            if (wt := ctx.worktrees.get(state.story_id)) is not None:
+                try:
+                    kept = ctx.worktrees.as_role("deployer").keep_attempt_and_reset(
+                        wt, f"{state.story_id}-{state.attempts_tier2}"
+                    )
+                except GitError as exc:
+                    ctx.emit("story.reset_failed", story_id=state.story_id, error=str(exc)[:200])
+            if kept:
+                state.commits = []
+                state.tasks_done = []
+                state.extra.pop("baseline", None)
+            ctx.emit("story.replanned", story_id=state.story_id, kept=kept or None)
             return goto(state, "plan")
         return goto(state, "dev")
     state.attempts_tier1 += 1

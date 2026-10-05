@@ -409,3 +409,19 @@ def test_a_story_branch_never_carries_the_factory_records(git_repo):
     (git_repo / ".loompa" / "specs" / "S-001" / "tasks.md").write_text("- [ ] T1\n")  # main's copy
     wm.as_role("deployer").merge_into_base(wt)
     assert (git_repo / "app.py").read_text() == "x = 1\n"
+
+
+def test_a_replan_starts_from_a_clean_branch_and_keeps_the_attempt(git_repo):
+    """12.1, S-061: the second plan was built on the first plan's commits and leftover tests."""
+    from loompa.worktrees import WorktreeManager
+
+    wm = WorktreeManager(git_repo)
+    wt = wm.create("S-001", title="tentativa")
+    (wt.path / "velho.py").write_text("x = 1\n")
+    wm.commit_all(wt, "feat: primeira tentativa")
+    attempt = wm.git("rev-parse", "HEAD", cwd=wt.path)
+    ref = wm.as_role("deployer").keep_attempt_and_reset(wt, "S-001-2")
+    assert ref == "refs/loompa/attempts/S-001-2"
+    assert wm.git("rev-parse", ref, cwd=wt.path) == attempt  # kept for analysis
+    assert not (wt.path / "velho.py").exists()
+    assert wm.as_role("deployer").keep_attempt_and_reset(wt, "S-001-3") == ""  # nothing new

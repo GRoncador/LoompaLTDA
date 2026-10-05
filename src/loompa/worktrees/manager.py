@@ -648,6 +648,22 @@ class WorktreeManager:
                 names.add(line[3:].split(" -> ")[-1].strip('"'))
         return sorted(n for n in names if n.strip() and not n.startswith(".loompa/"))
 
+    def keep_attempt_and_reset(self, wt: Worktree, label: str) -> str:
+        """Put a story's branch back where it left the base, keeping the attempt so far under
+        `refs/loompa/attempts/<label>` for analysis. A re-plan starts from a clean branch: S-061's
+        second plan was built on the first plan's commits and leftover tests (12.1). Deployer
+        only. Returns the kept ref ("" when the branch had nothing of its own)."""
+        self._require_deployer("git reset")
+        head = self.git("rev-parse", "HEAD", cwd=wt.path)
+        fork = self.git("merge-base", "HEAD", wt.base, cwd=wt.path)
+        if head == fork:
+            return ""
+        ref = f"refs/loompa/attempts/{label}"
+        self.git("update-ref", ref, head, cwd=wt.path)
+        self.git("reset", "--hard", "-q", fork, cwd=wt.path)
+        self.git("clean", "-fdq", cwd=wt.path)
+        return ref
+
     def drop_factory_records(self, wt: Worktree) -> list[str]:
         """Undo on the story branch whatever it changed under `.loompa/` (branches from before
         `commit_all` left those out): each path goes back to the base's version, or out of the

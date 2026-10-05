@@ -557,7 +557,7 @@ async def test_a_conflict_with_the_base_is_resolved_by_the_worker(factory: Facto
 
 
 async def test_a_conflict_left_with_markers_is_tried_again_then_on_the_tier_above(
-    factory: Factory,
+    factory: Factory, monkeypatch
 ):
     """ADR-0016 §5: a resolution that leaves markers is no longer the end. The merge is redone
     and resolved again — once on the same tier, then on the tier above — each try told which
@@ -622,6 +622,10 @@ async def test_a_conflict_left_with_markers_is_tried_again_then_on_the_tier_abov
             return worker(model, messages)
         return dry_run_script(model, messages, tools)
 
+    # the conflict ladder only: a re-plan's clean branch (12.1) would make the conflict vanish
+    from loompa.worktrees.manager import WorktreeManager
+
+    monkeypatch.setattr(WorktreeManager, "keep_attempt_and_reset", lambda self, wt, label: "")
     ctx = make_ctx(factory, script)
     sid = seed_story(ctx, "Subtrair")
     await Scheduler(ctx).run()
