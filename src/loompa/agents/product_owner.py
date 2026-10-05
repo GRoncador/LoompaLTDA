@@ -26,6 +26,7 @@ from loompa.backlog import (
     Triage,
 )
 from loompa.comms import sanitize_for_founder
+from loompa.comms.executive import clip
 from loompa.conversations import (
     CommitResult,
     Conversation,
@@ -521,7 +522,7 @@ class ProductOwnerAgent(LoompaAgent):
             reason_code="" if admit else (code if code in REFUSAL_CODES else "other"),
             reason=reason,
             duplicate_of=duplicate,
-            title=str(data.get("title") or "").strip()[:120] or title.strip()[:120],
+            title=clip(str(data.get("title") or ""), 120) or clip(title, 120),
             description=str(data.get("description") or "").strip() or description.strip(),
             kind=_kind(data.get("kind")),
             epic=str(data.get("epic") or "").strip()[:60],
@@ -587,7 +588,7 @@ class ProductOwnerAgent(LoompaAgent):
             verdicts[key] = Triage(
                 duplicate_of=ref(raw.get("duplicate_of")),
                 process_only=raw.get("process_only") is True,
-                title=str(raw.get("title") or "").strip()[:120],
+                title=clip(str(raw.get("title") or ""), 120),
                 description=str(raw.get("description") or "").strip(),
                 kind=_kind(raw.get("kind")),
                 after=after or None,
@@ -1475,7 +1476,7 @@ def _split(data: dict, draft, cards: dict) -> tuple[list[DraftItem], dict[str, s
         if not isinstance(raw, dict):
             continue
         before = len(split)
-        title = str(raw.get("title") or "").strip()[:120]
+        title = clip(str(raw.get("title") or ""), 120)
         text = str(raw.get("description") or "").strip()[:4000]
         into = str(raw.get("into") or "").strip().upper()
         keys = [k for k in (str(x).strip().upper() for x in raw.get("ideas") or []) if k in ideas]

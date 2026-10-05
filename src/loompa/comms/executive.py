@@ -191,6 +191,18 @@ _FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 MAX_FOUNDER_CHARS = 1200
 
 
+def clip(text: str, limit: int) -> str:
+    """`text` cut to `limit` at a word boundary, with "…" when cut. A cut in the middle of a word
+    reached the founder as "tests/fim_de_jogo_lcd.t", a path the audit no longer recognised, and
+    option labels ended in "para a" (12.1)."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    head = text[: limit - 1]
+    cut = head.rsplit(" ", 1)[0] if " " in head else head
+    return cut.rstrip(" ,;:-—") + "…"
+
+
 def sanitize_for_founder(text: str, *, max_chars: int = MAX_FOUNDER_CHARS) -> str:
     """Deterministically strip technical noise from `text` for Founder consumption."""
     text = _ANSI.sub("", text or "")

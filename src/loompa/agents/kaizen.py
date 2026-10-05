@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from loompa.agents.base import LoompaAgent
 from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.backlog import TRIAGE_KEY, Triage
+from loompa.comms.executive import clip
 from loompa.engine.state import Stage, StoryState
 from loompa.sprints import SprintBoard, SprintStatus
 
@@ -81,7 +82,7 @@ class KaizenAgent(LoompaAgent):
                 {
                     "key": key,
                     "label": KIND_LABEL.get(item.get("kind") or "opportunity", "Oportunidade"),
-                    "title": str(item.get("title") or "").strip()[:140],
+                    "title": clip(str(item.get("title") or ""), 140),
                     "detail": str(item.get("detail") or "").strip(),
                 }
                 for key, item in keyed.items()
@@ -92,7 +93,7 @@ class KaizenAgent(LoompaAgent):
         for key, item in keyed.items():
             kind = item.get("kind") or "opportunity"
             label = KIND_LABEL.get(kind, kind)
-            title = str(item.get("title") or "").strip()[:140]
+            title = clip(str(item.get("title") or ""), 140)
             detail = str(item.get("detail") or "").strip()
             verdict = verdicts.get(key) or Triage(reviewed=bool(verdicts))
             covered = filed.get(verdict.duplicate_of, verdict.duplicate_of)
@@ -191,7 +192,7 @@ class KaizenAgent(LoompaAgent):
             "backlog.duplicate",
             story_id=card,
             agent=self.name,
-            title=str(item.get("title") or "").strip()[:140],
+            title=clip(str(item.get("title") or ""), 140),
             repeat=True,
         )
         item["_captured"] = "1"

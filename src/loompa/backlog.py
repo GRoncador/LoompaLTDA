@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from loompa.comms.executive import clip
 from loompa.engine.state import TERMINAL, Stage, StoryKind, StoryState
 
 if TYPE_CHECKING:
@@ -154,7 +155,7 @@ class Backlog:
         """Create a card in the backlog, or point at the open card that already says the same.
         `after` slots the new card right after that waiting card (`TOP`: first) without moving
         any other; `kind` and `extra` keep what the Product Owner decided when it read it."""
-        title = title.strip()[:120]
+        title = clip(title, 120)
         if not title:
             raise BacklogError("uma história precisa de título")
         dup = self.find_duplicate(title, origin=origin, text=description)

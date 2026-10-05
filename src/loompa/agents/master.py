@@ -20,7 +20,7 @@ from loompa.comms import (
     compose_blocked_message,
     sanitize_for_founder,
 )
-from loompa.comms.executive import MAX_FOUNDER_CHARS
+from loompa.comms.executive import MAX_FOUNDER_CHARS, clip
 from loompa.conversations import (
     CommitResult,
     Conversation,
@@ -218,7 +218,7 @@ class MasterAgent(LoompaAgent):
             pass
         out.children = [
             {
-                "title": str(c.get("title", "")).strip()[:120],
+                "title": clip(str(c.get("title", "")), 120),
                 "description": str(c.get("description", "")).strip(),
             }
             for c in (data.get("children") or [])
@@ -959,7 +959,7 @@ class MasterAgent(LoompaAgent):
                     and not audit_executive_text("\n".join(labels))
                 ):
                     opts = [
-                        o.model_copy(update={"label": lb[:120]})
+                        o.model_copy(update={"label": clip(lb, 160)})
                         for o, lb in zip(opts, labels, strict=True)
                     ]
                 if title and not audit_executive_text(f"{title}\n{context}\n{impact}"):

@@ -179,3 +179,13 @@ def test_cli_rejects_malformed_decisions(git_repo, hub, monkeypatch, bad):
     assert runner.invoke(app, ["init", ".", "--yes", "--name", "Cli"]).exit_code == 0
     r = runner.invoke(app, ["inbox", "reply", "abc", "-d", bad])
     assert r.exit_code == 1 and "Decisão inválida" in r.stdout
+
+
+def test_a_long_title_is_cut_at_a_word_never_inside_a_path():
+    """12.1: "…pixels realmente desenhados em tests/fim_de_jogo_lcd.t" reached the founder."""
+    from loompa.comms.executive import clip
+
+    title = "Verificar a garantia contra os pixels realmente desenhados em tests/fim_de_jogo_lcd.test.js"
+    cut = clip(title, 80)
+    assert cut.endswith("…") and "tests/" not in cut and len(cut) <= 80
+    assert clip("curto", 80) == "curto"
