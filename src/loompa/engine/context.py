@@ -307,6 +307,10 @@ class EngineContext:
                 )
             else:
                 self.memory.delete_document(f"company/{doc.file}")
+        # client contracts (13.5): searchable only by the roles whose profile reads `contract`
+        for pattern in ("*.md", "*.txt"):
+            for f in sorted((p.company / "contracts").glob(pattern)):
+                n += self.memory.index_file(f, kind="contract", doc_id=str(f.relative_to(p.loompa)))
         # what was decided and delivered (13.3): sprint reports and the founder's answers
         n += self.memory.index_directory(p.reports, kind="report", relative_to=p.loompa)
         for doc_id, kind, title, text in answered_documents(

@@ -320,6 +320,7 @@ class MemoryStore:
         top_k: int = 6,
         kinds: tuple[str, ...] | None = None,
         min_score: float = 0.0,
+        exclude: tuple[str, ...] = (),
     ) -> list[MemoryHit]:
         """The chunks that best answer `query`: the vector and the BM25 rankings fused by
         reciprocal rank. `score` is the cosine similarity, for display and `min_score`."""
@@ -347,7 +348,7 @@ class MemoryStore:
                     "SELECT doc_id, kind, title, chunk_index, text, metadata_json FROM memory_chunks WHERE id = ?",
                     (cid,),
                 ).fetchone()
-                if row is None or (kinds and row[1] not in kinds):
+                if row is None or (kinds and row[1] not in kinds) or row[1] in exclude:
                     continue
                 hits.append(
                     MemoryHit(
@@ -380,9 +381,10 @@ class MemoryStore:
         top_k: int = 6,
         kinds: tuple[str, ...] | None = None,
         max_chars: int = 3000,
+        exclude: tuple[str, ...] = (),
     ) -> str:
         """Compact Markdown block with precedents, ready to inject into an agent prompt."""
-        hits = self.search(query, top_k=top_k, kinds=kinds)
+        hits = self.search(query, top_k=top_k, kinds=kinds, exclude=exclude)
         if not hits:
             return ""
         lines = [

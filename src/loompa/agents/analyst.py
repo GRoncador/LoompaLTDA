@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from loompa.agents.base import AgentResult, LoompaAgent
-from loompa.agents.toolbox import READ_TOOLS, normalize_url
+from loompa.agents.toolbox import EXPLORE_TOOLS, normalize_url
 from loompa.engine.state import StoryState
 from loompa.mcp import McpSession
 from loompa.speckit import render_research, story_dir
@@ -144,7 +144,7 @@ class AnalystAgent(LoompaAgent):
             paths.research.read_text(encoding="utf-8")[:5000] if paths.research.is_file() else ""
         )
         async with self._web() as web:
-            box = self.toolbox(offered=READ_TOOLS, mcp=web)
+            box = self.toolbox(offered=EXPLORE_TOOLS, mcp=web)
             user = self._brief(state, web.describe(), previous, precedents)
             data = await self.ask_json_with_tools(
                 SYSTEM.format(language=self.language),

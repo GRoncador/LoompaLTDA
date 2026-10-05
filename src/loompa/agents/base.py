@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loompa.agents.loopguard import REPEAT_PREFIX, LoopGuard
-from loompa.agents.toolbox import READ_TOOLS, Toolbox, prune_tool_history
+from loompa.agents.toolbox import (
+    EXPLORE_TOOLS,
+    RESTRICTED_KINDS,
+    Toolbox,
+    profile_for,
+    prune_tool_history,
+)
 from loompa.company import company_block
 from loompa.engine.context import EngineContext
 from loompa.engine.state import StoryState
@@ -130,8 +136,14 @@ class LoompaAgent:
         return f"{block}\n\n{company}" if company else block
 
     def precedents(self, query: str, *, kinds: tuple[str, ...] | None = None) -> str:
+        """What memory pushes into this role's prompt. Client contracts never reach a role whose
+        profile does not read them (plan 13.5, LGPD)."""
+        reads = profile_for(self.role).memory_kinds
+        exclude = tuple(k for k in RESTRICTED_KINDS if k not in reads)
         try:
-            return self.ctx.memory.recall(query, top_k=self.ctx.config.memory.top_k, kinds=kinds)
+            return self.ctx.memory.recall(
+                query, top_k=self.ctx.config.memory.top_k, kinds=kinds, exclude=exclude
+            )
         except Exception:  # noqa: BLE001 - memory is best-effort
             return ""
 
@@ -170,7 +182,7 @@ class LoompaAgent:
 
     def explore_tools(self, root: Path | None = None) -> Toolbox:
         """Read-only repository tools, for roles that specify or plan before answering."""
-        return self.toolbox(root, offered=READ_TOOLS)
+        return self.toolbox(root, offered=EXPLORE_TOOLS)
 
     async def tool_loop(self, messages: list[Message], toolbox: Toolbox, **kw: Any) -> LoopResult:
         """`_tool_loop` as one session: a router keeps every round on the provider that served the

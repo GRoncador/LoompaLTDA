@@ -150,6 +150,7 @@ GITIGNORE_LINES = (
     ".loompa/traces/",  # prompts and product code, per story (`loompa trace`)
     ".loompa/.env",  # per-factory API keys: never committed
     ".loompa/engine.lock",
+    ".loompa/company/contracts/",  # clients' personal data and clauses: never in the repo (LGPD)
 )
 
 

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from loompa.agents.conversation import founder_text
-from loompa.agents.toolbox import READ_TOOLS
+from loompa.agents.toolbox import EXPLORE_TOOLS
 from loompa.conversations import (
     Conversation,
     ConversationError,
@@ -268,7 +268,7 @@ async def consult(
         async with web_ctx() if web_ctx else nullcontext(None) as web:
             if web is not None:
                 conv.limits = [] if web.available else [web_limitation(web.unavailable, "conversa")]
-            box = agent.toolbox(offered=READ_TOOLS, mcp=web)
+            box = agent.toolbox(offered=EXPLORE_TOOLS, mcp=web)
             tools = (
                 f"{web.describe()}\n" if web is not None else "No web tools in this consultation.\n"
             ) + "Repository tools (read-only): list_dir, search, find_symbol, read_file."

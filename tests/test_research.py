@@ -386,5 +386,12 @@ async def test_planning_roles_are_offered_only_read_tools(factory: Factory, role
     ctx = make_ctx(factory, spy, dry_run=True)
     seed_story(ctx, "Qualquer coisa")
     await Scheduler(ctx).run()
-    assert offered and offered[0] == {"read_file", "list_dir", "search", "find_symbol"}
+    # read-only: the repository, and organizational memory (plan 13.4)
+    assert offered and offered[0] == {
+        "read_file",
+        "list_dir",
+        "search",
+        "find_symbol",
+        "search_memory",
+    }
     await ctx.aclose()
