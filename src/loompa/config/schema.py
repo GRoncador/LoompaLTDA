@@ -252,6 +252,14 @@ ROLE_TASKS: tuple[RoleTask, ...] = (
         default_tier="tier2",
     ),
     RoleTask(
+        key="product_owner.plan_review",
+        role="product_owner",
+        label="Revisar plano e tarefas",
+        hint="confere se as tarefas entregam todos os critérios; só é chamado quando o plano pede",
+        default_tier="tier2",
+        complex_tier="tier1",
+    ),
+    RoleTask(
         key="product_owner.spec_review",
         role="product_owner",
         label="Revisar a spec",

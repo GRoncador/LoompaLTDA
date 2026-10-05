@@ -48,7 +48,7 @@ def phase_stage(name: str) -> Stage:
 
 # ---------------------------------------------------------------------------- routes
 
-BASE_ROUTE = ["intake", "spec", "spec_review", "plan", "dev", "test", "review"]
+BASE_ROUTE = ["intake", "spec", "spec_review", "plan", "plan_review", "dev", "test", "review"]
 # Research produces knowledge, not code: no worktree, no merge. The Product Owner reviews the
 # report, then the founder reads it (`research_review` ends by pausing for the founder).
 RESEARCH_ROUTE = ["intake", "research", "research_review"]
@@ -66,9 +66,14 @@ def autonomy_for(complexity: Complexity | str, setting: str = "auto") -> Autonom
 
 
 def with_preflight(route: list[str]) -> list[str]:
-    if "preflight" in route or "plan" not in route:
+    """After `plan_review`, not before it: the gate is cheap and a plan it sends back would make
+    the pre-flight (a tier-2 call over the plan, its facts and its callers) run twice."""
+    if "preflight" in route:
         return route
-    i = route.index("plan") + 1
+    anchor = next((p for p in ("plan_review", "plan") if p in route), None)
+    if anchor is None:
+        return route
+    i = route.index(anchor) + 1
     return [*route[:i], "preflight", *route[i:]]
 
 

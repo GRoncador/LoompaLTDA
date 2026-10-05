@@ -136,3 +136,49 @@ def test_a_change_request_quotes_the_founder_without_the_option_label(tmp_path: 
     (h,) = story_history(st, "S-1")
     assert h["summary"].startswith("Você pediu ajustes: “Quase lá. Remova")
     assert "Pedir ajustes" not in h["summary"] and h["summary"].endswith("…”.")
+
+
+def test_the_plan_gate_says_what_it_found_without_naming_a_file(tmp_path: Path):
+    """ADR-0026: the checks' own text names paths and criterion numbers, so the history counts
+    them instead of quoting them."""
+    st = Store(tmp_path / "state.db")
+    s = "S-026"
+    planned = state(tasks_total=3, acceptance=["a", "b"])
+    steps = [
+        ("node_plan", "PLAN", planned, []),
+        (
+            "node_plan_review",
+            "PLAN",
+            {**planned, "phase": "plan", "plan_review_rounds": 1},
+            [
+                (
+                    "plan.checked",
+                    {
+                        "problems": [
+                            "acceptance criterion 2 has no test planned for it",
+                            "task 3 changes app/antigo.py, which is not in the repository",
+                        ]
+                    },
+                )
+            ],
+        ),
+        ("node_plan", "PLAN", planned, []),
+        (
+            "node_plan_review",
+            "DEV",
+            {**planned, "phase": "dev", "plan_review_rounds": 2},
+            [("plan.checked", {"problems": []}), ("plan.reviewed", {"approved": True})],
+        ),
+    ]
+    for node, stage, data, evs in steps:
+        for type_, payload in evs:
+            st.emit("f", type_, story_id=s, **payload)
+        st.checkpoint(s, node, stage, data)
+    said = [(h["role"], h["summary"]) for h in story_history(st, s)]
+    assert said[1] == (
+        "product_owner",
+        "Revisão do plano: 2 pontos a corrigir, plano devolvido (rodada 1).",
+    )
+    assert said[3] == ("product_owner", "Plano revisado pelo Product Owner: critérios cobertos.")
+    assert all(not audit_executive_text(text) for _, text in said)
+    assert all("app/" not in text and "criterion" not in text for _, text in said)

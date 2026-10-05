@@ -14,7 +14,14 @@ from loompa.dependencies import delivered_brief
 from loompa.engine.state import StoryKind, StoryState
 from loompa.hygiene import TEST_DIRS, is_test_path
 from loompa.risk import assess, render_matrix
-from loompa.speckit import render_plan, render_risk, render_tasks, story_dir, tasks_from_markdown
+from loompa.speckit import (
+    NO_TEST_MARK,
+    render_plan,
+    render_risk,
+    render_tasks,
+    story_dir,
+    tasks_from_markdown,
+)
 from loompa.stack_check import STACK_KEY, STACK_STATES
 
 SYSTEM = """<!-- role:architect -->
@@ -122,7 +129,8 @@ def tests_named(tasks: list[str], fence: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-# A clause that asks for a change (pt-BR and English verbs), and one that says to leave a file alone.
+# A clause that asks for a change (pt-BR and English verbs), and one that says to leave a file
+# alone (`LEAVE_ALONE` is read by `plan_check` too).
 _CHANGE = re.compile(
     r"\b(?:ajust|alter|mud[ae]|mudar|troc|adicion|acrescent|cri(?:e|ar|ando)\b|remov|exclu(?:a|ir)\b"
     r"|apag|convert|atualiz|implement|edit|corrij|corrig|substitu|renome|refator|mov(?:a|er|endo)\b"
@@ -130,7 +138,7 @@ _CHANGE = re.compile(
     r"|move|extend)",
     re.I,
 )
-_LEAVE = re.compile(
+LEAVE_ALONE = re.compile(
     r"\b(não|nao|sem|nunca|jamais|apenas ler|só ler|somente ler|do not|don't|never|without|"
     r"read[- ]only|leave|keep .* unchanged|untouched|intact)\b",
     re.I,
@@ -148,7 +156,7 @@ def files_named(tasks: list[str], fence: list[str], root: Path) -> list[str]:
     out: list[str] = []
     for task in tasks:
         for clause in re.split(r"(?<=[.;:])\s+|\n", task):
-            if not _CHANGE.search(clause) or _LEAVE.search(clause):
+            if not _CHANGE.search(clause) or LEAVE_ALONE.search(clause):
                 continue
             for p in PATH_REF.findall(clause):
                 if (
@@ -259,6 +267,13 @@ class ArchitectAgent(LoompaAgent):
                 + "\n".join(f"- {n}" for n in state.founder_notes)
                 + "\n\n"
                 if state.founder_notes
+                else ""
+            )
+            + (
+                "## What the plan review sent back (fix these before anything else)\n"
+                + state.handoff["plan_review"]
+                + "\n\n"
+                if state.handoff.get("plan_review")
                 else ""
             )
             + (
@@ -643,7 +658,7 @@ def _traceability(raw: object, criteria: list[str]) -> list[str]:
         if test:
             planned.setdefault(n, []).append(test)
     lines = [
-        f"Critério {n} → " + ("; ".join(planned[n]) if n in planned else "**sem teste planejado**")
+        f"Critério {n} → " + ("; ".join(planned[n]) if n in planned else NO_TEST_MARK)
         for n in range(1, len(criteria) + 1)
     ]
     return lines or [f"Critério {n} → {'; '.join(t)}" for n, t in sorted(planned.items())]

@@ -39,6 +39,16 @@ def _founder_message(messages: list[Message]) -> str:
     return messages[-1].content.split("## Founder's message\n", 1)[-1].strip()
 
 
+def _criteria_count(messages: list[Message]) -> int:
+    """How many acceptance criteria the spec in the prompt numbers (`_numbered` renders "1. ...")."""
+    for m in messages:
+        if m.role != "user" or "## Critérios de aceitação" not in m.content:
+            continue
+        block = m.content.split("## Critérios de aceitação", 1)[1].split("\n## ", 1)[0]
+        return len(re.findall(r"^\d+\. ", block, re.M))
+    return 0
+
+
 def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, Any]] | None) -> Any:
     role = role_of(messages)
     title = _story_title(messages)
@@ -175,13 +185,21 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
                     "generalizable": True,
                 }
             )
+        # The simulated plan passes the plan gate (ADR-0026) like a real one: one task naming the
+        # file it writes, and one planned test per acceptance criterion of the spec in the prompt.
         return json.dumps(
             {
                 "approach": "Implementação mínima e testada (simulação).",
                 "files": ["loompa_dryrun/", "tests/"],
                 "contracts": "",
                 "risks": ["simulação: nenhum código real é gerado"],
-                "tasks": [f"Registrar a entrega '{title}' (simulação)"],
+                "traceability": [
+                    {"criterion": n, "test": "tests/test_dryrun.py::test_simulacao"}
+                    for n in range(1, _criteria_count(messages) + 1)
+                ],
+                "tasks": [
+                    f"Registrar a entrega '{title}' em loompa_dryrun/ (simulação)",
+                ],
                 "adr_proposal": "",
             }
         )

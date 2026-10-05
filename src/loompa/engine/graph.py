@@ -1,9 +1,9 @@
-"""The story phases: intake, spec, spec_review, plan, dev, test, review (ADR-0006).
+"""The story phases: intake, spec, spec_review, plan, plan_review, dev, test, review (ADR-0006).
 
-    intake -> spec -> spec_review -> plan -> dev -> test -> review -> AWAITING_FOUNDER -> DONE
-                |        | (rewrite)  |       ^      |                     |
-                v        +------------+       |      v (fail: tier2 x2, tier1 x1; WAIVED)
-          AWAITING_FOUNDER (question)         +------+-- AWAITING_FOUNDER
+    intake -> spec -> spec_review -> plan -> plan_review -> dev -> test -> review -> DONE
+                |        | (rewrite)  |  ^      | (re-plan)  ^      |          |
+                v        +------------+  +------+            |      v (fail: tier2 x2, tier1 x1)
+          AWAITING_FOUNDER (question)                        +------+-- AWAITING_FOUNDER
 
 Every node is `async (ctx, state) -> state` and ends with `advance()` or `goto(phase)`; the
 runner checkpoints after each one. Which phases a story visits is its `route`, built at intake.
@@ -69,6 +69,7 @@ from loompa.engine.phases import (
 from loompa.engine.state import (
     Autonomy,
     BlockedReason,
+    Complexity,
     QAVerdict,
     Stage,
     StoryKind,
@@ -78,7 +79,9 @@ from loompa.finance.story_cap import CAP_BASE_KEY, over_cap
 from loompa.hygiene import is_test_path
 from loompa.llm import LLMError
 from loompa.llm.router import TIER_ABOVE
+from loompa.plan_check import PlanReport, check_plan
 from loompa.risk import needs_preflight
+from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.sprints import SprintBoard
 from loompa.stack_check import STACK_KEY, foreign_files, mismatch_note
 from loompa.worktrees import GitError, Worktree
@@ -267,6 +270,7 @@ _STAGE_OF_PHASE = {
     "spec": Stage.SPEC,
     "spec_review": Stage.SPEC,
     "plan": Stage.PLAN,
+    "plan_review": Stage.PLAN,
     "preflight": Stage.PLAN,
     "dev": Stage.DEV,
     "test": Stage.TEST,
@@ -412,6 +416,107 @@ async def node_plan(ctx: EngineContext, state: StoryState) -> StoryState:
             ),
         )
     return advance(state)
+
+
+async def node_plan_review(ctx: EngineContext, state: StoryState) -> StoryState:
+    """The plan's gate (ADR-0026). Code first: `check_plan` measures in the repository what a
+    plan can get wrong (a criterion with no planned test, a task that names no file, a path that
+    does not exist) and a plan carrying any of it is re-planned once, at no token cost. The
+    Product Owner is called only when the plan asks for it: a COMPLEX story, a route that already
+    earned its pre-flight, a plan whose own size says the story is bigger than its label, a
+    re-plan after failures, or problems the one round did not clear. A SIMPLE or plain STANDARD
+    plan that passes the checks goes to the Worker without a review call.
+
+    Why the asymmetry: the only check of the acceptance criteria today is the Inspector's judge,
+    which runs after the whole implementation exists; a criterion the plan forgot costs a full
+    development cycle to find there, and this review costs one call."""
+    paths = story_dir(ctx.root, state.story_id)
+    tasks = (
+        [t.text for t in tasks_from_markdown(paths.tasks.read_text(encoding="utf-8"))]
+        if paths.tasks.is_file()
+        else []
+    )
+    report = check_plan(
+        ctx.root,
+        acceptance=state.acceptance,
+        files=state.allowed_paths,
+        tasks=tasks,
+        plan_md=paths.plan.read_text(encoding="utf-8") if paths.plan.is_file() else "",
+    )
+    state.plan_review_rounds += 1
+    ctx.emit(
+        "plan.checked",
+        story_id=state.story_id,
+        problems=report.problems[:8],
+        signals=report.signals,
+        rounds=state.plan_review_rounds,
+    )
+    if report.problems and state.plan_review_rounds < 2:
+        state.hand_off(
+            "The plan was refused by the automatic checks. Fix exactly these, keeping the rest of "
+            "the plan: " + "; ".join(report.problems[:8]),
+            phase="plan_review",
+        )
+        return goto(state, "plan")
+    if report.problems:
+        # the second plan still carries them: the Architect and the Worker see them as the story's
+        # last failure instead of the founder hearing about paths and criterion numbers
+        state.failure_history.append("Plan checks still failing: " + "; ".join(report.problems[:8]))
+    _promote_from_plan(ctx, state, report.signals)
+    state.handoff.pop("plan_review", None)  # consumed by the re-plan that just passed
+    if not _plan_needs_review(state, report):
+        return advance(state)
+    review = await ProductOwnerAgent(ctx).review_plan(state, report.problems)
+    if not review.ok and state.plan_review_rounds < 2:
+        state.hand_off(review.summary, phase="plan_review")
+        ctx.emit("plan.rejected", story_id=state.story_id, issues=review.summary[:500])
+        return goto(state, "plan")
+    if not review.ok:
+        # one round only, as with the spec: the concerns travel with the story instead of holding
+        # the line, and the Inspector still judges the criteria at `test`
+        state.failure_history.append(f"Plan reviewed with concerns: {review.summary[:400]}")
+        state.learnings.append(
+            {
+                "kind": "opportunity",
+                "title": "Plano seguiu com ressalvas do Product Owner",
+                "detail": sanitize_for_founder(review.summary)[:500],
+            }
+        )
+    ctx.emit("plan.approved", story_id=state.story_id, rounds=state.plan_review_rounds)
+    return advance(state)
+
+
+def _promote_from_plan(ctx: EngineContext, state: StoryState, signals: list[str]) -> None:
+    """The plan is better evidence of size than the guess intake made before anyone had read the
+    code (`master.classify` falls back to STANDARD whenever it is unsure). A plan that comes back
+    too big promotes the story to COMPLEX and earns the pre-flight, the same lift `node_plan`
+    already does from the plan's own risky paths."""
+    if not signals or state.complexity == Complexity.COMPLEX:
+        return
+    if ctx.config.schedule.autonomy != "auto":  # the founder set the ceremony by hand
+        return
+    state.complexity = Complexity.COMPLEX
+    state.autonomy = Autonomy.PREFLIGHT
+    state.route = with_preflight(state.route)
+    ctx.emit(
+        "story.complexity",
+        story_id=state.story_id,
+        complexity=state.complexity.value,
+        autonomy=state.autonomy.value,
+        why=signals,
+    )
+
+
+def _plan_needs_review(state: StoryState, report: PlanReport) -> bool:
+    """Who pays for a review call: by evidence, not by label (ADR-0026)."""
+    return bool(
+        report.problems
+        or report.signals
+        or state.complexity == Complexity.COMPLEX
+        or "preflight" in state.route
+        or state.extra.get(REPLANNED_KEY)
+        or state.failure_history
+    )
 
 
 async def cost_cap_block(ctx: EngineContext, state: StoryState, spent: float) -> StoryState:
@@ -814,6 +919,7 @@ async def climb(
             # away from the real cause (`contas` S-005 could not touch the module that broke the
             # test). Once per story, the Architect re-plans with the failures in hand.
             state.extra[REPLANNED_KEY] = True
+            state.plan_review_rounds = 0  # the re-plan gets its own gate round (ADR-0026)
             ctx.emit("story.replanned", story_id=state.story_id)
             return goto(state, "plan")
         return goto(state, "dev")
@@ -1038,6 +1144,15 @@ register(
     )
 )
 register(Phase("plan", node_plan, Stage.PLAN, owner="architect", reviewer="product_owner"))
+register(
+    Phase(
+        "plan_review",
+        node_plan_review,
+        Stage.PLAN,
+        owner="product_owner",
+        description="coverage gate over plan and tasks: checks in code, review by evidence",
+    )
+)
 register(
     Phase(
         "preflight",

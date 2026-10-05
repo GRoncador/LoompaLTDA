@@ -22,6 +22,7 @@ OWNER = {
     "gate_plan": "factory",
     "gate_open": "factory",
     "node_plan": "architect",
+    "node_plan_review": "product_owner",
     "node_preflight": "architect",
     "node_dev": "worker",
     "node_test": "inspector",
@@ -38,6 +39,8 @@ OWNER = {
 
 EVENTS = (
     "spec.reviewed",
+    "plan.checked",
+    "plan.reviewed",
     "inspector.verdict",
     "story.escalated",
     "story.blocked",
@@ -54,6 +57,7 @@ PHASE = {
     "spec": "especificação",
     "spec_review": "revisão da spec",
     "plan": "plano",
+    "plan_review": "revisão do plano",
     "preflight": "conferência do plano",
     "dev": "código",
     "test": "testes",
@@ -146,6 +150,22 @@ def summarize(
         if asked:
             return "O plano parou numa dúvida para você."
         return f"Plano com {_plural(total, 'tarefa', 'tarefas')}."
+    if node == "node_plan_review":
+        # counts only: what the checks found names files and criterion numbers (ADR-0026), and
+        # the founder's text carries neither
+        holes = len((_first(evs, "plan.checked") or {}).get("problems") or [])
+        r = _first(evs, "plan.reviewed") or {}
+        if cur.get("phase") == "plan" or (cur.get("stage") == "PLAN" and holes and not r):
+            return (
+                f"Revisão do plano: {_plural(holes, 'ponto a corrigir', 'pontos a corrigir')}, "
+                f"plano devolvido (rodada {cur.get('plan_review_rounds') or 1})."
+            )
+        if r and not r.get("approved"):
+            gaps = _plural(int(r.get("missing") or 0), "critério faltando", "critérios faltando")
+            return f"Plano seguiu com ressalvas do Product Owner ({gaps})."
+        if r:
+            return "Plano revisado pelo Product Owner: critérios cobertos."
+        return "Plano conferido: critérios cobertos e tarefas com arquivos."
     if node == "node_preflight":
         added = total - int(prev.get("tasks_total") or 0)
         if added > 0:

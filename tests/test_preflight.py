@@ -121,7 +121,9 @@ async def test_the_architect_sends_an_unbuildable_spec_back_once(factory: Factor
     sid = seed_story(ctx, "Exportar PDF")
     await Scheduler(ctx).run()
     state = load_state(ctx, sid)
-    assert calls == {"architect": 2, "product": 2}  # bounced once, then the plan went ahead
+    # bounced once, then the plan went ahead; the third plan is the gate's round (PLAN leaves
+    # criterion 2 without a test, which `plan_check` refuses — ADR-0026)
+    assert calls == {"architect": 3, "product": 2}
     assert state.blocked_reason == "delivery"
     await ctx.aclose()
 
@@ -135,7 +137,8 @@ def test_autonomy_follows_the_complexity_unless_the_factory_says_otherwise():
     assert autonomy_for(Complexity.COMPLEX) == Autonomy.PREFLIGHT
     assert autonomy_for(Complexity.COMPLEX, "standard") == Autonomy.STANDARD
     route = build_route(StoryKind.FEATURE, Complexity.COMPLEX, Autonomy.PREFLIGHT)
-    assert route[route.index("plan") + 1] == "preflight"
+    # after the plan's own gate, so a plan it sends back does not pay for the pre-flight twice
+    assert route[route.index("plan") + 1 :][:2] == ["plan_review", "preflight"]
     assert "preflight" not in build_route(StoryKind.FEATURE, Complexity.STANDARD)
 
 

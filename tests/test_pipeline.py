@@ -56,6 +56,7 @@ def test_routes_by_kind_and_complexity():
         "spec",
         "spec_review",
         "plan",
+        "plan_review",
         "dev",
         "test",
         "review",

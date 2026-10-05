@@ -17,6 +17,10 @@ from pydantic import BaseModel, Field
 
 _TASK_LINE = re.compile(r"^\s*[-*]\s*\[( |x|X)\]\s*(?:(T\d+)[:.)]?\s*)?(.+?)\s*$")
 
+# What a traceability line says for an acceptance criterion with no test planned for it.
+# `plan_check` reads it back to refuse the plan, so the two must agree (ADR-0026).
+NO_TEST_MARK = "**sem teste planejado**"
+
 
 def _template(name: str) -> str:
     return resources.files("loompa.speckit.templates").joinpath(name).read_text(encoding="utf-8")
