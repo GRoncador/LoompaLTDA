@@ -19,6 +19,7 @@ from loompa.finance import CostTracker
 from loompa.llm import ModelRouter
 from loompa.mcp import McpHub
 from loompa.memory import MemoryStore, get_embedder
+from loompa.memory.sources import answered_documents
 from loompa.store import Store
 from loompa.trace import Tracer
 from loompa.worktrees import WorktreeManager
@@ -306,6 +307,12 @@ class EngineContext:
                 )
             else:
                 self.memory.delete_document(f"company/{doc.file}")
+        # what was decided and delivered (13.3): sprint reports and the founder's answers
+        n += self.memory.index_directory(p.reports, kind="report", relative_to=p.loompa)
+        for doc_id, kind, title, text in answered_documents(
+            self.store.list_messages(self.slug, limit=5000)
+        ):
+            n += self.memory.upsert_document(doc_id, text, kind=kind, title=title)
         for name in ("docs", "doc", "adr", "adrs"):
             n += self.memory.index_directory(self.root / name, kind="doc", relative_to=self.root)
         for name in ("README.md", "CONTRIBUTING.md", "ARCHITECTURE.md"):

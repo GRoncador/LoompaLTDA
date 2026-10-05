@@ -40,6 +40,7 @@ from loompa.engine.phases import goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.factory import ensure_gitignore
 from loompa.finance import BudgetStatus
+from loompa.memory.sources import answer_document
 from loompa.models_sync import ModelSync
 
 log = logging.getLogger("loompa.scheduler")
@@ -418,6 +419,17 @@ class Scheduler:
         await self.close_sprints()  # an approval or a cancel may have finished the sprint
         return state
 
+    def _remember_answer(self, msg: FounderMessage) -> None:
+        """The answer is a precedent from now on, not from the next `loompa run` (plan 13.3)."""
+        doc = answer_document(msg)
+        if doc is None:
+            return
+        doc_id, kind, title, text = doc
+        try:
+            self.ctx.memory.upsert_document(doc_id, text, kind=kind, title=title)
+        except Exception:  # noqa: BLE001 - memory is best-effort
+            log.exception("could not index the answer to %s", msg.id)
+
     def _decide_cards(self, msg: FounderMessage, answer: FounderAnswer) -> None:
         """Apply the side decisions of a batch answer, each on its own. Unknown ids, unknown
         options and cards already decided are ignored; an undecided card simply stays in the
@@ -447,6 +459,7 @@ class Scheduler:
         self.ctx.emit(
             "inbox.answered", story_id=msg.story_id, message_id=message_id, option=answer.option_key
         )
+        self._remember_answer(msg)
         if msg.kind.value == "finance" and answer.option_key in ("raise_10", "raise_30"):
             weekly = self.ctx.config.budget.period == "weekly"
             small, large = (5.0, 10.0) if weekly else (10.0, 30.0)
