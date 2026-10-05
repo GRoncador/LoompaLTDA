@@ -40,6 +40,7 @@ from loompa.engine.phases import goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.factory import ensure_gitignore
 from loompa.finance import BudgetStatus
+from loompa.finance.story_cap import CAP_BASE_KEY, story_spent
 from loompa.memory.sources import answer_document
 from loompa.models_sync import ModelSync
 
@@ -497,11 +498,15 @@ class Scheduler:
         self.ctx.emit("story.reopened", story_id=story_id, stage=state.stage.value)
         return state
 
-    async def restart_story(self, story_id: str, reason: str = "") -> StoryState:
+    async def restart_story(
+        self, story_id: str, reason: str = "", *, clean: bool = False
+    ) -> StoryState:
         """The founder starts a story over inside its sprint: spec, plan, code and branch are
         discarded and it goes back to intake with only its request and the founder's notes.
         Needed when the factory itself changed (new templates, gates) and a half-done story
-        would otherwise finish on artefacts the old version wrote."""
+        would otherwise finish on artefacts the old version wrote. The story's cost cap counts
+        from here: what the discarded attempt spent is not the new one's. `clean` also drops the
+        notes the founder gave while it ran (answers to its blocks), as if it never ran."""
         if story_id in self.running:
             raise RuntimeError(f"{story_id} está rodando agora; pare a esteira antes")
         old = load_state(self.ctx, story_id)
@@ -519,8 +524,9 @@ class Scheduler:
             title=old.title,
             description=old.description,
             epic=old.epic,
-            founder_notes=[*old.founder_notes, *([reason] if reason else [])],
+            founder_notes=[*([] if clean else old.founder_notes), *([reason] if reason else [])],
         )
+        state.extra[CAP_BASE_KEY] = story_spent(self.ctx, story_id)
         goto(state, "intake")
         state.stage = Stage.SPEC  # like an admitted card: out of the backlog, intake classifies
         save_state(self.ctx, state, "restart")

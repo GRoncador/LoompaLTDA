@@ -166,6 +166,24 @@ async def test_the_founder_restarts_a_story_from_scratch(factory: Factory):
     await ctx.aclose()
 
 
+async def test_a_clean_restart_drops_the_answers_and_the_spent_cap(factory: Factory):
+    """12.1, tamagotchi S-061: the founder wanted it "as if it never ran"; the answers it got to
+    its blocks and what the discarded attempt spent stayed with it."""
+    from loompa.engine.scheduler import save_state
+    from loompa.finance.story_cap import CAP_BASE_KEY, story_spent
+
+    ctx = make_ctx(factory, dry_run=True)
+    sid = seed_story(ctx, "Página de login")
+    await Scheduler(ctx).run()
+    old = load_state(ctx, sid)
+    old.founder_notes = ["pode ajustar os testes antigos"]
+    save_state(ctx, old, "test")
+    spent = story_spent(ctx, sid)
+    state = await Scheduler(ctx).restart_story(sid, clean=True)
+    assert state.founder_notes == [] and state.extra[CAP_BASE_KEY] == spent
+    await ctx.aclose()
+
+
 def test_every_state_enum_survives_the_checkpointer(caplog):
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 

@@ -269,6 +269,9 @@ def sprint_add(
 def sprint_restart(
     ids: list[str] = typer.Argument(..., help="Histórias a recomeçar do zero."),
     reason: str = typer.Option("", "--reason", "-r", help="Orientação para a nova tentativa."),
+    clean: bool = typer.Option(
+        False, "--limpo", help="Descarta também as respostas dadas durante a execução."
+    ),
     factory: str | None = typer.Option(None, "--factory", "-f"),
 ) -> None:
     """Recomeça histórias em andamento: descarta spec, plano e código e volta ao início."""
@@ -283,7 +286,7 @@ def sprint_restart(
         sched = Scheduler(ctx)
         for sid in ids:
             try:
-                await sched.restart_story(sid, reason)
+                await sched.restart_story(sid, reason, clean=clean)
             except (KeyError, ValueError) as exc:
                 console.print(f"[red]✘[/red] {sid}: {exc}")
                 continue
