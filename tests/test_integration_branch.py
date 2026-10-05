@@ -274,3 +274,31 @@ async def test_two_deliveries_that_conflict_stop_the_story_and_ask(factory: Fact
     finally:
         DeployerAgent.integrate_dependencies = real
     await ctx.aclose()
+
+
+async def test_a_spent_integration_branch_is_pruned_and_a_live_one_is_not(factory: Factory):
+    """ADR-0027: an integration branch is the base plus a merge per delivery, so it is never
+    merged into the base and `--merged` never lists it. It is deleted once every delivery it
+    carries is in the base, and kept while any of them is still out."""
+    ctx = make_ctx(factory)
+    root = factory.root
+    deployer = ctx.worktrees.as_role("deployer")
+    for name, file in (("b1", "um.py"), ("b2", "dois.py")):
+        git("checkout", "-q", "-b", name, "main", cwd=root)
+        (root / file).write_text("x = 1\n")
+        git("add", ".", cwd=root)
+        git("commit", "-qm", f"feat: {file}", cwd=root)
+        git("checkout", "-q", "main", cwd=root)
+    name = deployer.integration_branch("S-003")
+    assert deployer.integrate(name, ["b1", "b2"]) == []
+
+    # while the deliveries are out, it holds their commits: kept
+    assert deployer.prune_merged_branches() == []
+    assert name in git("branch", "--format=%(refname:short)", cwd=root).split()
+
+    # both deliveries accepted and merged: it adds nothing to the base any more
+    for branch in ("b1", "b2"):
+        git("merge", "--no-ff", "-q", "-m", f"merge {branch}", branch, cwd=root)
+    assert deployer.prune_merged_branches() == [name]
+    assert name not in git("branch", "--format=%(refname:short)", cwd=root).split()
+    await ctx.aclose()

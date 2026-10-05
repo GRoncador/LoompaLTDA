@@ -80,8 +80,11 @@ Inspector's baseline is taken on a tree that has the code this story was written
   not by rebuilding it. A conflict that appears later between a parent's new commits and the story
   is an ordinary sync conflict, resolved by the Worker as any other.
 * One more branch per such story (`loompa/integration/<story>`), deleted and rebuilt if the set of
-  pending deliveries changes, and removed outright on conflict. It is not pruned by
-  `prune_merged_branches` until it is merged into the base, which it never is — a cleanup worth
-  adding when branch hygiene is next touched.
+  pending deliveries changes, and removed outright on conflict. `prune_merged_branches` deletes it
+  once it is spent: an integration branch is the base plus a merge per delivery, so it is never
+  merged into the base and `--merged` never lists it. The safe reading is its own commits — when
+  `git rev-list --no-merges <branch> ^<base>` is empty, every delivery it carried is in the base
+  and the branch adds nothing, so it goes with `-D`. While any delivery is still out, that list is
+  not empty and the branch is kept.
 * The founder's message names titles only, never branches or files: the audit (`executive_audit`) is
   asserted in the tests.

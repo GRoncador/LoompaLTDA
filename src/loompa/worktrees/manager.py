@@ -204,8 +204,12 @@ class WorktreeManager:
     def path_for(self, story_id: str) -> Path:
         return self.dir / story_id
 
+    @property
+    def integration_prefix(self) -> str:
+        return f"{self.branch_prefix}integration/"
+
     def integration_branch(self, story_id: str) -> str:
-        return f"{self.branch_prefix}integration/{story_id.lower()}"
+        return f"{self.integration_prefix}{story_id.lower()}"
 
     def integrate(self, name: str, branches: list[str]) -> list[str]:
         """Build `name` from the base plus every branch in `branches`, so a story that depends on
@@ -313,7 +317,8 @@ class WorktreeManager:
     def prune_merged_branches(self, base: str | None = None) -> list[str]:
         """Delete the story branches already merged into the base that no worktree uses: what
         stories merged before branches were deleted on merge left behind (`contas` had one per
-        delivery). Deployer only; `-d` refuses anything not merged."""
+        delivery). Spent integration branches (ADR-0027) go too. Deployer only; `-d` refuses
+        anything not merged."""
         self._require_deployer("git branch -d")
         base = base or self.default_branch()
         listed = self.git(
@@ -335,7 +340,36 @@ class WorktreeManager:
             except GitError:  # checked out somewhere else, or not merged after all
                 continue
             pruned.append(branch)
+        for branch in self._spent_integrations(base):
+            if branch in busy or branch in pruned:
+                continue
+            try:
+                # `-D`, with the check above standing in for what `-d` cannot see
+                self.git("branch", "-D", branch)
+            except GitError:
+                continue
+            pruned.append(branch)
         return pruned
+
+    def _spent_integrations(self, base: str) -> list[str]:
+        """Integration branches that hold nothing the base does not have (ADR-0027). An
+        integration branch is the base plus a merge per delivery, so it is never *merged* into the
+        base itself and `--merged` never lists it: `-d` would refuse a branch whose whole content
+        is already delivered, and it would pile up one per story. The reading that is safe is its
+        own commits — every commit on it that is not one of its merges must be reachable from the
+        base; while any delivery it carries is still out, that list is not empty."""
+        listed = self.git(
+            "branch",
+            "--format=%(refname:short)",
+            "--list",
+            f"{self.integration_prefix}*",
+            check=False,
+        )
+        out = []
+        for branch in (b.strip() for b in listed.splitlines()):
+            if branch and not self.git("rev-list", "--no-merges", branch, f"^{base}", check=False):
+                out.append(branch)
+        return out
 
     # ----------------------------------------------------------------- operations
     def status(self, wt: Worktree) -> list[str]:
