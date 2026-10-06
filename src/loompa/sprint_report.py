@@ -741,7 +741,8 @@ def summary_facts(report: dict[str, Any]) -> str:
             else ""
         )
         + f", cancelled {t['cancelled']}, back to backlog "
-        f"{t['withdrawn']}, waiting for the founder {t['waiting']}, still in progress {t['working']}"
+        f"{t['withdrawn']}, waiting for the founder's answer {t['waiting']}, still in progress "
+        f"{t['working']}"
         + (
             f"; retired on purpose (covered by delivered work or obsolete, NOT missing work) "
             f"{t['retired']}"
@@ -751,7 +752,10 @@ def summary_facts(report: dict[str, Any]) -> str:
         + ".",
         f"Duration: {duration(t['duration_s'])}. Cost of the stories: {usd(t['cost_usd'])}"
         + (f" ({usd(t['cost_per_delivered_usd'])} per delivered story)" if t["delivered"] else "")
-        + f". Founder waiting time: {duration(t['founder_wait_s'])}.",
+        # "Founder waiting time" read as the time the founder waited, and summaries said so
+        # ("você esperou 1 minuto por nossas respostas", 14.3)
+        + f". Time the stories waited for the founder's answers: "
+        f"{duration(t['founder_wait_s'])}.",
         f"Rework: {t['rework']} (retries {t['retries']}, re-plans {t['replans']}, restarts "
         f"{t['restarts']}, changes the founder asked {t['changes_asked']}). Escalations to a "
         f"stronger model: {t['escalations']}. Blocks: {t['blocks']}.",
