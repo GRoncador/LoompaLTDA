@@ -58,6 +58,12 @@ def test_a_story_keeps_the_arm_it_drew_and_the_split_follows_the_share():
         "variant": "test-seams",
         "arm": "variant",
     }
+    # a story already under way when the experiment began stays out, for good
+    started = StoryState(story_id="S-2", title="t", commits=["abc1234"])
+    assert prompt_ab.prompt_for(on, started, "worker.SYSTEM", template) == (template, "")
+    started.commits = []
+    assert prompt_ab.prompt_for(on, started, "worker.SYSTEM", template) == (template, "")
+    assert len(on.emitted) == 1
     # another prompt is not in the experiment
     plan = registry.get("architect.SYSTEM").template
     assert prompt_ab.prompt_for(on, state, "architect.SYSTEM", plan) == (plan, "")

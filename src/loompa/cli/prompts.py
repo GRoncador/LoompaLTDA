@@ -317,7 +317,8 @@ def ab_on(
     save_config(f.root, f.config)
     console.print(
         f"Ligado em {f.config.factory.name}: {prompt} → {variant} em {100 * share:.0f}% das "
-        "histórias que começarem a partir de agora. Uma história em curso guarda o braço que tirou."
+        "histórias que ainda não têm código. Uma história já em construção fica de fora, e uma "
+        "que já tirou o braço o guarda."
     )
 
 

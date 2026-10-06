@@ -10,7 +10,7 @@ stories, and `loompa prompts ab` compares the stories of the two arms by what ha
 - `schedule.prompt_ab` in the factory's config turns one on: `{prompt, variant, share}`.
 - The arm is drawn per story (a hash of story, prompt and variant), stored in the story's state the
   first time, so every task and every retry of the story reads the same text, and announced once
-  with a `prompt.ab` event.
+  with a `prompt.ab` event. A story that already has commits when the experiment starts stays out.
 - Only the prompts wired below take part: `worker.SYSTEM` (the built-in Worker; the OpenCode
   backend has its own prompt) and `architect.SYSTEM` (the full plan, not the SIMPLE one).
 """
@@ -129,12 +129,17 @@ def prompt_for(
     if exp is None or exp.share <= 0 or (prompt, exp.variant) not in VARIANTS:
         return template, ""
     arms = state.extra.setdefault(AB_KEY, {})
-    arm = arms.get(prompt)
-    if arm not in (VARIANT, CONTROL):
-        arm = draw(state.story_id, prompt, exp.variant, exp.share)
+    if prompt not in arms:
+        # a story already under way when the experiment began stays out of it: switching its
+        # rules halfway would mix the arms
+        arm = "" if state.commits else draw(state.story_id, prompt, exp.variant, exp.share)
         arms[prompt] = arm
-        ctx.emit("prompt.ab", story_id=state.story_id, prompt=prompt, variant=exp.variant, arm=arm)
-    if arm == CONTROL:
+        if arm:
+            ctx.emit(
+                "prompt.ab", story_id=state.story_id, prompt=prompt, variant=exp.variant, arm=arm
+            )
+    arm = arms[prompt]
+    if arm != VARIANT:
         return template, arm
     try:
         return variant_text(template, prompt, exp.variant), arm

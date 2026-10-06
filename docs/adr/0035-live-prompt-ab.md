@@ -34,7 +34,8 @@ two arms by what happened to them.
   - `... show` prints a variant's diff.
 - **The arm is drawn per story,** not per task: the effect is on the story. It is a hash of story,
   prompt and variant, stored in the story's state the first time, so every task and every retry of
-  the story reads the same text. A change of share never moves a story already running. The
+  the story reads the same text. A change of share never moves a story already running, and a
+  story that already has commits when the experiment is turned on stays out of it. The
   assignment is announced once with a `prompt.ab` event, and each `worker.task` carries its
   `prompt_ab` arm.
 - **Wired prompts:**
