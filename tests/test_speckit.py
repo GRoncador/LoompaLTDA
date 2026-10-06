@@ -60,8 +60,10 @@ def test_a_long_spec_keeps_whole_sections_by_priority_and_says_what_was_left_out
     # the revision at the very end survives; what does not fit is named, never cut mid-word
     assert "critério 1 retirado pelo Founder" in out and "Dado A, quando B" in out
     assert "(left out to fit: Entidades principais; Perguntas em aberto)" in out
-    assert out.index("## Objetivo") < out.index("## Critérios de aceitação") < out.index(
-        "## Critérios revistos"
+    assert (
+        out.index("## Objetivo")
+        < out.index("## Critérios de aceitação")
+        < out.index("## Critérios revistos")
     )  # original order
     assert fit_sections("short", 100) == "short"
     huge = "## Critérios de aceitação (BDD)\n" + "\n".join(f"{i}. linha" for i in range(2000))

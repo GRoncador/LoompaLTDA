@@ -153,11 +153,11 @@ def test_an_old_config_drops_the_defaults_the_cost_review_changed(tmp_path):
     assert cfg.revision >= 1
     assert cfg.models.tier_for("master") == "tier2"
     assert cfg.models.tier_for("storyteller") == "tier1"  # changed by the founder: kept
-    assert cfg.models.tier_for_task("deployer", "deployer.summary") == "tier3"
+    assert cfg.models.tier_for_task("deployer", "deployer.summary") == "tier2"  # the default
     # saved and loaded again, a choice made after the upgrade is not undone
-    cfg.models.role_tasks["deployer.summary"] = "tier2"
+    cfg.models.role_tasks["deployer.summary"] = "tier3"
     save_config(tmp_path, cfg)
-    assert load_config(tmp_path).models.tier_for_task("deployer", "deployer.summary") == "tier2"
+    assert load_config(tmp_path).models.tier_for_task("deployer", "deployer.summary") == "tier3"
 
 
 def test_a_legacy_monthly_budget_keeps_its_numbers():
