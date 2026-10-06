@@ -1,14 +1,81 @@
 # 14.3 — O que a comunidade testou, aplicado aos prompts do Loompa
 
-06/10/2026 · proposta para a revisão do Founder · **nenhum prompt do código mudou.**
+06/10/2026: análise e proposta · 06-07/10: medida na bancada, aprovados no código.
 
 | Arquivo | O que é |
 | --- | --- |
-| este documento | a análise: referências, padrões, crítica da proposta anterior e a proposta |
-| [PROMPTS-14.3.md](PROMPTS-14.3.md) | cada prompt editado: o atual e o proposto inteiros, o diff, a referência e o porquê (gerado) |
-| [make_candidates.py](make_candidates.py) | gera os candidatos e confere o contrato JSON, os marcadores do dry-run, o `{language}` e as palavras de produto |
-| `candidates/` | `<prompt>.p0-agnostic.txt`, `<prompt>.<ideia>.txt` (P0 + uma ideia, para medir sozinha) e `<prompt>.proposed.txt` (P0 + as ideias recomendadas) |
-| [run_round3.sh](run_round3.sh) | a rodada da bancada que mede tudo isso; **ainda não rodou** |
+| este documento | o resultado (seção 0), a análise (referências, padrões, crítica da proposta anterior) e a proposta |
+| [PROMPTS-14.3.md](PROMPTS-14.3.md) | cada prompt: antes e depois inteiros, o diff, e cada ideia com o veredito da bancada, a referência e o porquê (gerado) |
+| [make_candidates.py](make_candidates.py) | gera os candidatos e os textos finais (`FINAL`, `RESULTS`) e confere contrato JSON, marcadores do dry-run, `{language}` e palavras de produto |
+| `candidates/` | `<prompt>.<ideia>.txt` (o P0 mais uma ideia), `<prompt>.proposed.txt` (a proposta de 06/10) e `<prompt>.final.txt` (o que a bancada aprovou) |
+| [run_round3.sh](run_round3.sh), [run_round4.sh](run_round4.sh) | descoberta (cada ideia contra o P0) e confirmação (o texto final contra o de antes, numa rodada nova) |
+| [adopt_final.py](adopt_final.py), [fullspec_cases.py](fullspec_cases.py) | leva um texto medido para a constante no código; refaz os casos do Inspector com a spec inteira |
+
+## 0. Resultado da bancada (06-07/10)
+
+**Como foi medido.**
+- 45 comparações, US$ 7,31, com casos reais das duas fábricas (até 60 por prompt).
+- As duas variantes rodaram no MiMo v2.6 flash. O juiz foi o GLM 5.3 flash, lendo cada par nas duas
+  ordens: o veredito que mudava com a ordem virou empate (7b47664).
+- O p vem do teste do sinal (juiz) e do McNemar (checagens por caso).
+- Dois controles, o prompt atual contra ele mesmo, deram 9×16 e 17×22 por acaso. Por isso:
+  - só conta p < 0,05;
+  - cada aprovação foi confirmada numa rodada nova, com o texto final;
+  - os neutros só entram quando corrigem uma regra ou cumprem a sua regra de prompt agnóstico.
+- Resposta vazia do provedor conta como falha, não como derrota (de72ce3).
+
+**O que entrou no código.**
+
+| Prompt | Entrou | Evidência | Commit |
+| --- | --- | --- | --- |
+| `master.EXEC_SYSTEM` | P0, P1 (voz), P6 (`impact`) | auditoria 75→97% (p 0,01); gênero/3ª pessoa 5→0; P6: juiz 21×5 (p < 0,01). Confirmado: juiz 16×4 (p 0,01), tranquilizações 18→9 | 1dab6bc, 3f144fc |
+| `master.SPRINT_REPORT_SYSTEM` | P1c (o time relata) | o P1 foi reprovado (pôs o Founder como sujeito); P1b/P1c: nota 3,73→4,36, "fundador" 9/11→0-1; juiz empata (n=11) | 3f144fc |
+| `architect.PREFLIGHT_SYSTEM` | P0, P6, P9 | P6: juiz 8×1 e 7×3 nas duas rodadas (p ≈ 0,02) | 1dab6bc, 8f7f683 |
+| `product_owner.PROPOSE_SYSTEM` | P6 | juiz 5×2 e 4×2 (n=11, mesmo lado duas vezes) | 8f7f683 |
+| `product_owner.REVIEW_SYSTEM` | P0, P6 | neutro (18×18; 17×19); aprovações 28→34 | 1dab6bc, 8f7f683 |
+| `analyst.SYSTEM` | P6, P9 | neutro (somado 6×7; final 3×3) | 8f7f683 |
+| `worker.SYSTEM` + ferramenta `blocked` | P6 ("arquivo existente"), o3 | alinhamento com o código; a primeira chamada não muda | 8f7f683 |
+| `deployer.SUMMARY_SYSTEM`, `inspector.JUDGE_SYSTEM`, `product_owner.ALIGN_SYSTEM`, `architect.AMEND_SYSTEM`, `architect.SIMPLE_SYSTEM`, `product_owner.REVIEW_CARDS_SYSTEM` | P0 | neutro em todos (ex.: SUMMARY 66×79 em quatro rodadas, Inspector 17×24 em duas). No REVIEW_CARDS o "second person" puro trouxe "o senhor" de volta; ficou "you" com "você" como exemplo do português | 1dab6bc |
+| `product.SYSTEM` | P0, P4 (critério com exemplo), P10b | P4: critérios com valor concreto 58→83%, juiz 23×12 (p 0,09); P10b neutro. Confirmado: juiz 28×17 (p 0,14), contrato 90→95%, valores 60→83%. Custa: pergunta mais ao Founder (11→17 de 60) e sai ~43% mais longa | 1244c94 |
+| `architect.SYSTEM` | P0, P6 | neutros (12×15; 16×23). Confirmado: juiz 20×13 (p 0,30), nota 3,95→4,11 | 1244c94 |
+
+**O que ficou de fora, e por quê.**
+- **Reprovados** (o original fica):
+  - P1 no SUMMARY: 21×20, sem ganho;
+  - P3 no Inspector: com a spec inteira, 8×14 (p 0,29) e 4 achados a mais;
+  - P4b na revisão da spec: 17×18;
+  - P10 na spec, que mudava três coisas e perdeu (14×23). Foi trocado pelo P10b, só a correção da
+    contradição.
+- **Não medíveis na bancada** (P2 tracer bullet, P5 lógica geral, P7 testes pela interface, P8
+  brainstorm, o1/o1b/o2/o4/o5): a bancada repete a primeira chamada ou a opinião do juiz sobre o
+  plano, e o efeito dessas ideias está no fim do laço do Worker ou no retrabalho. A primeira
+  chamada do Worker não muda com P5 nem P7 (seguro), e o juiz empata o P2. Ficam para um A/B ao vivo.
+
+**Consertos no código que a bancada achou.** Mais da metade do ganho veio daqui, não de texto:
+- **9667287** — o Inspector lia 3.000 caracteres da spec; agora lê seções inteiras, escopo e
+  bordas primeiro.
+- **1c24433** — 10 de 36 reescritas do EXEC eram jogadas fora só por "T1" ou "checklist", e o
+  Founder recebia o texto do time. As trocas de palavra do filtro rodam antes da auditoria: 35-36
+  de 36 passam, com qualquer prompt.
+- **d1efdfd** — o rótulo "Founder waiting time" lia-se como "o tempo que o Founder esperou", e os
+  resumos inverteram quem esperou quem.
+- **7b47664, de72ce3** — a bancada: o juiz lê nas duas ordens, há p-valor, e resposta vazia é falha.
+
+**Lições.**
+1. Quando um modelo erra sempre do mesmo jeito, a causa costuma estar no código ou nos dados. Foi o
+   caso do número de tarefa, do rótulo ambíguo e da spec cortada, e o retro do Matt Pocock manda
+   ir primeiro por aí.
+2. Falar com o Founder na segunda pessoa funciona num aviso, mas num relatório o modelo o fez autor
+   do trabalho. O que funcionou foi o time relatar, e o Founder aparecer pelo que fez.
+3. Exemplo concreto ajuda dentro da fábrica de onde veio. Num caso da `contas`, sem o exemplo do OFX
+   o modelo inventou o formato. Os casos da bancada vêm dessas fábricas, então ela favorece os
+   exemplos antigos. O P0 sai assim mesmo, porque é a sua regra e a diferença não é significativa.
+4. Com n ≈ 30, uma rodada sozinha engana: a mesma comparação deu 15×5 numa e 9×12 na outra. A
+   confirmação numa rodada nova não é opcional.
+5. Com 16 comparações ao mesmo tempo, o provedor devolve respostas vazias (13 de 120). Pela metade
+   da carga, nenhuma.
+
+---
 
 ## Resumo
 
@@ -169,9 +236,10 @@ fit_sections(spec, 8000, SPEC_FOR_REVIEW)
 ```
 
 Há cortes parecidos nas specs das histórias de que esta depende (`product.py:74`, 6.000) e na
-pesquisa (`analyst.py:149`, 5.000). Não mexi em nada disso: fica para você decidir.
+pesquisa (`analyst.py:149`, 5.000). **07/10:** o do Inspector foi consertado em 9667287 (escopo e
+bordas primeiro, 8.000 caracteres); os outros dois seguem abertos.
 
-## 6. Próximos passos
+## 6. Próximos passos (de 06/10; feitos em 06-07/10, ver seção 0)
 
 1. Você revisa o [PROMPTS-14.3.md](PROMPTS-14.3.md) e risca o que não quiser.
 2. Eu conserto o contexto do Inspector (seção 5), se você aprovar.

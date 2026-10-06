@@ -139,3 +139,22 @@ instructions cost reasoning models more than an arbitrary choice would.
     product word.
   - `PROMPTS-14.3.md` has each prompt, current and proposed, in full.
   - `run_round3.sh` measures it all; it has not run yet.
+- **14.3 measured and adopted (06-07/10).** Rounds 3 (each idea against P0) and 4 (each prompt's
+  final text against the old one, in a fresh run), 45 comparisons, US$ 7.31.
+  - The bench changed on the way:
+    - the judge reads each pair in both orders, and a verdict that flips is a tie (7b47664);
+    - `summarize.py` gives the sign-test and McNemar p;
+    - an empty answer is a failed call, not a loss (de72ce3).
+  - Two controls (the code's prompt against itself) split 9×16 and 17×22 by chance. So only
+    p < 0.05 counts, and every approval was confirmed in a fresh run.
+  - In the code:
+    - P0 everywhere;
+    - founder voice and the `impact` fix in EXEC;
+    - the team voice in the sprint report;
+    - the conflicts of Pre-flight, PROPOSE, REVIEW, Analyst, Worker and Architect;
+    - the recommended option first;
+    - in the spec, criteria with a concrete example.
+  - Rejected: the rest. Not measurable here (the tail of the Worker's loop, rework): P2, P5, P7, P8
+    and the texts outside the registry, which wait for a live A/B arm.
+  - Three code fixes were found by the bench: the Inspector's whole spec, the word swaps before the
+    executive audit, and the sprint report's founder-wait label.

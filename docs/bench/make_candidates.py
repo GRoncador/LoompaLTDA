@@ -14,10 +14,13 @@ the dry-run marker phrases survive, `{language}` still formats, and no product w
 
 from __future__ import annotations
 
+import ast
 import difflib
 import importlib
 import re
+import subprocess
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 
 from loompa.bench import registry
@@ -787,7 +790,153 @@ FINAL: dict[str, list[str]] = {
     "worker.SYSTEM": ["p6-conflicts"],
 }
 
+# What the bench said, idea by idea (pt-BR, for the review documents). The juiz split is
+# current×candidate unless said otherwise; p is the sign test (judge) or McNemar (checks).
+APROVADA, NEUTRA, REPROVADA, FORA = "aprovada", "neutra, adotada", "reprovada", "não medível"
+RESULTS: dict[tuple[str, str], tuple[str, str]] = {
+    ("p0-agnostic", "master.EXEC_SYSTEM"): (NEUTRA, "juiz 14×9 (p 0,40); auditoria 72→75%."),
+    ("p1-founder-voice", "master.EXEC_SYSTEM"): (
+        APROVADA,
+        "auditoria 75→97% (p 0,01); gênero/3ª pessoa 5→0; número de tarefa 5→0; juiz 11×13. "
+        "Confirmada no texto final (rodada 4): juiz 4×16 (p 0,01).",
+    ),
+    ("p6-conflicts", "master.EXEC_SYSTEM"): (
+        APROVADA,
+        "juiz 5×21 (p < 0,01); tranquilizações 20→11. Confirmada: tranquilizações 18→9.",
+    ),
+    ("p1-founder-voice", "deployer.SUMMARY_SYSTEM"): (
+        REPROVADA,
+        "sem ganho: juiz 21×20, auditoria 98→97%. O original (com o P0) fica.",
+    ),
+    ("p0-agnostic", "deployer.SUMMARY_SYSTEM"): (
+        NEUTRA,
+        "quatro rodadas somam 66×79; a auditoria já passa 93-100% nos dois.",
+    ),
+    ("p1-founder-voice", "master.SPRINT_REPORT_SYSTEM"): (
+        REPROVADA,
+        'tirou o "fundador" (7→0), mas pôs o Founder como sujeito ("Você entregou", "Você '
+        'esperou por nossas respostas"); nota 3,86→3,59. Trocada pelo P1c.',
+    ),
+    ("p1c-team-voice", "master.SPRINT_REPORT_SYSTEM"): (
+        APROVADA,
+        "P1b: nota 3,73→4,36, 3ª pessoa 9→1. P1c com o rótulo corrigido (d1efdfd): 3ª pessoa "
+        "3→0, nenhuma inversão; texto final: juiz 2×4, 3ª pessoa 8→1 (n=11).",
+    ),
+    ("p0-agnostic", "inspector.JUDGE_SYSTEM"): (
+        NEUTRA,
+        "duas rodadas iguais deram 5×15 (p 0,04) e 12×9: somadas 17×24.",
+    ),
+    ("p3-scope", "inspector.JUDGE_SYSTEM"): (
+        REPROVADA,
+        "com a spec inteira: juiz 8×14 (p 0,29), achados 22→26, decisão igual à gravada "
+        "89,7→86,2%. Sem ganho claro; o original fica.",
+    ),
+    ("p6-conflicts", "architect.PREFLIGHT_SYSTEM"): (
+        APROVADA,
+        "juiz 1×8 (p 0,04); confirmada no texto final: 3×7. Somadas 4×15 (p ≈ 0,02).",
+    ),
+    ("p9-recommended-first", "architect.PREFLIGHT_SYSTEM"): (
+        NEUTRA,
+        "juiz 6×4 (p 0,75); nenhum caso irreversível, então o texto novo não entrou em jogo.",
+    ),
+    ("p0-agnostic", "architect.PREFLIGHT_SYSTEM"): (NEUTRA, "medido junto com P6 e P9."),
+    ("p6-conflicts", "product_owner.PROPOSE_SYSTEM"): (
+        APROVADA,
+        "juiz 2×5 e, no texto final, 2×4; nota 3,55→3,86. Pequeno (n=11), mesmo lado duas vezes.",
+    ),
+    ("p6-conflicts", "product_owner.REVIEW_SYSTEM"): (
+        NEUTRA,
+        "juiz 21×14 e, no final, 19×17; aprovações 28→34 (critérios de borda deixam de ser "
+        "escopo inventado).",
+    ),
+    ("p0-agnostic", "product_owner.REVIEW_SYSTEM"): (NEUTRA, "juiz 18×18."),
+    ("p4b-testable-note", "product_owner.REVIEW_SYSTEM"): (
+        REPROVADA,
+        "juiz 17×18, aprovações 32→31: nada muda. O P4 (na escrita) cobre a ideia.",
+    ),
+    ("p0-agnostic", "product_owner.ALIGN_SYSTEM"): (NEUTRA, "juiz 5×6; no final, 3×8."),
+    ("p0-agnostic", "architect.AMEND_SYSTEM"): (NEUTRA, "juiz 14×11 duas vezes (p 0,69)."),
+    ("p0-agnostic", "architect.SIMPLE_SYSTEM"): (NEUTRA, "juiz 3×1 com 4 casos."),
+    ("p0-agnostic", "product_owner.REVIEW_CARDS_SYSTEM"): (
+        NEUTRA,
+        'a primeira versão ("second person") trouxe "o senhor" de volta; com "você" como '
+        "exemplo do português: juiz 0×1 (3 casos).",
+    ),
+    ("p6-conflicts", "analyst.SYSTEM"): (NEUTRA, "medido junto com o P9."),
+    ("p9-recommended-first", "analyst.SYSTEM"): (
+        NEUTRA,
+        "duas rodadas: 5×2 e 1×5 (somadas 6×7); texto final 3×3. Nenhum caso pediu decisão.",
+    ),
+    ("p6-conflicts", "worker.SYSTEM"): (
+        NEUTRA,
+        "uma palavra que repete o que o código faz; a primeira chamada do Worker não muda.",
+    ),
+    ("p5-general-solution", "worker.SYSTEM"): (
+        FORA,
+        "a primeira chamada fica igual (read_file 53→52) e o Worker não bloqueia mais cedo; o "
+        "efeito está no fim do laço, que a bancada não vê. Pede um A/B ao vivo.",
+    ),
+    ("p7-test-seams", "worker.SYSTEM"): (
+        FORA,
+        "primeira chamada igual (read_file 53→49); o efeito está nos testes escritos depois. "
+        "A/B ao vivo.",
+    ),
+    ("p8-ask-round", "brainstorm.BRAINSTORM_SYSTEM"): (
+        FORA,
+        "5 casos, primeira chamada, sem juiz. Lidas à mão, as respostas assumem e recomendam "
+        "mais, mas 5 não validam.",
+    ),
+    ("p0-agnostic", "product.SYSTEM"): (
+        NEUTRA,
+        "juiz 19×13 (p 0,38). Num caso da `contas`, sem o exemplo do OFX o modelo inventou o "
+        "formato: o exemplo concreto ajuda na fábrica de onde veio, e é por isso que sai.",
+    ),
+    ("p4-examples", "product.SYSTEM"): (
+        APROVADA,
+        "critérios com valor concreto 58→83% (382/660 → 649/786); juiz 12×23 (p 0,09). Gera "
+        "~19% mais critérios. Texto final (P0+P4+P10b) confirmado: juiz 17×28 (p 0,14), contrato "
+        "90→95%, valores 60→83%; pergunta mais ao Founder (11→17 de 60) e sai ~43% mais longa.",
+    ),
+    ("p10-when-to-ask", "product.SYSTEM"): (
+        REPROVADA,
+        "juiz 23×14 para o P0, contrato 97→90%; perguntas ao Founder 16→12. Mudava três coisas; "
+        "trocada pelo P10b.",
+    ),
+    ("p10b-minimal", "product.SYSTEM"): (
+        NEUTRA,
+        "juiz 21×16 para o P0 (p 0,51), contrato 87→90%. Tira a contradição sem custo.",
+    ),
+    ("p0-agnostic", "architect.SYSTEM"): (NEUTRA, "juiz 12×15 (p 0,70)."),
+    ("p2-tracer", "architect.SYSTEM"): (
+        FORA,
+        "o juiz empata o plano (14×17, p 0,72; nota 3,93→4,18) e há ~10% mais tarefas por plano; "
+        "o efeito que importa (retrabalho) só aparece ao vivo. Fica para um A/B ao vivo.",
+    ),
+    ("p6-conflicts", "architect.SYSTEM"): (
+        NEUTRA,
+        "juiz 16×23 (p 0,34); tarefas por plano 4,0→3,8. Texto final (P0+P6) confirmado: 13×20.",
+    ),
+}
+
 # --------------------------------------------------------------------------- outside the bench
+
+OUTSIDE_RESULTS: dict[str, tuple[str, str]] = {
+    "o1-reproducer-symptom": (
+        FORA,
+        "a bancada só repete chamadas gravadas; fica para um A/B ao vivo.",
+    ),
+    "o1b-reproducer-plan": (FORA, "idem."),
+    "o2-diagnose-retry": (
+        FORA,
+        "só aparece nas novas tentativas, ao vivo; pede a checagem de `[debug]`.",
+    ),
+    "o3-blocked-tool": (
+        NEUTRA,
+        "o mesmo alinhamento com o inbox que o P9 (neutro na bancada); adotada em 8f7f683.",
+    ),
+    "o4-ops-check": (FORA, "o EXPLAIN_SYSTEM fica fora do registro da bancada."),
+    "o5-glossary": (FORA, "texto montado no código, fora dos casos gravados."),
+}
 
 
 @dataclass
@@ -902,8 +1051,32 @@ def apply(text: str, edits: list[tuple[str, str]], label: str) -> str:
     return text
 
 
+# The prompts as they were before 14.3 changed any of them: every candidate is an edit on this text,
+# and the review documents compare against it, whatever the code holds today.
+BASE_COMMIT = "d1efdfd"
+
+
+@cache
+def baseline(key: str) -> str:
+    prompt = registry.get(key)
+    rel = "src/" + prompt.module.replace(".", "/") + ".py"
+    source = subprocess.run(
+        ["git", "show", f"{BASE_COMMIT}:{rel}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == prompt.const for t in node.targets
+        ):
+            return ast.literal_eval(node.value)
+    raise KeyError(key)
+
+
 def p0(key: str) -> str:
-    return apply(registry.get(key).template, P0.get(key, []), f"P0 {key}")
+    return apply(baseline(key), P0.get(key, []), f"P0 {key}")
 
 
 def check(key: str, text: str, label: str) -> list[str]:
@@ -914,10 +1087,10 @@ def check(key: str, text: str, label: str) -> list[str]:
     if registry.parse_contract(rendered) != prompt.contract:
         problems.append("contrato JSON mudou")
     for m in MARKERS:
-        if m in prompt.template and m not in text:
+        if m in baseline(key) and m not in text:
             problems.append(f"marcador do dry-run sumiu: {m}")
     try:
-        prompt.template.format(language="pt-BR")
+        baseline(key).format(language="pt-BR")
         text.format(language="pt-BR")
     except (KeyError, IndexError):
         pass  # a template with other fields (the consult prompt) is filled elsewhere
@@ -971,16 +1144,19 @@ def main() -> None:
         (OUT / f"{key}.proposed.txt").write_text(text, encoding="utf-8")
         proposed[key] = text
     by_id = {i.id: i for i in IDEAS}
+    finals: dict[str, str] = {}
     for key, ids in FINAL.items():
         text = p0(key)
         for idea_id in ids:
             text = apply(text, by_id[idea_id].edits[key], f"final {idea_id} {key}")
         problems += [f"{key}.final: {p}" for p in check(key, text, "final")]
         (OUT / f"{key}.final.txt").write_text(text, encoding="utf-8")
+        finals[key] = text
     for o in OUTSIDE:
-        if runtime_text(o.where).count(o.old) != 1:
+        text = runtime_text(o.where)
+        if text.count(o.old) != 1 and o.new not in text:  # neither pending nor adopted
             problems.append(f"{o.id}: trecho não encontrado uma vez em {o.where}")
-    REPORT.write_text(render_report(keys, proposed, applied), encoding="utf-8")
+    REPORT.write_text(render_report(keys, finals), encoding="utf-8")
     print("\n".join(sorted(p.name for p in OUT.glob("*.txt"))))
     print(f"\n{REPORT.relative_to(ROOT)}")
     if problems:
@@ -994,59 +1170,63 @@ def refs_md(ids: list[str]) -> str:
     return "; ".join(f"[{REFS[r][0]}]({REFS[r][1]})" for r in ids)
 
 
-def render_report(keys: list[str], proposed: dict[str, str], applied: dict[str, list[Idea]]) -> str:
+def render_report(keys: list[str], finals: dict[str, str]) -> str:
     lines = [
-        "# 14.3 — Prompts: o atual, o proposto e por quê",
+        "# 14.3 — Prompts: antes, depois e o que a bancada disse",
         "",
-        "Gerado por `uv run python docs/bench/make_candidates.py`; não editar à mão. A análise está",
-        "em [PROPOSTA-14.3.md](PROPOSTA-14.3.md). **Nenhum prompt do código mudou**: o proposto é",
-        "o candidato a medir na bancada (`loompa prompts compare`).",
+        "Gerado por `uv run python docs/bench/make_candidates.py`; não editar à mão. A análise e o",
+        "método estão em [PROPOSTA-14.3.md](PROPOSTA-14.3.md). **Antes** é o texto de",
+        f"`{BASE_COMMIT}`, anterior à 14.3; **depois** é o texto final, que leva só as ideias que a",
+        "bancada aprovou (ou que saíram neutras e corrigem uma regra) e é o que está no código.",
         "",
-        "Cada prompt traz: as mudanças com a referência e o porquê, o tamanho, o diff e os dois",
-        "textos inteiros (o `{language}` aparece como está no código).",
+        "Cada prompt traz todas as ideias medidas nele, aprovadas ou não, com o resultado, a",
+        "referência e o porquê; depois o diff e os dois textos inteiros.",
         "",
         "## Índice",
         "",
-        "| Prompt | Mudanças | Caracteres (atual → proposto) | Tokens a mais por chamada |",
-        "| --- | --- | --- | --- |",
+        "| Prompt | No texto final | Fora | Caracteres (antes → depois) | Tokens por chamada |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for key in keys:
-        old, new = registry.get(key).template, proposed[key]
-        ids = (["p0-agnostic"] if key in P0 else []) + [i.id for i in applied[key]]
+        old, new = baseline(key), finals.get(key, baseline(key))
+        kept = (["P0"] if key in P0 else []) + [short(i) for i in FINAL.get(key, [])]
+        out = [short(i.id) for i in IDEAS if key in i.edits and i.id not in FINAL.get(key, [])]
         lines.append(
-            f"| [`{key}`](#{key.lower().replace('.', '')}) | {', '.join(ids)} | "
-            f"{len(old)} → {len(new)} | {tokens(new) - tokens(old):+d} |"
+            f"| [`{key}`](#{key.lower().replace('.', '')}) | {', '.join(kept) or '—'} | "
+            f"{', '.join(out) or '—'} | {len(old)} → {len(new)} | {tokens(new) - tokens(old):+d} |"
         )
-    lines += ["", "Fora da bancada (texto que não é constante `*SYSTEM` do pacote de agentes):", ""]
-    lines += [f"- [`{o.id}`](#{o.id}) — {o.title}" for o in OUTSIDE]
+    lines += ["", "Fora da bancada:", ""]
+    lines += [f"- [`{o.id}`](#{o.id}) — {o.title}: **{OUTSIDE_RESULTS[o.id][0]}**" for o in OUTSIDE]
     for key in keys:
-        old, new = registry.get(key).template, proposed[key]
+        old, new = baseline(key), finals.get(key, baseline(key))
         lines += ["", f"## {key}", ""]
         if key in P0:
+            verdict, text = RESULTS.get(("p0-agnostic", key), (NEUTRA, ""))
             lines += [
-                "**p0-agnostic — sem fábrica, história ou exemplo de produto.** Regra do Founder (06/10) e",
-                f"{refs_md(['anthropic-skill-creator'])}: generalizar a partir do caso em vez de",
-                "remendos colados a ele. Cada regra fica, com o motivo dito em termos gerais.",
+                f"**P0 — sem fábrica, história ou exemplo de produto ({verdict}).** {text}",
+                "",
+                "Regra do Founder (06/10) e "
+                + refs_md(["anthropic-skill-creator"])
+                + ": generalizar a partir do caso em vez de remendos colados a ele.",
                 "",
             ]
-        for idea in applied[key]:
-            lines += [f"**{idea.id} — {idea.title}.** {idea.why}", ""]
-            if key in idea.detail:
-                lines += [f"*Neste prompt:* {idea.detail[key]}", ""]
-            if evidence := idea.evidence_for(key):
-                lines += [f"*Dados nossos:* {evidence}", ""]
-            if idea.note:
-                lines += [f"*Atenção:* {idea.note}", ""]
+        for idea in IDEAS:
+            if key not in idea.edits:
+                continue
+            verdict, text = RESULTS.get((idea.id, key), ("não medida", ""))
+            lines += [f"**{short(idea.id)} — {idea.title} ({verdict}).** {text}", ""]
+            lines += [f"*Por quê:* {idea.detail.get(key) or idea.why}", ""]
             lines += [f"*Referências:* {refs_md(idea.refs)}", ""]
-        alternatives = [i for i in IDEAS if key in i.edits and not i.proposed]
-        for idea in alternatives:
-            lines += [
-                f"*Fora do proposto, só para medir:* **{idea.id}** — {idea.title}. {idea.note or idea.why}",
-                "",
-            ]
+            if idea.id not in FINAL.get(key, []):
+                lines += [f"*Candidato medido:* `candidates/{key}.{idea.id}.txt`", ""]
         lines += [
             f"Tamanho: {len(old)} → {len(new)} caracteres (~{tokens(old)} → ~{tokens(new)} tokens).",
             "",
+        ]
+        if new == old:
+            lines += ["O texto final é igual ao de antes.", ""]
+            continue
+        lines += [
             "<details><summary>Diff</summary>",
             "",
             "```diff",
@@ -1055,7 +1235,7 @@ def render_report(keys: list[str], proposed: dict[str, str], applied: dict[str, 
             "",
             "</details>",
             "",
-            "<details><summary>Atual (inteiro)</summary>",
+            "<details><summary>Antes (inteiro)</summary>",
             "",
             "```text",
             old.rstrip(),
@@ -1063,7 +1243,7 @@ def render_report(keys: list[str], proposed: dict[str, str], applied: dict[str, 
             "",
             "</details>",
             "",
-            "<details><summary>Proposto (inteiro)</summary>",
+            "<details><summary>Depois (inteiro)</summary>",
             "",
             "```text",
             new.rstrip(),
@@ -1073,14 +1253,9 @@ def render_report(keys: list[str], proposed: dict[str, str], applied: dict[str, 
         ]
     lines += ["", "## Fora da bancada", ""]
     for o in OUTSIDE:
-        lines += [
-            f"### {o.id}",
-            "",
-            f"**{o.title}** (`{o.where}`). {o.why}",
-            "",
-            f"*Referências:* {refs_md(o.refs)}",
-            "",
-        ]
+        verdict, text = OUTSIDE_RESULTS[o.id]
+        lines += [f"### {o.id}", "", f"**{o.title}** (`{o.where}`): **{verdict}**. {text}", ""]
+        lines += [f"*Por quê:* {o.why}", "", f"*Referências:* {refs_md(o.refs)}", ""]
         if o.note:
             lines += [f"*Atenção:* {o.note}", ""]
         lines += [
@@ -1098,6 +1273,10 @@ def render_report(keys: list[str], proposed: dict[str, str], applied: dict[str, 
             "",
         ]
     return "\n".join(lines) + "\n"
+
+
+def short(idea_id: str) -> str:
+    return idea_id.split("-", 1)[0].upper()
 
 
 if __name__ == "__main__":

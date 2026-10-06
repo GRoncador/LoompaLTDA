@@ -721,8 +721,9 @@ Decided 2026-09-29:
   - Founder text moved from the free tier 3 to tier 2 (config revision 6). The free tier lost on the
     judge and broke the sprint report's JSON.
   - `qwen3.8-27b:free` left the free list.
-  - 14.3 (ideas from Matt Pocock's skills and the Anthropic/OpenAI guides) is paused by the founder:
-    each prompt change is shown to him before it is measured, and prompts stay product-agnostic.
+  - 14.3 (ideas from Matt Pocock's skills and 14 other references) was reviewed, measured in two
+    rounds, and the winners adopted on 06-07/10. The bench judge now reads both orders and reports
+    p-values. See `docs/bench/PROPOSTA-14.3.md` section 0 and ADR-0034.
   - 14.5 measured the decision model (Jev) on real calls: accurate where confident, but no outcome
     changes. It is `off` in all four uses (ADR-0032 "Plan 14.5").
   - SP-010 (3/3 delivered, US$ 0.26, 1h43, no rework): the founder's pause landing on the close left
