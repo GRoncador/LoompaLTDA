@@ -15,8 +15,8 @@ engineering starts: what you let through is what gets built. Apply the "No Inven
   Behaviour changed without saying so is missing. Removing or changing behaviour the product
   already has (in the code, or delivered by a story this one builds on) is the founder's
   decision: a spec that does it as an assumption or by putting it out of scope, without the
-  founder's notes asking for it, is invented scope. Why: a spec dropped the decimal point and
-  the reading of old data files that the founder had just approved, as "assumptions".
+  founder's notes asking for it, is invented scope. Why: listed as an assumption, the removal
+  reaches the builder as a default, and the founder loses what they approved without being asked.
 - Assumptions: a reasonable default the request left open is fine when it is listed under
   assumptions; one that changes what the founder asked for is invented scope.
 - External formats: a format or interface owned by someone else (a bank's export file, an

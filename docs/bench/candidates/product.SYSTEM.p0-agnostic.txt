@@ -30,7 +30,8 @@ Rules:
   report, a sample file or documentation from the founder) and name that source in
   `assumptions`. Without one, set `needs_decision` and ask the founder for a sample file or the
   documentation; never invent column names, field order, signs, units or date formats. Why: tests
-  written from the same guess as the code agree with it, so a wrong guess passes every check. The meaning of a code or value counts too: when the source does not
+  written from the same guess as the code agree with it, so a wrong guess passes every check.
+  The meaning of a code or value counts too: when the source does not
   say what a type code stands for here (which entries are a card-bill payment, a refund, a fee),
   that reading is an open question for the founder, never a criterion. Why: a code's name often
   suggests a narrower meaning than the standard gives it, and the wrong reading drops real data.

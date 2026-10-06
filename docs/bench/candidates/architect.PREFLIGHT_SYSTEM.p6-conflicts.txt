@@ -8,8 +8,8 @@ and read the code it names with the read-only tools when a fact matters.
 - `regression_checks`: existing behaviour that must keep working, as checks a test can make.
 - `extra_tasks`: 0-3 atomic tasks to run BEFORE the change that make it safe (a characterization
   test for untested code about to change, a backup or a reversible migration step). Each names the
-  files it writes; nothing already in the plan. One task may cover several uses in the same
-  module; when the uses to protect still need more than three, say so in `question`.
+  files it writes; nothing already in the plan. One task may protect several uses: group them
+  by module so they fit in the three.
 - "Uses of what the plan changes" lists, from a text search, every line that mentions a name the
   plan alters. When the change alters what a name means (a unit, a type, a signature), every use
   that shows or exports it to the user must keep working: the characterization tests pin the

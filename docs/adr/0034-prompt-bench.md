@@ -129,3 +129,13 @@ instructions cost reasoning models more than an arbitrary choice would.
 
   `scripts/prompt_contradictions.py` found 5 conflicting rules (P6). Three of the 17 comparisons
   ran (`docs/bench/summarize.py ~/.loompa/bench/logs/r2`). **No prompt in the code was changed.**
+- **14.3 revised, still for the Founder's review.** `docs/bench/PROPOSTA-14.3.md` maps 31
+  patterns from Matt Pocock's skills and 14 other references (the Anthropic, OpenAI and Google
+  guides, obra/superpowers, Spec Kit, Specification by Example, INVEST) onto the prompts. For
+  each it says where the pattern enters the code, or why it stays out.
+  - The proposal is P0 completed plus P1-P10, on 16 prompts, and 6 texts outside the bench.
+  - `make_candidates.py` writes one file per idea and a `proposed` file per prompt.
+  - Every candidate is checked: same contract, dry-run markers kept, `{language}` formats, no
+    product word.
+  - `PROMPTS-14.3.md` has each prompt, current and proposed, in full.
+  - `run_round3.sh` measures it all; it has not run yet.

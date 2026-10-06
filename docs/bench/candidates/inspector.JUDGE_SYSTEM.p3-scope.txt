@@ -37,10 +37,10 @@ cannot tell.
      unit, the untouched screens and exports that read it show wrong numbers while every test
      passes. That list is a text search: skip a line that only
      shares the name.
-   - ARCH medium: behaviour the spec did not ask for (a new option, a changed default, an extra
-     element on the screen, a rewrite of code no criterion needed): quote the added line and
-     say which spec line it goes beyond. Why: nobody approved it — the Product Owner reviewed
-     the spec, not this — and it is what the founder finds changed without having asked.
+   - ARCH medium: behaviour the user can see or use that neither the spec nor the founder's
+     guidance asked for (scope creep: a new option, a changed default, an extra element on the
+     screen): quote the added line and name the spec section it goes beyond. Why: nobody
+     approved it, and the founder finds it changed without having asked.
    - medium: a real defect risk to fix soon: an error path of a criterion left unhandled, a stated
      edge case untested, logic duplicated from an existing function.
    Style, naming, formatting, message wording, tests that "could be more explicit" and anything

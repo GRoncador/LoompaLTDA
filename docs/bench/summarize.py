@@ -31,9 +31,24 @@ def answers(report: dict, variant: str) -> list[dict]:
     return out
 
 
+# What plan 14.3's founder-text and spec candidates aim to move (PROPOSTA-14.3.md, P1/P4/P6/P10).
+FOUNDER_TEXT = ("master.EXEC_SYSTEM", "master.SPRINT_REPORT_SYSTEM", "deployer.SUMMARY_SYSTEM")
+THIRD_PERSON = re.compile(r"\b(o senhor|a senhora|d[oa] senhora?|ao senhor|fundadora?)\b", re.I)
+REASSURANCE = re.compile(r"normalmente|continua(m)? funcionando|continuam passando", re.I)
+TASK_ID = re.compile(r"\bT\d{1,3}\b")
+HAS_VALUE = re.compile(r"\d|[\"“'‘]")
+
+
 def extra(report: dict, variant: str) -> str:
     """The number that tells what the change does, per prompt."""
     p, data = report["prompt"], answers(report, variant)
+    if p in FOUNDER_TEXT:
+        texts = [json.dumps(d, ensure_ascii=False) for d in data]
+        return (
+            f"3ª pessoa/gênero {sum(bool(THIRD_PERSON.search(t)) for t in texts)}, "
+            f"tranquiliza {sum(bool(REASSURANCE.search(t)) for t in texts)}, "
+            f"T# {sum(bool(TASK_ID.search(t)) for t in texts)}"
+        )
     if p == "product_owner.REVIEW_SYSTEM":
         return f"aprovou {sum(bool(d.get('approved')) for d in data)}/{len(data)}"
     if p == "inspector.JUDGE_SYSTEM":
@@ -47,7 +62,11 @@ def extra(report: dict, variant: str) -> str:
         blockers = sum(1 for d in data if str(d.get("blocker") or "").strip())
         return f"tarefas/plano {sum(tasks) / max(len(tasks), 1):.1f}, blocker {blockers}"
     if p == "product.SYSTEM":
-        return f"needs_decision {sum(bool(d.get('needs_decision')) for d in data)}/{len(data)}"
+        crit = [str(c) for d in data for c in d.get("acceptance") or []]
+        return (
+            f"needs_decision {sum(bool(d.get('needs_decision')) for d in data)}/{len(data)}, "
+            f"critérios com valor {sum(bool(HAS_VALUE.search(c)) for c in crit)}/{len(crit)}"
+        )
     if p == "worker.SYSTEM":
         first = Counter(
             (r["tool_calls"] or ["(texto)"])[0] for r in report["runs"] if r["variant"] == variant
