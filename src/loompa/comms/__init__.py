@@ -13,6 +13,7 @@ from loompa.comms.executive import (
     compose_decision_message,
     compose_delivery_message,
     compose_research_message,
+    plain_words,
     sanitize_for_founder,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "compose_decision_message",
     "compose_delivery_message",
     "compose_research_message",
+    "plain_words",
     "sanitize_for_founder",
 ]

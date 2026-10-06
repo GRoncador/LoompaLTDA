@@ -18,6 +18,7 @@ from loompa.comms import (
     Option,
     audit_executive_text,
     compose_blocked_message,
+    plain_words,
     sanitize_for_founder,
 )
 from loompa.comms.executive import MAX_FOUNDER_CHARS, clip
@@ -963,13 +964,14 @@ class MasterAgent(LoompaAgent):
                     max_tokens=800,
                     reasoning_effort="low",  # ADR-0016: the facts are given; this words them
                 )
+                # Task numbers and the team's words become plain ones before the audit: "T1" or
+                # "checklist" sent 10 of 36 rewrites to the bin and the founder the team's text
+                # instead (14.3). A path, a code name or a stack trace still fails it.
                 title, context, impact = (
-                    str(data.get("title") or ""),
-                    str(data.get("context") or ""),
-                    str(data.get("impact") or ""),
+                    plain_words(str(data.get(k) or "")) for k in ("title", "context", "impact")
                 )
                 labels = [
-                    str(x.get("label") or "") if isinstance(x, dict) else str(x)
+                    plain_words(str(x.get("label") or "") if isinstance(x, dict) else str(x))
                     for x in data.get("options") or []
                 ]
                 labels = [lb.strip() for lb in labels if lb.strip()]

@@ -224,6 +224,16 @@ def clip(text: str, limit: int) -> str:
     return cut.rstrip(" ,;:-—") + "…"
 
 
+def plain_words(text: str) -> str:
+    """Only the word-for-word swaps of the filter: a task number ("T1" → "tarefa 1") and the
+    team's words ("checklist", "branch") in plain ones. For text a model already wrote for the
+    founder: a stack trace, a path or a code name left in it is a rewrite that failed, and the
+    audit must still see it, so those are not cleaned here (14.3)."""
+    for pattern, plain in _JARGON.items():
+        text = re.sub(pattern, plain, text or "", flags=re.I)
+    return text
+
+
 def sanitize_for_founder(text: str, *, max_chars: int = MAX_FOUNDER_CHARS) -> str:
     """Deterministically strip technical noise from `text` for Founder consumption."""
     text = _ANSI.sub("", text or "")

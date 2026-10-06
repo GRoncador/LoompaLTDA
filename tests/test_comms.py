@@ -7,6 +7,7 @@ from loompa.comms import (
     compose_delivery_message,
     sanitize_for_founder,
 )
+from test_engine import factory, make_ctx  # noqa: F401
 
 TRACE = """Tests failed while saving invoices.
 Traceback (most recent call last):
@@ -121,3 +122,35 @@ def test_a_replaced_file_name_does_not_double_its_noun_and_code_names_do_not_pas
     assert sanitize_for_founder("Está no arquivo src/app.py.") == "Está num arquivo do projeto."
     plain = "Vale testar no celular: o pet atravessa 8 horas sem fim de jogo."
     assert sanitize_for_founder(plain) == plain and not audit_executive_text(plain)
+
+
+async def test_a_rewrite_with_a_task_number_is_cleaned_and_kept_not_thrown_away(factory):  # noqa: F811
+    """14.3: 10 of 36 executive rewrites named "T1" or a git word, failed the audit and were
+    replaced by the team's own text. The deterministic filter now runs first, as on the fallback."""
+    import json
+
+    from loompa.agents import MasterAgent
+    from loompa.engine.state import StoryState
+
+    def script(model, messages, tools):
+        if "Rewrite the technical problem" in messages[0].content:
+            return json.dumps(
+                {
+                    "title": "A T1 parou num teste antigo",
+                    "context": "Ao fazer a T1, o checklist mostrou dois testes de outra história.",
+                    "impact": "A entrega espera a sua escolha.",
+                    "options": ["Ajustar os testes", "Deixar para depois"],
+                }
+            )
+        return "{}"
+
+    master = MasterAgent(make_ctx(factory, script))
+    msg = await master.blocked_message(
+        StoryState(story_id="S-001", title="Fim de jogo"),
+        "T1 failed: tests/test_idade.py",
+        options=["Ajustar tests/test_idade.py", "Deixar para depois"],
+    )
+    assert msg.title.startswith("A tarefa 1 parou")  # the model's rewrite, cleaned
+    assert "roteiro de verificação" in msg.context and "T1" not in msg.context
+    assert [o.label for o in msg.options] == ["Ajustar os testes", "Deixar para depois"]
+    assert not audit_executive_text(f"{msg.title}\n{msg.context}\n{msg.impact}")
