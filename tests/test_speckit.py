@@ -69,3 +69,24 @@ def test_a_long_spec_keeps_whole_sections_by_priority_and_says_what_was_left_out
     huge = "## Critérios de aceitação (BDD)\n" + "\n".join(f"{i}. linha" for i in range(2000))
     cut = fit_sections(huge, 1200, SPEC_FOR_BUILDING)
     assert "section cut here" in cut and len(cut) <= 1200
+
+
+def test_the_inspector_gets_the_scope_and_edge_cases_before_a_second_copy_of_the_criteria():
+    """14.3: the judge read the first 3000 characters of the spec, so the scope of a median 8k
+    spec never reached it. Its criteria come whole in their own block; the spec gives the bounds."""
+    from loompa.speckit.artifacts import SPEC_FOR_JUDGING, SPEC_JUDGE_ROOM, fit_sections
+
+    spec = (
+        "# Spec — S-1: x\n\n"
+        "## Objetivo de negócio\n" + "o" * 600 + "\n\n"
+        "## Escopo\n**Fora do escopo:** exportar em PDF.\n" + "s" * 1500 + "\n\n"
+        "## Critérios de aceitação (BDD)\n" + "c" * 6000 + "\n\n"
+        "## Casos de borda\n- lista vazia\n" + "b" * 1500 + "\n\n"
+        "## Entidades principais\n" + "e" * 2500 + "\n"
+    )
+    out = fit_sections(spec, SPEC_JUDGE_ROOM, SPEC_FOR_JUDGING)
+    assert len(out) <= SPEC_JUDGE_ROOM
+    assert "exportar em PDF" in out and "lista vazia" in out
+    assert "s" * 1500 in out and "b" * 1500 in out  # scope and edge cases whole
+    assert "c" * 1500 not in out  # the second copy of the criteria gives way
+    assert "(left out to fit: Entidades principais)" in out

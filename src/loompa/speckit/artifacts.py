@@ -41,6 +41,19 @@ SPEC_FOR_BUILDING = (
     "Premissas",
 )
 SPEC_FOR_REVIEW = (*SPEC_FOR_BUILDING, "Entidades", "Perguntas")
+# The Inspector gets the criteria and their revision whole in its own blocks; from the spec it
+# needs what bounds them: the scope, the edge cases, the rules (14.3: it read the first 3000
+# characters, so the out-of-scope section of a median 8k spec never reached the judge).
+SPEC_FOR_JUDGING = (
+    "Escopo",
+    "Casos de borda",
+    "Regras de negócio",
+    "Requisitos não-funcionais",
+    "Premissas",
+    "Objetivo",
+    "Critérios",
+)
+SPEC_JUDGE_ROOM = 8_000
 PLAN_FOR_BUILDING = (
     "Ajuste pedido",
     "Abordagem",

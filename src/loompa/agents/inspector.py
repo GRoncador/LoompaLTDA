@@ -35,6 +35,7 @@ from loompa.hygiene import (
 from loompa.onboarding.greenfield import test_command_for
 from loompa.smoke import smoke, start_command
 from loompa.speckit import story_dir
+from loompa.speckit.artifacts import SPEC_FOR_JUDGING, SPEC_JUDGE_ROOM, fit_sections
 from loompa.worktrees import Worktree, WorktreeManager
 
 JUDGE_SYSTEM = """<!-- role:inspector -->
@@ -377,11 +378,15 @@ class InspectorAgent(LoompaAgent):
                 "summary": "diff vazio",
             }
         paths = story_dir(self.ctx.root, state.story_id)
-        spec = paths.spec.read_text(encoding="utf-8")[:3000] if paths.spec.is_file() else ""
+        spec = (
+            fit_sections(paths.spec.read_text(encoding="utf-8"), SPEC_JUDGE_ROOM, SPEC_FOR_JUDGING)
+            if paths.spec.is_file()
+            else ""
+        )
         user = (
             "## Acceptance criteria\n"
             + "\n".join(f"- {c}" for c in state.acceptance)
-            + f"\n\n## Spec excerpt\n{spec}\n\n"
+            + f"\n\n## Spec (whole sections; the criteria above are the current ones)\n{spec}\n\n"
             + founder_guidance(state)
             + _criteria_revision(state)
             + (f"## Automated checks (already run; facts)\n{checks}\n\n" if checks else "")
