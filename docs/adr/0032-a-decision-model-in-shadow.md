@@ -94,3 +94,25 @@ now large enough to say Jev reads Portuguese well at this task. Its weak recall 
   how often a dropped citation or passage would have been right.
 - The supplier was 17 days old when this was written, its limits "change without notice", and
   the endpoint is `alpha`. Every path falls back to the LLM, and none depends on it.
+
+## Measured against recorded decisions (2026-10-05, later)
+
+The founder asked to replay recorded decisions rather than wait for shadow data.
+
+### Memory filter
+
+`scripts/decider_memory_eval.py` uses the 20 questions with a known right document from ADR-0031.
+The top six passages of each question were scored for usefulness: 51 passages from the right
+document and 69 from others.
+
+- **As a filter, it does not work.** It gave "useful" to 49 of 51 right passages and to 50 of 69
+  wrong ones. At confidence ≥ 0.7 it would drop nothing.
+- **As a re-ranker, it does.** Within each question, P(useful) puts a right passage above a wrong
+  one in 69% of pairs. The search's own order inside those six does it in 49% of pairs.
+- **Proposal:** replace "drop" with "re-order and keep the best", and measure it in shadow.
+
+### Research claims and process-only findings
+
+- **Research claims:** no usable labels. The past reports cite repository files, not web pages, and
+  the PO's review kept only counts.
+- **Process-only findings:** only two positive verdicts on record, too few to measure.
