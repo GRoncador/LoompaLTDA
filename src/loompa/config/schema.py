@@ -51,6 +51,15 @@ class FactoryConfig(BaseModel):
         return slugify(v) if v else ""
 
 
+class PromptAB(BaseModel):
+    """One live prompt experiment: `variant` (a name in `loompa.prompt_ab.VARIANTS`) of `prompt`
+    (worker.SYSTEM, architect.SYSTEM) for `share` of the stories."""
+
+    prompt: str
+    variant: str
+    share: float = Field(0.5, ge=0, le=1)
+
+
 class ScheduleConfig(BaseModel):
     max_parallel: int = Field(3, ge=1, le=32)
     tier2_max_attempts: int = Field(2, ge=1)
@@ -85,6 +94,9 @@ class ScheduleConfig(BaseModel):
     # Off since 2026-10-04: the Worker's model (MiMo) ignores effort labels, measured; the
     # experiment could not answer while it runs there. Raise it again to measure another model.
     effort_ab_low_share: float = Field(0.0, ge=0, le=1)
+    # Live prompt A/B (plan 14.3, ADR-0035): each entry runs a variant of `loompa.prompt_ab` for
+    # `share` of the stories; `loompa prompts ab` compares the two arms. Empty = off.
+    prompt_ab: list[PromptAB] = Field(default_factory=list)
 
 
 class WorkerConfig(BaseModel):

@@ -33,6 +33,7 @@ from loompa.hygiene import (
     weak_tests,
 )
 from loompa.onboarding.greenfield import test_command_for
+from loompa.prompt_ab import finding_prefixes
 from loompa.smoke import smoke, start_command
 from loompa.speckit import story_dir
 from loompa.speckit.artifacts import SPEC_FOR_JUDGING, SPEC_JUDGE_ROOM, fit_sections
@@ -332,6 +333,7 @@ class InspectorAgent(LoompaAgent):
             agent=self.name,
             verdict=verdict,
             findings=len(findings),
+            prefixes=finding_prefixes(findings),  # the prompt A/B counts the TEST ones
         )
         return AgentResult(
             ok=ok,

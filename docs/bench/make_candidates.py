@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
+from loompa import prompt_ab  # P2, P5 and P7 live there, for the live A/B (ADR-0035)
 from loompa.bench import registry
 
 HERE = Path(__file__).parent
@@ -403,20 +404,7 @@ IDEAS: list[Idea] = [
         "em muitos módulos) segue expand–contract, que é a regra que o prompt já tem.",
         "O resultado antigo do P2 não vale (o juiz lia planos cortados). O efeito real é no retrabalho "
         "do Worker, que a bancada não mede: o juiz só opina sobre o plano.",
-        {
-            "architect.SYSTEM": [
-                (
-                    "   Tests: new tests for this story go in a new test file of its own",
-                    "   Order the tasks as a tracer bullet when the story crosses layers (data, logic, what the user\n"
-                    "   sees): the first task builds one thin path through all of them for one case of the main\n"
-                    "   criterion, with its test, and the next tasks widen it case by case. A change of one name or\n"
-                    "   unit across many modules keeps the one-module-at-a-time order above. Why: a path that works\n"
-                    "   end to end shows a wrong assumption at the first task; a layer built alone is proven only when\n"
-                    "   the last task joins it.\n"
-                    "   Tests: new tests for this story go in a new test file of its own",
-                )
-            ]
-        },
+        {"architect.SYSTEM": [prompt_ab.TRACER]},
     ),
     Idea(
         "p3-scope",
@@ -500,19 +488,7 @@ IDEAS: list[Idea] = [
         "O Worker moveu um sprite 1 px até passar no smoke (Fase 15), e a S-065 precisou de "
         "autorização para mexer em testes que fixavam pixels. A bancada mede só a primeira chamada do "
         "Worker; o efeito aparece no fim do laço, ao vivo.",
-        {
-            "worker.SYSTEM": [
-                (
-                    "3. Each write reports syntax errors",
-                    "   Write the general logic that is right for every valid input: tests and the factory's checks\n"
-                    "   verify the behaviour, they do not define it. So no special case for a test's values, and no\n"
-                    "   number (a pixel, a timeout) nudged just until a check passes; when a test or a check itself\n"
-                    "   looks wrong, call `blocked` and say why instead of working around it. Why: a value tuned to a\n"
-                    "   check hides the defect from every later check.\n"
-                    "3. Each write reports syntax errors",
-                )
-            ]
-        },
+        {"worker.SYSTEM": [prompt_ab.GENERAL_SOLUTION]},
     ),
     Idea(
         "p6-conflicts",
@@ -614,17 +590,7 @@ IDEAS: list[Idea] = [
         "relógio, aleatoriedade). Superpowers diz o mesmo. O Inspector já reprova o teste tautológico "
         "(TEST high); dizer isso a quem escreve o teste evita a rodada de retrabalho.",
         "",
-        {
-            "worker.SYSTEM": [
-                (
-                    "maximum and one past it, invalid input). Leave out the same path",
-                    "maximum and one past it, invalid input). Test through the interface the user or the calling\n"
-                    "   code uses, mocking only what the project does not own (network, clock, randomness), and write\n"
-                    "   each expected value as a literal from the spec or worked out by hand, never recomputed the way\n"
-                    "   the code computes it. Leave out the same path",
-                )
-            ]
-        },
+        {"worker.SYSTEM": [prompt_ab.TEST_SEAMS]},
     ),
     Idea(
         "p8-ask-round",

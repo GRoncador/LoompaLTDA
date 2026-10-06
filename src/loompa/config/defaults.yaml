@@ -24,6 +24,9 @@ schedule:
   ops_max_recoveries: 3     # transient crashes (rate limit, network) the Ops Loompa retries by itself
   ops_retry_base_s: 60      # wait before the first retry; doubles each time (max 10 min)
   stall_minutes: 20         # a running story silent this long is restarted by the Ops Loompa (0 = off)
+  # Live prompt A/B (ADR-0035): a variant of loompa.prompt_ab for a share of the stories,
+  # e.g. [{prompt: worker.SYSTEM, variant: tests-and-general, share: 0.5}]. `loompa prompts ab`.
+  prompt_ab: []
 
 worker:
   backend: aci               # aci (Loompa's own tool loop) | opencode (spike, see ADR-0007)

@@ -13,6 +13,7 @@ from loompa.callers import callers_of_plan
 from loompa.dependencies import delivered_brief
 from loompa.engine.state import Complexity, StoryKind, StoryState
 from loompa.hygiene import TEST_DIRS, is_test_path
+from loompa.prompt_ab import prompt_for
 from loompa.risk import assess, render_matrix
 from loompa.speckit import (
     NO_TEST_MARK,
@@ -395,8 +396,12 @@ class ArchitectAgent(LoompaAgent):
         state.extra[LEAN_KEY] = lean
         # The plan's `files` are the only paths the Worker may touch: let the Architect check
         # them in the repository instead of guessing.
+        # the full plan may run a live prompt experiment (ADR-0035); the SIMPLE form never does
+        system = (
+            SIMPLE_SYSTEM if lean else prompt_for(self.ctx, state, "architect.SYSTEM", SYSTEM)[0]
+        )
         data = await self.ask_json_with_tools(
-            (SIMPLE_SYSTEM if lean else SYSTEM).format(language=self.language) + EXPLORE_HINT,
+            system.format(language=self.language) + EXPLORE_HINT,
             user,
             self.explore_tools(at),
             story=state,

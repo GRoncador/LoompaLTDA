@@ -212,3 +212,148 @@ def print_summary(data: dict) -> None:
         f"custo do juiz US$ {data.get('judge_cost_usd', 0)}",
         highlight=False,
     )
+
+
+# ----------------------------------------------------------------------------- live A/B (ADR-0035)
+
+ab_app = typer.Typer(
+    help="A/B ao vivo de um prompt: uma variante para parte das histórias (ADR-0035).",
+    invoke_without_command=True,
+)
+prompts_app.add_typer(ab_app, name="ab")
+
+MIN_STORIES = 10  # per arm, before a difference is worth reading
+
+
+@ab_app.callback()
+def ab_status(
+    ctx: typer.Context,
+    factory_slug: str | None = typer.Option(None, "--factory", help="A fábrica (padrão: a ativa)."),
+    days: int = typer.Option(180, help="Janela das histórias sorteadas."),
+) -> None:
+    """Os experimentos ligados, as variantes que existem e o resultado de cada braço."""
+    if ctx.invoked_subcommand:
+        return
+    from loompa import prompt_ab
+    from loompa.store import Store
+
+    f = resolve_factory(factory_slug)
+    on = f.config.schedule.prompt_ab
+    console.print(f"[bold]{f.config.factory.name}[/bold] · experimentos ligados:")
+    for e in on or []:
+        console.print(f"  {e.prompt} → {e.variant} em {100 * e.share:.0f}% das histórias")
+    if not on:
+        console.print("  nenhum")
+    console.print("Variantes disponíveis:")
+    for (prompt, name), v in prompt_ab.VARIANTS.items():
+        console.print(f"  {prompt} {name}: {v.title}", highlight=False)
+    results = prompt_ab.report(Store(f.paths.state_db), f.config.factory.slug, days=days)
+    if not results:
+        console.print("Nenhuma história sorteada ainda.")
+        return
+    for r in results:
+        _print_ab(r)
+
+
+def _print_ab(r: dict) -> None:
+    from loompa.prompt_ab import CONTROL, VARIANT
+
+    t = Table(title=f"{r['prompt']} · {r['variant']} — {r['title']}")
+    t.add_column("medida")
+    t.add_column("variante")
+    t.add_column("controle")
+    v, c = r["arms"][VARIANT], r["arms"][CONTROL]
+    rows = [
+        ("histórias (encerradas)", lambda a: f"{a['stories']} ({a['settled']})"),
+        ("entregues", lambda a: a["delivered"]),
+        ("com retrabalho", lambda a: a["with_rework"]),
+        ("retrabalho por história", lambda a: a["rework"]),
+        ("reprovações do Inspector", lambda a: a["fails"]),
+        ("achados TEST", lambda a: a["test_findings"]),
+        ("bloqueios", lambda a: a["blocks"]),
+        ("tarefas que não terminaram", lambda a: a["unfinished_tasks"]),
+        ("tarefas por história", lambda a: a["tasks"]),
+        ("US$ por história", lambda a: a["cost_usd"]),
+    ]
+    for label, get in rows:
+        t.add_row(label, str(get(v)), str(get(c)))
+    console.print(t)
+    few = min(v["settled"], c["settled"]) < MIN_STORIES
+    console.print(
+        f"Histórias com retrabalho, Fisher p {r['rework_p']:.2f}. Observar: {r['watch']}."
+        + (
+            f" Com menos de {MIN_STORIES} histórias encerradas por braço, ainda não diz nada."
+            if few
+            else ""
+        ),
+        highlight=False,
+    )
+
+
+@ab_app.command("on")
+def ab_on(
+    prompt: str = typer.Argument(..., help="worker.SYSTEM ou architect.SYSTEM"),
+    variant: str = typer.Argument(..., help="O nome da variante (veja `loompa prompts ab`)."),
+    share: float = typer.Option(0.5, min=0.0, max=1.0, help="Parte das histórias na variante."),
+    factory_slug: str | None = typer.Option(None, "--factory", help="A fábrica (padrão: a ativa)."),
+) -> None:
+    """Liga um experimento: a variante roda em `share` das histórias novas desse prompt."""
+    from loompa import prompt_ab
+    from loompa.bench import registry
+    from loompa.config.schema import PromptAB
+    from loompa.config.store import save_config
+
+    if (prompt, variant) not in prompt_ab.VARIANTS:
+        console.print(f"[red]Variante desconhecida:[/red] {prompt} {variant}")
+        raise typer.Exit(code=2)
+    try:
+        prompt_ab.variant_text(registry.get(prompt).template, prompt, variant)
+    except ValueError as exc:
+        console.print(f"[red]A variante não cabe mais no prompt do código:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    f = resolve_factory(factory_slug)
+    others = [e for e in f.config.schedule.prompt_ab if e.prompt != prompt]
+    f.config.schedule.prompt_ab = [*others, PromptAB(prompt=prompt, variant=variant, share=share)]
+    save_config(f.root, f.config)
+    console.print(
+        f"Ligado em {f.config.factory.name}: {prompt} → {variant} em {100 * share:.0f}% das "
+        "histórias que começarem a partir de agora. Uma história em curso guarda o braço que tirou."
+    )
+
+
+@ab_app.command("off")
+def ab_off(
+    prompt: str = typer.Argument(..., help="worker.SYSTEM ou architect.SYSTEM"),
+    factory_slug: str | None = typer.Option(None, "--factory", help="A fábrica (padrão: a ativa)."),
+) -> None:
+    """Desliga o experimento de um prompt; o resultado continua em `loompa prompts ab`."""
+    from loompa.config.store import save_config
+
+    f = resolve_factory(factory_slug)
+    before = len(f.config.schedule.prompt_ab)
+    f.config.schedule.prompt_ab = [e for e in f.config.schedule.prompt_ab if e.prompt != prompt]
+    save_config(f.root, f.config)
+    console.print(
+        f"Desligado em {f.config.factory.name}: {prompt}."
+        if len(f.config.schedule.prompt_ab) < before
+        else f"Nenhum experimento ligado para {prompt}."
+    )
+
+
+@ab_app.command("show")
+def ab_show(
+    prompt: str = typer.Argument(...),
+    variant: str = typer.Argument(...),
+) -> None:
+    """O diff da variante sobre o prompt do código."""
+    import difflib
+
+    from loompa import prompt_ab
+    from loompa.bench import registry
+
+    base = registry.get(prompt).template
+    text = prompt_ab.variant_text(base, prompt, variant)
+    for line in difflib.unified_diff(
+        base.splitlines(), text.splitlines(), prompt, f"{prompt} · {variant}", lineterm=""
+    ):
+        console.print(line, highlight=False, markup=False)

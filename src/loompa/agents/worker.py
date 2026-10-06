@@ -23,6 +23,7 @@ from loompa.finance.story_cap import over_cap, story_spent
 from loompa.hygiene import cited_criteria, new_files, scan_diff, tests_to_trim
 from loompa.llm import EnginePaused, Message
 from loompa.llm.router import TIER_ABOVE
+from loompa.prompt_ab import prompt_for
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.speckit.artifacts import (
     PLAN_FOR_BUILDING,
@@ -828,8 +829,10 @@ class WorkerAgent(LoompaAgent):
         # (rules, constitution, spec, plan, allowed paths) goes first, in the system block, so the
         # provider's prefix cache (DeepSeek/Gemini automatic, Anthropic explicit) hits on every call.
         # Only the task-specific part changes per call.
+        # a live prompt experiment (ADR-0035) gives a share of the stories a variant of the rules
+        system, prompt_arm = prompt_for(self.ctx, state, "worker.SYSTEM", SYSTEM)
         stable = (
-            SYSTEM.format(language=self.language)
+            system.format(language=self.language)
             + f"\n## Story {state.story_id} — {state.title}\n\n## Allowed paths\n{json.dumps(state.allowed_paths, ensure_ascii=False)}\n\n"
             f"## Spec\n{fit_sections(spec, SPEC_ROOM, SPEC_FOR_BUILDING)}\n\n"
             f"## Plan\n{fit_sections(plan, PLAN_ROOM, PLAN_FOR_BUILDING)}\n\n{self.grounding(3000)}\n"
@@ -887,6 +890,7 @@ class WorkerAgent(LoompaAgent):
             duration_s=round(time.monotonic() - started, 1),
             effort="low" if light else "default",
             effort_ab=arm or None,  # the experiment's arm, when this task was in it
+            prompt_ab=prompt_arm or None,  # the prompt experiment's arm (ADR-0035)
             cost_usd=round(story_spent(self.ctx, state.story_id) - spent_before, 6),
             raised=loop.raised or None,
         )
