@@ -48,7 +48,7 @@ MARKERS = (
 # format of a reference in a JSON example, not a story.
 PRODUCT_WORDS = re.compile(
     r"tamagotchi|\bcontas\b|\bpet\b|\bOFX\b|`valor`|\breais\b|(?<!\")\bS-0\d\d\b|12\.50|10\.99|"
-    r"fundadora|\bvocê\b|casca-retorno|converter -|\bClick\b|\bTyper\b",
+    r"fundadora|casca-retorno|converter -|\bClick\b|\bTyper\b",
     re.I,
 )
 
@@ -297,7 +297,8 @@ P0: dict[str, list[tuple[str, str]]] = {
     "product_owner.REVIEW_CARDS_SYSTEM": [
         (
             'Address the founder as "você" and never guess their gender (a live reply said "a fundadora").',
-            "Address the founder directly, in the second person, and never assume their gender: a\nguessed gender is wrong for some founders.",
+            'Address the founder as "you" (in Portuguese "você", never "o senhor" or "a senhora"), without\n'
+            "assuming their gender: a guessed gender is wrong for some founders.",
         )
     ],
 }
@@ -701,7 +702,90 @@ IDEAS: list[Idea] = [
             ]
         },
     ),
+    # Round 3 (06/10): alternatives where the first proposal was not tuned
+    Idea(
+        "p1c-team-voice",
+        "Relatório do sprint: o time relata, o Founder aparece pelo que fez",
+        ["anthropic-best", "mp-writing"],
+        "O P1 dirigia o relatório ao Founder e o modelo passou a pôr o Founder como sujeito "
+        '("Você entregou as 2 histórias", "Você esperou 3d 23h por nossas respostas"). Aqui o time '
+        "relata na primeira pessoa e o Founder aparece só pelo que fez (os pedidos, as respostas), na "
+        'segunda pessoa e sem supor o gênero; e "rework" ganha a palavra em português, que o juiz '
+        "cobrava.",
+        'Rodada 3: P1b (a mesma voz) subiu a nota de 3,73 para 4,36 e o "fundador" na 3ª pessoa de '
+        "9/11 para 1/11. Com o rótulo dos dados corrigido no código (d1efdfd), o P1c zera a 3ª pessoa "
+        "e não inverte quem esperou quem; o juiz empata (5×4, n=11).",
+        {
+            "master.SPRINT_REPORT_SYSTEM": [
+                (
+                    "for the founder, who is not\ntechnical. In at most five short sentences of plain {language}: "
+                    "what the sprint delivered against\nits goal, what took longest or cost most and why (rework, "
+                    "blocks, waiting for the founder), what",
+                    "for the founder, who is not\ntechnical. Write it as the team reporting to them: the team "
+                    'delivered, spent and got blocked\n("we delivered"); the founder appears only for what they '
+                    "did, in the second person and without\nassuming their gender (the changes you asked for, the "
+                    "time the stories waited for your answers).\nIn at most five short sentences of plain "
+                    "{language}: what the sprint delivered against its goal,\nwhat took longest or cost most and "
+                    "why (rework, blocks, time waiting for the founder's answers), what",
+                ),
+                (
+                    '(in Portuguese a\nstory is a "história", never "story").',
+                    '(in Portuguese a\nstory is a "história", never "story", and rework is "retrabalho").',
+                ),
+            ]
+        },
+        proposed=False,
+    ),
+    Idea(
+        "p10b-minimal",
+        "Spec: só a contradição do formato externo, e a recomendada primeiro",
+        ["openai-gpt5", "speckit-clarify"],
+        "O P10 mexia em três coisas de uma vez (onde perguntar, o limiar do Spec Kit e a recomendada "
+        "primeiro) e perdeu para o P0 (14×23). Aqui fica o mínimo: o formato de terceiros sem fonte é "
+        'motivo para perguntar (a contradição "high"), e a opção recomendada vem primeiro, como o '
+        "inbox já mostra.",
+        "",
+        {
+            "product.SYSTEM": [
+                (
+                    "choice in `assumptions`; it is technical, not the founder's decision.",
+                    "choice in `assumptions`; it is technical, not the founder's decision, unless it is a format\n"
+                    "  owned by someone else (next rule).",
+                ),
+                (
+                    "- `needs_decision`: true only for a genuinely blocking product decision (two viable paths with\n"
+                    "  business impact); then `question`, `context` and 2-3 short `options` in plain, non-technical\n"
+                    "  {language} for the founder.",
+                    "- `needs_decision`: true only for a genuinely blocking product decision (two viable paths with\n"
+                    "  business impact) or for the missing source of a format owned by someone else (above); then\n"
+                    "  `question`, `context` and 2-3 short `options` in plain, non-technical {language} for the\n"
+                    "  founder, the one you recommend first: the founder sees it marked as recommended.",
+                ),
+            ]
+        },
+        proposed=False,
+    ),
 ]
+
+# What the bench approved (rounds 3 and 3b, PROPOSTA-14.3.md "Resultado"): the ideas each prompt's
+# final text carries, on top of P0 when the prompt has P0 edits. A prompt not listed stays as it is.
+FINAL: dict[str, list[str]] = {
+    "analyst.SYSTEM": ["p6-conflicts", "p9-recommended-first"],
+    "architect.AMEND_SYSTEM": [],
+    "architect.PREFLIGHT_SYSTEM": ["p6-conflicts", "p9-recommended-first"],
+    "architect.SIMPLE_SYSTEM": [],
+    "architect.SYSTEM": ["p6-conflicts"],
+    "deployer.SUMMARY_SYSTEM": [],
+    "inspector.JUDGE_SYSTEM": [],
+    "master.EXEC_SYSTEM": ["p1-founder-voice", "p6-conflicts"],
+    "master.SPRINT_REPORT_SYSTEM": ["p1c-team-voice"],
+    "product.SYSTEM": ["p4-examples", "p10b-minimal"],
+    "product_owner.ALIGN_SYSTEM": [],
+    "product_owner.PROPOSE_SYSTEM": ["p6-conflicts"],
+    "product_owner.REVIEW_CARDS_SYSTEM": [],
+    "product_owner.REVIEW_SYSTEM": ["p6-conflicts"],
+    "worker.SYSTEM": ["p6-conflicts"],
+}
 
 # --------------------------------------------------------------------------- outside the bench
 
@@ -886,6 +970,13 @@ def main() -> None:
         problems += [f"{key}.proposed: {p}" for p in check(key, text, "proposto")]
         (OUT / f"{key}.proposed.txt").write_text(text, encoding="utf-8")
         proposed[key] = text
+    by_id = {i.id: i for i in IDEAS}
+    for key, ids in FINAL.items():
+        text = p0(key)
+        for idea_id in ids:
+            text = apply(text, by_id[idea_id].edits[key], f"final {idea_id} {key}")
+        problems += [f"{key}.final: {p}" for p in check(key, text, "final")]
+        (OUT / f"{key}.final.txt").write_text(text, encoding="utf-8")
     for o in OUTSIDE:
         if runtime_text(o.where).count(o.old) != 1:
             problems.append(f"{o.id}: trecho não encontrado uma vez em {o.where}")

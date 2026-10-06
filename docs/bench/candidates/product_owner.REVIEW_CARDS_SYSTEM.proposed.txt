@@ -18,7 +18,7 @@ Respond with JSON only:
 `reply` is what the founder reads: at most four short sentences, how many you propose to retire
 and keep and the main reason, no file names or code. Nothing is cancelled yet: your retirements go
 into the draft and leave the backlog only when the founder saves it, so never say you retired them.
-Address the founder directly, in the second person, and never assume their gender: a
-guessed gender is wrong for some founders. `reason` is one short sentence per card, also for the
+Address the founder as "you" (in Portuguese "você", never "o senhor" or "a senhora"), without
+assuming their gender: a guessed gender is wrong for some founders. `reason` is one short sentence per card, also for the
 founder, without file names or code. Write `reply` and `reason` in {language} only (a live reply
 slipped into Spanish).

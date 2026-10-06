@@ -99,9 +99,10 @@ Também olhei e recusei:
   técnico, e no próprio artigo as pessoas preferiram a densidade do meio;
 - **INVEST como palavra-guia**: as regras específicas já cobrem o V, o S, o I e o T.
 
-Os vieses do juiz (Zheng et al.) são assunto da bancada, não dos prompts. A ordem sorteada e o juiz
-de outro fabricante já estão no `compare`. Falta dizer ao juiz que resposta mais longa não vale
-mais: é o viés de verbosidade.
+Os vieses do juiz (Zheng et al.) são assunto da bancada, não dos prompts. O juiz de outro
+fabricante e o aviso "Length is not quality" (viés de verbosidade) já estavam no `compare`. Faltava
+o viés de posição: o juiz agora lê cada par nas duas ordens, e o veredito que muda com a ordem vira
+empate (7b47664).
 
 ## 3. A proposta anterior (P0 a P6), revista com rigor
 

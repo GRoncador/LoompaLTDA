@@ -203,3 +203,28 @@ async def test_a_judge_that_always_picks_the_first_answer_counts_as_a_tie(tmp_pa
     assert summary["A"]["judge_wins"] == summary["B"]["judge_wins"] == 0
     assert summary["A"]["judge_ties"] == summary["A"]["judge_flips"] == len(picked)
     assert summary["A"]["judge_score"] == summary["B"]["judge_score"] == 3.0
+
+
+async def test_an_empty_answer_is_a_failed_call_and_never_judged(tmp_path: Path):
+    root = tmp_path / "fab"
+    await _factory_with_trace(root)
+    picked = [c for c in cases.harvest_factory(root, "fab") if c.mode == "one_shot"]
+
+    def script(model, messages, tools):
+        if messages[0].content.startswith("You are the reviewer of a prompt bench"):
+            return json.dumps({"better": "1", "score_1": 5, "score_2": 1, "reason": "r"})
+        return "" if messages[0].content.startswith("EMPTY") else '{"summary": "Feito."}'
+
+    report = await compare(
+        pinned(default_config(), "mock:m"),
+        {},
+        registry.get("deployer.SUMMARY_SYSTEM"),
+        picked,
+        Variant("A"),
+        Variant("B", 'EMPTY {language}\nRespond with JSON only: {{"summary": str}}'),
+        judge_model="mock:judge",
+        providers={"mock": MockProvider("mock", script)},
+    )
+    summary = report.summary()
+    assert summary["B"]["errors"] == len(picked) and summary["A"]["errors"] == 0
+    assert all(v.winner == "error" for v in report.verdicts)

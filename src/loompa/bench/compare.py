@@ -333,6 +333,10 @@ async def replay(router: ModelRouter, prompt: registry.Prompt, case: Case, varia
     except (LLMError, Exception) as exc:  # noqa: BLE001 - one failed case never stops the run
         run.error = f"{type(exc).__name__}: {exc}"[:300]
     run.ms = int((time.monotonic() - t0) * 1000)
+    if not run.error and not run.text.strip() and not run.tool_calls:
+        # A reasoning model that spends its tokens and returns no text: a provider failure, not an
+        # answer to judge (16 comparisons at once got 13 of 120 empty, none at half the load).
+        run.error = "empty answer: the provider returned no text"
     if not run.error:
         got = checks.check(prompt, case.mode, run.text, [{"name": n} for n in run.tool_calls])
         run.checked = asdict(got) | {"ok": got.ok}

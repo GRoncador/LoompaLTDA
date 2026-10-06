@@ -24,7 +24,7 @@ textos inteiros (o `{language}` aparece como está no código).
 | [`product.SYSTEM`](#productsystem) | p0-agnostic, p4-examples, p10-when-to-ask | 3685 → 4318 | +159 |
 | [`product_owner.ALIGN_SYSTEM`](#product_owneralign_system) | p0-agnostic | 1133 → 1131 | +0 |
 | [`product_owner.PROPOSE_SYSTEM`](#product_ownerpropose_system) | p6-conflicts | 2491 → 2580 | +22 |
-| [`product_owner.REVIEW_CARDS_SYSTEM`](#product_ownerreview_cards_system) | p0-agnostic | 1925 → 1959 | +9 |
+| [`product_owner.REVIEW_CARDS_SYSTEM`](#product_ownerreview_cards_system) | p0-agnostic | 1925 → 1993 | +17 |
 | [`product_owner.REVIEW_SYSTEM`](#product_ownerreview_system) | p0-agnostic, p6-conflicts | 2657 → 2809 | +38 |
 | [`worker.SYSTEM`](#workersystem) | p5-general-solution, p6-conflicts, p7-test-seams | 3200 → 3913 | +178 |
 
@@ -1198,6 +1198,8 @@ Respond with JSON only: {{"title": str, "context": str, "impact": str, "options"
 
 *Referências:* [Anthropic — Prompting best practices (Claude)](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices); [Lee Boonstra (Google) — Prompt Engineering whitepaper, 2025 (resumo)](https://justbeingresourceful.com/2025/04/15/mastering-prompt-engineering-key-insights-from-googles-must-read-whitepaper/); [Matt Pocock — writing-for-agents](https://github.com/mattpocock/skills/tree/main/skills/productivity/writing-for-agents)
 
+*Fora do proposto, só para medir:* **p1c-team-voice** — Relatório do sprint: o time relata, o Founder aparece pelo que fez. O P1 dirigia o relatório ao Founder e o modelo passou a pôr o Founder como sujeito ("Você entregou as 2 histórias", "Você esperou 3d 23h por nossas respostas"). Aqui o time relata na primeira pessoa e o Founder aparece só pelo que fez (os pedidos, as respostas), na segunda pessoa e sem supor o gênero; e "rework" ganha a palavra em português, que o juiz cobrava.
+
 Tamanho: 949 → 1028 caracteres (~237 → ~257 tokens).
 
 <details><summary>Diff</summary>
@@ -1273,6 +1275,8 @@ remendos colados a ele. Cada regra fica, com o motivo dito em termos gerais.
 *Dados nossos:* A auditoria de contradições marcou este par como "high".
 
 *Referências:* [GitHub Spec Kit — /specify](https://github.com/github/spec-kit/blob/main/templates/commands/specify.md); [GitHub Spec Kit — /clarify](https://github.com/github/spec-kit/blob/main/templates/commands/clarify.md); [Matt Pocock — writing-for-agents](https://github.com/mattpocock/skills/tree/main/skills/productivity/writing-for-agents); [OpenAI — GPT-5 prompting guide](https://developers.openai.com/cookbook/examples/gpt-5/gpt-5_prompting_guide)
+
+*Fora do proposto, só para medir:* **p10b-minimal** — Spec: só a contradição do formato externo, e a recomendada primeiro. O P10 mexia em três coisas de uma vez (onde perguntar, o limiar do Spec Kit e a recomendada primeiro) e perdeu para o P0 (14×23). Aqui fica o mínimo: o formato de terceiros sem fonte é motivo para perguntar (a contradição "high"), e a opção recomendada vem primeiro, como o inbox já mostra.
 
 Tamanho: 3685 → 4318 caracteres (~921 → ~1080 tokens).
 
@@ -1631,7 +1635,7 @@ one short sentence per card (why in or out, what it waits for). Write `reply` an
 [Anthropic — skill-creator (anthropics/skills)](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md): generalizar a partir do caso em vez de
 remendos colados a ele. Cada regra fica, com o motivo dito em termos gerais.
 
-Tamanho: 1925 → 1959 caracteres (~481 → ~490 tokens).
+Tamanho: 1925 → 1993 caracteres (~481 → ~498 tokens).
 
 <details><summary>Diff</summary>
 
@@ -1642,8 +1646,8 @@ Tamanho: 1925 → 1959 caracteres (~481 → ~490 tokens).
  and keep and the main reason, no file names or code. Nothing is cancelled yet: your retirements go
  into the draft and leave the backlog only when the founder saves it, so never say you retired them.
 -Address the founder as "você" and never guess their gender (a live reply said "a fundadora"). `reason` is one short sentence per card, also for the
-+Address the founder directly, in the second person, and never assume their gender: a
-+guessed gender is wrong for some founders. `reason` is one short sentence per card, also for the
++Address the founder as "you" (in Portuguese "você", never "o senhor" or "a senhora"), without
++assuming their gender: a guessed gender is wrong for some founders. `reason` is one short sentence per card, also for the
  founder, without file names or code. Write `reply` and `reason` in {language} only (a live reply
  slipped into Spanish).
 ```
@@ -1703,8 +1707,8 @@ Respond with JSON only:
 `reply` is what the founder reads: at most four short sentences, how many you propose to retire
 and keep and the main reason, no file names or code. Nothing is cancelled yet: your retirements go
 into the draft and leave the backlog only when the founder saves it, so never say you retired them.
-Address the founder directly, in the second person, and never assume their gender: a
-guessed gender is wrong for some founders. `reason` is one short sentence per card, also for the
+Address the founder as "you" (in Portuguese "você", never "o senhor" or "a senhora"), without
+assuming their gender: a guessed gender is wrong for some founders. `reason` is one short sentence per card, also for the
 founder, without file names or code. Write `reply` and `reason` in {language} only (a live reply
 slipped into Spanish).
 ```
