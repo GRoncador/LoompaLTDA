@@ -48,6 +48,12 @@ from loompa.dependencies import delivered_brief
 from loompa.engine.state import Stage, StoryKind, StoryState
 from loompa.risk import declared_dependencies
 from loompa.speckit import story_dir
+from loompa.speckit.artifacts import (
+    PLAN_FOR_REVIEW,
+    SPEC_FOR_BUILDING,
+    SPEC_FOR_REVIEW,
+    fit_sections,
+)
 from loompa.sprints import SprintBoard, SprintError
 
 REVIEW_SYSTEM = """<!-- role:product_owner -->
@@ -1088,7 +1094,7 @@ class ProductOwnerAgent(LoompaAgent):
                 else ""
             )
             + delivered_brief(self.ctx.store, state.story_id)
-            + f"## Spec under review\n{spec[:6000]}\n\n"
+            + f"## Spec under review\n{fit_sections(spec, 16000, SPEC_FOR_REVIEW)}\n\n"
             + f"## Declared dependencies\n{declared_dependencies(self.ctx.root) or '(none)'}\n\n"
             + f"{self.grounding(3000)}"
         )
@@ -1119,7 +1125,7 @@ class ProductOwnerAgent(LoompaAgent):
             )
             + "## Automatic checks\n"
             + ("\n".join(f"- {p}" for p in problems) or "- nothing measured against the plan")
-            + f"\n\n## Plan under review\n{plan[:6000]}\n\n## Tasks\n{tasks[:3000]}\n\n"
+            + f"\n\n## Plan under review\n{fit_sections(plan, 12000, PLAN_FOR_REVIEW)}\n\n## Tasks\n{tasks[:3000]}\n\n"
             + f"{self.grounding(2500)}"
         )
         return await self._verdict(
@@ -1161,7 +1167,7 @@ class ProductOwnerAgent(LoompaAgent):
                 if tests_diff
                 else ""
             )
-            + f"## Spec\n{spec[:4000]}"
+            + f"## Spec\n{fit_sections(spec, 8000, SPEC_FOR_BUILDING)}"
         )
         try:
             data = await self.ask_json(
@@ -1200,7 +1206,7 @@ class ProductOwnerAgent(LoompaAgent):
             + f"## Acceptance criteria\n{numbered}\n\n"
             + "## What the Inspector failed, twice, and why\n"
             + "\n".join(f"- {c['text'][:300]}: {c['reason'][:600]}" for c in failed[:6])
-            + f"\n\n## Spec\n{spec[:4000]}"
+            + f"\n\n## Spec\n{fit_sections(spec, 8000, SPEC_FOR_BUILDING)}"
         )
         try:
             data = await self.ask_json(

@@ -22,6 +22,12 @@ from loompa.speckit import (
     story_dir,
     tasks_from_markdown,
 )
+from loompa.speckit.artifacts import (
+    PLAN_FOR_BUILDING,
+    SPEC_FOR_BUILDING,
+    SPEC_FOR_REVIEW,
+    fit_sections,
+)
 from loompa.stack_check import STACK_KEY, STACK_STATES
 
 SYSTEM = """<!-- role:architect -->
@@ -340,7 +346,7 @@ class ArchitectAgent(LoompaAgent):
         )
         outline = self._repo_outline(at=at)
         user = (
-            f"# Story {state.story_id}: {state.title}\n\n## Spec\n{spec[:6000]}\n\n"
+            f"# Story {state.story_id}: {state.title}\n\n## Spec\n{fit_sections(spec, 16000, SPEC_FOR_REVIEW)}\n\n"
             + (
                 "## Guidance from the founder (follow it)\n"
                 + "\n".join(f"- {n}" for n in state.founder_notes)
@@ -504,7 +510,7 @@ class ArchitectAgent(LoompaAgent):
             f"# Story {state.story_id}: {state.title}\n\n"
             + ("## Founder's guidance\n" if source == "founder" else "## The Worker's request\n")
             + f"{guidance[:3000]}\n\n"
-            f"## Current plan\n{plan[:4000]}\n\n## Tasks\n{tasks_md[:3000]}\n\n"
+            f"## Current plan\n{fit_sections(plan, 8000, PLAN_FOR_BUILDING)}\n\n## Tasks\n{tasks_md[:3000]}\n\n"
             f"## Paths the Worker may touch now\n"
             + "\n".join(state.allowed_paths)
             + (f"\n\n## Current test run in the story's worktree\n{suite[:4000]}" if suite else "")
@@ -578,7 +584,8 @@ class ArchitectAgent(LoompaAgent):
             PREFLIGHT_SYSTEM.format(language=self.language) + EXPLORE_HINT,
             f"# Story {state.story_id}: {state.title}\n\n## Facts\n{matrix}\n\n"
             + (f"## Uses of what the plan changes\n{uses[:5000]}\n\n" if uses else "")
-            + f"## Plan\n{plan[:5000]}\n\n## Spec (excerpt)\n{spec[:2500]}",
+            + f"## Plan\n{fit_sections(plan, 8000, PLAN_FOR_BUILDING)}\n\n"
+            + f"## Spec (excerpt)\n{fit_sections(spec, 4000, SPEC_FOR_BUILDING)}",
             self.explore_tools(),
             story=state,
             max_iterations=4,

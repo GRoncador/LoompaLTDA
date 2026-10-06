@@ -19,7 +19,14 @@ from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.engine.state import StoryState
 from loompa.finance import UsageRecord
 from loompa.speckit import story_dir, tasks_from_markdown
-from loompa.speckit.artifacts import mark_task_done
+from loompa.speckit.artifacts import (
+    PLAN_FOR_BUILDING,
+    PLAN_ROOM,
+    SPEC_FOR_BUILDING,
+    SPEC_ROOM,
+    fit_sections,
+    mark_task_done,
+)
 from loompa.worktrees import DEPLOYER_ONLY, Worktree
 
 AGENT_SYSTEM = """You are the Worker Loompa, a senior full-stack engineer carrying out ONE task of a
@@ -180,7 +187,8 @@ class OpenCodeWorker(LoompaAgent):
         cfg = self.ctx.config.worker
         prompt = (
             f"# Story {state.story_id} — {state.title}\n\n"
-            f"## Spec\n{spec[:4000]}\n\n## Plan\n{plan[:4000]}\n\n"
+            f"## Spec\n{fit_sections(spec, SPEC_ROOM, SPEC_FOR_BUILDING)}\n\n"
+            f"## Plan\n{fit_sections(plan, PLAN_ROOM, PLAN_FOR_BUILDING)}\n\n"
             f"## Task T{number}\n{text}\n\n## Checklist\n{tasks_md[:2000]}\n"
         )
         argv = [

@@ -25,6 +25,73 @@ NO_TEST_MARK = "**sem teste planejado**"
 REVIEW_MARK = "review:"
 
 
+# What each reader needs first when a spec or plan does not fit its room (plan 14): whole sections
+# by priority, never a cut in the middle. Found by the prompt bench on 06/10: every tamagotchi spec
+# was longer than the Worker's 4000-character head, so it built from half the acceptance criteria
+# and never saw "Critérios revistos pelo Product Owner"; the Product Owner reviewed specs cut
+# mid-word. Headings are the templates' own (pt-BR whatever the factory language), matched by prefix.
+SPEC_FOR_BUILDING = (
+    "Critérios revistos",
+    "Critérios de aceitação",
+    "Escopo",
+    "Casos de borda",
+    "Regras de negócio",
+    "Objetivo",
+    "Requisitos não-funcionais",
+    "Premissas",
+)
+SPEC_FOR_REVIEW = (*SPEC_FOR_BUILDING, "Entidades", "Perguntas")
+PLAN_FOR_BUILDING = (
+    "Ajuste pedido",
+    "Abordagem",
+    "Arquivos",
+    "Contratos",
+    "Rastreabilidade",
+    "Riscos",
+    "Impacto",
+    "Rollback",
+)
+PLAN_FOR_REVIEW = (*PLAN_FOR_BUILDING, "Checagem", "Alternativas")
+# Room for them in the Worker's cached prefix: the median tamagotchi spec is 8k characters and its
+# plan 10k, where the old 4k heads left half the criteria out.
+SPEC_ROOM = 9_000
+PLAN_ROOM = 8_000
+
+
+def fit_sections(text: str, budget: int, priority: tuple[str, ...] = ()) -> str:
+    """`text` within `budget` characters: whole `## ` sections chosen by `priority` (heading
+    prefixes; sections no prefix names come last, the document's head first of all), shown in
+    their original order, and a closing line naming what was left out. A section that alone is
+    larger than the room left is cut at a line, saying so."""
+    if len(text) <= budget:
+        return text
+    parts = re.split(r"(?m)^(?=## )", text)
+    head, sections = (parts[0], parts[1:]) if not parts[0].startswith("## ") else ("", parts)
+
+    def rank(section: str) -> int:
+        title = section[3:].lstrip()
+        for i, prefix in enumerate(priority):
+            if title.startswith(prefix):
+                return i
+        return len(priority)
+
+    order = sorted(range(len(sections)), key=lambda i: rank(sections[i]))
+    room = budget - len(head) - 120
+    kept: dict[int, str] = {}
+    for i in order:
+        sec = sections[i]
+        if len(sec) <= room:
+            kept[i] = sec
+            room -= len(sec)
+        elif room > 400 and rank(sec) < len(priority):
+            cut = sec[:room].rsplit("\n", 1)[0]
+            kept[i] = cut + f"\n(… section cut here: {len(sec) - len(cut)} more characters)\n"
+            room = 0
+    left = [sections[i].splitlines()[0][3:].strip() for i in range(len(sections)) if i not in kept]
+    body = head + "".join(kept[i] for i in sorted(kept))
+    return body + (f"\n(left out to fit: {'; '.join(left)})\n" if left else "")
+
+
 def _template(name: str) -> str:
     return resources.files("loompa.speckit.templates").joinpath(name).read_text(encoding="utf-8")
 

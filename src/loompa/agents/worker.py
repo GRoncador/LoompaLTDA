@@ -24,7 +24,14 @@ from loompa.hygiene import cited_criteria, new_files, scan_diff, tests_to_trim
 from loompa.llm import EnginePaused, Message
 from loompa.llm.router import TIER_ABOVE
 from loompa.speckit import story_dir, tasks_from_markdown
-from loompa.speckit.artifacts import mark_task_done
+from loompa.speckit.artifacts import (
+    PLAN_FOR_BUILDING,
+    PLAN_ROOM,
+    SPEC_FOR_BUILDING,
+    SPEC_ROOM,
+    fit_sections,
+    mark_task_done,
+)
 from loompa.worktrees import Worktree
 
 SYSTEM = """<!-- role:worker -->
@@ -824,7 +831,8 @@ class WorkerAgent(LoompaAgent):
         stable = (
             SYSTEM.format(language=self.language)
             + f"\n## Story {state.story_id} — {state.title}\n\n## Allowed paths\n{json.dumps(state.allowed_paths, ensure_ascii=False)}\n\n"
-            f"## Spec\n{spec[:4000]}\n\n## Plan\n{plan[:4000]}\n\n{self.grounding(3000)}\n"
+            f"## Spec\n{fit_sections(spec, SPEC_ROOM, SPEC_FOR_BUILDING)}\n\n"
+            f"## Plan\n{fit_sections(plan, PLAN_ROOM, PLAN_FOR_BUILDING)}\n\n{self.grounding(3000)}\n"
             + (
                 f"\n## Repository outline (at the start of this run)\n{outline}\n"
                 if outline
