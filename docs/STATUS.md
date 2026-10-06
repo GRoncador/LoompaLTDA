@@ -732,6 +732,21 @@ Decided 2026-09-29:
     fact is replaced. The blocked text's "o arquivo um arquivo do projeto" and leaked constant names
     and line numbers are fixed in the sanitizer and the audit.
 
+- **2026-10-07 — 14.3 measured and adopted; live prompt A/B.** Rounds 3 and 4 of the bench
+  (45 comparisons, US$ 7.31; the judge reads both orders, p-values, an empty answer is a failed
+  call) put the winners in the prompts:
+  - P0 everywhere;
+  - EXEC voice and `impact`;
+  - sprint report in the team's voice;
+  - the conflicts;
+  - the recommended option first;
+  - spec criteria with examples.
+
+  Three code fixes came from the bench: the Inspector reads whole spec sections, the word swaps run
+  before the executive audit, and the sprint report's founder-wait label no longer reads backwards.
+  What the bench cannot see (P2, P5, P7) runs as a live A/B (ADR-0035, `loompa prompts ab`), on in
+  tamagotchi for both the Worker and the Architect, at 50%.
+
 ## Known gaps / next steps
 
 **Since 2026-10-05 the plan is `docs/PLANO-2026-10.md`.** Its "Herdado do plano de setembro" section

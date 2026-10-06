@@ -49,7 +49,8 @@
 - **Não medíveis na bancada** (P2 tracer bullet, P5 lógica geral, P7 testes pela interface, P8
   brainstorm, o1/o1b/o2/o4/o5): a bancada repete a primeira chamada ou a opinião do juiz sobre o
   plano, e o efeito dessas ideias está no fim do laço do Worker ou no retrabalho. A primeira
-  chamada do Worker não muda com P5 nem P7 (seguro), e o juiz empata o P2. Ficam para um A/B ao vivo.
+  chamada do Worker não muda com P5 nem P7 (seguro), e o juiz empata o P2. **Desde 07/10 estão num
+  A/B ao vivo (ADR-0035, `loompa prompts ab`), ligado na tamagotchi em metade das histórias.**
 
 **Consertos no código que a bancada achou.** Mais da metade do ganho veio daqui, não de texto:
 - **9667287** — o Inspector lia 3.000 caracteres da spec; agora lê seções inteiras, escopo e

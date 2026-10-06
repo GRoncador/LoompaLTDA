@@ -514,7 +514,7 @@ Write the text values in {language}; keep keys, paths, test names and code as th
 
 Regra do Founder (06/10) e [Anthropic — skill-creator (anthropics/skills)](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md): generalizar a partir do caso em vez de remendos colados a ele.
 
-**P2 — Plano do Architect: tracer bullet (não medível).** o juiz empata o plano (14×17, p 0,72; nota 3,93→4,18) e há ~10% mais tarefas por plano; o efeito que importa (retrabalho) só aparece ao vivo. Fica para um A/B ao vivo.
+**P2 — Plano do Architect: tracer bullet (não medível).** o juiz empata o plano (14×17, p 0,72; nota 3,93→4,18) e há ~10% mais tarefas por plano; o efeito que importa (retrabalho) só aparece ao vivo. Em A/B ao vivo na tamagotchi (ADR-0035).
 
 *Por quê:* Matt Pocock (tdd, to-tickets) e The Pragmatic Programmer: a primeira fatia atravessa todas as camadas num caso só, e as seguintes alargam; uma suposição errada aparece na primeira tarefa. O to-tickets abre uma exceção que o P2 antigo não tinha: a refatoração larga (um nome ou unidade em muitos módulos) segue expand–contract, que é a regra que o prompt já tem.
 
@@ -1775,7 +1775,7 @@ not a rejection. Write the text values in {language}.
 
 ## worker.SYSTEM
 
-**P5 — Worker: a lógica geral, não o valor que passa na checagem (não medível).** a primeira chamada fica igual (read_file 53→52) e o Worker não bloqueia mais cedo; o efeito está no fim do laço, que a bancada não vê. Pede um A/B ao vivo.
+**P5 — Worker: a lógica geral, não o valor que passa na checagem (não medível).** a primeira chamada fica igual (read_file 53→52) e o Worker não bloqueia mais cedo; o efeito está no fim do laço, que a bancada não vê. Em A/B ao vivo na tamagotchi (ADR-0035).
 
 *Por quê:* Anthropic, "Avoid focusing on passing tests and hard-coding": "os testes verificam a correção, não definem a solução"; quando um teste parece errado, avisar em vez de contornar. Reescrito com o alvo positivo na frente (o P5 antigo era só proibição).
 
@@ -1789,7 +1789,7 @@ not a rejection. Write the text values in {language}.
 
 *Referências:* [OpenAI — GPT-5 prompting guide](https://developers.openai.com/cookbook/examples/gpt-5/gpt-5_prompting_guide); [OpenAI — GPT-5 prompt optimization cookbook](https://developers.openai.com/cookbook/examples/gpt-5/prompt-optimization-cookbook); [Matt Pocock — to-tickets](https://github.com/mattpocock/skills/tree/main/skills/engineering/to-tickets)
 
-**P7 — Worker: testar pela interface, com valor esperado independente (não medível).** primeira chamada igual (read_file 53→49); o efeito está nos testes escritos depois. A/B ao vivo.
+**P7 — Worker: testar pela interface, com valor esperado independente (não medível).** primeira chamada igual (read_file 53→49); o efeito está nos testes escritos depois. Em A/B ao vivo na tamagotchi (ADR-0035).
 
 *Por quê:* Matt Pocock (tdd): teste pela interface pública, nunca por dentro; o valor esperado vem de uma fonte independente (um literal, um exemplo feito à mão, a spec), nunca recalculado como o código calcula (o teste tautológico). mocking.md: mock só na fronteira do sistema (rede, relógio, aleatoriedade). Superpowers diz o mesmo. O Inspector já reprova o teste tautológico (TEST high); dizer isso a quem escreve o teste evita a rodada de retrabalho.
 

@@ -840,12 +840,12 @@ RESULTS: dict[tuple[str, str], tuple[str, str]] = {
     ("p5-general-solution", "worker.SYSTEM"): (
         FORA,
         "a primeira chamada fica igual (read_file 53→52) e o Worker não bloqueia mais cedo; o "
-        "efeito está no fim do laço, que a bancada não vê. Pede um A/B ao vivo.",
+        "efeito está no fim do laço, que a bancada não vê. Em A/B ao vivo na tamagotchi (ADR-0035).",
     ),
     ("p7-test-seams", "worker.SYSTEM"): (
         FORA,
         "primeira chamada igual (read_file 53→49); o efeito está nos testes escritos depois. "
-        "A/B ao vivo.",
+        "Em A/B ao vivo na tamagotchi (ADR-0035).",
     ),
     ("p8-ask-round", "brainstorm.BRAINSTORM_SYSTEM"): (
         FORA,
@@ -876,7 +876,7 @@ RESULTS: dict[tuple[str, str], tuple[str, str]] = {
     ("p2-tracer", "architect.SYSTEM"): (
         FORA,
         "o juiz empata o plano (14×17, p 0,72; nota 3,93→4,18) e há ~10% mais tarefas por plano; "
-        "o efeito que importa (retrabalho) só aparece ao vivo. Fica para um A/B ao vivo.",
+        "o efeito que importa (retrabalho) só aparece ao vivo. Em A/B ao vivo na tamagotchi (ADR-0035).",
     ),
     ("p6-conflicts", "architect.SYSTEM"): (
         NEUTRA,
