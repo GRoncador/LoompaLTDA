@@ -34,6 +34,7 @@ from loompa.conversations import (
 )
 from loompa.dependencies import missing_from, rows_by_id
 from loompa.engine.state import TERMINAL, Complexity, Stage, StoryKind, StoryState
+from loompa.llm import EnginePaused
 from loompa.sprints import Sprint, SprintBoard, SprintError, SprintStatus, running_message
 
 log = logging.getLogger("loompa.master")
@@ -355,6 +356,9 @@ class MasterAgent(LoompaAgent):
                 continue
             counts = board.progress(sprint)
             sprint = board.close(sprint.id)
+            # set before the report: a close that a pause or a crash cuts short is finished on
+            # the next pass instead of leaving a sprint closed with no report (SP-010, 06/10)
+            self.ctx.store.set(REPORT_PENDING + sprint.id, "1")
             self.ctx.emit(
                 "sprint.done",
                 agent=self.name,
@@ -362,39 +366,47 @@ class MasterAgent(LoompaAgent):
                 done=counts["done"],
                 cancelled=counts["cancelled"],
             )
-            summary = ""
-            health = None
-            try:  # the factory's self-diagnosis over the sprint's window (8.3), into the hub
-                from loompa import factory_health
-
-                health = await factory_health.scan(self.ctx, sprint=sprint)
-            except Exception:  # noqa: BLE001 - a diagnosis that fails never keeps a sprint open
-                log.exception("could not scan the factory over %s", sprint.id)
-            try:
-                _, summary = await self.write_sprint_report(sprint, health=health)
-            except Exception:  # noqa: BLE001 - a report that fails never keeps a sprint open
-                log.exception("could not write the report of %s", sprint.id)
-            self.ctx.inbox(
-                FounderMessage(
-                    factory=self.ctx.slug,
-                    kind=MessageKind.INFO,
-                    sender=self.name,
-                    title=f"Sprint {sprint.id} concluído",
-                    context=summary
-                    or (
-                        f"{counts['done']} entregas concluídas"
-                        + (f" e {counts['cancelled']} canceladas" if counts["cancelled"] else "")
-                        + "."
-                        + (f" Meta: {sprint.goal}" if sprint.goal else "")
-                    ),
-                    impact="O relatório completo está na aba Sprints do painel. "
-                    + _next_step(board),
-                    allow_free_text=False,
-                    sprint_id=sprint.id,
-                )
-            )
+            await self._report_closed(board, sprint, counts)
             closed.append(sprint)
+        for sprint in board.sprints(SprintStatus.CLOSED):
+            if sprint not in closed and self.ctx.store.get(REPORT_PENDING + sprint.id) == "1":
+                await self._report_closed(board, sprint, board.progress(sprint))
         return closed
+
+    async def _report_closed(self, board: SprintBoard, sprint: Sprint, counts: dict) -> None:
+        """The closed sprint's diagnosis, report and inbox note. A pause here takes the paths a
+        model failure takes: no diagnosis, the summary written in code; the record still exists."""
+        summary = ""
+        health = None
+        try:  # the factory's self-diagnosis over the sprint's window (8.3), into the hub
+            from loompa import factory_health
+
+            health = await factory_health.scan(self.ctx, sprint=sprint)
+        except (Exception, EnginePaused):  # noqa: BLE001 - never keeps a sprint without its report
+            log.exception("could not scan the factory over %s", sprint.id)
+        try:
+            _, summary = await self.write_sprint_report(sprint, health=health)
+        except Exception:  # noqa: BLE001 - a report that fails never keeps a sprint open
+            log.exception("could not write the report of %s", sprint.id)
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                kind=MessageKind.INFO,
+                sender=self.name,
+                title=f"Sprint {sprint.id} concluído",
+                context=summary
+                or (
+                    f"{counts['done']} entregas concluídas"
+                    + (f" e {counts['cancelled']} canceladas" if counts["cancelled"] else "")
+                    + "."
+                    + (f" Meta: {sprint.goal}" if sprint.goal else "")
+                ),
+                impact="O relatório completo está na aba Sprints do painel. " + _next_step(board),
+                allow_free_text=False,
+                sprint_id=sprint.id,
+            )
+        )
+        self.ctx.store.set(REPORT_PENDING + sprint.id, "")
 
     async def write_sprint_report(
         self, sprint: Sprint, *, summarize: bool = True, health: Any = None
@@ -426,8 +438,12 @@ class MasterAgent(LoompaAgent):
                     reasoning_effort="low",
                 )
                 text = str(data.get("summary") or "").strip()
-                summary = "" if audit_executive_text(text) else text[:MAX_FOUNDER_CHARS]
-            except Exception:  # noqa: BLE001 - the summary written in code stands in
+                denied = sprint_report.denies_facts(report, text)
+                if denied:
+                    self.ctx.emit("sprint.summary_rejected", sprint_id=sprint.id, denied=denied)
+                bad = audit_executive_text(text) or denied
+                summary = "" if bad else text[:MAX_FOUNDER_CHARS]
+            except (Exception, EnginePaused):  # noqa: BLE001 - the summary written in code stands in
                 summary = ""
             finally:
                 self.set_state("IDLE")
@@ -1183,6 +1199,9 @@ def meeting_question(ctx: Any) -> str:
             "você: revise com o Product Owner e inicie."
         )
     return ""
+
+
+REPORT_PENDING = "sprint_report_pending:"  # kv: a closed sprint whose report is still owed
 
 
 def _next_step(board: SprintBoard) -> str:

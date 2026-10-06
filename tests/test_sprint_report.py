@@ -255,3 +255,48 @@ async def test_a_story_retired_as_covered_is_not_reported_as_returned_work(facto
     md = (factory.paths.reports / "SP-001.md").read_text()
     assert "aposentada (coberta pela S-001)" in md and "Devolvidas ao backlog" not in md
     await ctx.aclose()
+
+
+async def test_a_pause_while_a_sprint_closes_never_leaves_it_without_its_report(factory: Factory):
+    """SP-010 (06/10): the founder paused as the last story merged; the summary's model call
+    raised the pause, which went past every `except Exception`, and the sprint stayed closed
+    with no report and no inbox note."""
+    ctx = make_ctx(factory, summary_says("O SP-001 entregou as três histórias."))
+    sprint_with_history(ctx)
+    ctx.router.holding = True  # the pause: no new model call starts
+    await MasterAgent(ctx).close_finished_sprints()
+    report = sprint_report.load(factory.paths.reports, "SP-001")
+    assert report is not None and report["summary"].startswith("O SP-001 entregou")  # in code
+    notes = [m for m in ctx.store.list_messages(ctx.slug) if m.title == "Sprint SP-001 concluído"]
+    assert len(notes) == 1
+    await ctx.aclose()
+
+
+async def test_a_close_cut_short_is_reported_on_the_next_pass(factory: Factory):
+    from loompa.agents.master import REPORT_PENDING
+
+    ctx = make_ctx(factory, dry_run=True)
+    sprint_with_history(ctx)
+    SprintBoard(ctx.store, ctx.slug).close("SP-001")  # closed, then the process died
+    ctx.store.set(REPORT_PENDING + "SP-001", "1")
+    master = MasterAgent(ctx)
+    await master.close_finished_sprints()
+    assert sprint_report.load(factory.paths.reports, "SP-001") is not None
+    await master.close_finished_sprints()  # owed once: no second note
+    notes = [m for m in ctx.store.list_messages(ctx.slug) if m.title == "Sprint SP-001 concluído"]
+    assert len(notes) == 1
+    await ctx.aclose()
+
+
+async def test_a_summary_that_denies_a_measured_fact_is_replaced(factory: Factory):
+    """SP-010: 'nenhum retrabalho nem espera pelo fundador' over 1h32 of founder wait."""
+    ctx = make_ctx(factory, summary_says("Tudo certo, sem bloqueios nem espera pelo fundador."))
+    sprint_with_history(ctx)
+    sprint = SprintBoard(ctx.store, ctx.slug).get("SP-001")
+    report, summary = await MasterAgent(ctx).write_sprint_report(sprint)
+    assert report["totals"]["blocks"] > 0
+    assert summary.startswith("O SP-001 entregou")  # the summary written in code
+    assert sprint_report.denies_facts(report, "Houve 1 bloqueio e nenhum retrabalho.") == (
+        ["rework"] if report["totals"]["rework"] else []
+    )
+    await ctx.aclose()
