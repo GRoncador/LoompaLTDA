@@ -91,9 +91,11 @@ async def main() -> None:
             return await jev.decide(state, {"same": SAME}, purpose="offline")
 
     answers = await asyncio.gather(*(ask(f, c) for f, c, _ in data))
-    rows = [(a["same"], want) for a, (_, _, want) in zip(answers, data) if a]
-    print(f"{len(rows)} pairs ({sum(w for _, w in rows)} duplicates by the PO), "
-          f"{len(data) - len(rows)} unanswered")
+    rows = [(a["same"], want) for a, (_, _, want) in zip(answers, data, strict=True) if a]
+    print(
+        f"{len(rows)} pairs ({sum(w for _, w in rows)} duplicates by the PO), "
+        f"{len(data) - len(rows)} unanswered"
+    )
     agree = sum(a.value == w for a, w in rows)
     print(f"overall agreement: {agree}/{len(rows)} = {agree / max(len(rows), 1):.0%}")
     for lo, hi in BANDS:
