@@ -59,3 +59,23 @@ async def test_contracts_reach_only_the_roles_that_may_read_them(factory: Factor
     assert "ACME" not in SupportAgent(ctx, "storyteller").precedents("multa de rescisão")
     assert ".loompa/company/contracts/" in GITIGNORE_LINES
     await ctx.aclose()
+
+
+async def test_a_cancelled_storys_spec_is_not_pushed_as_a_precedent(factory: Factory):  # noqa: F811
+    """12.1: S-061B, the clean restart of S-061, got the cancelled S-061's spec back."""
+    from loompa.agents import ProductOwnerAgent
+    from loompa.engine.state import Stage
+
+    ctx = make_ctx(factory)
+    po = ProductOwnerAgent(ctx)
+    old = po.add_item("Botão Novo ovo").story_id
+    ctx.memory.upsert_document(
+        f"specs/{old}/spec.md", "Spec do botão Novo ovo no fim de jogo.", kind="spec", title="s"
+    )
+    assert "Novo ovo" in LoompaAgent(ctx).precedents("botão novo ovo")
+    po.backlog.set_status(old, Stage.CANCELLED)
+    assert "Novo ovo" not in LoompaAgent(ctx).precedents("botão novo ovo")
+    toolbox = Toolbox.for_role(ctx, "architect")
+    found = await toolbox.call(MEMORY_TOOL, {"query": "botão novo ovo", "kinds": ["spec"]})
+    assert "Novo ovo" in found.output  # still there for analysis
+    await ctx.aclose()

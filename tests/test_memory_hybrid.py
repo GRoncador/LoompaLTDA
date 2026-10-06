@@ -64,3 +64,17 @@ def test_the_suite_never_downloads_a_model(monkeypatch):
     monkeypatch.delenv(HASH_ONLY_ENV)
     fallback = get_embedder("not/a-model")
     assert fallback.name == "hash-ngram" and fallback.fallback_reason
+
+
+def test_one_document_never_fills_the_answer(tmp_path: Path):
+    """12.1, S-061B: six chunks of one spec came back as six precedents."""
+    mem = MemoryStore(tmp_path / "m.db", HashEmbedder(), chunk_size=100)
+    long = "\n\n".join(f"Botão Novo ovo no fim de jogo, parte {i}." for i in range(8))
+    mem.upsert_document("specs/S-061/spec.md", long, kind="spec", title="S-061")
+    mem.upsert_document("specs/S-037/spec.md", "Recomeçar o jogo do zero.", kind="spec", title="S")
+    hits = mem.search("botão novo ovo fim de jogo", top_k=6)
+    docs = [h.chunk.doc_id for h in hits]
+    assert docs.count("specs/S-061/spec.md") == 2 and "specs/S-037/spec.md" in docs
+    skipped = mem.search("botão novo ovo", top_k=6, skip_docs=("specs/S-061/",))
+    assert all(not h.chunk.doc_id.startswith("specs/S-061/") for h in skipped)
+    mem.close()

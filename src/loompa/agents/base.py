@@ -22,7 +22,7 @@ from loompa.agents.toolbox import (
 from loompa.company import company_block
 from loompa.decider import build_decider, useful_question
 from loompa.engine.context import EngineContext
-from loompa.engine.state import StoryState
+from loompa.engine.state import Stage, StoryState
 from loompa.llm import LLMError, LLMResponse, Message
 from loompa.llm.providers import extract_json, llm_session
 from loompa.worktrees import WorktreeManager
@@ -151,12 +151,27 @@ class LoompaAgent:
         exclude = tuple(k for k in RESTRICTED_KINDS if k not in reads)
         try:
             hits = self.ctx.memory.search(
-                query, top_k=self.ctx.config.memory.top_k, kinds=kinds, exclude=exclude
+                query,
+                top_k=self.ctx.config.memory.top_k,
+                kinds=kinds,
+                exclude=exclude,
+                skip_docs=self._cancelled_records(),
             )
             self._shadow_filter(query, hits)
             return self.ctx.memory.render(hits)
         except Exception:  # noqa: BLE001 - memory is best-effort
             return ""
+
+    def _cancelled_records(self) -> tuple[str, ...]:
+        """The spec, plan and tasks of cancelled stories are not pushed as precedents: a story
+        restarted as a copy got its abandoned original's spec back six times (12.1, S-061B), and
+        the founder's rule is that a restart starts clean. They stay in memory, and in reach of
+        `search_memory`, for analysis."""
+        return tuple(
+            f"specs/{r['id']}/"
+            for r in self.ctx.store.list_stories(self.ctx.slug)
+            if r["stage"] == Stage.CANCELLED
+        )
 
     def _shadow_filter(self, query: str, hits: list) -> None:
         """13.6 in shadow: the decision model scores how useful each pushed passage is, beside

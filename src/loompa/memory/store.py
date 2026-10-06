@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS memory_docs (
 # was in the top 5 for 11 with hashed n-grams alone, 12 with the multilingual MiniLM alone, 14
 # with hashed n-grams + BM25 and 16 with MiniLM + BM25 (`scripts/memory_recall_eval.py`).
 RRF_K = 60
+MAX_PER_DOC = 2  # chunks of one document in one answer
 CANDIDATES = 50
 _WORD = re.compile(r"\w+", re.UNICODE)
 _STOPWORDS = frozenset(
@@ -321,9 +322,13 @@ class MemoryStore:
         kinds: tuple[str, ...] | None = None,
         min_score: float = 0.0,
         exclude: tuple[str, ...] = (),
+        max_per_doc: int = MAX_PER_DOC,
+        skip_docs: tuple[str, ...] = (),
     ) -> list[MemoryHit]:
         """The chunks that best answer `query`: the vector and the BM25 rankings fused by
-        reciprocal rank. `score` is the cosine similarity, for display and `min_score`."""
+        reciprocal rank. `score` is the cosine similarity, for display and `min_score`. At most
+        `max_per_doc` chunks of one document (12.1: S-061B got six chunks of one spec), and none
+        whose doc id starts with one of `skip_docs`."""
         with self._lock:
             mat, ids = self._matrix()
             if not ids:
@@ -338,6 +343,7 @@ class MemoryStore:
                 if cid in row_of:  # a chunk of another embedder waits for its reindex
                     fused[cid] = fused.get(cid, 0.0) + 1 / (RRF_K + rank)
             hits: list[MemoryHit] = []
+            per_doc: dict[str, int] = {}
             for cid in sorted(fused, key=lambda c: -fused[c]):
                 if len(hits) >= top_k:
                     break
@@ -350,6 +356,11 @@ class MemoryStore:
                 ).fetchone()
                 if row is None or (kinds and row[1] not in kinds) or row[1] in exclude:
                     continue
+                if (skip_docs and row[0].startswith(skip_docs)) or per_doc.get(row[0], 0) >= max(
+                    1, max_per_doc
+                ):
+                    continue
+                per_doc[row[0]] = per_doc.get(row[0], 0) + 1
                 hits.append(
                     MemoryHit(
                         MemoryChunk(row[0], row[1], row[2], row[3], row[4], json.loads(row[5])),
