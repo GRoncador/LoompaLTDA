@@ -80,6 +80,25 @@ def tool_results(messages: list[Message]) -> list[str]:
 # ------------------------------------------------------------------------ happy path
 
 
+async def test_engine_start_commits_the_filled_company_documents(factory: Factory):
+    """The founder's company documents go into git in a commit of their own when the engine
+    starts (tamagotchi, 06/10: filled, never committed); a template still says nothing."""
+    from loompa.agents.deployer import DeployerAgent
+    from loompa.company import ensure_templates
+
+    ensure_templates(factory.paths.loompa)
+    (factory.paths.company / "business.md").write_text("# Modelo de negócio\n\nJogo grátis.\n")
+    contracts = factory.paths.company / "contracts"
+    contracts.mkdir()
+    (contracts / "cliente.md").write_text("cláusulas\n")
+    ctx = make_ctx(factory)
+    assert await Scheduler(ctx).run() == []
+    assert "docs(empresa)" in git("log", "--oneline", "-1", cwd=factory.root)
+    tracked = git("ls-files", ".loompa/company", cwd=factory.root).split()
+    assert tracked == [".loompa/company/business.md"]
+    assert DeployerAgent(ctx).record_company() is None  # nothing new: no empty commit
+
+
 async def test_dry_run_pipeline_delivers_and_founder_approves(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     master = MasterAgent(ctx)

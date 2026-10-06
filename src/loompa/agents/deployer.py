@@ -12,6 +12,8 @@ from loompa.comms import (
     compose_delivery_message,
     sanitize_for_founder,
 )
+from loompa.company import DOCS as COMPANY_DOCS
+from loompa.company import company_dir, filled
 from loompa.dependencies import INTEGRATION_KEY
 from loompa.engine.state import StoryState
 from loompa.hygiene import is_debris, is_stray_data, new_files
@@ -288,6 +290,32 @@ class DeployerAgent(LoompaAgent):
             return
         if sha:
             self.ctx.emit("story.recorded", story_id=state.story_id, agent=self.name, sha=sha)
+        self.record_company()
+
+    def company_paths(self) -> list[str]:
+        """The founder's company documents that say something (not the template), relative to
+        the repo. The contracts folder stays out: it is gitignored (LGPD)."""
+        loompa = self.ctx.factory.paths.loompa
+        return [
+            str((company_dir(loompa) / doc.file).relative_to(self.ctx.root))
+            for doc in COMPANY_DOCS
+            if filled(loompa, doc.kind)
+        ]
+
+    def record_company(self) -> str | None:
+        """Commit the founder's edits to the company documents, in a commit of their own, when the
+        engine starts and after each merge: in the tamagotchi they sat outside git (06/10), lost
+        in a fresh clone. Advisory, like the story's record."""
+        try:
+            sha = self.git.commit_records(
+                self.company_paths(), message="docs(empresa): documentos da empresa"
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.ctx.emit("company.records_failed", agent=self.name, error=str(exc))
+            return None
+        if sha:
+            self.ctx.emit("company.recorded", agent=self.name, sha=sha)
+        return sha
 
     def _learn_test_command(self) -> None:
         """A factory without a test command (a `custom` greenfield) gets one as soon as the

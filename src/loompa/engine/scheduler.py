@@ -27,6 +27,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
+from loompa.agents.deployer import DeployerAgent
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent, StoryStalled, triage
 from loompa.comms import FounderAnswer, FounderMessage, MessageKind
 from loompa.company import ensure_templates
@@ -439,6 +440,8 @@ class Scheduler:
         lock.acquire()
         ensure_gitignore(self.ctx.root)  # older factories get the newer lines (plan 8.6.6)
         ensure_templates(self.ctx.factory.paths.loompa)  # and the company templates (13.2)
+        if not self.ctx.dry_run:
+            DeployerAgent(self.ctx).record_company()  # the founder's edits go into git
         self.ctx.listeners.append(self._heard)
         awake = Awake(enabled=None if not self.ctx.dry_run else False)
         try:
