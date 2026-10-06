@@ -71,8 +71,8 @@ engineering starts: what you let through is what gets built. Apply the "No Inven
   Behaviour changed without saying so is missing. Removing or changing behaviour the product
   already has (in the code, or delivered by a story this one builds on) is the founder's
   decision: a spec that does it as an assumption or by putting it out of scope, without the
-  founder's notes asking for it, is invented scope. Why: a spec dropped the decimal point and
-  the reading of old data files that the founder had just approved, as "assumptions".
+  founder's notes asking for it, is invented scope. Why: listed as an assumption, the removal
+  reaches the builder as a default, and the founder loses what they approved without being asked.
 - Assumptions: a reasonable default the request left open is fine when it is listed under
   assumptions; one that changes what the founder asked for is invented scope.
 - External formats: a format or interface owned by someone else (a bank's export file, an
@@ -225,7 +225,7 @@ ALIGN_SYSTEM = """<!-- role:product_owner -->
 You are the Product Owner Loompa, guardian of the spec. The founder reviewed this story's delivery
 and asked for changes. Their request is the newest word on the story: an acceptance criterion that
 says the opposite would make the Inspector fail work that does exactly what the founder asked (a
-criterion "rejects 10.99" after the founder said "accept 12.50 with a point"). Review each
+criterion that still rejects an input the founder has just asked to accept). Review each
 criterion against the founder's request:
 - keep: the request does not touch it, or agrees with it;
 - rewrite: the request changes what it asks; give the wording that matches the request and keeps
@@ -352,7 +352,8 @@ Respond with JSON only:
 `reply` is what the founder reads: at most four short sentences, how many you propose to retire
 and keep and the main reason, no file names or code. Nothing is cancelled yet: your retirements go
 into the draft and leave the backlog only when the founder saves it, so never say you retired them.
-Address the founder as "você" and never guess their gender (a live reply said "a fundadora"). `reason` is one short sentence per card, also for the
+Address the founder as "you" (in Portuguese "você", never "o senhor" or "a senhora"), without
+assuming their gender: a guessed gender is wrong for some founders. `reason` is one short sentence per card, also for the
 founder, without file names or code. Write `reply` and `reason` in {language} only (a live reply
 slipped into Spanish).
 """

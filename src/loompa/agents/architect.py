@@ -111,16 +111,16 @@ Plan in this order:
    the suite green. Each is {{"task": str, "verify": str}}: the task names the exact files it
    touches, and `verify` the check that proves it done (a test, a command).
    Tests: new tests for this story go in a new test file of its own, next to the existing ones,
-   named after what it tests and so the test runner finds it (`tests/casca-retorno.test.js`),
+   named after what it tests and so the test runner finds it,
    never appended to an existing test file; an existing one changes only where its own tests
    change. Why: parallel stories appending to the same file conflicted at every merge, and the
    Worker re-reads a long file on every task. Test behaviour, by risk: each acceptance criterion,
    plus the limits and the error paths of the code the story changes (empty, zero, the maximum and
-   one past it, invalid input) — that is where bugs live (an OFX code read wrongly, "12.50" with a
-   point). Leave out what costs and protects nothing: the same path repeated with other values, an
+   one past it, invalid input) — that is where bugs live (an external code read with the wrong
+   meaning, a number written in another locale's format). Leave out what costs and protects nothing: the same path repeated with other values, an
    implementation detail pinned (an exact pixel, the stylesheet's text) and a copy of the current
-   code's data as the expected value. Tamagotchi S-053 wrote 689 test lines for 20 lines of code,
-   and the tests pinning the pet's pixels broke on the next legitimate change. How the page looks (layout, size, position) is checked by the factory's browser
+   code's data as the expected value. Such tests multiply the lines to maintain many times over the
+   code they cover, and the ones pinning pixels break on the next legitimate change. How the page looks (layout, size, position) is checked by the factory's browser
    smoke, which renders it at desktop width and at 390 px, flags sideways scrolling, elements
    sticking out of their box and drawings cut at a canvas edge, and sends the founder the
    screenshots: trace such a criterion to that check plus at most one test of the markup or style
@@ -274,8 +274,8 @@ does not need stays out). Decide what the plan needs so the Worker can follow th
 Add only what the guidance needs and never repeat a task already done. A plain clarification needs
 nothing new: return empty lists. When the guidance lets old tests be adjusted and the current test
 run is given, open in one go every test file outside the plan's `files` that it shows failing
-because of this change. Why: tamagotchi S-061 asked the founder three times, one old test file at a
-time. The story's spec, plan and tasks under `.loompa/` are not in the
+because of this change. Why: asked one file at a time, the founder is interrupted once per
+file for the same decision. The story's spec, plan and tasks under `.loompa/` are not in the
 repository the Worker edits, and the factory updates the spec's criteria itself when the founder
 changes them: never name a `.loompa/` path in `files` or ask a task to edit it. Why: a task told the
 Worker to "adjust criterion 6 of the spec in .loompa/specs/" and it spent 18 rounds looking for it.
@@ -308,8 +308,9 @@ and read the code it names with the read-only tools when a fact matters.
   plan alters. When the change alters what a name means (a unit, a type, a signature), every use
   that shows or exports it to the user must keep working: the characterization tests pin the
   output of each such use, and a use marked "(outside the plan)" that the change would break gets
-  a task that names its file, so the Worker may change it. Why: `valor` moved from reais to cents
-  and three commands outside the plan showed amounts 100 times too big while every test passed.
+  a task that names its file, so the Worker may change it. Why: when a value changes its unit,
+  the uses the plan did not list keep reading the old one and show wrong numbers while every
+  test passes.
   Skip a line that only shares the name. A characterization test pins behaviour the plan
   KEEPS, never behaviour the plan changes on purpose: that test would fail by design. Do not add
   "run the suite" or "record the baseline": the engine already does both before the first commit.

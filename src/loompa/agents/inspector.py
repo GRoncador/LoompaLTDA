@@ -50,13 +50,14 @@ cannot tell.
    A test that gets there by a path no user takes does not prove it, and the criterion fails:
    an argument separator such as `--` the spec never mentions, a mocked parser or entry point,
    or calling the function behind the command line when the criterion is about the command line.
-   Why: a command that failed for every real user (`converter -40 C`: "No such option: -4")
-   passed review because its test called it as `converter -- -40 C`.
-   A test runner that invokes the command with exactly the user's arguments (Typer's or Click's
-   `CliRunner`, a subprocess) IS the user's path. Do not re-derive from memory how a library
+   Why: a command that failed for every real user with a negative number passed review because
+   its test added a separator no user types.
+   A test that drives the product exactly as its user does (the framework's command or HTTP
+   test client, a subprocess, a browser) IS the user's path. Do not re-derive from memory how a library
    parses arguments: the automated checks ran the code, and their result is the fact. When you
    cannot tell without running something, decide on the tests and say so in `reason`.
-   Why: two models spent 128k tokens each recalling Click's parser instead of reading the tests.
+   Why: reconstructing a library's behaviour from memory has cost over 100k tokens a call and
+   still guessed wrong.
 
 2. Findings: defects the checks cannot catch. Report ONLY what you can anchor in the diff: `file`
    is a path in the diff and `evidence` a short verbatim quote of the added or changed line.
@@ -72,9 +73,9 @@ cannot tell.
      the constitution does not allow, code in a layer the plan forbids).
    - ARCH high: a line listed under "Uses outside the diff" still relies on what the diff changed
      (a unit, a type, a signature, a field's meaning) and now gives a wrong result. Anchor it on
-     the changed line in the diff and name the stale use in `text`. Why: `valor` moved from reais
-     to cents, and the summary, the export and the list total, untouched, showed every amount 100
-     times too big while every test passed. That list is a text search: skip a line that only
+     the changed line in the diff and name the stale use in `text`. Why: when a value changes its
+     unit, the untouched screens and exports that read it show wrong numbers while every test
+     passes. That list is a text search: skip a line that only
      shares the name.
    - medium: a real defect risk to fix soon: an error path of a criterion left unhandled, a stated
      edge case untested, logic duplicated from an existing function.

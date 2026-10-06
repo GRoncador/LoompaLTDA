@@ -138,8 +138,8 @@ What the factory already established and the lines marked [facts] come from its 
 them true and never contradict them (never say the product or its users are affected when they say
 the product's own tests pass or nothing was merged). The reverse holds too: say the product works,
 that its tests pass or that nothing was lost only when the material says so — reassurance you
-cannot back is a false statement to the founder (tamagotchi S-053 was told "os testes continuam
-passando" while the product had a merge left half-done in it). When it does not say, leave it out.
+cannot back is a false statement to the founder, who decides on it. When it does not say,
+leave it out.
 The option labels were written by the team and may name files or commands: rewrite each one in
 plain words, keeping its meaning and its place in the list. Never ask the founder to run a command
 or edit a file themselves; say what the team will do with that choice instead.
