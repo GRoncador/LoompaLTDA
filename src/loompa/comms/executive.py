@@ -121,6 +121,25 @@ _FILE_LINE = re.compile(r"\b[\w\-/]+\.(py|ts|tsx|js|jsx|go|rs|java|rb):\d+\b")
 _FILE_NAME = re.compile(
     r"(?<![\w@.])[\w\-]+(?:/[\w.\-]+)*\.(?:py|pyi|ts|tsx|js|jsx|mjs|go|rs|java|rb|toml|json|ya?ml|cfg|ini|lock|sql|sh)\b"
 )
+# A name from the code: a constant (FAIXA_RETORNO_Y) or a snake_case identifier. Prose in any
+# language has no underscore inside a word. A line reference ("linhas 1959-1963") goes with it:
+# both reached the founder in a blocked message on 06/10 (SP-010).
+_CODE_NAME = re.compile(r"(?<![\w`])`?[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+`?(?![\w`])")
+_LINE_REF = re.compile(r",?\s*\b(?:linhas?|lines?)\s+\d+(?:\s*[-–]\s*\d+)?", re.I)
+# The noun the writer already put before a name the sanitizer replaced: "o arquivo src/x.js"
+# became "o arquivo um arquivo do projeto".
+_DOUBLED = re.compile(
+    r"\b(?:(o|um|no|do|ao|num|dum)\s+)?(?:arquivo|file)\s+um (arquivo do (?:projeto|sistema))",
+    re.I,
+)
+_ARTICLE = {"no": "num ", "num": "num ", "do": "de um ", "dum": "de um ", "ao": "a um "}
+
+
+def _undouble(match: re.Match[str]) -> str:
+    lead = _ARTICLE.get((match.group(1) or "").lower(), "um ")
+    return lead + match.group(2)
+
+
 _GIT_COMMAND = re.compile(
     r"\bgit (?:checkout|diff|reset|revert|restore|commit|push|pull|merge|rebase|stash|add|log|status)\b"
 )
@@ -182,6 +201,8 @@ _FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("absolute_path", re.compile(r"(?<![\w/])/(Users|home|var|tmp|opt)/[\w./\-]+")),
     ("hex_identifier", _HEX_ID),
     ("task_id", re.compile(r"\bT\d{1,3}\b")),
+    ("code_name", _CODE_NAME),
+    ("line_ref", _LINE_REF),
     ("jargon", TECH_WORD),
     ("terminal_noise", re.compile(r"\$ (pytest|npm|pip|uv|ruff|git) ")),
     ("shell_prompt", re.compile(r"^\s*[\$#>] ", re.M)),
@@ -214,6 +235,9 @@ def sanitize_for_founder(text: str, *, max_chars: int = MAX_FOUNDER_CHARS) -> st
         line = _FILE_LINE.sub("um arquivo do sistema", line)
         line = _PATH.sub("um arquivo do sistema", line)
         line = _FILE_NAME.sub("um arquivo do projeto", line)
+        line = _DOUBLED.sub(_undouble, line)
+        line = _LINE_REF.sub("", line)
+        line = _CODE_NAME.sub("um valor do código", line)
         line = _GIT_COMMAND.sub("um comando técnico", line)
         line = _HEX_ID.sub("(id)", line)
         for pattern, plain in _JARGON.items():

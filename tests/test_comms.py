@@ -101,3 +101,23 @@ def test_audit_flags_project_files_and_git_commands_in_option_labels():
         options=[Option(key="opt1", label=leaked)],
     )
     assert {v.rule for v in msg.executive_audit()} == {"file_name", "git_command"}
+
+
+def test_a_replaced_file_name_does_not_double_its_noun_and_code_names_do_not_pass():
+    """SP-010 (06/10): "o arquivo um arquivo do projeto ... (FAIXA_RETORNO_Y, linhas 1959–1963)"
+    reached the founder."""
+    from loompa.comms.executive import audit_executive_text, sanitize_for_founder
+
+    raw = (
+        "Mas o arquivo tests/casca.test.js fixa a banda antiga numa constante "
+        "(FAIXA_RETORNO_Y, linhas 1959–1963) e o campo valor_centavos também."
+    )
+    out = sanitize_for_founder(raw)
+    assert "arquivo um arquivo" not in out and "mas um arquivo do projeto" in out.lower()
+    assert "FAIXA_RETORNO_Y" not in out and "1959" not in out and "valor_centavos" not in out
+    assert not audit_executive_text(out)
+    rules = {v.rule for v in audit_executive_text(raw)}
+    assert {"code_name", "line_ref"} <= rules
+    assert sanitize_for_founder("Está no arquivo src/app.py.") == "Está num arquivo do projeto."
+    plain = "Vale testar no celular: o pet atravessa 8 horas sem fim de jogo."
+    assert sanitize_for_founder(plain) == plain and not audit_executive_text(plain)
