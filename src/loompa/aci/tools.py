@@ -186,7 +186,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "blocked",
-        "description": "Signal that you cannot continue without a human decision. `reason` is plain, non-technical language for the founder; `options` are 2-3 choices.",
+        "description": "Signal that you cannot continue without a human decision. `reason` is plain, non-technical language for the founder; `options` are 2-3 choices, the one you recommend first: the founder sees it marked as recommended.",
         "parameters": {
             "type": "object",
             "properties": {

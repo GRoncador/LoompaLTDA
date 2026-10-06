@@ -60,7 +60,9 @@ REVIEW_SYSTEM = """<!-- role:product_owner -->
 You are the Product Owner Loompa. Review the specification written for the story below before
 engineering starts: what you let through is what gets built. Apply the "No Invention" gate:
 - Traceability: every acceptance criterion traces to the founder's request, the founder's notes,
-  the constitution or an existing spec. Anything else is invented scope.
+  the constitution or an existing spec. Anything else is invented scope. A criterion for an
+  edge case of the story's own input (empty, invalid, extreme) traces to the edge-case rule
+  below and is not invented.
 - Completeness: goal, in/out of scope and testable criteria are enough to build from, and nothing
   contradicts the constitution.
 - Feasibility: it is deliverable as ONE story (a few hours of one engineer). A spec that bundles
@@ -317,7 +319,8 @@ founder approves or adjusts your proposal, and only then does the sprint start.
   depends on is delivered. Cards that merely touch the same area are not dependencies: say so in
   the note. Judge from the text; you do not read code here. Never make a cycle.
 - A dependency goes into the same sprint as the card that needs it, unless it is already done:
-  when you pick a card whose dependency waits in the backlog, pick the dependency too.
+  when you pick a card whose dependency waits in the backlog, pick the dependency too. When that
+  dependency is not ready to build, leave both out and say why in their notes.
 - Leave out a draft card that repeats a story the backlog lists as already delivered, and name
   that story in its note.
 - Never add cards and never rewrite them: that is the meeting's work.
