@@ -54,7 +54,7 @@ def test_the_english_only_default_is_dropped_from_old_configs(monkeypatch):
     data = _upgrade(
         {"revision": 4, "models": {}, "memory": {"embedding_model": "BAAI/bge-small-en-v1.5"}}
     )
-    assert "embedding_model" not in data["memory"] and data["revision"] == 5
+    assert "embedding_model" not in data["memory"] and data["revision"] >= 5
     kept = _upgrade({"revision": 4, "models": {}, "memory": {"embedding_model": "x/y"}})
     assert kept["memory"]["embedding_model"] == "x/y"
 

@@ -212,15 +212,15 @@ ROLE_TASKS: tuple[RoleTask, ...] = (
         key="master.exec_options",
         role="master",
         label="Opções para um bloqueio",
-        hint="transforma um problema técnico já diagnosticado em opções para o Founder escolher",
-        default_tier="tier3",
+        hint="o Founder lê e escolhe por este texto; no tier 3 gratuito veio pior e mais lento (bancada, 06/10)",
+        default_tier="tier2",
     ),
     RoleTask(
         key="master.wording",
         role="master",
         label="Textos de reunião e relatório",
-        hint="redige fatos já contados no código; nada é decidido aqui",
-        default_tier="tier3",
+        hint="redige fatos já contados no código para o Founder; no tier 3 gratuito o relatório veio quebrado",
+        default_tier="tier2",
     ),
     RoleTask(
         key="architect.plan",
@@ -284,8 +284,8 @@ ROLE_TASKS: tuple[RoleTask, ...] = (
         key="deployer.summary",
         role="deployer",
         label="Resumo da entrega",
-        hint="reescreve as notas do Worker em uma frase para o Founder",
-        default_tier="tier3",
+        hint="reescreve as notas do Worker para o Founder; custa centavos de real por sprint no tier 2",
+        default_tier="tier2",
     ),
 )
 
@@ -694,7 +694,7 @@ RETIRED_PROVIDERS: tuple[str, ...] = ("groq",)
 
 # Bumped when a default changes in a way an existing config.yaml must pick up (every save writes
 # the whole config, so an old default would otherwise stay forever); see config/store.py.
-CONFIG_REVISION = 5
+CONFIG_REVISION = 6
 
 
 class LoompaConfig(BaseModel):

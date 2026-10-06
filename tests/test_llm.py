@@ -711,7 +711,8 @@ def test_a_declared_task_wins_over_the_story_complexity():
     assert tier("architect", complexity="STANDARD", task="architect.plan") == "tier2"
     assert tier("architect", complexity="COMPLEX", task="architect.plan") == "tier1"
     assert tier("architect", complexity="SIMPLE") == "tier2"
-    assert tier("deployer", complexity="SIMPLE", task="deployer.summary") == "tier3"
+    # founder text moved to tier 2 when the bench measured the free tier on it (revision 6)
+    assert tier("deployer", complexity="SIMPLE", task="deployer.summary") == "tier2"
 
 
 async def test_a_free_tier_call_falls_to_tier_two_when_no_free_model_answers():
@@ -732,7 +733,7 @@ async def test_a_free_tier_call_falls_to_tier_two_when_no_free_model_answers():
         },
         max_retries=0,
     )
-    rc = await router.complete("deployer", [Message("user", "x")], task="deployer.summary")
+    rc = await router.complete("deployer", [Message("user", "x")], tier_override="tier3")
     # no waiting on the free model's 30 s limit: tier 2 answered on the same call
     assert asked == ["x:free"] and rc.tier == "tier2"
     assert rc.response.text == "gemini-3.5-flash-lite says hi"
@@ -964,3 +965,24 @@ async def test_a_fixed_slot_runs_every_call_at_its_own_effort():
     router = ModelRouter(cfg, providers={"openrouter": seen}, secrets={}, max_retries=0)
     await router.complete("worker", [Message("user", "x")], reasoning_effort="low")
     assert seen.calls[0]["reasoning_effort"] == "medium"
+
+
+def test_revision_six_moves_the_founder_text_off_the_free_tier_but_keeps_a_choice():
+    from loompa.config.store import _upgrade
+
+    data = _upgrade(
+        {
+            "revision": 5,
+            "models": {
+                "role_tasks": {
+                    "deployer.summary": "tier3",
+                    "master.wording": "tier3",
+                    "master.exec_options": "tier1",  # someone chose it: kept
+                    "architect.plan": "tier2",
+                }
+            },
+        }
+    )
+    tasks = data["models"]["role_tasks"]
+    assert "deployer.summary" not in tasks and "master.wording" not in tasks
+    assert tasks["master.exec_options"] == "tier1" and tasks["architect.plan"] == "tier2"

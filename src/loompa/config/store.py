@@ -52,6 +52,13 @@ _REVISION_1_DEFAULTS = {
 }
 
 
+# Revision 6 (2026-10-06): the prompt bench measured the founder's text on the free tier 3 against
+# tier 2 (nemotron-3-ultra free vs mimo-v2.6-flash, 12 real cases each, blind judge from a third
+# maker): invalid JSON in up to 27% of sprint reports, 2-4x slower, and the judge preferred tier 2
+# in three of four prompts, for about US$ 0.0002 a call. The old tier-3 default is dropped.
+_REVISION_6_TIER3_TASKS = ("master.exec_options", "master.wording", "deployer.summary")
+
+
 # Revision 2 (2026-10-03): provider fields a real call settled, dropped when still the old guess.
 _REVISION_2_PROVIDERS = {("xiaomi", "takes_effort"): False}
 # Revision 3 (2026-10-03): a hand-written BYOK pair models.dev showed to be two models (OpenRouter's
@@ -94,6 +101,12 @@ def _upgrade(data: dict) -> dict:
         memory = data.get("memory")
         if isinstance(memory, dict) and memory.get("embedding_model") == "BAAI/bge-small-en-v1.5":
             del memory["embedding_model"]
+    if int(data.get("revision") or 0) < 6:  # 2026-10-06: founder text on tier 2 (plan 14.2)
+        tasks = models.get("role_tasks")
+        if isinstance(tasks, dict):
+            for key in _REVISION_6_TIER3_TASKS:
+                if tasks.get(key) == "tier3":
+                    del tasks[key]
     data["revision"] = max(int(data.get("revision") or 0), CONFIG_REVISION)
     return data
 
