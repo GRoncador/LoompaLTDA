@@ -302,6 +302,7 @@ try:  # extended commands (meeting/run/inbox/dashboard) registered when the engi
     from loompa.cli import health as _health  # noqa: F401
     from loompa.cli import models as _models  # noqa: F401
     from loompa.cli import ops as _ops  # noqa: F401
+    from loompa.cli import prompts as _prompts  # noqa: F401
     from loompa.cli import providers as _providers  # noqa: F401
     from loompa.cli import schedule as _schedule  # noqa: F401
     from loompa.cli import setup as _setup  # noqa: F401
