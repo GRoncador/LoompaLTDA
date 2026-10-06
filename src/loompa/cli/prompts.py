@@ -88,6 +88,9 @@ def compare_cmd(
         ..., help="Prompt, ex.: deployer.SUMMARY_SYSTEM (ou parte do nome)."
     ),
     candidate: Path | None = typer.Option(None, "--candidate", "-c", help="Texto do prompt B."),
+    candidate_a: Path | None = typer.Option(
+        None, "--candidate-a", help="Texto do prompt A (padrão: o do código)."
+    ),
     model_a: str | None = typer.Option(None, help="provedor:modelo da variante A."),
     model_b: str | None = typer.Option(None, help="provedor:modelo da variante B."),
     mode: str | None = typer.Option(None, help="one_shot | first | final (padrão: o mais comum)."),
@@ -110,7 +113,7 @@ def compare_cmd(
     except KeyError as exc:
         console.print(f"[red]Prompt desconhecido:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    if candidate is None and not model_a and not model_b:
+    if candidate is None and candidate_a is None and not model_a and not model_b:
         console.print("[red]Nada a comparar:[/red] passe --candidate, --model-a ou --model-b.")
         raise typer.Exit(code=2)
     found = cases_mod.load(p.key, factories=only or None)
@@ -126,7 +129,9 @@ def compare_cmd(
     random.Random(seed).shuffle(pool)
     picked = pool[:limit]
     f = resolve_factory(factory_slug)
-    a = Variant("A", None, model_a)
+    a = Variant("A", candidate_a.read_text(encoding="utf-8") if candidate_a else None, model_a)
+    if candidate_a:
+        a.label = f"candidato {candidate_a.name}"
     b = Variant("B", candidate.read_text(encoding="utf-8") if candidate else None, model_b)
     if candidate:
         b.label = f"candidato {candidate.name}"

@@ -181,3 +181,84 @@ agreement, 82% at confidence ≥ 0.8. That is the same as before, as expected: t
 used one pair per request. The shadow now asks the same shape, so it measures what was validated.
 
 **Research claims:** still no labels on record. The new shape waits for a research story in shadow.
+
+## Plan 14.5: measured on the factories' real calls (2026-10-06)
+
+The shadow sprint (SP-010) gave too little: seven passage filters in the new shape, and no Kaizen
+finding or research. Each use was replayed instead on the real material that the prompt bench
+harvested (ADR-0034), with `scripts/decider_shadow_eval.py`.
+
+The reference label is the agreement of two LLMs from different makers (glm-5.3-flash,
+gpt-6-luna), asked the same question in the same words:
+
+- pairs they split on are left out and counted;
+- the PO is compared with the reference, not assumed right;
+- every disagreement below was read by hand;
+- labelling cost: US$ 0.09.
+
+**Precedents (memory)**
+
+- 107 passages from 48 real spec and plan calls; 95 have a reference label.
+- 72 of the 95 (76%) are about something else than the task.
+- P(relevant) agreed with the reference on 95/95, in every confidence band.
+- The 0.3 floor drops 65 of the 72 off-task passages and none of the 23 relevant ones.
+- The search's own score does almost as well at no cost: a 0.4 floor drops 63 of 72 and loses
+  2 of 23.
+- Ranking could not be measured: only 17 right/wrong pairs inside one call.
+
+**What the filter changes in the answers.** `scripts/decider_reorder_eval.py` replayed 40 real
+spec and plan calls with today's prompt and model. Each call ran with the block as it was
+pushed, and with the block in `decide` mode (under 0.3 left out, the rest ordered by
+P(relevant)).
+
+- The block changed in 27 calls.
+- The blind judge (glm-5.3-flash) gave 14 to the original, 10 to the filtered one, and 3 ties.
+- No reason the judge gave mentions a precedent.
+- Input was 2% smaller.
+
+The off-task passages are noise the models already ignore. Removing them neither helps nor hurts.
+
+**Same problem (Kaizen)**
+
+- 336 finding × listed-card pairs from 46 real triage calls.
+- At confidence ≥ 0.8, Jev agreed with the PO and with the reference on 259 of 259 pairs.
+- It found 9 of the PO's 9 duplicates.
+- It also found 5 of the 7 that the reference saw and the PO missed. All 7 date from before
+  03/10, a series of "run the suite and attach the output" cards.
+- PO against reference: 323/330.
+
+**Process only (Kaizen)**
+
+- 69 findings.
+- 49 of them were triaged before the PO had the field (commit 72af121, 03/10). For those, its
+  `false` is a default, not a judgement.
+- On the 20 judged with the field, Jev and the PO agree 19/20. The one difference is the PO's
+  error: "the suite already fails on main" filed as process only.
+- Jev agrees with the reference on 50/50.
+- Positives are rare: 2 since the field.
+
+**Research claims**
+
+- 94 claim × source pairs from the Analyst's reports: 47 claims against the source they cite,
+  and 47 controls against another claim's source.
+- The sources are repository files, as the trace holds them.
+- At ≥ 0.8 it agrees with the reference on 30 of 30 pairs.
+- Below 0.8 it is near chance: it says `supports` for 11 controls where the reference says 2.
+- At the 0.9 threshold it would act on 9 of 47 citations and drop 3.
+- The 3 drops are claims of absence ("the folder is empty"). An empty listing does support
+  them, which the question does not cover.
+
+### Proposal per use (the Founder decides)
+
+| Use | Accurate? | Does it change an outcome? | Proposal |
+|---|---|---|---|
+| Precedents filter / order | yes (0 relevant lost) | no (14×10×3, noise) | `off`; a search-score floor would trim the block for free if tokens ever matter |
+| Kaizen "same problem?" | yes at ≥ 0.8 | no: the PO's call still runs for the title, kind and place, and the PO is right since 03/10 | `off` |
+| Kaizen "process only?" | yes | 1 error in 20 corrected | `off` until findings grow; reopen if process cards reappear |
+| Research "sentence × source" | only at ≥ 0.8, covers 28% | 3 drops, all claims of absence | `off`; research is rare and its sources are files |
+
+Jev is accurate where it is confident. In these four uses, though, it either repeats a call that
+must run anyway, or removes noise that changes nothing. The natural use is the one it was kept
+for: "does this story touch the interface?" in Fase 15. There it gates a whole phase with one
+typed question, and nothing else answers that question. The code stays, so turning a use back on
+is one line in the config.

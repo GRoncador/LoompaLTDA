@@ -37,7 +37,7 @@ from loompa.llm.providers import LLMError, Message
 from loompa.llm.router import ModelRouter
 
 MATERIAL_CHARS = 9000  # what the judge reads of the case's input
-ANSWER_CHARS = 6000
+ANSWER_CHARS = 30000  # whole: a spec or plan runs to 10k, and a cut one read as the model's fault
 
 JUDGE_SYSTEM = """You are the reviewer of a prompt bench. Two AI answers were produced for the
 same task from the same material; decide which one serves the task better.
@@ -360,7 +360,12 @@ def _material(case: Case) -> str:
         if case.mode == "final"
         else ""
     )
-    return user[:MATERIAL_CHARS] + note
+    cut = (
+        f"\n(material cut here by the bench: {len(user) - MATERIAL_CHARS} more characters)"
+        if len(user) > MATERIAL_CHARS
+        else ""
+    )
+    return user[:MATERIAL_CHARS] + cut + note
 
 
 def _order(case_id: str) -> bool:
@@ -475,7 +480,7 @@ async def compare(
                 replay(routers["A"], prompt, case, a), replay(routers["B"], prompt, case, b)
             )
             report.runs += [ra, rb]
-            if jrouter is not None:
+            if jrouter is not None and case.mode != "first":  # a judge cannot weigh tool calls
                 report.verdicts.append(await judge(jrouter, prompt, case, ra, rb))
         done += 1
         if on_progress:
