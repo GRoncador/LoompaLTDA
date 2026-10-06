@@ -1,6 +1,6 @@
 # Brief → implementation map
 
-Status as of 2026-10-05 on branch `dev`. ✅ built & tested · 🟡 partial · ⚪ not started
+Status as of 2026-10-06 on branch `dev`. ✅ built & tested · 🟡 partial · ⚪ not started
 
 | Brief section | Status | Where |
 | --- | --- | --- |
@@ -710,6 +710,26 @@ Decided 2026-09-29:
   after `story.escalated`, over the latest sprint, and only for stories with no
   `constitution.lesson`. The 80% budget alert no longer claims "Já apliquei prompts mais curtos",
   which nothing did.
+
+- **2026-10-06 — Fase 14 (prompt bench) and tamagotchi SP-010.** `loompa prompts harvest | list |
+  compare | show` (ADR-0034 draft, `src/loompa/bench/`) replays real calls from the traces (992 cases,
+  38 prompts) through two variants. Each answer gets checks in code, a blind pairwise judge from a
+  third maker, and its cost.
+  - The bench found the Worker read only the first 4000 characters of specs and plans that run 8-10k,
+    about half the acceptance criteria. Spec and plan now go in by whole sections, by each reader's
+    priority (`speckit.artifacts.fit_sections`).
+  - Founder text moved from the free tier 3 to tier 2 (config revision 6). The free tier lost on the
+    judge and broke the sprint report's JSON.
+  - `qwen3.8-27b:free` left the free list.
+  - 14.3 (ideas from Matt Pocock's skills and the Anthropic/OpenAI guides) is paused by the founder:
+    each prompt change is shown to him before it is measured, and prompts stay product-agnostic.
+  - 14.5 measured the decision model (Jev) on real calls: accurate where confident, but no outcome
+    changes. It is `off` in all four uses (ADR-0032 "Plan 14.5").
+  - SP-010 (3/3 delivered, US$ 0.26, 1h43, no rework): the founder's pause landing on the close left
+    the sprint with no report (EnginePaused passed every `except Exception`). The report now falls
+    back to code and an owed report is finished on the next pass. A summary that denies a measured
+    fact is replaced. The blocked text's "o arquivo um arquivo do projeto" and leaked constant names
+    and line numbers are fixed in the sanitizer and the audit.
 
 ## Known gaps / next steps
 
