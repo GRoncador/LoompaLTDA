@@ -7,14 +7,16 @@ card (ADR-0017): nothing enters the backlog unread.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import UTC, datetime
 
-from loompa.agents.base import LoompaAgent
+from loompa.agents.base import _SHADOW, LoompaAgent
 from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.backlog import TRIAGE_KEY, Triage
 from loompa.comms.executive import clip
-from loompa.engine.state import Stage, StoryState
+from loompa.decider import NO_CARD, PROCESS_ONLY, build_decider, duplicate_question
+from loompa.engine.state import TERMINAL, Stage, StoryState
 from loompa.sprints import SprintBoard, SprintStatus
 
 KIND_LABEL = {
@@ -36,6 +38,24 @@ def without_label(title: str) -> str:
     while (m := _LEADING_LABEL.match(title)) and m.group(1).strip().lower() in labels:
         title = title[m.end() :]
     return title.strip()
+
+
+SHADOW_CARDS = 8  # the open cards the shadow's duplicate question chooses among
+
+
+def _nearest(ctx, text: str, cards: dict[str, str], k: int) -> dict[str, str]:
+    """The `k` open cards whose titles are closest to `text` (the memory's embedder): a state of
+    eight short titles, not the whole backlog — the decision model gets worse with noise."""
+    if not cards:
+        return {}
+    ids = list(cards)
+    try:
+        vecs = ctx.memory.embedder.embed([text, *(cards[i] for i in ids)])
+    except Exception:  # noqa: BLE001 - shadow only
+        return {}
+    scores = vecs[1:] @ vecs[0]
+    order = sorted(range(len(ids)), key=lambda n: -float(scores[n]))[:k]
+    return {ids[n]: cards[ids[n]] for n in order}
 
 
 def _normal(title: str) -> str:
@@ -88,6 +108,7 @@ class KaizenAgent(LoompaAgent):
                 for key, item in keyed.items()
             ],
         )
+        self._shadow_triage(state, keyed, verdicts)
         filed: dict[str, str] = {}  # finding key -> card id, for findings that point at another
         lines = []
         for key, item in keyed.items():
@@ -178,6 +199,52 @@ class KaizenAgent(LoompaAgent):
                 self.ctx.factory.paths.learnings, kind="learning", doc_id="learnings.md"
             )
         return created
+
+    def _shadow_triage(self, state: StoryState, keyed: dict, verdicts: dict) -> None:
+        """13.6 in shadow: the decision model answers the triage's two narrow questions — process
+        only? a duplicate of which open card? — beside the Product Owner, whose verdict stands;
+        both go to the trace (`decider.shadow`) to be compared. Fire and forget."""
+        decider = build_decider(self.ctx)
+        if decider is None or not keyed or not verdicts:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        cards = {
+            r["id"]: r["title"]
+            for r in self.ctx.store.list_stories(self.ctx.slug)
+            if r["stage"] not in TERMINAL and r["id"] != state.story_id
+        }
+
+        async def one(key: str, item: dict) -> None:
+            text = f"{item.get('title') or ''}\n{str(item.get('detail') or '')[:800]}"
+            near = _nearest(self.ctx, text, cards, SHADOW_CARDS)
+            questions = {"process_only": PROCESS_ONLY}
+            if near:
+                questions["duplicate"] = duplicate_question(near)
+            got = await decider.decide(
+                f"Finding:\n{text}", questions, purpose="kaizen_triage", story_id=state.story_id
+            )
+            if not got:
+                return
+            po = verdicts.get(key)
+            dup = got.get("duplicate")
+            self.ctx.emit(
+                "decider.shadow",
+                story_id=state.story_id,
+                purpose="kaizen_triage",
+                finding=str(item.get("title") or "")[:140],
+                process_only=[got["process_only"].value, round(got["process_only"].confidence, 3)],
+                duplicate=[dup.value, round(dup.confidence, 3)] if dup else None,
+                po_process_only=bool(po and po.process_only),
+                po_duplicate=(po.duplicate_of if po else "") or NO_CARD,
+            )
+
+        for key, item in keyed.items():
+            task = loop.create_task(one(key, item))
+            _SHADOW.add(task)
+            task.add_done_callback(_SHADOW.discard)
 
     def _filed_by(self, story_id: str) -> dict[str, str]:
         """The findings this story already turned into (or pointed at) a card: title -> card."""

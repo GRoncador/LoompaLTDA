@@ -243,3 +243,26 @@ def useful_question(n: int) -> Question:
 def keeps(answer: Answer | None, threshold: float) -> bool:
     """Whether a `decide`-mode answer is trusted: confident enough, never the dry-run's."""
     return answer is not None and answer.confidence >= threshold
+
+
+PROCESS_ONLY = Question(
+    "noul",
+    "Does this finding ask only for process (run the test suite, attach output or evidence, record "
+    "a closing, write spec/plan/tasks for work already done), with no change to the product or its "
+    "tests?",
+    {
+        "true": "Only process: nothing in the product or its tests would change.",
+        "false": "It asks for a change in the product or its tests (code, a test, a fix).",
+    },
+)
+NO_CARD = "none"
+
+
+def duplicate_question(cards: dict[str, str]) -> Question:
+    """Which open card already covers the finding, or none (`cards`: id -> title)."""
+    return Question(
+        "choice",
+        "Which open card already covers the same problem as the finding, so that doing that card "
+        "would also settle it? Judge by meaning, not wording.",
+        {**cards, NO_CARD: "None of these cards covers the finding's problem."},
+    )

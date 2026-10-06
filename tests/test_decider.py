@@ -146,4 +146,45 @@ async def test_pushed_passages_are_scored_beside_the_prompt(factory: Factory, mo
     await asyncio.gather(*list(_SHADOW))
     (shadow,) = events(ctx, "decider.shadow")
     assert shadow["payload"]["passages"] == [["specs/S-001/spec.md", 2, 0.9]]
+    assert shadow["payload"]["reranked"] == ["specs/S-001/spec.md"]
     await ctx.aclose()
+
+
+async def test_the_kaizen_triage_is_answered_in_shadow_beside_the_po(factory: Factory, monkeypatch):  # noqa: F811
+    """ADR-0032 (later): process only? and a duplicate of which open card? — the decision model
+    answers both beside the Product Owner, whose verdict stands; the trace keeps both."""
+    import json
+
+    from loompa.agents import KaizenAgent, ProductOwnerAgent
+    from test_backlog_doors import po_answers
+
+    ctx = make_ctx(factory, po_answers(**{"Triage the findings": {"findings": [{"key": "F1"}]}}))
+    card = ProductOwnerAgent(ctx).add_item("Limpar arquivos temporários do relatório").story_id
+    monkeypatch.setattr(
+        "loompa.agents.kaizen.build_decider",
+        lambda c: ScriptedMany(
+            {"process_only": Answer("noul", False, 0.9), "duplicate": Answer("choice", card, 0.8)}
+        ),
+    )
+    state = StoryState(story_id="S-009", title="Relatório")
+    await KaizenAgent(ctx).capture(
+        state,
+        items=[{"kind": "tech_debt", "title": "tmp_relatorio.csv fica na raiz", "detail": "x"}],
+    )
+    await asyncio.gather(*list(_SHADOW))
+    (shadow,) = [
+        e for e in events(ctx, "decider.shadow") if e["payload"]["purpose"] == "kaizen_triage"
+    ]
+    p = shadow["payload"]
+    assert p["duplicate"] == [card, 0.8] and p["process_only"] == [False, 0.9]
+    assert p["po_duplicate"] == "none" and p["po_process_only"] is False
+    json.dumps(p)  # it is plain data
+    await ctx.aclose()
+
+
+class ScriptedMany:
+    def __init__(self, answers: dict):
+        self.answers = answers
+
+    async def decide(self, state, questions, *, purpose, story_id=None):  # noqa: ANN001
+        return {k: self.answers[k] for k in questions}

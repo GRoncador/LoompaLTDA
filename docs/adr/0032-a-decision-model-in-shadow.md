@@ -116,3 +116,16 @@ document and 69 from others.
 - **Research claims:** no usable labels. The past reports cite repository files, not web pages, and
   the PO's review kept only counts.
 - **Process-only findings:** only two positive verdicts on record, too few to measure.
+
+### In shadow from 2026-10-05 (evening), decided at plan 14.5
+
+- **Precedents:** filter and re-order, with the order P(useful) would give in `reranked`.
+- **Research claims:** sentence against source.
+- **Kaizen triage:** process only, and duplicate of which open card. The state is the finding and
+  the eight nearest open card titles by the memory's embedder; the PO's verdict is recorded beside.
+
+None of these changes a prompt, so the providers' prompt cache is unaffected.
+
+In `decide` mode, a re-ordered precedents block would change only that block. The block sits at the
+end of the first user message, after the stable part (role and constitution), and already varies
+with each request. It is decided once per call, so a tool loop re-sends it unchanged.

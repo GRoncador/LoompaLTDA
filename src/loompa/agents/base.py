@@ -178,6 +178,10 @@ class LoompaAgent:
         async def run() -> None:
             got = await decider.decide(state, questions, purpose="memory_filter")
             if got:
+                useful = {
+                    i: got[f"p{i}"].probabilities.get("2", 1.0 if got[f"p{i}"].value == 2 else 0.0)
+                    for i in range(1, len(hits) + 1)
+                }
                 self.ctx.emit(
                     "decider.shadow",
                     purpose="memory_filter",
@@ -186,6 +190,10 @@ class LoompaAgent:
                     passages=[
                         [h.chunk.doc_id, got[f"p{i}"].value, round(got[f"p{i}"].confidence, 3)]
                         for i, h in enumerate(hits, 1)
+                    ],
+                    # the re-ranker use (ADR-0032): the order P(useful) would give the passages
+                    reranked=[
+                        hits[i - 1].chunk.doc_id for i in sorted(useful, key=lambda k: -useful[k])
                     ],
                 )
 
