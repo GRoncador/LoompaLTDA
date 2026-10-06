@@ -24,19 +24,11 @@ from types import SimpleNamespace
 import numpy as np
 
 from loompa.config import default_config
-from loompa.decider import JevDecider, Question
+from loompa.decider import SAME_PROBLEM as SAME
+from loompa.decider import JevDecider
 from loompa.memory.embedders import HashEmbedder
 
-SAME = Question(
-    "noul",
-    "Do the finding and the card describe the same problem, so that doing the card would also "
-    "settle the finding? Judge by meaning, not by wording.",
-    {
-        "true": "Same defect or task: one card is enough for both.",
-        "false": "Different problems, or the finding needs work the card does not cover.",
-    },
-)
-BANDS = ((0.5, 0.7), (0.7, 0.9), (0.9, 1.01))
+BANDS = ((0.0, 0.4), (0.4, 0.8), (0.8, 1.01))  # confidence |2p - 1|
 HARD_NEGATIVES = 2
 
 
@@ -87,7 +79,8 @@ async def main() -> None:
 
     async def ask(finding: str, card: str):
         async with sem:
-            state = f"Finding:\n{finding}\n\nCard:\n{card}"
+            title, _, desc = card.partition("\n")
+            state = {"finding": finding, "card": {"title": title, "description": desc}}
             return await jev.decide(state, {"same": SAME}, purpose="offline")
 
     answers = await asyncio.gather(*(ask(f, c) for f, c, _ in data))

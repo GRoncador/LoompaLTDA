@@ -25,7 +25,7 @@ from typing import Any
 
 from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.agents.toolbox import EXPLORE_TOOLS, normalize_url
-from loompa.decider import SUPPORTS, Answer, build_decider, keeps
+from loompa.decider import RELATION, Answer, build_decider, claim_state, keeps, nearest_section
 from loompa.engine.state import StoryState
 from loompa.mcp import McpSession
 from loompa.speckit import render_research, story_dir
@@ -313,7 +313,9 @@ class AnalystAgent(LoompaAgent):
         self, state: StoryState, report: dict[str, Any], source_text: dict[str, str]
     ) -> dict[str, Any]:
         """Does each cited source say what its sentence claims (13.6)? Asked of the decision
-        model, one sentence and one source per call. In `shadow` mode the answers only go to
+        model, one sentence and one source per call, as TypeSafe's citation check does: code
+        finds the section of the source nearest the sentence, and the model says whether it
+        supports, contradicts or says nothing about it. In `shadow` mode the answers only go to
         the trace (`decider.shadow`); in `decide` mode a source confidently judged not to
         support its sentence is dropped like an unseen one. A source whose text this run never
         saw (read from the repository, say) is left alone."""
@@ -329,17 +331,14 @@ class AnalystAgent(LoompaAgent):
         ][:CLAIM_CHECKS]
 
         async def ask(f: dict[str, Any], src: str) -> Answer | None:
-            state_text = (
-                f"Sentence:\n{f['text'][:600]}\n\nSource ({src}):\n"
-                f"{source_text[normalize_url(src)][:3000]}"
-            )
+            section = nearest_section(source_text[normalize_url(src)], f["text"])
             got = await decider.decide(
-                state_text,
-                {"supports": SUPPORTS},
+                claim_state(f["text"], section),
+                {"relation": RELATION},
                 purpose="research_claim",
                 story_id=state.story_id,
             )
-            return got["supports"] if got else None
+            return got["relation"] if got else None
 
         answers = await asyncio.gather(*(ask(f, src) for f, src in pairs))
         unsupported = 0
@@ -351,11 +350,11 @@ class AnalystAgent(LoompaAgent):
                 story_id=state.story_id,
                 purpose="research_claim",
                 source=src,
-                supports=a.value,
+                relation=a.value,
                 confidence=round(a.confidence, 3),
                 mode=cfg.mode,
             )
-            if cfg.mode == "decide" and not a.value and keeps(a, cfg.threshold):
+            if cfg.mode == "decide" and a.value != "supports" and keeps(a, cfg.threshold):
                 f["sources"].remove(src)
                 report["dropped_sources"].append(src)
                 unsupported += 1

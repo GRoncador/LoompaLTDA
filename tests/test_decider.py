@@ -10,7 +10,7 @@ import httpx
 
 from loompa.agents.analyst import AnalystAgent
 from loompa.agents.base import _SHADOW, LoompaAgent
-from loompa.decider import SUPPORTS, Answer, FixedDecider, JevDecider, Question, build_decider
+from loompa.decider import RELATION, Answer, FixedDecider, JevDecider, Question, build_decider
 from loompa.engine.state import StoryState
 from loompa.factory import Factory
 from test_engine import factory, make_ctx  # noqa: F401
@@ -41,7 +41,8 @@ def jev(answers: dict, model: str = "typesafe/jev-1.13-20260917", status: int = 
 
 
 def test_answers_of_each_kind_are_read():
-    assert Answer.parse({"type": "noul", "noul": 0.2}) == Answer("noul", False, 0.8, {"true": 0.2})
+    # a noul's confidence is |2p - 1|, on the same scale as a choice's (TypeSafe's formula)
+    assert Answer.parse({"type": "noul", "noul": 0.2}) == Answer("noul", False, 0.6, {"true": 0.2})
     choice = Answer.parse({"type": "choice", "choice": "b", "confidence": 0.7, "probabilities": {}})
     assert choice.value == "b" and choice.confidence == 0.7
     score = Answer.parse(
@@ -90,7 +91,7 @@ async def test_off_by_default_and_the_dry_run_never_decides(factory: Factory):  
     dry.config.decider.mode = "decide"
     fixed = build_decider(dry)
     assert isinstance(fixed, FixedDecider)
-    got = await fixed.decide("x", {"s": SUPPORTS}, purpose="t")
+    got = await fixed.decide("x", {"s": RELATION}, purpose="t")
     assert got["s"].confidence == 0.0
     await ctx.aclose()
     await dry.aclose()
@@ -116,19 +117,19 @@ def _report() -> dict:
 
 async def test_a_source_that_does_not_support_its_sentence(factory: Factory, monkeypatch):  # noqa: F811
     ctx = make_ctx(factory)
-    no = Answer("noul", False, 0.95)
+    no = Answer("choice", "says_nothing", 0.95)
     monkeypatch.setattr("loompa.agents.analyst.build_decider", lambda c: Scripted(no))
     text = {"https://nodejs.org/x": "Release schedule…"}
     state = StoryState(story_id="S-001", title="Pesquisa")
     ctx.config.decider.mode = "shadow"
     kept = await AnalystAgent(ctx).check_claims(state, _report(), text)
     assert kept["findings"][0]["sources"] == ["https://nodejs.org/x"]  # shadow changes nothing
-    assert events(ctx, "decider.shadow")[0]["payload"]["supports"] is False
+    assert events(ctx, "decider.shadow")[0]["payload"]["relation"] == "says_nothing"
     ctx.config.decider.mode = "decide"
     dropped = await AnalystAgent(ctx).check_claims(state, _report(), text)
     assert dropped["findings"][0]["sources"] == [] and dropped["sourced"] == 0
     assert "não sustentavam" in dropped["limitations"][-1]
-    unsure = Answer("noul", False, 0.6)
+    unsure = Answer("choice", "contradicts", 0.6)
     monkeypatch.setattr("loompa.agents.analyst.build_decider", lambda c: Scripted(unsure))
     held = await AnalystAgent(ctx).check_claims(state, _report(), text)
     assert held["findings"][0]["sources"]  # below the threshold, the LLM's citation stands
@@ -139,13 +140,14 @@ async def test_pushed_passages_are_scored_beside_the_prompt(factory: Factory, mo
     ctx = make_ctx(factory)
     ctx.memory.upsert_document("specs/S-001/spec.md", "Exportar CSV.", kind="spec", title="S-001")
     monkeypatch.setattr(
-        "loompa.agents.base.build_decider", lambda c: Scripted(Answer("score", 2, 0.9))
+        "loompa.agents.base.build_decider",
+        lambda c: Scripted(Answer("noul", True, 0.8, {"true": 0.9})),
     )
     text = LoompaAgent(ctx).precedents("exportar csv")
     assert "Exportar CSV" in text  # the prompt is the same as without the decider
     await asyncio.gather(*list(_SHADOW))
     (shadow,) = events(ctx, "decider.shadow")
-    assert shadow["payload"]["passages"] == [["specs/S-001/spec.md", 2, 0.9]]
+    assert shadow["payload"]["passages"] == [["specs/S-001/spec.md", 0.9, 0.9]]
     assert shadow["payload"]["reranked"] == ["specs/S-001/spec.md"]
     await ctx.aclose()
 
@@ -163,7 +165,11 @@ async def test_the_kaizen_triage_is_answered_in_shadow_beside_the_po(factory: Fa
     monkeypatch.setattr(
         "loompa.agents.kaizen.build_decider",
         lambda c: ScriptedMany(
-            {"process_only": Answer("noul", False, 0.9), "duplicate": Answer("choice", card, 0.8)}
+            {
+                "asks_change": Answer("noul", True, 0.8, {"true": 0.9}),
+                "asks_process": Answer("noul", False, 0.8, {"true": 0.1}),
+                "same": Answer("noul", True, 0.6, {"true": 0.8}),
+            }
         ),
     )
     state = StoryState(story_id="S-009", title="Relatório")
@@ -176,7 +182,7 @@ async def test_the_kaizen_triage_is_answered_in_shadow_beside_the_po(factory: Fa
         e for e in events(ctx, "decider.shadow") if e["payload"]["purpose"] == "kaizen_triage"
     ]
     p = shadow["payload"]
-    assert p["duplicate"] == [card, 0.8] and p["process_only"] == [False, 0.9]
+    assert p["duplicate"] == [card, 0.8] and p["process_only"] == [False, 0.1, 0.9]
     assert p["po_duplicate"] == "none" and p["po_process_only"] is False
     json.dumps(p)  # it is plain data
     await ctx.aclose()
@@ -188,3 +194,24 @@ class ScriptedMany:
 
     async def decide(self, state, questions, *, purpose, story_id=None):  # noqa: ANN001
         return {k: self.answers[k] for k in questions}
+
+
+def test_code_finds_the_section_and_combines_the_answers():
+    """ADR-0032 (revised): what code can do, code does — locate the source section nearest the
+    claim, and combine two literal yes/no answers into "process only"."""
+    from loompa.decider import nearest_section, process_only
+
+    filler = "\n".join(
+        f"Paragraph {i} about release notes and download mirrors." for i in range(80)
+    )
+    page = f"{filler}\nNode 24 enters long-term support (LTS) in October.\n{filler}"
+    section = nearest_section(page, "O Node 24 é LTS desde outubro (Node 24 LTS October).")
+    assert "long-term support" in section and len(section) <= 1500
+    assert nearest_section("short", "anything") == "short"
+
+    def a(p: float) -> Answer:
+        return Answer("noul", p >= 0.5, abs(2 * p - 1), {"true": p})
+
+    assert process_only({"asks_process": a(0.9), "asks_change": a(0.1)}) is True
+    assert process_only({"asks_process": a(0.9), "asks_change": a(0.7)}) is False
+    assert process_only({"asks_process": a(0.2), "asks_change": a(0.1)}) is False

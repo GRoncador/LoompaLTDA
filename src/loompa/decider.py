@@ -5,7 +5,7 @@ this source support that sentence?". A decision model (TypeSafe's Jev 1.13, serv
 at `POST /api/alpha/decisions` with the same key and credits) answers them with a calibrated
 confidence, for about US$ 0.04 per million input tokens and nothing for the output, in ~0.1 s. It
 reads literally, does no arithmetic, counts or dates, and gets worse with a large noisy state:
-it only gets short states and plain questions.
+it only gets short states and plain questions, one pair at a time (see the questions below).
 
 Three kinds of question, as the endpoint takes them:
 - `noul`: a proposition, true or false (criteria for each); the answer is P(true);
@@ -19,6 +19,7 @@ answer with no confidence, so `decide` mode never acts on it; the tests script t
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -28,6 +29,7 @@ import httpx
 from loompa.llm.providers import resolve_key
 
 Kind = Literal["noul", "choice", "score"]
+State = str | dict[str, Any] | list[Any]  # a JSON object with named fields, preferably
 MODEL_SEEN_KEY = "decider_model_seen:"  # kv: the dated id the alias last resolved to
 
 
@@ -46,7 +48,9 @@ class Question:
 class Answer:
     kind: Kind
     value: Any  # bool (noul), the option (choice), the level index (score)
-    confidence: float  # 0..1; for a noul, how far P(true) is from a coin toss, as max(p, 1 - p)
+    # 0..1. A noul carries none of its own: |2p - 1|, TypeSafe's formula, on the same scale as a
+    # choice's (0 at a coin toss, 1 at certainty). A ranking reads probabilities["true"] instead.
+    confidence: float
     probabilities: dict[str, float] = field(default_factory=dict)
 
     @classmethod
@@ -55,7 +59,7 @@ class Answer:
         try:
             if kind == "noul":
                 p = float(raw["noul"])
-                return cls("noul", p >= 0.5, max(p, 1 - p), {"true": p})
+                return cls("noul", p >= 0.5, abs(2 * p - 1), {"true": p})
             if kind == "choice":
                 return cls(
                     "choice",
@@ -75,7 +79,7 @@ class Answer:
 class Decider(Protocol):
     async def decide(
         self,
-        state: str,
+        state: State,
         questions: dict[str, Question],
         *,
         purpose: str,
@@ -214,55 +218,135 @@ def build_decider(ctx: Any) -> Decider | None:
     return FixedDecider() if ctx.dry_run else JevDecider(ctx)
 
 
-# --------------------------------------------------------------------------- the uses (13.6)
+# --------------------------------------------------------------------------- the questions (13.6)
+# Every question and threshold the factory asks of the decision model lives here, so a review
+# reads them in one place. The shapes follow TypeSafe's own cookbooks (re-ranking, classifying
+# RAG passages, double-checking citations) and its list of Jev 1.13's weak points:
+# - one request per pair (task and passage, claim and source, finding and card): no question
+#   sees the other candidates, which are only distractors, and none points at "passage [3]";
+# - the state is a JSON object with named fields, and the questions name them in backticks;
+# - atomic yes/no questions, combined in code, where one question would hide two judgments;
+# - a ranking reads the probability (a noul), never a threshold on confidence.
 
-SUPPORTS = Question(
-    "noul",
-    "Does the source text state or directly support the sentence? Read both literally; a source "
-    "that is only about the same topic does not support it.",
+WORD = re.compile(r"\w{3,}", re.UNICODE)
+
+
+def _yes_no(instructions: str, yes: str, no: str) -> Question:
+    return Question("noul", instructions, {"true": yes, "false": no})
+
+
+# Memory: is a pushed passage worth its place in the prompt? Measured offline (ADR-0032, 20 pt-BR
+# questions, 120 passages): P(relevant) puts a right passage above a wrong one in 95% of pairs
+# (the search's own order: 60%; P(applies): 73%), and none of the right passages fell under 0.3
+# while a third of the wrong ones did. So the ranking reads `relevant`, and RELEVANT_MIN is
+# the floor under which a passage is off the task.
+PASSAGE_QUESTIONS = {
+    "relevant": _yes_no(
+        "Does `passage` address the subject of `task`?",
+        "The passage is about the same feature, file, rule or problem as the task.",
+        "The passage is about something else; sharing a few words with the task is not enough.",
+    ),
+    "applies": _yes_no(
+        "Does `passage` state a decision, rule, convention or past mistake that someone doing "
+        "`task` should follow or avoid?",
+        "It states something the person doing the task should reuse, follow or avoid repeating.",
+        "It states nothing that would change how the task is done.",
+    ),
+}
+RELEVANT_MIN = 0.3
+PASSAGE_CHARS = 1200
+
+
+def passage_state(task: str, kind: str, title: str, text: str) -> dict[str, Any]:
+    return {
+        "task": task[:800],
+        "passage": {"kind": kind, "title": title, "text": text.strip()[:PASSAGE_CHARS]},
+    }
+
+
+def p_true(answer: Answer | None) -> float:
+    """A noul's probability of yes (0.5 when there is no answer: no evidence either way)."""
+    return answer.probabilities.get("true", 0.5) if answer else 0.5
+
+
+# Research: how does the part of a source nearest the claim relate to it? `contradicts` is kept
+# apart from `says_nothing`: a source saying the opposite is a finding of its own.
+RELATION = Question(
+    "choice",
+    "How does `source` relate to `claim`?",
     {
-        "true": "The source says what the sentence claims, or something that clearly implies it.",
-        "false": "The source does not say it, says something else, or is only on the same topic.",
+        "supports": "The source states the claim or directly implies that it is true.",
+        "contradicts": "The source states the opposite of the claim or implies that it is false.",
+        "says_nothing": "The source does not settle the claim: it is only on the same topic, or "
+        "says something else.",
     },
 )
-USEFUL_LEVELS = [
-    "Unrelated to the task",
-    "Same area, but nothing to reuse or avoid",
-    "A decision, rule or past mistake that applies to the task",
-]
+SECTION_CHARS = 1500
 
 
-def useful_question(n: int) -> Question:
-    return Question(
-        "score",
-        f"How useful is passage [{n}] to someone about to do the task?",
-        USEFUL_LEVELS,
-    )
+def claim_state(claim: str, section: str) -> dict[str, str]:
+    return {"claim": claim[:600], "source": section}
+
+
+def nearest_section(text: str, claim: str, size: int = SECTION_CHARS) -> str:
+    """The part of a long source text that shares the most words with the claim: located in
+    code, so the model reads one section instead of a whole page (a large state costs it
+    accuracy). Paragraphs are packed into windows of about `size` characters."""
+    if len(text) <= size:
+        return text
+    want = {w.lower() for w in WORD.findall(claim)}
+    paras = [p.strip() for p in re.split(r"\n\s*\n|\n", text) if p.strip()]
+    windows, cur = [], ""
+    for p in paras:
+        if cur and len(cur) + len(p) > size:
+            windows.append(cur)
+            cur = cur[-200:]  # a little overlap, so a sentence cut at the edge is still whole
+        cur = f"{cur}\n{p}" if cur else p
+    windows.append(cur)
+
+    def overlap(w: str) -> int:
+        return len(want & {x.lower() for x in WORD.findall(w)})
+
+    return max(windows, key=overlap)[:size]
+
+
+# Kaizen triage: two questions about the finding alone, combined in code into "process only",
+# and one yes/no per nearby open card: "the same problem?" (the offline check's shape).
+FINDING_QUESTIONS = {
+    "asks_change": _yes_no(
+        "Does `finding` ask for a change to the product's code or to its tests?",
+        "It asks to change code, fix a defect, or add or change a test.",
+        "It asks for no change to the product's code or tests.",
+    ),
+    "asks_process": _yes_no(
+        "Does `finding` ask for process work: running the test suite, attaching output or "
+        "evidence, recording a closing, or writing a spec, plan or tasks for work already done?",
+        "It asks for at least one of those process steps.",
+        "It asks for none of those process steps.",
+    ),
+}
+SAME_PROBLEM = _yes_no(
+    "Do `finding` and `card` describe the same problem, so that doing `card` would also settle "
+    "`finding`? Judge by meaning, not by wording.",
+    "Same defect or task: one card is enough for both.",
+    "Different problems, or the finding needs work the card does not cover.",
+)
+YES = 0.5  # a noul above this reads as yes
+NO_CARD = "none"
+
+
+def finding_state(text: str) -> dict[str, str]:
+    return {"finding": text}
+
+
+def pair_state(finding: str, card_id: str, card_title: str) -> dict[str, Any]:
+    return {"finding": finding, "card": {"id": card_id, "title": card_title}}
+
+
+def process_only(answers: dict[str, Answer]) -> bool:
+    return p_true(answers.get("asks_process")) > YES and p_true(answers.get("asks_change")) < YES
 
 
 def keeps(answer: Answer | None, threshold: float) -> bool:
     """Whether a `decide`-mode answer is trusted: confident enough, never the dry-run's."""
     return answer is not None and answer.confidence >= threshold
-
-
-PROCESS_ONLY = Question(
-    "noul",
-    "Does this finding ask only for process (run the test suite, attach output or evidence, record "
-    "a closing, write spec/plan/tasks for work already done), with no change to the product or its "
-    "tests?",
-    {
-        "true": "Only process: nothing in the product or its tests would change.",
-        "false": "It asks for a change in the product or its tests (code, a test, a fix).",
-    },
-)
-NO_CARD = "none"
-
-
-def duplicate_question(cards: dict[str, str]) -> Question:
-    """Which open card already covers the finding, or none (`cards`: id -> title)."""
-    return Question(
-        "choice",
-        "Which open card already covers the same problem as the finding, so that doing that card "
-        "would also settle it? Judge by meaning, not wording.",
-        {**cards, NO_CARD: "None of these cards covers the finding's problem."},
-    )

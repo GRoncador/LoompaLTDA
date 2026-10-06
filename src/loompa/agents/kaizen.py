@@ -15,7 +15,17 @@ from loompa.agents.base import _SHADOW, LoompaAgent
 from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.backlog import TRIAGE_KEY, Triage
 from loompa.comms.executive import clip
-from loompa.decider import NO_CARD, PROCESS_ONLY, build_decider, duplicate_question
+from loompa.decider import (
+    FINDING_QUESTIONS,
+    NO_CARD,
+    SAME_PROBLEM,
+    YES,
+    build_decider,
+    finding_state,
+    p_true,
+    pair_state,
+    process_only,
+)
 from loompa.engine.state import TERMINAL, Stage, StoryState
 from loompa.sprints import SprintBoard, SprintStatus
 
@@ -202,7 +212,7 @@ class KaizenAgent(LoompaAgent):
 
     def _shadow_triage(self, state: StoryState, keyed: dict, verdicts: dict) -> None:
         """13.6 in shadow: the decision model answers the triage's two narrow questions — process
-        only? a duplicate of which open card? — beside the Product Owner, whose verdict stands;
+        only? the same problem as which nearby open card? — beside the Product Owner, whose verdict stands;
         both go to the trace (`decider.shadow`) to be compared. Fire and forget."""
         decider = build_decider(self.ctx)
         if decider is None or not keyed or not verdicts:
@@ -220,23 +230,42 @@ class KaizenAgent(LoompaAgent):
         async def one(key: str, item: dict) -> None:
             text = f"{item.get('title') or ''}\n{str(item.get('detail') or '')[:800]}"
             near = _nearest(self.ctx, text, cards, SHADOW_CARDS)
-            questions = {"process_only": PROCESS_ONLY}
-            if near:
-                questions["duplicate"] = duplicate_question(near)
-            got = await decider.decide(
-                f"Finding:\n{text}", questions, purpose="kaizen_triage", story_id=state.story_id
+            sid = state.story_id
+            # one request about the finding alone, one per nearby card: no card is an option
+            # beside the others, so their order cannot lean the answer (ADR-0032)
+            asked = await asyncio.gather(
+                decider.decide(
+                    finding_state(text), FINDING_QUESTIONS, purpose="kaizen_triage", story_id=sid
+                ),
+                *(
+                    decider.decide(
+                        pair_state(text, cid, title),
+                        {"same": SAME_PROBLEM},
+                        purpose="kaizen_triage",
+                        story_id=sid,
+                    )
+                    for cid, title in near.items()
+                ),
             )
-            if not got:
+            finding, same = asked[0], asked[1:]
+            if not finding or not all(same):
                 return
+            p_same = {cid: p_true(g["same"]) for cid, g in zip(near, same, strict=True)}
+            best = max(p_same, key=p_same.get) if p_same else NO_CARD
+            dup = best if best != NO_CARD and p_same[best] > YES else NO_CARD
             po = verdicts.get(key)
-            dup = got.get("duplicate")
             self.ctx.emit(
                 "decider.shadow",
-                story_id=state.story_id,
+                story_id=sid,
                 purpose="kaizen_triage",
                 finding=str(item.get("title") or "")[:140],
-                process_only=[got["process_only"].value, round(got["process_only"].confidence, 3)],
-                duplicate=[dup.value, round(dup.confidence, 3)] if dup else None,
+                process_only=[
+                    process_only(finding),
+                    round(p_true(finding["asks_process"]), 3),
+                    round(p_true(finding["asks_change"]), 3),
+                ],
+                duplicate=[dup, round(p_same.get(best, 0.0), 3)],
+                p_same={cid: round(p, 3) for cid, p in p_same.items()},
                 po_process_only=bool(po and po.process_only),
                 po_duplicate=(po.duplicate_of if po else "") or NO_CARD,
             )

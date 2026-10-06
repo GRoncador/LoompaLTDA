@@ -20,7 +20,13 @@ from loompa.agents.toolbox import (
     prune_tool_history,
 )
 from loompa.company import company_block
-from loompa.decider import build_decider, useful_question
+from loompa.decider import (
+    PASSAGE_QUESTIONS,
+    RELEVANT_MIN,
+    build_decider,
+    p_true,
+    passage_state,
+)
 from loompa.engine.context import EngineContext
 from loompa.engine.state import Stage, StoryState
 from loompa.llm import LLMError, LLMResponse, Message
@@ -174,10 +180,11 @@ class LoompaAgent:
         )
 
     def _shadow_filter(self, query: str, hits: list) -> None:
-        """13.6 in shadow: the decision model scores how useful each pushed passage is, beside
-        the prompt and without changing it; the scores go to the trace (`decider.shadow`) to be
-        compared with what the role then used. Dropping passages needs the answer before the
-        prompt is built, which waits for the Founder's verdict on the shadow sprint."""
+        """13.6 in shadow: the decision model judges each pushed passage against the task, one
+        request per passage (TypeSafe's re-ranking shape), beside the prompt and without changing
+        it; the trace (`decider.shadow`) gets each passage's P(applies) and P(relevant), the
+        order P(relevant) would give them and those under the off-task floor. Acting on it needs the answers before the prompt is
+        built, which waits for the Founder's verdict on the shadow sprint."""
         decider = build_decider(self.ctx)
         if decider is None or not hits:
             return
@@ -185,32 +192,36 @@ class LoompaAgent:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        state = f"Task:\n{query[:800]}\n\nPassages:\n" + "\n\n".join(
-            f"[{i}] ({h.chunk.kind}) {h.chunk.text.strip()[:500]}" for i, h in enumerate(hits, 1)
-        )
-        questions = {f"p{i}": useful_question(i) for i in range(1, len(hits) + 1)}
+
+        async def one(h) -> dict | None:  # noqa: ANN001
+            c = h.chunk
+            state = passage_state(query, c.kind, c.title, c.text)
+            return await decider.decide(state, PASSAGE_QUESTIONS, purpose="memory_filter")
 
         async def run() -> None:
-            got = await decider.decide(state, questions, purpose="memory_filter")
-            if got:
-                useful = {
-                    i: got[f"p{i}"].probabilities.get("2", 1.0 if got[f"p{i}"].value == 2 else 0.0)
-                    for i in range(1, len(hits) + 1)
-                }
-                self.ctx.emit(
-                    "decider.shadow",
-                    purpose="memory_filter",
-                    agent=self.name,
-                    role=self.role,
-                    passages=[
-                        [h.chunk.doc_id, got[f"p{i}"].value, round(got[f"p{i}"].confidence, 3)]
-                        for i, h in enumerate(hits, 1)
-                    ],
-                    # the re-ranker use (ADR-0032): the order P(useful) would give the passages
-                    reranked=[
-                        hits[i - 1].chunk.doc_id for i in sorted(useful, key=lambda k: -useful[k])
-                    ],
-                )
+            got = await asyncio.gather(*(one(h) for h in hits))
+            if not all(got):
+                return
+            applies = [p_true(g["applies"]) for g in got]
+            relevant = [p_true(g["relevant"]) for g in got]
+            self.ctx.emit(
+                "decider.shadow",
+                purpose="memory_filter",
+                agent=self.name,
+                role=self.role,
+                passages=[
+                    [h.chunk.doc_id, round(a, 3), round(r, 3)]
+                    for h, a, r in zip(hits, applies, relevant, strict=True)
+                ],
+                # the re-ranker use (ADR-0032): the order P(relevant) would give the passages
+                reranked=[
+                    hits[i].chunk.doc_id
+                    for i in sorted(range(len(hits)), key=lambda i: -relevant[i])
+                ],
+                off_task=[
+                    h.chunk.doc_id for h, r in zip(hits, relevant, strict=True) if r < RELEVANT_MIN
+                ],
+            )
 
         task = loop.create_task(run())
         _SHADOW.add(task)
