@@ -16,6 +16,7 @@ The executive summary that goes on top is the Master's (`MasterAgent.write_sprin
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -786,6 +787,29 @@ def summary_facts(report: dict[str, Any]) -> str:
         )
     )
     return "\n".join(lines)
+
+
+# What a summary may not deny when the numbers say it happened (SP-010, 06/10: "nenhum retrabalho
+# nem espera pelo fundador" over 1h32 of founder wait). A negation word, at most three words, then
+# the thing; checked in code because the model had the number in front of it and still wrote it.
+_NEGATION = r"\b(?:nenhum|nenhuma|sem|zero|nem|não houve|não teve)\s+(?:[\w,]+\s+){0,3}?"
+_DENIALS: tuple[tuple[str, str], ...] = (
+    ("founder_wait_s", r"(?:espera|esperas|aguard\w*)"),
+    ("blocks", r"(?:bloqueio\w*|travament\w*)"),
+    ("rework", r"(?:retrabalho\w*)"),
+    ("escalations", r"(?:escalad\w*|escalonament\w*|subidas?)"),
+    ("cancelled", r"(?:cancelad\w*|cancelament\w*)"),
+)
+
+
+def denies_facts(report: dict[str, Any], text: str) -> list[str]:
+    """The measures `text` says did not happen while the report counts them."""
+    totals = report.get("totals") or {}
+    return [
+        key
+        for key, word in _DENIALS
+        if (totals.get(key) or 0) > 0 and re.search(_NEGATION + word + r"\b", text, re.I)
+    ]
 
 
 def fallback_summary(report: dict[str, Any]) -> str:
