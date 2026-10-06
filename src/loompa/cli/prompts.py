@@ -205,8 +205,10 @@ def print_summary(data: dict) -> None:
             continue
         table.add_row(label, *["—" if v is None else str(v) for v in values])
     console.print(table)
-    ties = summary[next(iter(summary))]["judge_ties"] if summary else 0
+    first = summary[next(iter(summary))] if summary else {}
+    ties, flips = first.get("judge_ties", 0), first.get("judge_flips", 0)
     console.print(
-        f"Empates do juiz: {ties} · custo do juiz US$ {data.get('judge_cost_usd', 0)}",
+        f"Empates do juiz: {ties} (dos quais {flips} mudaram com a ordem) · "
+        f"custo do juiz US$ {data.get('judge_cost_usd', 0)}",
         highlight=False,
     )

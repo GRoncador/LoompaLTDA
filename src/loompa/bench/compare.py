@@ -7,7 +7,9 @@ recording), and each answer gets:
 
 - the checks in code of `checks.py` (JSON, contract, founder text, the decision it took);
 - a blind pairwise verdict from a judge model (which answer serves the task better, 1-5 each),
-  the two answers in an order drawn per case, so neither variant always sits first;
+  asked twice with the answers in both orders: a judge favours the answer it reads first
+  (Zheng et al. 2023, "Judging LLM-as-a-judge"), so a win counts only when both orders agree and
+  a verdict that flips is a tie;
 - tokens, cost and latency.
 
 The report keeps every answer, so a surprising number can be read case by case, and is written to
@@ -105,10 +107,11 @@ class Run:
 class Verdict:
     case_id: str
     winner: str  # A | B | tie | error
-    score_a: int = 0
-    score_b: int = 0
+    score_a: float = 0
+    score_b: float = 0
     reason: str = ""
     cost_usd: float = 0.0
+    flipped: bool = False  # the two orders disagreed, so the verdict became a tie
 
 
 @dataclass
@@ -152,6 +155,7 @@ class Report:
                 else None,
                 "judge_wins": wins,
                 "judge_ties": sum(1 for v in self.verdicts if v.winner == "tie"),
+                "judge_flips": sum(1 for v in self.verdicts if v.flipped),
                 "judge_score": round(
                     sum((v.score_a if name == "A" else v.score_b) for v in scored)
                     / max(len(scored), 1),
@@ -374,11 +378,36 @@ def _order(case_id: str) -> bool:
 
 
 async def judge(
-    router: ModelRouter, prompt: registry.Prompt, case: Case, a: Run, b: Run
+    router: ModelRouter, prompt: registry.Prompt, case: Case, a: Run, b: Run, *, swap: bool = True
 ) -> Verdict:
+    """One verdict per case. With `swap`, the judge reads the pair in both orders; a winner both
+    readings name wins, a pair whose winner changes with the order is a tie (`flipped`), and the
+    scores are the mean of the two readings."""
     if a.error or b.error:
         return Verdict(case.id, "error", reason="a variant failed")
-    a_first = _order(case.id)
+    first_order = _order(case.id)
+    orders = [first_order, not first_order] if swap else [first_order]
+    got = await asyncio.gather(*(_judge_once(router, prompt, case, a, b, o) for o in orders))
+    ok = [v for v in got if v.winner != "error"]
+    if not ok:
+        return got[0]
+    cost = sum(v.cost_usd for v in got)
+    winners = {v.winner for v in ok}
+    flipped = len(winners) > 1
+    return Verdict(
+        case.id,
+        "tie" if flipped else ok[0].winner,
+        score_a=round(sum(v.score_a for v in ok) / len(ok), 2),
+        score_b=round(sum(v.score_b for v in ok) / len(ok), 2),
+        reason=" | ".join(dict.fromkeys(v.reason for v in ok if v.reason))[:600],
+        cost_usd=cost,
+        flipped=flipped,
+    )
+
+
+async def _judge_once(
+    router: ModelRouter, prompt: registry.Prompt, case: Case, a: Run, b: Run, a_first: bool
+) -> Verdict:
     first, second = (a, b) if a_first else (b, a)
     rubric = RUBRICS.get(prompt.key, "")
     user = (

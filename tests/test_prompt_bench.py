@@ -174,3 +174,32 @@ async def test_compare_replays_both_variants_and_the_blind_judge_picks(tmp_path:
     assert any(s.startswith("<!-- role:deployer -->") for s in seen_systems)
     assert any(s.startswith("CANDIDATE pt-BR") for s in seen_systems)
     assert report.cases[0]["decision"] == {}  # a summary carries no decision field
+
+
+async def test_a_judge_that_always_picks_the_first_answer_counts_as_a_tie(tmp_path: Path):
+    """Position bias (Zheng et al. 2023): the judge reads each pair in both orders, and a winner
+    that changes with the order is no winner."""
+    root = tmp_path / "fab"
+    await _factory_with_trace(root)
+    picked = [c for c in cases.harvest_factory(root, "fab") if c.mode == "one_shot"]
+
+    def script(model, messages, tools):
+        if messages[0].content.startswith("You are the reviewer of a prompt bench"):
+            return json.dumps({"better": "1", "score_1": 5, "score_2": 1, "reason": "first"})
+        return '{"summary": "Feito."}'
+
+    mock = MockProvider("mock", script)
+    report = await compare(
+        pinned(default_config(), "mock:m"),
+        {},
+        registry.get("deployer.SUMMARY_SYSTEM"),
+        picked,
+        Variant("A"),
+        Variant("B", 'B {language}\nRespond with JSON only: {{"summary": str}}'),
+        judge_model="mock:judge",
+        providers={"mock": mock},
+    )
+    summary = report.summary()
+    assert summary["A"]["judge_wins"] == summary["B"]["judge_wins"] == 0
+    assert summary["A"]["judge_ties"] == summary["A"]["judge_flips"] == len(picked)
+    assert summary["A"]["judge_score"] == summary["B"]["judge_score"] == 3.0

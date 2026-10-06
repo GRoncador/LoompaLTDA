@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from collections import Counter
@@ -78,6 +79,28 @@ def extra(report: dict, variant: str) -> str:
     return ""
 
 
+def sign_p(k: int, n: int) -> float:
+    """Two-sided exact binomial p of k successes in n at 1/2: is a split of wins, or of the cases
+    where only one variant passed a check, more than chance? (sign test; McNemar when paired)."""
+    if n == 0:
+        return 1.0
+    k = min(k, n - k)
+    tail = sum(math.comb(n, i) for i in range(k + 1)) / 2**n
+    return min(1.0, 2 * tail)
+
+
+def paired_founder(report: dict) -> str:
+    """Cases where only A or only B passed the founder-text checks, and the McNemar p."""
+    ok: dict[str, dict[str, bool]] = {}
+    for r in report["runs"]:
+        f = (r.get("checked") or {}).get("founder_ok")
+        if f is not None:
+            ok.setdefault(r["case_id"], {})[r["variant"]] = bool(f)
+    only_a = sum(1 for v in ok.values() if v.get("A") and v.get("B") is False)
+    only_b = sum(1 for v in ok.values() if v.get("B") and v.get("A") is False)
+    return f"só A {only_a}, só B {only_b} (p {sign_p(only_a, only_a + only_b):.2f})" if ok else "—"
+
+
 def main() -> None:
     folder = Path(sys.argv[1]).expanduser()
     rows = []
@@ -88,12 +111,15 @@ def main() -> None:
             continue
         s = rep["summary"]
         a, b = s["A"], s["B"]
+        wins = a["judge_wins"] + b["judge_wins"]
         rows.append(
             f"| {log.stem} | {a['n']} | {a['judge_wins']}×{b['judge_wins']} (empates "
-            f"{a['judge_ties']}) | {a['judge_score']}→{b['judge_score']} | "
+            f"{a['judge_ties']}, viradas {a.get('judge_flips', '—')}; p "
+            f"{sign_p(b['judge_wins'], wins):.2f}) | {a['judge_score']}→{b['judge_score']} | "
             f"{a['contract_ok']}→{b['contract_ok']} | "
             f"{a['founder_ok'] if a['founder_ok'] is not None else '—'}→"
-            f"{b['founder_ok'] if b['founder_ok'] is not None else '—'} | "
+            f"{b['founder_ok'] if b['founder_ok'] is not None else '—'} "
+            f"({paired_founder(rep)}) | "
             f"{a['agrees_recorded'] if a['agrees_recorded'] is not None else '—'}→"
             f"{b['agrees_recorded'] if b['agrees_recorded'] is not None else '—'} | "
             f"{a['avg_in']}/{a['avg_out']}→{b['avg_in']}/{b['avg_out']} | "
