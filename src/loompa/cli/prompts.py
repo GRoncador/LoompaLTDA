@@ -100,6 +100,12 @@ def compare_cmd(
     judge_model: str | None = typer.Option(None, help="provedor:modelo do juiz."),
     factory_slug: str | None = typer.Option(None, "--factory", help="Roteamento desta fábrica."),
     only: list[str] = typer.Option(None, "--from", help="Casos só destas fábricas."),
+    b_from: list[str] = typer.Option(
+        None,
+        "--b-from",
+        help="A variante B lê os mesmos casos destas pastas (pelo id): muda o que o código põe "
+        "na mensagem, não o prompt.",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Imprime o relatório em JSON."),
 ) -> None:
     """Roda o prompt atual e o candidato (ou dois modelos) sobre os mesmos casos (14.2)."""
@@ -113,7 +119,7 @@ def compare_cmd(
     except KeyError as exc:
         console.print(f"[red]Prompt desconhecido:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    if candidate is None and candidate_a is None and not model_a and not model_b:
+    if candidate is None and candidate_a is None and not model_a and not model_b and not b_from:
         console.print("[red]Nada a comparar:[/red] passe --candidate, --model-a ou --model-b.")
         raise typer.Exit(code=2)
     found = cases_mod.load(p.key, factories=only or None)
@@ -135,6 +141,9 @@ def compare_cmd(
     b = Variant("B", candidate.read_text(encoding="utf-8") if candidate else None, model_b)
     if candidate:
         b.label = f"candidato {candidate.name}"
+    if b_from:
+        b.cases = {c.id: c for c in cases_mod.load(p.key, factories=b_from)}
+        b.label = (b.label + " · " if b.label else "") + "casos de " + ", ".join(b_from)
     console.print(
         f"[bold]{p.key}[/bold] · {len(picked)} casos ({mode}) · A = {a.describe()} · "
         f"B = {b.describe()}"

@@ -81,6 +81,9 @@ class Variant:
     template: str | None = None  # None: today's prompt
     model: str | None = None  # provider:model, None: the factory's routing
     label: str = ""
+    # The same cases as this variant reads them, by id: what the code puts in the message changed
+    # (a context block, a label), not the prompt. None: the cases as recorded.
+    cases: dict[str, Case] | None = None
 
     def describe(self) -> str:
         what = self.label or ("prompt atual" if self.template is None else "prompt candidato")
@@ -304,6 +307,7 @@ def tools_for(case: Case) -> list[dict[str, Any]] | None:
 
 async def replay(router: ModelRouter, prompt: registry.Prompt, case: Case, variant: Variant) -> Run:
     run = Run(case.id, variant.name)
+    case = (variant.cases or {}).get(case.id, case)
     messages = messages_for(prompt, case, variant.template)
     t0 = time.monotonic()
     try:

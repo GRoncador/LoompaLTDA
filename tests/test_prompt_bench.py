@@ -240,3 +240,35 @@ def test_a_null_text_or_list_is_empty_not_a_broken_contract():
     assert contract_errors({"irreversible": None, "question": "", "options": []}, contract) == [
         "type:irreversible"
     ]
+
+
+async def test_variant_b_can_read_its_own_version_of_the_cases(tmp_path: Path):
+    """What the code puts in the message (a context block) is compared on the same prompt."""
+    import dataclasses
+
+    root = tmp_path / "fab"
+    await _factory_with_trace(root)
+    picked = [c for c in cases.harvest_factory(root, "fab") if c.mode == "one_shot"]
+    rewritten = {}
+    for c in picked:
+        msgs = [dict(m) for m in c.messages]
+        msgs[1]["content"] = "GLOSSARY " + str(msgs[1]["content"])
+        rewritten[c.id] = dataclasses.replace(c, messages=msgs)
+
+    def script(model, messages, tools):
+        if messages[0].content.startswith("You are the reviewer of a prompt bench"):
+            return json.dumps({"better": "tie", "score_1": 3, "score_2": 3, "reason": "r"})
+        return json.dumps({"summary": "com" if "GLOSSARY" in messages[-1].content else "sem"})
+
+    report = await compare(
+        pinned(default_config(), "mock:m"),
+        {},
+        registry.get("deployer.SUMMARY_SYSTEM"),
+        picked,
+        Variant("A"),
+        Variant("B", cases=rewritten),
+        judge_model="mock:judge",
+        providers={"mock": MockProvider("mock", script)},
+    )
+    texts = {r.variant: r.text for r in report.runs}
+    assert "sem" in texts["A"] and "com" in texts["B"]
