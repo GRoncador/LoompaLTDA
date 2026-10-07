@@ -54,6 +54,23 @@ SPEC_FOR_JUDGING = (
     "Critérios",
 )
 SPEC_JUDGE_ROOM = 8_000
+# A spec read by the stories that build on it: what it decided comes first (its data, rules,
+# premises and scope); the Spec Loompa takes those as given (14.3: 32 of 40 tamagotchi specs ran
+# past the old 6000-character head, which cut exactly those sections, at the end).
+SPEC_FOR_DEPENDENTS = (
+    "Critérios revistos",
+    "Entidades",
+    "Regras de negócio",
+    "Premissas",
+    "Escopo",
+    "Critérios de aceitação",
+    "Requisitos não-funcionais",
+    "Objetivo",
+)
+DEPENDENCY_ROOM = 6_000
+# A research report the Analyst redoes: its answer first, its sources last.
+RESEARCH_FOR_REDOING = ("Pergunta", "Resumo", "Recomendação", "Achados", "Limitações")
+RESEARCH_ROOM = 5_000
 PLAN_FOR_BUILDING = (
     "Ajuste pedido",
     "Abordagem",

@@ -6,6 +6,7 @@ from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent
 from loompa.dependencies import delivered_brief
 from loompa.engine.state import StoryState
 from loompa.speckit import SpecArtifacts, story_dir
+from loompa.speckit.artifacts import DEPENDENCY_ROOM, SPEC_FOR_DEPENDENTS, fit_sections
 
 SYSTEM = """<!-- role:product -->
 You are the Spec Loompa of an autonomous software factory. Turn the story below into a precise,
@@ -75,7 +76,11 @@ class ProductAgent(LoompaAgent):
         for dep in row.get("depends_on") or []:
             other = self.ctx.store.get_story(dep) or {}
             spec = story_dir(self.ctx.root, dep).spec
-            text = spec.read_text(encoding="utf-8")[:6000] if spec.is_file() else "(no spec yet)"
+            text = (
+                fit_sections(spec.read_text(encoding="utf-8"), DEPENDENCY_ROOM, SPEC_FOR_DEPENDENTS)
+                if spec.is_file()
+                else "(no spec yet)"
+            )
             parts.append(f"### {dep}: {other.get('title', '')}\n{text}")
         if not parts:
             return ""

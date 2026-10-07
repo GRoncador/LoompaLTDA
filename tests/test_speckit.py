@@ -90,3 +90,35 @@ def test_the_inspector_gets_the_scope_and_edge_cases_before_a_second_copy_of_the
     assert "s" * 1500 in out and "b" * 1500 in out  # scope and edge cases whole
     assert "c" * 1500 not in out  # the second copy of the criteria gives way
     assert "(left out to fit: Entidades principais)" in out
+
+
+def test_a_dependency_spec_gives_its_decisions_before_its_criteria():
+    """14.3: the Spec Loompa read the first 6000 characters of each spec its story builds on, and
+    32 of 40 tamagotchi specs ran past that, losing the entities, rules and premises at the end."""
+    from loompa.speckit.artifacts import DEPENDENCY_ROOM, SPEC_FOR_DEPENDENTS, fit_sections
+
+    spec = (
+        "# Spec — S-1: x\n\n"
+        "## Objetivo de negócio\n" + "o" * 800 + "\n\n"
+        "## Critérios de aceitação (BDD)\n" + "c" * 4500 + "\n\n"
+        "## Entidades principais\n- Limite: guardado em limites.json, em centavos\n\n"
+        "## Premissas\n- valores em centavos\n" + "p" * 600 + "\n\n"
+        "## Perguntas em aberto\n" + "q" * 900 + "\n"
+    )
+    out = fit_sections(spec, DEPENDENCY_ROOM, SPEC_FOR_DEPENDENTS)
+    assert len(out) <= DEPENDENCY_ROOM
+    assert "guardado em limites.json" in out and "valores em centavos" in out
+    assert "Perguntas em aberto" in out.split("(left out")[-1]
+
+
+def test_a_research_redone_keeps_its_answer_before_its_sources():
+    from loompa.speckit.artifacts import RESEARCH_FOR_REDOING, RESEARCH_ROOM, fit_sections
+
+    report = (
+        "# Pesquisa — S-9: x\n\n## Pergunta\nqual gateway?\n\n## Resumo\n" + "r" * 400 + "\n\n"
+        "## Achados\n" + "a" * 2500 + "\n\n## Recomendação\nusar o gateway B\n\n"
+        "## Limitações\nsem web\n\n## Fontes consultadas\n" + "f" * 3000 + "\n"
+    )
+    out = fit_sections(report, RESEARCH_ROOM, RESEARCH_FOR_REDOING)
+    assert "usar o gateway B" in out and "sem web" in out
+    assert "(left out to fit: Fontes consultadas)" in out

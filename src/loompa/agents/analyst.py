@@ -29,6 +29,7 @@ from loompa.decider import RELATION, Answer, build_decider, claim_state, keeps, 
 from loompa.engine.state import StoryState
 from loompa.mcp import McpSession
 from loompa.speckit import render_research, story_dir
+from loompa.speckit.artifacts import RESEARCH_FOR_REDOING, RESEARCH_ROOM, fit_sections
 
 SYSTEM = """<!-- role:analyst -->
 You are the Analyst Loompa of an autonomous software factory. The founder asked a question that
@@ -147,7 +148,11 @@ class AnalystAgent(LoompaAgent):
             kinds=("constitution", "adr", "learning", "spec", "doc"),
         )
         previous = (
-            paths.research.read_text(encoding="utf-8")[:5000] if paths.research.is_file() else ""
+            fit_sections(
+                paths.research.read_text(encoding="utf-8"), RESEARCH_ROOM, RESEARCH_FOR_REDOING
+            )
+            if paths.research.is_file()
+            else ""
         )
         async with self._web() as web:
             box = self.toolbox(offered=EXPLORE_TOOLS, mcp=web)
