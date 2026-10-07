@@ -61,7 +61,7 @@ two arms by what happened to them.
   several sprints. The decision stays the founder's, read from the report. Until it is made, half
   the stories run a prompt the bench could not validate. On the bench that prompt was safe at the
   first call (P5, P7) or tied with the current one (P2).
-- **The texts outside the registry** (o1 reproducer, o2 diagnosis on retry, o4 Ops, o5 glossary) are
+- **The texts outside the registry** (o1 reproducer, o2 diagnosis on retry, o4 Ops) are
   not variants yet. They are built in code, not taken from a prompt constant. They can join through
   the same `prompt_for` call when one of them is next.
 - **Turning it off** is `loompa prompts ab off <prompt>`. The stories already assigned keep their

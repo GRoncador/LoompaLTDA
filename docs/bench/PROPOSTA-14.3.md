@@ -47,7 +47,7 @@
   - P10 na spec, que mudava três coisas e perdeu (14×23). Foi trocado pelo P10b, só a correção da
     contradição.
 - **Não medíveis na bancada** (P2 tracer bullet, P5 lógica geral, P7 testes pela interface, P8
-  brainstorm, o1/o1b/o2/o4/o5): a bancada repete a primeira chamada ou a opinião do juiz sobre o
+  brainstorm, o1/o1b/o2/o4): a bancada repete a primeira chamada ou a opinião do juiz sobre o
   plano, e o efeito dessas ideias está no fim do laço do Worker ou no retrabalho. A primeira
   chamada do Worker não muda com P5 nem P7 (seguro), e o juiz empata o P2. **Desde 07/10 estão num
   A/B ao vivo (ADR-0035, `loompa prompts ab`), ligado na tamagotchi em metade das histórias.**
@@ -156,7 +156,7 @@ PROMPTS-14.3.md); **não** = recusado, com o motivo.
 | 27 | Erro mecânico ganha checagem em código, não frase no prompt | Matt Pocock (retro), ADR-0026 | Ops (diagnóstico da fábrica); e esta proposta | **o4**. Apliquei a mim mesmo: "erro engolido por catch largo" (Codex) não virou regra do Inspector, porque é caso de lint |
 | 28 | Afirmar só o que foi verificado | superpowers (verification-before-completion), Anthropic (investigate before answering) | EXEC, SUMMARY, SPRINT_REPORT, Inspector, `denies_facts` | **já temos**; o P6 fecha a brecha do `impact` no EXEC |
 | 29 | Descrição de ferramenta é prompt | Anthropic (tools), Codex | ferramenta `blocked` | **o3**; revisar o toolbox inteiro fica como próximo passo |
-| 30 | Vocabulário do domínio (glossário) | Matt Pocock (domain-modeling, tdd), DDD | bloco dos documentos da empresa (13.2) | **o5** |
+| 30 | Vocabulário do domínio (glossário) | Matt Pocock (domain-modeling, tdd), DDD | bloco dos documentos da empresa (13.2) | **o5**, medido em 07/10 e recusado: o glossário presente já basta (no-op) |
 | 31 | Dado não é instrução (spotlighting) | Microsoft 2024, OWASP | todos os prompts | **já temos** |
 
 Também olhei e recusei:

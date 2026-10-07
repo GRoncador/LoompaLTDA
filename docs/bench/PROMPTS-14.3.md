@@ -36,7 +36,7 @@ Fora da bancada:
 - [`o2-diagnose-retry`](#o2-diagnose-retry) — Worker numa nova tentativa: reproduzir, hipóteses, instrumentar: **não medível**
 - [`o3-blocked-tool`](#o3-blocked-tool) — Ferramenta `blocked`: a recomendada primeiro: **neutra, adotada**
 - [`o4-ops-check`](#o4-ops-check) — Ops: uma checagem em código antes de uma frase no prompt: **não medível**
-- [`o5-glossary`](#o5-glossary) — Glossário: usar os termos dele: **não medível**
+- [`o5-glossary`](#o5-glossary) — Glossário: usar os termos dele: **reprovada**
 
 ## analyst.SYSTEM
 
@@ -2028,7 +2028,7 @@ in a prompt: a check holds for every call and every model, a sentence only chang
 
 ### o5-glossary
 
-**Glossário: usar os termos dele** (`src/loompa/company.py`): **não medível**. texto montado no código, fora dos casos gravados.
+**Glossário: usar os termos dele** (`src/loompa/company.py`): **reprovada**. medida em 07/10 com --b-from (glossary_cases.py), nos três prompts que leem o glossário: spec 17×23, revisão 9×7, classificação 9×2; somado 35×32, neutro. Os dois braços já usam os termos do glossário (1.103 × 1.116 menções na spec): tê-lo no contexto basta, e a frase seria um no-op (Matt Pocock, writing-for-agents). Não entrou.
 
 *Por quê:* domain-modeling, tdd e to-tickets: nomes, testes e textos usam o vocabulário do glossário. O glossário (13.2) já chega ao Master, ao PO, ao Spec e ao Architect, mas como "dados", sem dizer que é para usar os termos.
 

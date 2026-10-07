@@ -158,3 +158,9 @@ instructions cost reasoning models more than an arbitrary choice would.
     and the texts outside the registry, which wait for a live A/B arm.
   - Three code fixes were found by the bench: the Inspector's whole spec, the word swaps before the
     executive audit, and the sprint report's founder-wait label.
+- **A change in the message, not the prompt (07/10).** `compare --b-from <folder>` gives variant B
+  the same cases, by id, from another folder, so a context block or a label is measured on the same
+  prompt (73ba16a).
+  - First use, the 14.3 glossary line: neutral (35×32 over the spec, the review and the
+    classification).
+  - Both arms already used the glossary's terms alike, so the line would be a no-op and stayed out.

@@ -901,7 +901,13 @@ OUTSIDE_RESULTS: dict[str, tuple[str, str]] = {
         "o mesmo alinhamento com o inbox que o P9 (neutro na bancada); adotada em 8f7f683.",
     ),
     "o4-ops-check": (FORA, "o EXPLAIN_SYSTEM fica fora do registro da bancada."),
-    "o5-glossary": (FORA, "texto montado no código, fora dos casos gravados."),
+    "o5-glossary": (
+        REPROVADA,
+        "medida em 07/10 com --b-from (glossary_cases.py), nos três prompts que leem o glossário: "
+        "spec 17×23, revisão 9×7, classificação 9×2; somado 35×32, neutro. Os dois braços já usam "
+        "os termos do glossário (1.103 × 1.116 menções na spec): tê-lo no contexto basta, e a frase "
+        "seria um no-op (Matt Pocock, writing-for-agents). Não entrou.",
+    ),
 }
 
 
