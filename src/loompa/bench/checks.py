@@ -92,6 +92,10 @@ def contract_errors(data: dict[str, Any], contract: dict[str, str]) -> list[str]
             errors.append(f"missing:{key}")
             continue
         value = data[key]
+        if value is None and kind in ("str", "list"):
+            # the agents read `data.get(key) or ""`: a null text or list is an empty one, not a
+            # broken contract (the Pre-flight's question and options, when nothing is irreversible)
+            continue
         fits = _TYPES.get(kind)
         if fits is not None and not fits(value):
             errors.append(f"type:{key}")

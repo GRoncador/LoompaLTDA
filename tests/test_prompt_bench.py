@@ -228,3 +228,15 @@ async def test_an_empty_answer_is_a_failed_call_and_never_judged(tmp_path: Path)
     summary = report.summary()
     assert summary["B"]["errors"] == len(picked) and summary["A"]["errors"] == 0
     assert all(v.winner == "error" for v in report.verdicts)
+
+
+def test_a_null_text_or_list_is_empty_not_a_broken_contract():
+    from loompa.bench.checks import contract_errors
+
+    contract = {"irreversible": "bool", "question": "str", "options": "list"}
+    assert (
+        contract_errors({"irreversible": False, "question": None, "options": None}, contract) == []
+    )
+    assert contract_errors({"irreversible": None, "question": "", "options": []}, contract) == [
+        "type:irreversible"
+    ]
