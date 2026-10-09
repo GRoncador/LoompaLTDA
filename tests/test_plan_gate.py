@@ -306,3 +306,43 @@ def test_a_clause_that_creates_a_file_and_adjusts_others_is_not_a_missing_file(t
         plan_md="",
     )
     assert report.problems == []
+
+
+def test_tasks_that_write_or_test_the_factorys_records_are_refused(tmp_path: Path):
+    """ADR-0036 §5, tamagotchi S-077: two tasks wrote ADRs under .loompa/decisions and two tests
+    read them; the merge left .loompa/ out of the base as it always does, and the base went red.
+    S-068/S-069/S-070/S-076/S-089 each spent a Worker task copying their checklist into
+    specs/S-0xx/tasks.md in the product."""
+    from loompa.plan_check import factory_records_in_tasks
+
+    tasks = [
+        "docs: cria .loompa/decisions/0003-s-077-pwa.md (registra a inversão da S-015)",
+        "test: cria o arquivo novo tests/decisoes_s077.test.js, cobrindo CA1 (o texto de "
+        ".loompa/decisions/0003-s-077-pwa.md contém 'S-015')",
+        "Cria `specs/S-070/tasks.md` (arquivo novo) com a matriz critério → tarefa → teste",
+        "Ajusta src/link_pet.js seguindo .loompa/decisions/0002-stack.md (não altere o ADR)",
+        "Cria src/modo_exibicao.js (arquivo novo, módulo ES puro)",
+    ]
+    found = factory_records_in_tasks(tasks)
+    assert [p.split(":")[0] for p in found] == [
+        "task 1 writes .loompa/decisions/0003-s-077-pwa.md",
+        "task 2 has a test read .loompa/decisions/0003-s-077-pwa.md",
+        "task 3 writes specs/S-070/tasks.md, a copy of the factory's own records in the product",
+    ]
+
+
+def test_a_criterion_about_a_record_may_be_traced_to_the_review_in_a_code_story():
+    from loompa.plan_check import criteria_without_test
+
+    plan = (
+        "- Critério 1 → review: a decisão nomeia a S-015 e o escopo novo\n"
+        "- Critério 2 → review: o service worker guarda os arquivos\n"
+    )
+    criteria = [
+        "A decisão registra a inversão da nota da S-015",
+        "O service worker guarda os arquivos da página",
+    ]
+    assert criteria_without_test(plan, criteria, ["src/sw.js"]) == [
+        "acceptance criterion 2 is traced to the review, but the story changes product code: "
+        "plan a test for it"
+    ]

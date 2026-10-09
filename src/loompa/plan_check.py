@@ -67,6 +67,13 @@ def touches_no_code(files: list[str]) -> bool:
     )
 
 
+# A criterion about a record (a decision, the spec) rather than about what the product does: its
+# proof is the record itself, read in the review, never a test that reads it (ADR-0036 §5).
+_RECORD_CRITERION = re.compile(
+    r"\b(?:ADR|decis[ãa]o|decis[õo]es|decision|registr\w*|record\w*)\b", re.I
+)
+
+
 def criteria_without_test(
     plan_md: str, criteria: list[str], files: list[str] | None = None
 ) -> list[str]:
@@ -74,7 +81,9 @@ def criteria_without_test(
     without a planned test, and a criterion traceability skipped altogether. A criterion traced
     to the diff review (`review: …`) counts only when the story changes no product code:
     tamagotchi S-051 fixed four comments and, held to a test per criterion, added 185 lines of
-    tests reading a test file as text (plan 12.1)."""
+    tests reading a test file as text (plan 12.1). Or when the criterion is about a record: S-077
+    held two "the decision records …" criteria to tests that read the ADRs, which the merge then
+    left out of the base, and the base went red (ADR-0036 §5)."""
     if not criteria:
         return []
     seen: dict[int, str] = {int(n): body for n, body in _TRACE_LINE.findall(plan_md)}
@@ -86,7 +95,11 @@ def criteria_without_test(
             out.append(f"acceptance criterion {n} is missing from the plan's traceability")
         elif NO_TEST_MARK in body or not body.strip():
             out.append(f"acceptance criterion {n} has no test planned for it")
-        elif body.strip().lower().startswith(REVIEW_MARK) and not reviewable:
+        elif (
+            body.strip().lower().startswith(REVIEW_MARK)
+            and not reviewable
+            and not _RECORD_CRITERION.search(criteria[n - 1])
+        ):
             out.append(
                 f"acceptance criterion {n} is traced to the review, but the story changes "
                 "product code: plan a test for it"
@@ -139,7 +152,8 @@ def edits_of_missing_files(root: Path, tasks: list[str]) -> list[str]:
 # `sprites.test.js` in tamagotchi were 1,500-2,100 lines when four stories appended to each).
 LONG_TEST_FILE = 400
 _ADD = re.compile(
-    r"\b(?:adicion|acrescent|cri(?:e|ar|ando)\b|escrev|inclu(?:a|ir)\b|complet|cobr(?:ir|a)\b"
+    r"\b(?:adicion|acrescent|cri(?:a|e|ar|ando)\b|grav(?:a|e|ar)\b|salv(?:a|e|ar)\b"
+    r"|ger(?:a|e|ar)\b|escrev|inclu(?:a|ir)\b|complet|cobr(?:ir|a)\b"
     r"|add|writ|creat|append|cover)",
     re.I,
 )
@@ -169,6 +183,56 @@ def tests_appended_to_long_files(root: Path, tasks: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+_FACTORY_PATH = re.compile(r"(?<![\w/.-])\.loompa/[\w./-]*")
+# a product path named after a story: the factory's records copied into the product
+# (tamagotchi: specs/S-068/tasks.md, specs/S-070/tasks.md, five of them, a Worker task each)
+_STORY_SEGMENT = re.compile(r"(?:^|/)S-\d+[A-Z]?(?:/|$)")
+_RECORD_NAMES = ("spec.md", "plan.md", "tasks.md")
+
+
+def factory_records_in_tasks(tasks: list[str]) -> list[str]:
+    """Tasks that write the factory's own records, or test against them (ADR-0036 §5). The
+    factory writes and commits a story's spec, plan, checklist and decisions itself, and leaves
+    `.loompa/` out of every story's branch at merge: a task that writes there is lost, a test that
+    reads it fails on the base (tamagotchi S-077: two ADRs written by tasks, two tests reading
+    them, a red base), and a copy of the records in the product is work nobody uses."""
+    out = []
+    for i, task in enumerate(tasks, 1):
+        refs = list(dict.fromkeys(_FACTORY_PATH.findall(task)))
+        names_test = any(is_test_path(p) for p in PATH_REF.findall(task))
+        for clause in re.split(r"(?<=[.;])\s+|\n", task):
+            if LEAVE_ALONE.search(clause):
+                continue
+            writes = _ADD.search(clause) or _EDIT.search(clause)
+            # "create tests/x.test.js covering what .loompa/… says": the test is written, the
+            # record is read (that is the other problem, below)
+            makes_test = any(is_test_path(p) for p in PATH_REF.findall(clause))
+            for rel in _FACTORY_PATH.findall(clause):
+                if writes and not makes_test:
+                    out.append(
+                        f"task {i} writes {rel}: the factory keeps its records under .loompa/ "
+                        "itself and leaves them out of the story's branch at merge, so nothing "
+                        "the product or its tests use can live there; put a decision in the "
+                        "plan's `adr_proposal`"
+                    )
+            for rel in PATH_REF.findall(clause):
+                if rel.startswith(".loompa/") or not writes:
+                    continue
+                if _STORY_SEGMENT.search(rel) or (rel.endswith(_RECORD_NAMES) and "specs/" in rel):
+                    out.append(
+                        f"task {i} writes {rel}, a copy of the factory's own records in the "
+                        "product: the spec, plan and checklist live under .loompa/specs and are "
+                        "committed with the merge; drop the task"
+                    )
+        if refs and names_test:
+            out.append(
+                f"task {i} has a test read {refs[0]}: the factory's records are not part of "
+                "the product and never reach the base with the story; test what the product "
+                "does, and trace a criterion about a record to `review:`"
+            )
+    return list(dict.fromkeys(out))
+
+
 def size_signals(tasks: list[str], files: list[str]) -> list[str]:
     """Only product paths count: tamagotchi S-061 (12.1) changed three source files, and the six
     old tests founder had let it adjust (pixel-exact ones) made it "9 paths", COMPLEX, and a
@@ -193,6 +257,7 @@ def check_plan(
             *tasks_without_file(tasks),
             *edits_of_missing_files(root, tasks),
             *tests_appended_to_long_files(root, tasks),
+            *factory_records_in_tasks(tasks),
         ],
         signals=size_signals(tasks, files),
     )
