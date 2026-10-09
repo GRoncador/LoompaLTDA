@@ -66,13 +66,16 @@ class DeployerAgent(LoompaAgent):
     role = "deployer"
     display = "Deployer Loompa"
 
-    async def run(self, state: StoryState, wt: Worktree) -> AgentResult:
+    async def run(self, state: StoryState, wt: Worktree, *, rebase: bool = True) -> AgentResult:
+        """Commit what is left, put the branch on its base and tell the founder it is ready.
+        `rebase=False` when the caller already brought the base in with its checks: a rebase
+        here would deliver a combination nobody ran (ADR-0036 §3)."""
         self.set_state("WORKING", state, detail="preparando entrega")
         self._drop_debris(state, wt)
         commit = self.git.commit_all(wt, f"chore({state.story_id.lower()}): finalize story")
         if commit:
             state.commits.append(commit.sha)
-        if not self.git.rebase_on_base(wt):
+        if rebase and not self.git.rebase_on_base(wt):
             self.set_state("BLOCKED", state, detail="conflito com a base")
             return AgentResult(
                 ok=False,

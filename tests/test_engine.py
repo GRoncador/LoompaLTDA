@@ -667,7 +667,9 @@ async def test_a_conflict_left_with_markers_is_tried_again_then_on_the_tier_abov
 async def test_a_conflict_found_at_delivery_is_reintegrated_before_asking(factory: Factory):
     """`contas` S-002: main moved (another story merged) while it was in test, so the
     delivery's rebase conflicted and the founder was asked. Merging the base and resolving is
-    now automatic, once; the founder hears only if that fails."""
+    now automatic, once; the founder hears only if that fails. Since ADR-0036 §3 the base goes in
+    before the delivery the way the merge queue does it: conflicts resolved, checks run again,
+    with no trip back to `dev`."""
     root = factory.root
     moved: list[bool] = []
     story = "def add(a, b):\n    return a + b  # story\n"
@@ -708,9 +710,71 @@ async def test_a_conflict_found_at_delivery_is_reintegrated_before_asking(factor
     state = load_state(ctx, sid)
     assert state.blocked_reason == "delivery", state.failure_history
     types = [e["type"] for e in ctx.store.events_since(0, limit=10_000)]
-    assert types.count("story.reintegrating") == 1 and "worktree.merged_base" in types
+    assert "story.brought_up_to_date" in types and "worktree.merged_base" in types
     assert not [m for m in ctx.store.list_messages(factory.slug) if "conflita" in m.title]
     assert (Path(state.worktree) / "app" / "calc.py").read_text() == both
+    await ctx.aclose()
+
+
+async def test_a_base_that_moved_without_conflict_is_checked_again_before_delivery(
+    factory: Factory,
+):
+    """ADR-0036 §3, tamagotchi 08/10: S-070 was tested at 23:21 on a base without S-077, S-077
+    merged at 23:24, and the delivery's clean rebase at 23:25 handed the founder a combination
+    nobody had run; the approval merged it on the spot and the base went red (S-077's test fixed
+    the exact list of files to cache, S-070 added one). Now the base goes in with the checks, and
+    a combination that fails them goes back to `dev`."""
+    root = factory.root
+    moved: list[bool] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role == "inspector" and "## Diff" in messages[-1].content and not moved:
+            moved.append(True)  # another story lands a test that pins the files in app/
+            names = sorted(p.name for p in (root / "app").glob("*.py"))
+            (root / "tests").mkdir(exist_ok=True)
+            (root / "tests" / "test_landed.py").write_text(
+                "from pathlib import Path\n\n\ndef test_landed():\n"
+                "    app = Path(__file__).parent.parent / 'app'\n"
+                f"    assert sorted(p.name for p in app.glob('*.py')) == {names!r}\n"
+            )
+            git("add", ".", cwd=root)
+            git("commit", "-qm", "feat: outra entrega", cwd=root)
+        if role == "worker":
+            if not tool_results(messages):
+                return [
+                    ToolCall(
+                        "w",
+                        "write_file",
+                        {"path": "app/extra.py", "content": "def sub(a, b):\n    return a - b\n"},
+                    ),
+                ]
+            return [ToolCall("d", "done", {"summary": "ok"})]
+        if role == "architect" and "## Founder's guidance" not in messages[-1].content:
+            return json.dumps(
+                {
+                    "approach": "x",
+                    "files": ["app/"],
+                    "contracts": "",
+                    "risks": [],
+                    "tasks": ["Acrescentar sub"],
+                    "adr_proposal": "",
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Acrescentar a subtração")
+    await Scheduler(ctx).run()
+    types = [
+        (e["type"], e["payload"].get("after"))
+        for e in ctx.store.events_since(0, limit=10_000)
+        if e["story_id"] == sid
+    ]
+    assert ("story.reintegrating", "delivery") in types
+    # the founder never got the untested combination as a delivery
+    first_back = types.index(("story.reintegrating", "delivery"))
+    assert ("story.delivered", None) not in types[:first_back]
     await ctx.aclose()
 
 

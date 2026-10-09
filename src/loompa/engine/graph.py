@@ -1210,9 +1210,12 @@ def _merged(state: StoryState) -> StoryState:
     return state
 
 
-async def _approved_back_to_work(ctx: EngineContext, state: StoryState, problem: str) -> StoryState:
+async def _approved_back_to_work(
+    ctx: EngineContext, state: StoryState, problem: str, *, after: str = "approval"
+) -> StoryState:
     """An approved story that does not hold up on the current base: its code must change, so it
-    is delivered again rather than merged on the strength of an approval of other code."""
+    is delivered again rather than merged on the strength of an approval of other code. The same
+    for a story about to be delivered (`after="delivery"`)."""
     unresolved = problem.startswith("merging the base")
     if (
         not unresolved
@@ -1221,7 +1224,7 @@ async def _approved_back_to_work(ctx: EngineContext, state: StoryState, problem:
     ):
         state.extra[CONFLICT_RETRIES_KEY] = state.extra.get(CONFLICT_RETRIES_KEY, 0) + 1
         state.failure_history.append(problem)
-        ctx.emit("story.reintegrating", story_id=state.story_id, after="approval")
+        ctx.emit("story.reintegrating", story_id=state.story_id, after=after)
         return goto(state, "dev")
     return await block(ctx, state, BlockedReason.CONFLICT, problem, resume="review")
 
@@ -1323,7 +1326,15 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
     await KaizenAgent(ctx).capture(
         state
     )  # findings never get lost: sweep what no earlier phase filed
-    res = await DeployerAgent(ctx).run(state, wt)
+    if ctx.worktrees.behind_base(wt):
+        # The base moved since the story was tested. A rebase here used to deliver a combination
+        # nobody had run, and the approval then merged it on the spot because the branch already
+        # held the base (tamagotchi S-070 broke S-077's offline cache, 08/10). The base goes in
+        # the way the merge queue does it, checks and all (ADR-0036 §3).
+        if problem := await _bring_up_to_date(ctx, state, wt):
+            return await _approved_back_to_work(ctx, state, problem, after="delivery")
+    # no rebase: a base that moves after this is caught by the approval (`_merge_now`)
+    res = await DeployerAgent(ctx).run(state, wt, rebase=False)
     if not res.ok:
         if (
             "dev" in state.route
