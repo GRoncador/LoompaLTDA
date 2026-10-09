@@ -129,3 +129,56 @@ async def test_the_worker_reads_the_variant_and_every_task_says_its_arm(factory:
     tasks = [e["payload"] for e in events if e["type"] == "worker.task"]
     assert tasks and {t["prompt_ab"] for t in tasks} == {"variant"}
     await ctx.aclose()
+
+
+def test_the_arms_stay_balanced_within_each_complexity():
+    """ADR-0036 §11, tamagotchi 07-09/10: drawn story by story, the Worker experiment put 3
+    COMPLEX of 6 in the variant and 1 of 8 in the control; its p=0.01 was about the stories."""
+    store = Store(":memory:")
+    ctx = SimpleNamespace(
+        config=default_config(), emit=lambda *a, **kw: None, store=store, slug="f"
+    )
+    ctx.config.schedule.prompt_ab = [PromptAB(prompt="worker.SYSTEM", variant="test-seams")]
+    template = registry.get("worker.SYSTEM").template
+    arms: dict[str, list[str]] = {"COMPLEX": [], "SIMPLE": []}
+    for i in range(12):
+        complexity = "COMPLEX" if i % 3 == 0 else "SIMPLE"
+        state = StoryState(story_id=f"S-{i:03d}", title="t", complexity=complexity)
+        _, arm = prompt_ab.prompt_for(ctx, state, "worker.SYSTEM", template)
+        arms[complexity].append(arm)
+        store.upsert_story(
+            {
+                "id": state.story_id,
+                "factory": "f",
+                "title": "t",
+                "stage": "DONE",
+                "state": state.model_dump(mode="json"),
+            }
+        )
+    for got in arms.values():
+        assert abs(got.count("variant") - got.count("control")) <= 1, got
+
+
+def test_the_report_splits_by_complexity_and_says_when_the_mix_differs():
+    store = Store(":memory:")
+    rows = [
+        ("S-1", "COMPLEX", "variant"),
+        ("S-2", "COMPLEX", "variant"),
+        ("S-3", "SIMPLE", "control"),
+    ]
+    for sid, complexity, arm in rows:
+        state = StoryState(story_id=sid, title="t", complexity=complexity)
+        store.upsert_story(
+            {
+                "id": sid,
+                "factory": "f",
+                "title": "t",
+                "stage": "DONE",
+                "state": state.model_dump(mode="json"),
+            }
+        )
+        store.emit("f", "prompt.ab", story_id=sid, prompt="worker.SYSTEM", variant="x", arm=arm)
+    (r,) = prompt_ab.report(store, "f")
+    assert r["by_complexity"]["COMPLEX"]["variant"]["settled"] == 2
+    assert r["by_complexity"]["SIMPLE"]["control"]["settled"] == 1
+    assert r["confounded"] is True

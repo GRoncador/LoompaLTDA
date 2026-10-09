@@ -286,7 +286,21 @@ def _print_ab(r: dict) -> None:
     ]
     for label, get in rows:
         t.add_row(label, str(get(v)), str(get(c)))
+    for k in sorted(r.get("by_complexity") or {}):
+        cells = r["by_complexity"][k]
+
+        def cell(arm: str, cells: dict = cells) -> str:
+            got = cells.get(arm) or {"settled": 0, "with_rework": 0}
+            return f"{got['with_rework']} de {got['settled']}"
+
+        t.add_row(f"com retrabalho · {k}", cell(VARIANT), cell(CONTROL))
     console.print(t)
+    if r.get("confounded"):
+        console.print(
+            "[yellow]![/yellow] Os braços têm misturas de complexidade diferentes: compare linha "
+            "a linha por complexidade, não o total.",
+            highlight=False,
+        )
     few = min(v["settled"], c["settled"]) < MIN_STORIES
     console.print(
         f"Histórias com retrabalho, Fisher p {r['rework_p']:.2f}. Observar: {r['watch']}."

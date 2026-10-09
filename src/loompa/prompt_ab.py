@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from loompa.store import Store
 
 AB_KEY = "prompt_ab"  # state.extra: {prompt key: "variant" | "control"}
+# arms whose share of one complexity differs by more than this are not comparable as a whole
+MIX_GAP = 0.25
 VARIANT, CONTROL = "variant", "control"
 
 
@@ -120,6 +122,35 @@ def draw(story_id: str, prompt: str, variant: str, share: float) -> str:
     return VARIANT if int(h, 16) / 0xFFFFFFFF < share else CONTROL
 
 
+def balanced_draw(
+    ctx: EngineContext, state: StoryState, prompt: str, variant: str, share: float
+) -> str:
+    """The arm for a story, balanced within its complexity (ADR-0036 §11). Drawn story by story,
+    tamagotchi's Worker experiment put 3 COMPLEX stories of 6 in the variant and 1 of 8 in the
+    control, and its p=0.01 said more about the stories than about the prompt. The arm behind
+    its share in this complexity gets the story; a tie is the hash draw."""
+    store = getattr(ctx, "store", None)
+    if store is None:
+        return draw(state.story_id, prompt, variant, share)
+    mine = str(state.complexity or "")
+    n_v = n_c = 0
+    for row in store.list_stories(ctx.slug):
+        if row["id"] == state.story_id:
+            continue
+        other = row.get("state") or {}
+        if str(other.get("complexity") or "") != mine:
+            continue
+        arm = ((other.get("extra") or {}).get(AB_KEY) or {}).get(prompt)
+        n_v += arm == VARIANT
+        n_c += arm == CONTROL
+    n = n_v + n_c
+    if n and n_v / n < share:
+        return VARIANT
+    if n and n_v / n > share:
+        return CONTROL
+    return draw(state.story_id, prompt, variant, share)
+
+
 def prompt_for(
     ctx: EngineContext, state: StoryState, prompt: str, template: str
 ) -> tuple[str, str]:
@@ -132,7 +163,7 @@ def prompt_for(
     if prompt not in arms:
         # a story already under way when the experiment began stays out of it: switching its
         # rules halfway would mix the arms
-        arm = "" if state.commits else draw(state.story_id, prompt, exp.variant, exp.share)
+        arm = "" if state.commits else balanced_draw(ctx, state, prompt, exp.variant, exp.share)
         arms[prompt] = arm
         if arm:
             ctx.emit(
@@ -168,9 +199,11 @@ def _story(store: Store, sid: str) -> dict[str, Any]:
     verdicts = [e["payload"] for e in by.get("inspector.verdict", [])]
     tasks = [e["payload"] for e in by.get("worker.task", [])]
     tests = sum(int((v.get("prefixes") or {}).get("TEST", 0)) for v in verdicts)
+    complexity = str((row.get("state") or {}).get("complexity") or "")
     return {
         "id": sid,
         "stage": str(row.get("stage") or ""),
+        "complexity": complexity or "?",
         "rework": len([e for e in by.get("story.retry", []) if e["payload"].get("tier")])
         + len(by.get("story.replanned", []))
         + len(by.get("story.restarted", [])),
@@ -233,6 +266,28 @@ def report(store: Store, factory: str, days: int = 180) -> list[dict[str, Any]]:
                 "cost_usd": round(sum(s["cost_usd"] for s in done) / n, 4),
                 "story_ids": sids,
             }
+        # the same comparison within each complexity, and whether the arms' mixes differ
+        # enough to explain the difference by themselves (ADR-0036 §11)
+        mix: dict[str, dict[str, dict[str, int]]] = {}
+        for arm, sids in arms.items():
+            for st in (_story(store, sid) for sid in sids):
+                if st["stage"] not in ("DONE", "CANCELLED"):
+                    continue
+                cell = mix.setdefault(st["complexity"], {}).setdefault(
+                    arm, {"settled": 0, "with_rework": 0}
+                )
+                cell["settled"] += 1
+                cell["with_rework"] += bool(st["rework"])
+        shares = {
+            arm: {
+                k: cells.get(arm, {}).get("settled", 0) / (totals[arm]["settled"] or 1)
+                for k, cells in mix.items()
+            }
+            for arm in (VARIANT, CONTROL)
+        }
+        confounded = any(
+            abs(shares[VARIANT].get(k, 0) - shares[CONTROL].get(k, 0)) > MIX_GAP for k in mix
+        )
         v, c = totals[VARIANT], totals[CONTROL]
         out.append(
             {
@@ -241,6 +296,8 @@ def report(store: Store, factory: str, days: int = 180) -> list[dict[str, Any]]:
                 "title": VARIANTS[(prompt, name)].title if (prompt, name) in VARIANTS else name,
                 "watch": VARIANTS[(prompt, name)].watch if (prompt, name) in VARIANTS else "",
                 "arms": totals,
+                "by_complexity": mix,
+                "confounded": confounded,
                 "rework_p": fisher_p(
                     v["with_rework"],
                     v["settled"] - v["with_rework"],
