@@ -36,6 +36,7 @@ from loompa.engine.awake import Awake
 from loompa.engine.context import EngineContext
 from loompa.engine.graph import BlockedReason, apply_founder_answer, back_to_backlog, block
 from loompa.engine.langgraph_engine import GraphRuntime
+from loompa.engine.line import LineWatch
 from loompa.engine.lock import DryRunOnLiveFactory, EngineLock
 from loompa.engine.merge_queue import waits_its_turn
 from loompa.engine.phases import goto
@@ -148,6 +149,7 @@ class Scheduler:
     pause_reason: str = ""
     _paused_said: bool = False
     started: dict[str, float] = field(default_factory=dict)  # story -> wall time dispatched
+    _line: asyncio.Task | None = None  # the base's suite running after the base moved (§4)
 
     def pause(self, reason: str = "founder") -> None:
         if self.pausing:
@@ -219,6 +221,19 @@ class Scheduler:
             if self.not_before.get(s["id"], 0.0) > now
         ]
         return max(min(waits), 0.0) if waits else None
+
+    def _watch_line(self) -> None:
+        """ADR-0036 §4: once the base moved, its suite runs once, beside the dispatch loop (a
+        suite can take minutes; the stories in flight go on meanwhile)."""
+        if self._line is not None:
+            if not self._line.done():
+                return
+            if not self._line.cancelled() and (exc := self._line.exception()) is not None:
+                log.warning("checking the base's suite failed: %s", exc)
+            self._line = None
+        watch = LineWatch(self.ctx)
+        if watch.due():
+            self._line = asyncio.create_task(watch.check(), name="line")
 
     async def close_sprints(self) -> None:
         """Close sprints whose stories all finished (the Master reports to the founder)."""
@@ -448,6 +463,8 @@ class Scheduler:
             while True:
                 self._watch()
                 self._dispatch()
+                if not self.pausing:
+                    self._watch_line()
                 awake.hold(bool(self.running))
                 await self.close_sprints()
                 if not self.running:
@@ -464,6 +481,9 @@ class Scheduler:
                 if max_cycles and cycles >= max_cycles:
                     break
         finally:
+            if self._line is not None and not self._line.done():
+                self._line.cancel()  # the next run checks the same base again
+                await asyncio.gather(self._line, return_exceptions=True)
             for task in self.running.values():
                 task.cancel()
             if self.running:

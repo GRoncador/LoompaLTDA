@@ -847,7 +847,18 @@ class WorkerAgent(LoompaAgent):
             if changed.strip()
             else ""
         )
-        user = f"# Task T{number}\n\n**{text}**\n{retry_ctx}{notes}{done_before}\n## Checklist\n{tasks_md[:2000]}\n"
+        failing_base = (state.extra.get("baseline") or {}).get("failing") or []
+        base_red = (
+            "\n## Already failing on the base (not this story's)\n"
+            "These tests failed on the base before any change of this story, and the factory "
+            "tracks them on their own. Do not try to fix them and do not stop because of them: "
+            "the task is done when nothing else fails.\n"
+            + "\n".join(f"- {n}" for n in failing_base[:20])
+            + "\n"
+            if failing_base
+            else ""
+        )
+        user = f"# Task T{number}\n\n**{text}**\n{retry_ctx}{notes}{done_before}{base_red}\n## Checklist\n{tasks_md[:2000]}\n"
         messages = [Message("system", stable, cache=True), Message("user", user)]
         sched = self.ctx.config.schedule
         aci.begin_task()

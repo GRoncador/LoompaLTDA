@@ -130,35 +130,46 @@ class InspectorAgent(LoompaAgent):
         """Run the Tier 3 checks on the untouched worktree so pre-existing failures are not
         blamed on the story (brownfield repos are often red on main). `at` runs them on another
         checkout of the base instead (the worktree already holds the story's changes)."""
-        q = self.ctx.config.quality
-        where = at or wt.path
-        base: dict = {"tests_ok": True, "failing": [], "lint_ok": True}
-        tests = test_command_for(q.test_command, where)
-        if tests:
-            res = await run_command(tests, where, timeout=900)
-            summary = summarize_tests(res.output, res.returncode)
-            base["tests_ok"] = summary.ok and not res.timed_out
-            base["failing"] = sorted({f.name for f in summary.failures})
-        if q.lint_command:
-            res = await run_command(q.lint_command, where, timeout=300)
-            base["lint_ok"] = summarize_lint(res.output, res.returncode).ok
+        from loompa.engine.line import line_card
+
+        base = await self.checks_at(at or wt.path)
         if not base["tests_ok"] or not base["lint_ok"]:
-            state.learnings.append(
-                {
-                    "kind": "tech_debt",
-                    "title": "A suíte de verificações já falha na versão principal",
-                    "detail": "Falhas pré-existentes: "
-                    + (", ".join(base["failing"][:8]) or "lint")
-                    + ". A fábrica ignora essas falhas nas histórias até serem corrigidas.",
-                }
-            )
+            card = line_card(self.ctx)
+            if card is None:
+                # while the card that fixes the base is open, each story filing its own copy
+                # only made duplicates (tamagotchi SP-013: 12 of them, ADR-0036 §4)
+                state.learnings.append(
+                    {
+                        "kind": "tech_debt",
+                        "title": "A suíte de verificações já falha na versão principal",
+                        "detail": "Falhas pré-existentes: "
+                        + (", ".join(base["failing"][:8]) or "lint")
+                        + ". A fábrica ignora essas falhas nas histórias até serem corrigidas.",
+                    }
+                )
             self.ctx.emit(
                 "inspector.baseline_red",
                 story_id=state.story_id,
                 agent=self.name,
                 failing=base["failing"][:20],
+                **({"card": card} if card else {}),
             )
         return base
+
+    async def checks_at(self, where: Path, *, lint: bool = True) -> dict:
+        """The Tier 3 checks at a checkout: `tests_ok`, the `failing` test names, `lint_ok`."""
+        q = self.ctx.config.quality
+        out: dict = {"tests_ok": True, "failing": [], "lint_ok": True}
+        tests = test_command_for(q.test_command, where)
+        if tests:
+            res = await run_command(tests, where, timeout=900)
+            summary = summarize_tests(res.output, res.returncode)
+            out["tests_ok"] = summary.ok and not res.timed_out
+            out["failing"] = sorted({f.name for f in summary.failures})
+        if lint and q.lint_command:
+            res = await run_command(q.lint_command, where, timeout=300)
+            out["lint_ok"] = summarize_lint(res.output, res.returncode).ok
+        return out
 
     async def run(self, state: StoryState, wt: Worktree, *, judge: bool = True) -> AgentResult:
         """The quality gate. `judge=False` runs only the checks that need no model (tests,
