@@ -51,3 +51,25 @@ class Awake:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
+
+
+BATTERY_WARNING = (
+    "O computador está na bateria: se ele dormir (tampa fechada, repouso automático ou bateria "
+    "no fim), a fábrica para junto e o sprint parece mais lento do que foi. Na tomada ela "
+    "trabalha sem pausas."
+)
+
+
+def on_battery() -> bool:
+    """True when a Mac runs on battery now (`pmset -g batt`), where `caffeinate -s` holds
+    nothing: tamagotchi slept 7h20 on 1% battery and ~11 hours of dark wakes with the lid
+    closed in SP-011/SP-012 (ADR-0036 §10). False anywhere it cannot tell."""
+    if sys.platform != "darwin" or shutil.which("pmset") is None:
+        return False
+    try:
+        out = subprocess.run(
+            ["pmset", "-g", "batt"], capture_output=True, text=True, timeout=5
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "'Battery Power'" in out

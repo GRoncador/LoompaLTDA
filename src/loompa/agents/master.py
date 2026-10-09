@@ -37,6 +37,7 @@ from loompa.dependencies import missing_from, rows_by_id
 from loompa.engine.state import TERMINAL, Complexity, Stage, StoryKind, StoryState
 from loompa.llm import EnginePaused
 from loompa.sprints import Sprint, SprintBoard, SprintError, SprintStatus, running_message
+from loompa.store import now_iso
 
 log = logging.getLogger("loompa.master")
 
@@ -341,6 +342,11 @@ class MasterAgent(LoompaAgent):
                 )
             for sid in sprint.story_ids:
                 po.admit(sid)
+            # a sprint always has a goal: SP-013 started without one when the founder said only
+            # "vamos ao próximo sprint", and its report had nothing to judge it by (ADR-0036 §10)
+            goal = goal.strip() or goal_from_titles(
+                [(store.get_story(sid) or {}).get("title", sid) for sid in sprint.story_ids]
+            )
             sprint = board.start(sprint.id, goal)
             self.ctx.emit(
                 "sprint.started",
@@ -378,13 +384,21 @@ class MasterAgent(LoompaAgent):
             await self._report_closed(board, sprint, counts)
             closed.append(sprint)
         for sprint in board.sprints(SprintStatus.CLOSED):
-            if sprint not in closed and self.ctx.store.get(REPORT_PENDING + sprint.id) == "1":
+            if sprint not in closed and _report_owed(
+                self.ctx.store.get(REPORT_PENDING + sprint.id)
+            ):
                 await self._report_closed(board, sprint, board.progress(sprint))
         return closed
 
     async def _report_closed(self, board: SprintBoard, sprint: Sprint, counts: dict) -> None:
         """The closed sprint's diagnosis, report and inbox note. A pause here takes the paths a
-        model failure takes: no diagnosis, the summary written in code; the record still exists."""
+        model failure takes: no diagnosis, the summary written in code; the record still exists.
+        Whoever claims the report writes it; another pass (the dashboard's, the engine's) that
+        finds it being written leaves it (two notes per sprint on tamagotchi, ADR-0036 §10)."""
+        key = REPORT_PENDING + sprint.id
+        owed = self.ctx.store.get(key) or ""
+        if not _report_owed(owed) or not self.ctx.store.claim(key, owed, WRITING + now_iso()):
+            return
         summary = ""
         health = None
         try:  # the factory's self-diagnosis over the sprint's window (8.3), into the hub
@@ -1212,6 +1226,30 @@ def meeting_question(ctx: Any) -> str:
 
 
 REPORT_PENDING = "sprint_report_pending:"  # kv: a closed sprint whose report is still owed
+WRITING = "writing:"  # the value while one pass writes it; stale after REPORT_STALE_S
+REPORT_STALE_S = 900.0
+
+
+def goal_from_titles(titles: list[str]) -> str:
+    """The goal of a sprint nobody stated one for: what it delivers, in its stories' words."""
+    names = [clip(t.strip().rstrip("."), 70) for t in titles if t and t.strip()]
+    if not names:
+        return ""
+    listed = names[0] if len(names) == 1 else "; ".join(names[:-1]) + " e " + names[-1]
+    return clip(f"Entregar: {listed}.", 300)
+
+
+def _report_owed(value: str | None) -> bool:
+    """A report still owed: never claimed ("1"), or claimed by a pass that died writing it."""
+    if value == "1":
+        return True
+    if not value or not value.startswith(WRITING):
+        return False
+    try:
+        since = datetime.fromisoformat(value.removeprefix(WRITING))
+    except ValueError:
+        return True
+    return (datetime.now(UTC) - since).total_seconds() > REPORT_STALE_S
 
 
 def _next_step(board: SprintBoard) -> str:

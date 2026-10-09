@@ -339,6 +339,17 @@ def measure(store: Store, slug: str, sprint: Sprint, *, previous: bool = True) -
     }
 
     totals = _totals(stories, usage, start, end, sprint)
+    # the machine asleep is not the factory working slowly: tamagotchi SP-011's "10h02, +481%"
+    # held 7h20 of a Mac asleep on 1% battery (ADR-0036 §10)
+    asleep = round(
+        sum(
+            float(e["payload"].get("minutes") or 0) * 60
+            for e in events
+            if e["type"] == "engine.slept"
+        )
+    )
+    totals["asleep_s"] = min(asleep, totals["duration_s"])
+    totals["active_s"] = max(0, totals["duration_s"] - totals["asleep_s"])
     report: dict[str, Any] = {
         "sprint": {
             "id": sprint.id,
@@ -590,6 +601,22 @@ def render_markdown(report: dict[str, Any], summary: str = "") -> str:
         ),
         ("Custo total da fábrica no período", usd(t["factory_cost_usd"]), ""),
         ("Consultas aos modelos", _num(t["calls"]), _delta(t["calls"], pt.get("calls"), _num)),
+        *(
+            [
+                (
+                    "Tempo com o computador dormindo",
+                    duration(t["asleep_s"]),
+                    "",
+                ),
+                (
+                    "Tempo ativo (sem o computador dormindo)",
+                    duration(t["active_s"]),
+                    _delta(t["active_s"], pt.get("active_s"), duration),
+                ),
+            ]
+            if t.get("asleep_s")
+            else []
+        ),
         ("Tempo de modelo", duration(t["model_s"]), ""),
         ("Tempo das histórias esperando você (somado)", duration(t["founder_wait_s"]), ""),
         (
@@ -750,7 +777,14 @@ def summary_facts(report: dict[str, Any]) -> str:
             else ""
         )
         + ".",
-        f"Duration: {duration(t['duration_s'])}. Cost of the stories: {usd(t['cost_usd'])}"
+        f"Duration: {duration(t['duration_s'])}"
+        + (
+            f", of which the computer was asleep {duration(t['asleep_s'])} (active "
+            f"{duration(t['active_s'])})"
+            if t.get("asleep_s")
+            else ""
+        )
+        + f". Cost of the stories: {usd(t['cost_usd'])}"
         + (f" ({usd(t['cost_per_delivered_usd'])} per delivered story)" if t["delivered"] else "")
         # "Founder waiting time" read as the time the founder waited, and summaries said so
         # ("você esperou 1 minuto por nossas respostas", 14.3)
@@ -826,13 +860,23 @@ def fallback_summary(report: dict[str, Any]) -> str:
         + (f", a {usd(t['cost_per_delivered_usd'])} por entrega" if t["delivered"] else "")
         + "."
     ]
+    if t.get("asleep_s") and t["asleep_s"] >= 0.1 * (t["duration_s"] or 1):
+        said.append(
+            f"O computador ficou dormindo {duration(t['asleep_s'])} desse tempo; ativo, foram "
+            f"{duration(t['active_s'])}."
+        )
     if report["sprint"]["goal"]:
-        said.append(f"Meta: {report['sprint']['goal']}.")
+        said.append(f"Meta: {report['sprint']['goal'].strip().rstrip('.')}.")
     if t["joined"]:
-        said.append(f"{t['joined']} entraram no meio do sprint.")
+        one = t["joined"] == 1
+        said.append(
+            f"{t['joined']} {'história entrou' if one else 'histórias entraram'} no meio do sprint."
+        )
     if t["rework"]:
         said.append(
-            f"Houve {t['rework']} retrabalho(s), {t['escalations']} com o modelo mais forte."
+            f"Houve {t['rework']} {'retrabalho' if t['rework'] == 1 else 'retrabalhos'}"
+            + (f", {t['escalations']} com o modelo mais forte" if t["escalations"] else "")
+            + "."
         )
     if t["founder_wait_s"]:
         said.append(f"Somadas, as histórias esperaram por você {duration(t['founder_wait_s'])}.")

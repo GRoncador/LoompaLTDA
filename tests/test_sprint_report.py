@@ -300,3 +300,71 @@ async def test_a_summary_that_denies_a_measured_fact_is_replaced(factory: Factor
         ["rework"] if report["totals"]["rework"] else []
     )
     await ctx.aclose()
+
+
+async def test_two_passes_closing_the_same_sprint_send_one_report(factory: Factory):
+    """ADR-0036 §10, tamagotchi SP-011 and SP-012: two "Sprint concluído" notes 11 and 35 seconds
+    apart, with different texts; the second pass found the report still owed while the first was
+    writing it."""
+    import asyncio
+
+    from loompa.agents.master import REPORT_PENDING
+
+    ctx = make_ctx(factory, dry_run=True)
+    sprint_with_history(ctx)
+    SprintBoard(ctx.store, ctx.slug).close("SP-001")
+    ctx.store.set(REPORT_PENDING + "SP-001", "1")
+    real = MasterAgent.write_sprint_report
+
+    async def slow(self, *a, **kw):  # the summary's model call takes a while
+        await asyncio.sleep(0.05)
+        return await real(self, *a, **kw)
+
+    with mock.patch.object(MasterAgent, "write_sprint_report", slow):
+        await asyncio.gather(
+            MasterAgent(ctx).close_finished_sprints(), MasterAgent(ctx).close_finished_sprints()
+        )
+    notes = [m for m in ctx.store.list_messages(ctx.slug) if m.title == "Sprint SP-001 concluído"]
+    assert len(notes) == 1
+    await ctx.aclose()
+
+
+def test_a_claim_has_exactly_one_winner():
+    from loompa.store import Store
+
+    store = Store(":memory:")
+    store.set("k", "1")
+    assert store.claim("k", "1", "writing:a") is True
+    assert store.claim("k", "1", "writing:b") is False and store.get("k") == "writing:a"
+
+
+async def test_a_sprint_started_without_a_goal_gets_one_from_its_stories(factory: Factory):
+    """SP-013 started with an empty goal after "vamos ao próximo sprint!"."""
+    ctx = make_ctx(factory, dry_run=True)
+    po = ProductOwnerAgent(ctx)
+    a, b = (po.add_item(t).story_id for t in ("Tornar o jogo um PWA", "Gerar link."))
+    sprint = MasterAgent(ctx).start_sprint([a, b], goal="  ")
+    assert sprint.goal == "Entregar: Tornar o jogo um PWA e Gerar link."
+    await ctx.aclose()
+
+
+def test_the_summary_in_code_counts_right_and_says_when_the_computer_slept():
+    report = {
+        "sprint": {"id": "SP-011", "goal": "Esvaziar o backlog (S-058, S-064 e S-059)."},
+        "totals": {
+            "delivered": 4,
+            "stories": 4,
+            "duration_s": 36120,
+            "asleep_s": 26340,
+            "active_s": 9780,
+            "cost_per_delivered_usd": 0.134,
+            "joined": 1,
+            "rework": 1,
+            "escalations": 0,
+            "founder_wait_s": 0,
+        },
+    }
+    text = sprint_report.fallback_summary(report)
+    assert "(S-058, S-064 e S-059)." in text and ".." not in text
+    assert "1 história entrou no meio do sprint" in text and "Houve 1 retrabalho." in text
+    assert "O computador ficou dormindo 7h19 desse tempo; ativo, foram 2h43." in text

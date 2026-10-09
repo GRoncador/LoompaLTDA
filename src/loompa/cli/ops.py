@@ -216,6 +216,11 @@ def run(
             f"[bold]{f.config.factory.name}[/bold] · execução {'simulada' if dry_run else 'real'} · paralelismo {parallel or f.config.schedule.max_parallel}"
         )
     )
+    if not dry_run:
+        from loompa.engine.awake import BATTERY_WARNING, on_battery
+
+        if on_battery():
+            console.print(f"[yellow]![/yellow] {BATTERY_WARNING}")
     running = SprintBoard(ctx.store, f.slug).running()
     waiting = len(ctx.store.list_stories(f.slug, stage=Stage.BACKLOG))
     if running is not None:  # one sprint at a time (ADR-0018): the backlog waits for the next

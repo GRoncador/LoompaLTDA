@@ -949,3 +949,17 @@ class Store:
 
     def set(self, key: str, value: str) -> None:
         self._x("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", (key, value))
+
+    def claim(self, key: str, expect: str, new: str) -> bool:
+        """Set `key` to `new` only while it holds `expect`: of two processes racing for the same
+        work, exactly one gets True (the dashboard and the engine both closed tamagotchi's
+        sprints, and each sent its own report, ADR-0036 §10)."""
+
+        def run() -> int:
+            cur = self._conn.execute(
+                "UPDATE kv SET value = ? WHERE key = ? AND value = ?", (new, key, expect)
+            )
+            return cur.rowcount
+
+        with self._lock:
+            return retry_locked(run, what="state.db") == 1
