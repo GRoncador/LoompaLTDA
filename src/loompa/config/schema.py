@@ -62,6 +62,10 @@ class PromptAB(BaseModel):
 
 class ScheduleConfig(BaseModel):
     max_parallel: int = Field(3, ge=1, le=32)
+    # How many of the factory's own findings a delivery may offer to put into the running sprint
+    # (ADR-0036 §7): tamagotchi SP-013 started with 3 stories and ran 8, one approval pulling in
+    # four. Beyond this, a finding is offered for the backlog only; 0 never offers the sprint.
+    kaizen_sprint_cap: int = Field(2, ge=0)
     tier2_max_attempts: int = Field(2, ge=1)
     tier1_max_attempts: int = Field(2, ge=1)
     worker_max_iterations: int = Field(40, ge=1)

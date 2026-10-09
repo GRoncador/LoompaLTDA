@@ -309,6 +309,17 @@ class KaizenAgent(LoompaAgent):
         board = SprintBoard(self.ctx.store, self.ctx.slug)
         own = board.sprint_of(state.story_id)
         running = own.id if own is not None and own.status == SprintStatus.RUNNING else ""
+        # findings a delivery already put into this sprint count against its room (ADR-0036 §7)
+        room = 0
+        if own is not None and running:
+            decided_ids = self.ctx.store.story_ids_with_event(self.ctx.slug, "finding.decided")
+            joined = [
+                sid
+                for sid in own.story_ids
+                if sid in decided_ids
+                and (self.ctx.store.get_story(sid) or {}).get("origin") == "kaizen"
+            ]
+            room = max(0, self.ctx.config.schedule.kaizen_sprint_cap - len(joined))
         cards = []
         for sid in state.finding_cards:
             row = self.ctx.store.get_story(sid)
@@ -325,6 +336,10 @@ class KaizenAgent(LoompaAgent):
                     "sprint": running,  # the sprint it may join; never the next one
                 }
             )
+        # the sprint is offered to the most urgent ones only, as many as there is room for
+        for n, card in enumerate(sorted(cards, key=lambda c: int(c["priority"] or 500))):
+            if n >= room:
+                card["sprint"] = ""
         return cards
 
     def record_resolution(self, state: StoryState, failure: str, fix: str) -> None:

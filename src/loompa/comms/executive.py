@@ -331,16 +331,15 @@ def card_decision(card: dict) -> Decision:
 
     The next sprint is the Sprint Meeting's call (ADR-0018), so a finding never offers it: it
     goes to the backlog (the default), is dropped or, when the story that raised it belongs to
-    the running sprint (`card["sprint"]`), joins that sprint. Joining is recommended only for a
-    collateral bug of this work; anything broader is better weighed with the rest of the backlog.
+    the running sprint and the sprint still has room for findings (`card["sprint"]`), joins that
+    sprint. The backlog is always the recommendation (ADR-0036 §7): recommending the sprint for
+    collateral bugs put four findings into tamagotchi SP-013 with one click on "Aprovar", and
+    two thirds of three sprints went into the factory's own findings.
     """
     sprint = str(card.get("sprint") or "")
-    urgent = bool(sprint) and int(card.get("priority") or 500) <= 250  # bugs come in at 250
-    options = [Option(key="backlog", label="Enviar ao backlog", recommended=not urgent)]
+    options = [Option(key="backlog", label="Enviar ao backlog", recommended=True)]
     if sprint:
-        options.append(
-            Option(key="sprint", label=f"Incluir neste sprint ({sprint})", recommended=urgent)
-        )
+        options.append(Option(key="sprint", label=f"Incluir neste sprint ({sprint})"))
     options.append(Option(key="drop", label="Ignorar"))
     return Decision(
         id=str(card["id"]),

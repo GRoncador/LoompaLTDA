@@ -68,7 +68,9 @@ async def test_delivery_offers_each_finding_as_its_own_decision(factory: Factory
     by_id = {d.id: d for d in msg.decisions}
     assert [o.key for o in by_id[bug].options] == ["backlog", "sprint", "drop"]
     assert by_id[bug].options[1].label == "Incluir neste sprint (SP-001)"  # never the next one
-    assert next(o for o in by_id[bug].options if o.recommended).key == "sprint"  # collateral bug
+    # the backlog is always the recommendation (ADR-0036 §7): one click on "Aprovar" put four
+    # findings into tamagotchi SP-013 when collateral bugs recommended the sprint
+    assert next(o for o in by_id[bug].options if o.recommended).key == "backlog"
     assert next(o for o in by_id[debt].options if o.recommended).key == "backlog"
     assert by_id[bug].title.startswith("Achado: [Bug colateral]")
     await ctx.aclose()
@@ -189,3 +191,20 @@ def test_a_long_title_is_cut_at_a_word_never_inside_a_path():
     cut = clip(title, 80)
     assert cut.endswith("…") and "tests/" not in cut and len(cut) <= 80
     assert clip("curto", 80) == "curto"
+
+
+async def test_a_sprint_takes_only_so_many_findings_from_deliveries(factory: Factory):
+    """ADR-0036 §7: tamagotchi SP-013 started with 3 stories and ran 8. The sprint option goes to
+    the most urgent findings, as many as `kaizen_sprint_cap` still allows."""
+    factory.config.schedule.kaizen_sprint_cap = 1
+    factory.save()
+    ctx, sid, state, msg = await deliver(Factory.open(factory.root))
+    offered = [d.id for d in msg.decisions if any(o.key == "sprint" for o in d.options)]
+    assert len(offered) == 1
+    bug, debt = state.finding_cards
+    await Scheduler(ctx).aanswer(msg.id, FounderAnswer(decisions={offered[0]: "sprint"}))
+    from loompa.agents.kaizen import KaizenAgent
+
+    later = KaizenAgent(ctx).suggested_cards(state)  # the room is used up now
+    assert later and all(c["sprint"] == "" for c in later)
+    await ctx.aclose()
