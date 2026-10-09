@@ -337,6 +337,68 @@ Respond with JSON only: {{"rule": str, "generalizable": bool}}
 """
 
 
+# What a constitution lesson must not be (ADR-0036 §9). tamagotchi's constitution grew three
+# near-copies of "do not re-read a file" after tool-call storms the provider wrote (a lesson
+# blaming the team for the service), two telling agents to create tasks.md "in the checkout"
+# (the product then got specs/S-0xx/tasks.md, a Worker task each), one demanding a test for every
+# criterion against the plan's `review:` rule, and one asking to extend existing test files
+# against the one-file-per-story rule. The code enforces the first two kinds already; the rest
+# contradict the prompts.
+LESSON_SIMILAR = 0.22  # word overlap (Jaccard): the re-read trio 0.24-0.36, unrelated ones <=0.17
+_LESSON_TOOLS = re.compile(
+    r"\b(?:rel[eê](?:r|ia|u|ndo)?|releitura|re-?read\w*|mesmas? leituras?|repet\w*\s+(?:as\s+)?"
+    r"mesmas\s+(?:leituras|chamadas)|loop de consulta|ciclo de reconsulta|or[çc]amento de "
+    r"chamadas|tool (?:calls?|budget))\b",
+    re.I,
+)
+_LESSON_RECORDS = re.compile(
+    r"tasks\.md|plan\.md|spec\.md|\.loompa/|matriz de cobertura|um para um|roteiro de "
+    r"verifica[çc][ãa]o|rastreabilidade|traceability",
+    re.I,
+)
+_LESSON_EXTEND = re.compile(r"\b(?:estend|extend)\w*", re.I)
+_LESSON_TEST = re.compile(r"\btest", re.I)
+_STOPWORDS = (
+    "a o as os de da do das dos e em no na nos nas um uma uns umas que se ou para por com sem ao "
+    "aos à às é ser seu sua seus suas não nunca antes depois quando cada todo toda todos todas the "
+    "of to and in on for with is be it this that or no not"
+)
+_STOP = frozenset(_STOPWORDS.split())
+_LESSON_LINE = re.compile(r"^- \[[^\]]*\]\s*(.*)$", re.M)
+
+
+def _lesson_words(text: str) -> set[str]:
+    import unicodedata
+
+    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+    return {w[:6] for w in re.findall(r"[a-z0-9]{3,}", plain) if w not in _STOP}
+
+
+def lesson_refusal(rule: str, existing: list[str]) -> str:
+    """Why `rule` does not go into the constitution, or "" when it does (ADR-0036 §9)."""
+    if _LESSON_TOOLS.search(rule):
+        return "tool use: the factory's loop guard enforces it in code"
+    if _LESSON_RECORDS.search(rule):
+        return "the factory's records: the factory writes and commits them itself"
+    if _LESSON_EXTEND.search(rule) and _LESSON_TEST.search(rule):
+        return "contradicts the plan rule: each story's tests go in a file of its own"
+    mine = _lesson_words(rule)
+    for old in existing:
+        theirs = _lesson_words(old)
+        if mine and theirs and len(mine & theirs) / len(mine | theirs) >= LESSON_SIMILAR:
+            return f"repeats a lesson already there: {old[:120]}"
+    return ""
+
+
+def lessons_of(text: str) -> list[str]:
+    """The lessons section's rules, oldest first, without their date and story."""
+    _, sep, tail = text.partition(LESSONS_HEADING)
+    return [m.group(1).strip() for m in _LESSON_LINE.finditer(tail)] if sep else []
+
+
+LESSONS_HEADING = "## 7. Lições incorporadas"
+
+
 class ArchitectAgent(LoompaAgent):
     role = "architect"
     display = "Architect Loompa"
@@ -693,19 +755,40 @@ class ArchitectAgent(LoompaAgent):
         rule = str(data.get("rule") or "").strip()
         if not rule or data.get("generalizable") is False:
             return None
-        self.append_constitution_lesson(rule, state.story_id)
-        return rule
+        if self.append_constitution_lesson(rule, state.story_id):
+            return rule
+        return None
 
-    def append_constitution_lesson(self, rule: str, story_id: str) -> None:
+    def _storm_story(self, story_id: str) -> bool:
+        """The story's trouble came from the model service writing tool-call storms (ADR-0036
+        §2): what the team "learned" from it would be about the service, not the work."""
+        kinds = ("llm.storm", "tool.trimmed", "llm.upstream_avoided")
+        return bool(self.ctx.store.story_events(story_id, kinds))
+
+    def append_constitution_lesson(self, rule: str, story_id: str) -> bool:
+        """Add `rule` to the constitution's lessons. False when it is refused (`lesson_refusal`,
+        or a story whose failures were the service's): the refusal is an event, not a line."""
         path = self.ctx.factory.paths.constitution
         text = (
             path.read_text(encoding="utf-8")
             if path.is_file()
             else "# Constitution\n\n## 7. Lições incorporadas (Loop Kaizen)\n"
         )
+        why = lesson_refusal(rule, lessons_of(text))
+        if not why and self._storm_story(story_id):
+            why = "the failures came from tool-call storms of the model service"
+        if why:
+            self.ctx.emit(
+                "constitution.lesson_refused",
+                story_id=story_id,
+                agent=self.name,
+                rule=rule,
+                why=why,
+            )
+            return False
         line = f"- [{date.today().isoformat()} · {story_id}] {rule}"
         if line in text:
-            return
+            return False
         if "## 7. Lições incorporadas" in text:
             text = text.rstrip("\n") + "\n" + line + "\n"
         else:
@@ -713,6 +796,7 @@ class ArchitectAgent(LoompaAgent):
         path.write_text(text, encoding="utf-8")
         self.ctx.memory.index_file(path, kind="constitution", doc_id="constitution.md")
         self.ctx.emit("constitution.lesson", story_id=story_id, agent=self.name, rule=rule)
+        return True
 
 
 def _alternatives(raw: object) -> list[str]:

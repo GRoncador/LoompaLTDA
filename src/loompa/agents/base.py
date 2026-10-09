@@ -172,8 +172,28 @@ class LoompaAgent:
         return self.ctx.worktrees.as_role(self.role)
 
     def constitution(self, max_chars: int = 6000) -> str:
+        """The constitution within `max_chars`: its rules whole, then the newest lessons that fit.
+        A plain cut kept the oldest lessons and dropped every new one: tamagotchi's Worker read
+        3000 characters of a 5900-character file, one lesson and a half (ADR-0036 §9)."""
         text = self.ctx.factory.constitution_text()
-        return text[:max_chars]
+        if len(text) <= max_chars:
+            return text
+        head, sep, tail = text.partition("## 7. Lições incorporadas")
+        lines = tail.splitlines(keepends=True)
+        title, lessons = (lines[0], lines[1:]) if lines else ("", [])
+        lessons = [x for x in lessons if x.startswith("- [")]
+        if not sep or len(head) >= max_chars or not lessons:
+            return text[:max_chars]
+        room = max_chars - len(head) - len(sep) - len(title) - 60
+        kept: list[str] = []
+        for line in reversed(lessons):
+            if room - len(line) < 0:
+                break
+            kept.insert(0, line)
+            room -= len(line)
+        left_out = len(lessons) - len(kept)
+        note = f"(the {left_out} oldest lessons are left out here)\n" if left_out else ""
+        return head + sep + title + note + "".join(kept)
 
     def grounding(self, max_chars: int = 6000) -> str:
         """The constitution excerpt, then the company documents this role reads whole (13.2)."""
