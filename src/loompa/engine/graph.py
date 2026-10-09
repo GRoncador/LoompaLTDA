@@ -118,13 +118,16 @@ async def block(
     resume: str | Stage | None = None,
     executive: str | None = None,
     message: FounderMessage | None = None,
+    cause: str | None = None,
 ) -> StoryState:
     """Isolate the story: write an executive inbox message and pause. Never blocks the line.
-    `resume` is the phase to continue from after the founder answers (defaults to the current)."""
+    `resume` is the phase to continue from after the founder answers (defaults to the current).
+    `cause` names what stopped it in code terms (the files the fence refused): the same cause
+    twice in a row is a repeat whatever words the model used (ADR-0036 §6)."""
     ref = _write_tech_log(ctx, state, technical)
     master = MasterAgent(ctx)
-    repeats = _count_repeat(state, reason, technical)
-    if repeats > 1 and message is None and reason in _RETRYABLE_BLOCKS:
+    repeats = _count_repeat(state, reason, cause or technical)
+    if repeats > 1 and message is None and (reason in _RETRYABLE_BLOCKS or cause):
         message = _repeated_block_message(ctx, state, master, executive or technical, repeats)
     if message is not None:
         message.technical_ref = message.technical_ref or ref
@@ -274,6 +277,34 @@ def _repeated_block_message(
     )
     msg.sender = master.name
     msg.title = f"O mesmo problema voltou em “{state.title}”"
+    return msg
+
+
+def _records_block_message(ctx: EngineContext, state: StoryState) -> FounderMessage:
+    """The plan still asks to write the factory's records after the Architect revised it once
+    (ADR-0036 §6). Said plainly, with the ways out the code can carry out."""
+    msg = compose_blocked_message(
+        factory=ctx.slug,
+        story_id=state.story_id,
+        story_title=state.title,
+        reason=(
+            "Um passo do plano pede para gravar um documento na pasta interna da fábrica, que "
+            "não faz parte do produto e não pode ser liberada para uma história. O plano já foi "
+            "revisto uma vez e o passo continuou lá."
+        ),
+        impact="Nada foi integrado ao produto. As demais entregas seguem normalmente.",
+        options=[
+            Option(key="skip", label="Deixar para depois (volta ao backlog)", recommended=True),
+            Option(key="drop", label="Cancelar esta entrega"),
+            Option(
+                key="retry",
+                label="Tentar de novo sem esse passo",
+                description="Se você escrever uma orientação, ela vai junto para quem tentar.",
+            ),
+        ],
+    )
+    msg.sender = MasterAgent.display
+    msg.title = f"Um passo de “{state.title}” pede algo que não pode ser liberado"
     return msg
 
 
@@ -756,13 +787,50 @@ async def _align_once(ctx: EngineContext, state: StoryState, guidance: str) -> A
     return revised
 
 
+RECORDS_TASK_KEY = "records_task"  # a task that wrote under .loompa/ went back to the Architect
+RECORDS_GUIDANCE = (
+    "The Worker stopped because a task writes {paths}, under .loompa/. The factory keeps its "
+    "records there itself (spec, plan, checklist, decisions) and leaves that folder out of the "
+    "story's branch at merge, so that write can never be allowed, by anyone. Rewrite or drop the "
+    "task so neither the product nor its tests need anything under .loompa/: a decision goes in "
+    "`adr_proposal`; a test that reads a record there should test what the product does instead, "
+    "or its criterion is traced to `review:`."
+)
+
+
+def _records(paths: list[str]) -> list[str]:
+    return [p for p in paths if p.removeprefix("./").startswith(".loompa/")]
+
+
+async def _drop_records_task(ctx: EngineContext, state: StoryState, res: AgentResult) -> bool:
+    """The Worker stopped because its task writes the factory's records (ADR-0036 §6). The
+    Architect would never open .loompa/ in the fence, and the founder was asked six times in 27
+    minutes to "allow the decisions folder" on tamagotchi S-090, each yes changing nothing. The
+    Architect rewrites the plan once with the reason; True when the Worker should run again."""
+    refused = _records(list((res.data or {}).get("fence_refused") or []))
+    if not refused or not res.blocked_reason or state.extra.get(RECORDS_TASK_KEY):
+        return False
+    state.extra[RECORDS_TASK_KEY] = refused
+    try:
+        await ArchitectAgent(ctx).amend(
+            state, RECORDS_GUIDANCE.format(paths=", ".join(refused)), source="worker"
+        )
+    except LLMError as exc:
+        ctx.emit("plan.amend_failed", story_id=state.story_id, error=str(exc)[:200])
+        return False
+    ctx.emit("plan.records_task", story_id=state.story_id, paths=refused)
+    return True
+
+
 async def _widen_fence(ctx: EngineContext, state: StoryState, res: AgentResult) -> bool:
     """The Worker stopped because the plan's fence refused a file (contas Sprint 2, S-047: task 4
     needed cli.py, the plan left it out, and it became a finding for the founder). The Architect,
     who owns the plan, reviews it once per story with the Worker's reason; True when it opened a
     file the Worker asked for, and the Worker runs again."""
     refused = [
-        f for f in (res.data or {}).get("fence_refused") or [] if f not in state.allowed_paths
+        f
+        for f in (res.data or {}).get("fence_refused") or []
+        if f not in state.allowed_paths and not _records([f])  # never opened: _drop_records_task
     ]
     if (
         not refused
@@ -872,12 +940,13 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     )
     worker = worker_cls(ctx, name=label, tier_override=tier)
     res = await worker.run(state, wt)
-    if await _widen_fence(ctx, state, res):
+    if await _widen_fence(ctx, state, res) or await _drop_records_task(ctx, state, res):
         res = await worker.run(state, wt)
     await KaizenAgent(ctx).capture(state)
     if (res.data or {}).get("cost_cap"):
         return await cost_cap_block(ctx, state, float(res.data["cost_cap"]))
     if res.blocked_reason:
+        refused = sorted((res.data or {}).get("fence_refused") or [])
         return await block(
             ctx,
             state,
@@ -885,6 +954,9 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
             res.blocked_reason,
             options=res.blocked_options,
             resume="dev",
+            cause=f"fence refused: {', '.join(refused)}" if refused else None,
+            # a write under .loompa/ is never the founder's to allow: no option may offer it
+            message=_records_block_message(ctx, state) if _records(refused) else None,
         )
     if unfinished(res):
         ctx.emit(

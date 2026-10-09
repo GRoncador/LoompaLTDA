@@ -15,7 +15,7 @@ from conftest import git
 from loompa.agents import MasterAgent, ProductOwnerAgent
 from loompa.agents.dryrun import dry_run_script, role_of
 from loompa.comms import FounderAnswer, MessageStatus
-from loompa.engine import EngineContext, Scheduler, Stage, load_state
+from loompa.engine import EngineContext, Scheduler, Stage, StoryState, load_state
 from loompa.factory import Factory, bootstrap_factory
 from loompa.llm import LLMError, Message, MockProvider, ModelRouter, ToolCall
 from loompa.store import Store
@@ -2026,4 +2026,89 @@ async def test_a_sprint_that_ran_restarts_as_a_copy(factory: Factory):
     outcome = _json.loads(ctx.store.get(f"sprint_outcome:{sprint.id}"))
     assert outcome["as"] == new_id and outcome["reason"] == "outra abordagem"
     assert board.get(sprint.id).story_ids == ["S-001"]  # the original keeps what it spent
+    await ctx.aclose()
+
+
+async def test_a_task_that_writes_the_factorys_records_never_becomes_a_founder_question(
+    factory: Factory,
+):
+    """ADR-0036 §6, tamagotchi S-090: a task wrote a decision under .loompa/decisions, the fence
+    refused it, and the founder was asked six times in 27 minutes to "allow the decisions
+    folder"; each yes changed nothing, because the Architect never opens .loompa/. Now the plan
+    goes back to the Architect once with the reason, and if the step is still there the founder
+    gets the plain ways out, never an option to allow it."""
+    amends: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role == "worker":
+            if not tool_results(messages):
+                return [
+                    ToolCall(
+                        "w",
+                        "write_file",
+                        {"path": ".loompa/decisions/0003-x.md", "content": "decisão\n"},
+                    )
+                ]
+            return [
+                ToolCall(
+                    "b",
+                    "blocked",
+                    {
+                        "reason": "a pasta de decisões não está liberada",
+                        "options": ["Liberar a pasta das decisões no plano", "Deixar falhando"],
+                    },
+                )
+            ]
+        if role == "architect":
+            if "## Founder's guidance" in messages[-1].content or "under .loompa/" in str(
+                messages[-1].content
+            ):
+                amends.append(messages[-1].content)
+            return json.dumps(
+                {
+                    "approach": "x",
+                    "files": ["app/"],
+                    "contracts": "",
+                    "risks": [],
+                    "tasks": ["Registrar a decisão em app/"],
+                    "adr_proposal": "",
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Registrar uma decisão")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    events = [e["type"] for e in ctx.store.events_since(0, limit=10_000) if e["story_id"] == sid]
+    assert events.count("plan.records_task") == 1 and any("under .loompa/" in a for a in amends)
+    (msg,) = [m for m in ctx.store.list_messages(factory.slug) if m.story_id == sid]
+    assert "não pode ser liberado" in msg.title
+    assert [o.key for o in msg.options] == ["skip", "drop", "retry"]
+    assert not any("Liberar" in o.label for o in msg.options)
+    assert state.blocked_reason == "question"
+    await ctx.aclose()
+
+
+async def test_the_same_cause_twice_is_a_repeat_whatever_the_words(factory: Factory):
+    """ADR-0036 §6: the fingerprint of a question is its cause in code terms (the files the fence
+    refused), not the model's sentence, which changed on every one of S-090's six blocks."""
+    from loompa.engine.graph import BlockedReason, block
+
+    ctx = make_ctx(factory)
+    state = StoryState(story_id="S-1", title="t", phase="dev")
+    for words in ("a pasta não está liberada", "o documento não pode ser salvo"):
+        state = await block(
+            ctx,
+            state,
+            BlockedReason.QUESTION,
+            words,
+            options=["Liberar"],
+            resume="dev",
+            cause="fence refused: src/x.js",
+        )
+    last = ctx.store.get_message(state.blocked_message_id)
+    assert "mesmo problema voltou" in last.title.lower() or "mesmo problema" in last.context
+    assert [o.key for o in last.options] == ["skip", "drop", "retry"]
     await ctx.aclose()
