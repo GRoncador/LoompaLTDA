@@ -747,6 +747,36 @@ Decided 2026-09-29:
   What the bench cannot see (P2, P5, P7) runs as a live A/B (ADR-0035, `loompa prompts ab`), on in
   tamagotchi for both the Worker and the Architect, at 50%.
 
+**2026-10-09, ADR-0036 (lessons of tamagotchi's sprints 11 to 13):**
+
+- **Router:**
+  - a 402 pauses the whole account for 6 h and tells the founder;
+  - tool-call storms are cut in the stream and the upstream that wrote them is left out
+    (`provider.ignore`, plus the founder's `ignore_upstreams`);
+  - `_tool_loop` runs at most 20 distinct calls per answer.
+- **Integration:**
+  - a delivery brings a moved base in with its checks instead of rebasing blindly;
+  - `engine/line.py` stops the line when the base goes red: one fix card, one note, no duplicate
+    cards.
+- **Plan gate and blocks:**
+  - the plan gate refuses tasks that write or test `.loompa/`;
+  - a refused `.loompa/` write goes back to the Architect and is never a founder option;
+  - a question's repeat is its cause, not its wording.
+- **Kaizen and founder text:**
+  - findings recommend the backlog, and a sprint has a cap for them;
+  - the founder-text tidy pass fixes the mangled titles.
+- **Constitution:** lessons are filtered (tools, records, extending tests, near-copies,
+  storm-born stories), and agents read the newest that fit.
+- **Sprint report:**
+  - claimed once (`Store.claim`);
+  - a goal is never empty;
+  - asleep time is reported apart;
+  - `loompa run` warns on battery.
+- **Prompt A/B:** drawn balanced within each complexity, reported per complexity.
+- **Not done:**
+  - no system prompt was edited;
+  - the Worker's new "Already failing on the base" block was not benched.
+
 ## Known gaps / next steps
 
 **Since 2026-10-05 the plan is `docs/PLANO-2026-10.md`.** Its "Herdado do plano de setembro" section
