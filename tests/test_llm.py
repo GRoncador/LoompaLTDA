@@ -986,3 +986,70 @@ def test_revision_six_moves_the_founder_text_off_the_free_tier_but_keeps_a_choic
     tasks = data["models"]["role_tasks"]
     assert "deployer.summary" not in tasks and "master.wording" not in tasks
     assert tasks["master.exec_options"] == "tier1" and tasks["architect.plan"] == "tier2"
+
+
+def _one_account_two_models():
+    from loompa.config.schema import ALL_CLUSTERS
+
+    cfg = default_config()
+    tier = [
+        ModelCandidate(provider="xiaomi", model="mimo-v2.6-flash"),
+        ModelCandidate(provider="xiaomi", model="mimo-v2.6-pro"),
+        ModelCandidate(provider="deepseek", model="deepseek-chat"),
+    ]
+    cfg.models.tiers = {t: list(tier) for t in ("tier1", "tier2", "tier3")}
+    cfg.models.matrix = {c: {t: list(tier) for t in cfg.models.tiers} for c in ALL_CLUSTERS}
+    return cfg
+
+
+async def test_an_account_with_no_credit_is_skipped_for_hours_and_told_once():
+    """tamagotchi, 07/10: Xiaomi's account ran out of credit and answered 402 to 256 calls in two
+    days, retried every 5 minutes as if it were a rate limit, and nobody was told."""
+    cfg = _one_account_two_models()
+    told: list[tuple[str, str]] = []
+    events: list[tuple[str, dict]] = []
+    empty = MockProvider(
+        "xiaomi",
+        script=lambda *a: QuotaExhausted(
+            "xiaomi/mimo-v2.6-flash: cota/limite (402): Insufficient balance", status=402
+        ),
+    )
+    router = ModelRouter(
+        cfg,
+        providers={"xiaomi": empty, "deepseek": MockProvider("deepseek", script=scripted)},
+        on_billing=lambda p, d: told.append((p, d)),
+        on_event=lambda t, **kw: events.append((t, kw)),
+        max_retries=0,
+    )
+    rc = await router.complete("worker", [Message("user", "x")])
+    assert rc.candidate.provider == "deepseek"
+    # one refusal stands for the whole account: its other model is not tried
+    assert [c["model"] for c in empty.calls] == ["mimo-v2.6-flash"]
+    for _ in range(3):
+        await router.complete("worker", [Message("user", "x")])
+    assert len(empty.calls) == 1
+    assert [p for p, _ in told] == ["xiaomi"] and "Insufficient balance" in told[0][1]
+    (billing,) = [kw for t, kw in events if t == "llm.billing"]
+    assert billing["provider"] == "xiaomi" and billing["paused_s"] == cfg.models.billing_pause_s
+    reasons = [kw["reason"] for t, kw in events if t == "llm.fallthrough"]
+    assert reasons == ["billing"]
+    # a saved setting (a new key, a topped-up account) tries it again at once
+    router.reset_providers()
+    router._providers["xiaomi"] = empty
+    await router.complete("worker", [Message("user", "x")])
+    assert len(empty.calls) == 2
+
+
+@respx.mock
+async def test_the_key_check_tells_an_empty_account_from_a_rate_limit():
+    from loompa.llm import probe_provider
+
+    cfg = _one_account_two_models()
+    cfg.providers["xiaomi"].stream = False
+    url = cfg.providers["xiaomi"].base_url.rstrip("/") + "/chat/completions"
+    respx.post(url).respond(402, json={"error": {"message": "Insufficient balance"}})
+    r = await probe_provider(cfg, "xiaomi", secrets={"XIAOMI_API_KEY": "sk-x"})
+    assert not r.ok and "sem saldo" in r.detail
+    respx.post(url).respond(429, json={"error": {"message": "slow down"}})
+    r = await probe_provider(cfg, "xiaomi", secrets={"XIAOMI_API_KEY": "sk-x"})
+    assert r.ok and "limite de uso" in r.detail

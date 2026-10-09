@@ -892,3 +892,15 @@ def test_applying_a_one_cluster_proposal_keeps_the_other_clusters_lists():
     general = [c.model for c in config.models.matrix["general"]["tier1"]]
     assert general[0] == "n/smart"
     assert {"strategy", "engineering", "routine", "general"} <= set(config.models.matrix)
+
+
+async def test_an_account_with_no_credit_is_told_once_until_it_answers_again(factory: Factory):
+    ctx = make_ctx(factory, dry_run=True)
+    watch = ModelWatch(ctx)
+    watch.billing_refused("xiaomi")
+    watch.billing_refused("xiaomi")  # every model of the account fails; one note
+    (msg,) = ctx.store.list_messages(factory.slug, status="pending")
+    assert "sem saldo" in msg.title and msg.executive_audit() == []
+    watch.billing_back("xiaomi")  # a call answered: the next refusal is news again
+    watch.billing_refused("xiaomi")
+    assert len(ctx.store.list_messages(factory.slug, status="pending")) == 2

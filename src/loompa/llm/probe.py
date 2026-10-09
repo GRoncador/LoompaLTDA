@@ -99,7 +99,16 @@ async def probe_provider(
             temperature=0.0,
             max_tokens=PROBE_MAX_TOKENS,
         )
-    except QuotaExhausted:
+    except QuotaExhausted as exc:
+        if exc.billing:
+            # a key that works on an account with no credit: every call fails until it is topped
+            # up (tamagotchi, 07/10: 256 refusals in two days and nobody knew)
+            return ProbeResult(
+                name,
+                False,
+                "chave válida, mas a conta está sem saldo; recarregue no site do provedor",
+                model=model,
+            )
         return ProbeResult(
             name, True, "chave válida; o provedor está com limite de uso no momento", model=model
         )

@@ -115,6 +115,8 @@ class EngineContext:
             ctx.router.on_model_gone = ctx._on_model_gone
         if ctx.router.on_event is None:
             ctx.router.on_event = ctx.emit
+        if getattr(ctx.router, "on_billing", "absent") is None:
+            ctx.router.on_billing = ctx._on_billing
         return ctx
 
     def reload_secrets(self) -> Secrets:
@@ -167,8 +169,17 @@ class EngineContext:
         except OtlpUnavailable as exc:
             log.warning("trace.otlp.endpoint is set but the export is not installed: %s", exc)
 
+    def _on_billing(self, provider: str, detail: str) -> None:
+        from loompa.models_sync import ModelWatch
+
+        try:
+            ModelWatch(self).billing_refused(provider)
+        except Exception:  # noqa: BLE001 - a notice must never break the call that is failing
+            log.exception("could not report the missing credit of %s", provider)
+
     def _on_llm_call(self, role: str, agent: str, routed: Any) -> None:
         self._watch_aliases(role, agent, routed)
+        self._credit_back(routed.candidate.provider)
         resp = routed.response
         self.emit(
             "llm.call",
@@ -196,6 +207,14 @@ class EngineContext:
             ModelWatch(self).model_gone(candidate.provider, candidate.model)
         except Exception:  # noqa: BLE001 - a notice must never break the call that is failing
             log.exception("could not report a model the provider does not have")
+
+    def _credit_back(self, provider: str) -> None:
+        from loompa.models_sync import ModelWatch
+
+        try:
+            ModelWatch(self).billing_back(provider)
+        except Exception:  # noqa: BLE001 - a notice must never cost the call that already answered
+            log.exception("could not clear the missing credit of %s", provider)
 
     def _watch_aliases(self, role: str, agent: str, routed: Any) -> None:
         from loompa.models_sync import AliasWatch

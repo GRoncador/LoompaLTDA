@@ -33,6 +33,7 @@ from loompa.llm.catalog import (
     fetch_endpoint_prices,
 )
 from loompa.sprints import SprintBoard, SprintStatus
+from loompa.store import now_iso
 
 SENDER = "Ops Loompa"
 PREFIX = "models_sync:"  # kv: `models_sync:<message id>` holds the proposal that message asks about
@@ -282,6 +283,7 @@ class AliasWatch:
 PRICE_SEEN = "price_seen:"  # kv: the catalogue's reference price (one provider), for the event
 PRICE_MEDIAN = "price_median:"  # kv: `{"median", "providers"}` last told to the founder
 MODEL_GONE = "model_gone:"  # kv: `model_gone:<provider>/<model>` = already reported once
+NO_CREDIT = "no_credit:"  # kv: `no_credit:<provider>` = when its 402 was told (empty: answering)
 PRICE_JUMP = 0.10  # a rise under 10% is noise from rounding, not news
 
 
@@ -441,3 +443,41 @@ class ModelWatch:
     def forget(self, provider: str, model: str) -> None:
         """A model that answers again may fail again later, and that is news once more."""
         self.ctx.store.set(MODEL_GONE + f"{provider}/{model}", "")
+
+    # ------------------------------------------------------------- no credit
+    def billing_refused(self, provider: str) -> None:
+        """A provider answered 402: the account behind the key has no credit (ADR-0036 §1). Told
+        once until a call through it answers again; the router already skips it for hours."""
+        key = NO_CREDIT + provider
+        if self.ctx.store.get(key):
+            return
+        self.ctx.store.set(key, now_iso())
+        cfg = self.ctx.config.providers.get(provider)
+        name = (cfg.label if cfg and cfg.label else "") or provider
+        self.ctx.emit("models.no_credit", provider=provider)
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                kind=MessageKind.FINANCE,
+                sender=SENDER,
+                title=f"A conta {name} ficou sem saldo",
+                context=(
+                    f"O provedor {name} recusou as chamadas por falta de saldo na conta. A "
+                    "fábrica seguiu com os outros modelos da lista e volta a tentar este a cada "
+                    "poucas horas."
+                ),
+                impact=(
+                    "Enquanto o saldo não for recarregado, o trabalho pode sair mais caro ou mais "
+                    "lento pelos outros caminhos. Depois de recarregar no site do provedor, salve "
+                    "as configurações para a fábrica tentar de novo na hora."
+                ),
+                allow_free_text=False,
+            )
+        )
+
+    def billing_back(self, provider: str) -> None:
+        """A call through `provider` answered: its credit is back, and the next refusal is news."""
+        key = NO_CREDIT + provider
+        if self.ctx.store.get(key):
+            self.ctx.store.set(key, "")
+            self.ctx.emit("models.credit_back", provider=provider)

@@ -346,6 +346,9 @@ class ModelsConfig(BaseModel):
     stream_token_idle_s: float = Field(900.0, ge=10)
     # Wall-clock limit for a call to a provider that is not streamed.
     call_timeout_s: float = Field(600.0, ge=10)
+    # A provider that answers 402 (no credit left) is skipped, every model of it, this long: a
+    # 5-minute pause retried it 256 times in two days on tamagotchi (ADR-0036 §1).
+    billing_pause_s: float = Field(21600.0, ge=60)
     # Off: every role shares the `general` cluster, one 3-tier list instead of three.
     clusters_enabled: bool = True
     tier1_ceiling: float = Field(1.25, ge=0.0)

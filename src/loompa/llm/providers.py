@@ -89,6 +89,12 @@ class QuotaExhausted(LLMError):
         super().__init__(message, status=status, retryable=True)
         self.retry_after = retry_after
 
+    @property
+    def billing(self) -> bool:
+        """402: the account has no credit left. Not a rate limit: nothing changes until someone
+        tops it up, so it is paused for hours and the founder is told (ADR-0036 §1)."""
+        return self.status == 402
+
 
 def _retry_after_seconds(resp: httpx.Response) -> float | None:
     """Best-effort: `Retry-After` header, Gemini's `retryDelay: "23s"` detail, or an
@@ -124,6 +130,18 @@ def _retry_after_seconds(resp: httpx.Response) -> float | None:
             secs = float(m.group(1))
             return secs / 1000 if m.group(2) == "ms" else secs
     return None
+
+
+def _error_message(resp: httpx.Response) -> str:
+    """The provider's own sentence for a refusal (`{"error": {"message": ...}}`), or "". Never
+    raises, for the same reason as `_retry_after_seconds`."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return ""
+    err = body.get("error") if isinstance(body, dict) else None
+    msg = err.get("message") if isinstance(err, dict) else err
+    return str(msg).strip() if isinstance(msg, str) else ""
 
 
 @dataclass
@@ -758,8 +776,10 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def _raise_for_status(self, resp: httpx.Response, model: str) -> None:
         if resp.status_code == 429 or resp.status_code in (402, 503):
+            said = _error_message(resp) if resp.status_code == 402 else ""
             raise QuotaExhausted(
-                f"{self.name}/{model}: cota/limite ({resp.status_code})",
+                f"{self.name}/{model}: cota/limite ({resp.status_code})"
+                + (f": {said[:160]}" if said else ""),
                 status=resp.status_code,
                 retry_after=_retry_after_seconds(resp),
             )

@@ -125,6 +125,7 @@ class ModelRouter:
         on_call: Callable[[str, str, RoutedCall], None] | None = None,
         on_model_gone: Callable[[ModelCandidate, str], None] | None = None,
         on_event: Callable[..., None] | None = None,
+        on_billing: Callable[[str, str], None] | None = None,
         tracer: Tracer | None = None,
         max_retries: int = 2,
         max_cooldown_wait: float = 90.0,
@@ -141,6 +142,9 @@ class ModelRouter:
         # `(type, *, story_id, agent, **payload)`: cuts and fall-through become events, so a call
         # that spends minutes retrying is not silence to the stall watchdog or to the dashboard.
         self.on_event = on_event
+        # `(provider, what it said)`: a 402, the account has no credit. The engine turns it into
+        # one inbox note per provider (loompa.models_sync.ModelWatch.billing_refused).
+        self.on_billing = on_billing
         self.tracer = tracer or Tracer()
         self.max_retries = max_retries
         self._budget_checked_at = 0.0
@@ -163,6 +167,17 @@ class ModelRouter:
         # candidate thought to the 96k ceiling or looped on 6 of 9 calls (mean 8 min, one review
         # 44 min) while the next one in the same tier answered in about a minute.
         self._rested: dict[tuple[str, str], float] = {}
+        # provider name -> loop time until which none of its models is tried: it answered 402.
+        # Per provider, not per model: Xiaomi's empty account refused both MiMo models.
+        self._unpaid: dict[str, float] = {}
+
+    def _resting_until(self, cand: ModelCandidate) -> float:
+        """Loop time until which `cand` is skipped (0 when it is not): its own cooldown or its
+        provider's missing credit, whichever ends later."""
+        return max(
+            self._cooldown.get(f"{cand.provider}/{cand.model}", 0.0),
+            self._unpaid.get(cand.provider, 0.0),
+        )
 
     def remember_rested(self, events: list[dict[str, Any]], now_iso_: str) -> None:
         """Rests still running from `llm.rested` events (a restarted engine keeps them): each
@@ -209,6 +224,7 @@ class ModelRouter:
             n: p for n, p in self._providers.items() if getattr(p, "cfg", None) is None
         }
         self._cooldown.clear()
+        self._unpaid.clear()  # a new key or a topped-up account is worth a try at once
 
     def direct_first(
         self, cands: list[ModelCandidate], reasoning_effort: str | None = None
@@ -448,9 +464,7 @@ class ModelRouter:
             # Nothing answered. If every candidate is only cooling down, wait for the first
             # one to come back rather than failing the story on the spot.
             cooling = [
-                self._cooldown[f"{c.provider}/{c.model}"]
-                for c in cands
-                if self._cooldown.get(f"{c.provider}/{c.model}", 0) > loop.time()
+                self._resting_until(c) for c in cands if self._resting_until(c) > loop.time()
             ]
             if len(cooling) != len(cands):
                 break
@@ -504,6 +518,28 @@ class ModelRouter:
 
         return report
 
+    def _no_credit(self, provider: str, detail: str, story_id: str | None, who: str) -> None:
+        """`provider` answered 402: every model of it is skipped for `billing_pause_s`, and the
+        founder hears it once (`on_billing`). The calls go on through the other providers."""
+        loop = asyncio.get_running_loop()
+        first = self._unpaid.get(provider, 0) <= loop.time()
+        self._unpaid[provider] = loop.time() + self.config.models.billing_pause_s
+        if not first:
+            return
+        self._event(
+            "llm.billing",
+            story_id,
+            who,
+            provider=provider,
+            paused_s=self.config.models.billing_pause_s,
+            error=detail[:300],
+        )
+        if self.on_billing is not None:
+            try:
+                self.on_billing(provider, detail)
+            except Exception:  # noqa: BLE001 - a notice must never stop the call going on
+                log.exception("could not report the missing credit of %s", provider)
+
     def _event(self, type_: str, story_id: str | None, agent: str, **payload: Any) -> None:
         if self.on_event is None:
             return
@@ -546,6 +582,9 @@ class ModelRouter:
         )
         for cand in cands:
             key = f"{cand.provider}/{cand.model}"
+            if self._unpaid.get(cand.provider, 0) > loop.time():
+                calls.errors.append(f"{key}: conta sem saldo")
+                continue
             if self._cooldown.get(key, 0) > loop.time():
                 calls.errors.append(f"{key}: em cooldown")
                 continue
@@ -623,11 +662,15 @@ class ModelRouter:
                         who,
                         model=key,
                         role=role,
-                        reason="quota",
+                        reason="billing" if exc.billing else "quota",
                         status=exc.status,
                     )
+                    if exc.billing:
+                        self._no_credit(cand.provider, str(exc), story_id, who)
+                        resp = None
+                        break  # next candidate, of another provider
                     # Honour the provider's hint; otherwise a 429 is a per-minute rate limit,
-                    # anything else (402 billing, 503 overloaded) deserves a longer pause.
+                    # anything else (503 overloaded) deserves a longer pause.
                     pause = exc.retry_after or (60.0 if exc.status == 429 else 300.0)
                     self._cooldown[key] = loop.time() + pause
                     resp = None
