@@ -1111,8 +1111,9 @@ async def test_a_tool_call_storm_sends_the_same_model_through_another_upstream()
     await router.aclose()
 
 
-async def test_an_answer_that_fills_the_output_room_is_a_cut_whatever_it_says():
-    """A storm on tamagotchi ended at exactly 96000 tokens reported as `tool_calls`."""
+async def test_an_answer_that_fills_the_output_room_on_a_tool_call_is_a_cut():
+    """A storm on tamagotchi ended at exactly 96000 tokens reported as `tool_calls`; an answer
+    that says it stopped is believed (some providers leave reasoning out of `max_tokens`)."""
     cfg = _small_rooms(single_provider_config(), full=1000, ceiling=1000)
 
     def full(model, messages, tools):
@@ -1123,11 +1124,16 @@ async def test_an_answer_that_fills_the_output_room_is_a_cut_whatever_it_says():
             provider="deepseek",
             input_tokens=10,
             output_tokens=1000,
-            finish_reason="stop",
+            finish_reason=finish[0],
         )
 
+    finish = ["tool_calls"]
     router = ModelRouter(
         cfg, providers={"deepseek": MockProvider("deepseek", script=full)}, max_retries=0
     )
     with pytest.raises(LLMError, match="cortada"):
         await router.complete("worker", [Message("user", "x")])
+    finish[0] = "stop"
+    router._rested.clear()
+    rc = await router.complete("worker", [Message("user", "x")])
+    assert rc.response.output_tokens == 1000

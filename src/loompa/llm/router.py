@@ -837,9 +837,13 @@ class ModelRouter:
                     break
                 cost = self._record(resp, cand, tier, role, agent, story_id)
                 calls.spent += cost
-                # The output room ran out whatever the provider says: a storm on tamagotchi ended
-                # at exactly 96000 tokens reported as `tool_calls` (ADR-0036 §2).
-                cut = resp.truncated or resp.output_tokens >= budget
+                # The output room ran out even when the provider calls it `tool_calls`: a storm on
+                # tamagotchi ended at exactly 96000 tokens that way (ADR-0036 §2). An answer that
+                # says it stopped is believed: some providers leave reasoning out of `max_tokens`.
+                cut = resp.truncated or (
+                    resp.output_tokens >= budget
+                    and resp.finish_reason.lower() not in ("stop", "end_turn", "")
+                )
                 storm = tool_storm(
                     [(c.name, json.dumps(c.arguments, sort_keys=True)) for c in resp.tool_calls]
                 )
