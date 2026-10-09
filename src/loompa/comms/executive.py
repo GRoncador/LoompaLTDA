@@ -173,8 +173,11 @@ _JARGON: dict[str, str] = {
     r"\bnull ?pointer\b": "dado ausente",
     r"\bNoneType\b": "dado ausente",
     r"\bsegfault\b": "falha do programa",
-    r"\bregression\b": "algo que funcionava deixou de funcionar",
-    r"\bregressão\b": "algo que funcionava deixou de funcionar",
+    # a noun for a noun: "teste de regressão" became "teste de algo que funcionava deixou de
+    # funcionar" in tamagotchi's founder messages (ADR-0036 §8)
+    r"\b(?:testes? de regress(?:ão|ões)|regression tests?)\b": "teste contra a volta de defeitos",
+    r"\bregressions?\b": "volta de um defeito",
+    r"\bregress(?:ão|ões)\b": "volta de um defeito",
     r"\bflaky test\b": "verificação instável",
     r"\bCI pipeline\b": "verificação automática",
     r"\bendpoint\b": "ponto de acesso da API",
@@ -234,6 +237,35 @@ def plain_words(text: str) -> str:
     return text
 
 
+# What the replacements leave behind when several names sat side by side (ADR-0036 §8): "o ciclo
+# de imports entre um arquivo do projeto e um arquivo do projeto", "um arquivo do projeto ()",
+# "para o um valor do código".
+_PLACEHOLDERS = {
+    "um arquivo do projeto": "arquivos do projeto",
+    "um arquivo do sistema": "arquivos do sistema",
+    "um valor do código": "valores do código",
+    "um comando técnico": "comandos técnicos",
+}
+_COUNT = {2: "dois", 3: "três"}
+_EMPTY_PARENS = re.compile(r"\s*\(\s*[,;]?\s*\)")
+
+
+def _tidy(line: str) -> str:
+    for one, many in _PLACEHOLDERS.items():
+        run = re.compile(rf"{one}(?:(?:,\s*|\s+e\s+|\s+ou\s+){one})+")
+
+        def plural(m: re.Match[str], many: str = many, one: str = one) -> str:
+            n = m.group(0).count(one)
+            return f"{_COUNT.get(n, 'alguns')} {many}"
+
+        line = run.sub(plural, line)
+        # an article the writer had already put before the name: "para o um valor do código"
+        line = re.sub(rf"\b(?:o|a|os|as)\s+({one})", r"\1", line)
+    # a title that opened with the file it is about ("sw.js: start_url …"): the place says nothing
+    line = re.sub(r"(^|\]\s|:\s)um arquivo do projeto:\s+", r"\1", line)
+    return _EMPTY_PARENS.sub("", line)
+
+
 def sanitize_for_founder(text: str, *, max_chars: int = MAX_FOUNDER_CHARS) -> str:
     """Deterministically strip technical noise from `text` for Founder consumption."""
     text = _ANSI.sub("", text or "")
@@ -252,7 +284,7 @@ def sanitize_for_founder(text: str, *, max_chars: int = MAX_FOUNDER_CHARS) -> st
         line = _HEX_ID.sub("(id)", line)
         for pattern, plain in _JARGON.items():
             line = re.sub(pattern, plain, line, flags=re.I)
-        kept.append(line.rstrip())
+        kept.append(_tidy(line).rstrip())
     out = _TRAILING_NOISE.sub("\n\n", "\n".join(kept)).strip()
     if len(out) > max_chars:
         out = out[: max_chars - 1].rsplit(" ", 1)[0] + "…"

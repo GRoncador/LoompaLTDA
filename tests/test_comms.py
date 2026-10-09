@@ -154,3 +154,26 @@ async def test_a_rewrite_with_a_task_number_is_cleaned_and_kept_not_thrown_away(
     assert "roteiro de verificação" in msg.context and "T1" not in msg.context
     assert [o.label for o in msg.options] == ["Ajustar os testes", "Deixar para depois"]
     assert not audit_executive_text(f"{msg.title}\n{msg.context}\n{msg.impact}")
+
+
+def test_names_side_by_side_read_as_plain_portuguese():
+    """ADR-0036 §8: real founder text from tamagotchi deliveries, as the sanitizer left it."""
+    from loompa.comms.executive import sanitize_for_founder
+
+    cases = {
+        "Quebrar o ciclo de imports entre src/sprites.js e src/lcd_screen.js": (
+            "Quebrar o ciclo de imports entre dois arquivos do projeto"
+        ),
+        "Adicionar teste de regressão para content-types do servidor": (
+            "Adicionar teste contra a volta de defeitos para content-types do servidor"
+        ),
+        "detectar regressão real no carregamento": "detectar volta de um defeito real no carregamento",
+        "a navegação para o start_url './' resulta": "a navegação para um valor do código './' resulta",
+        "[Oportunidade] sw.js: o pré-cache não inclui a página": (
+            "[Oportunidade] o pré-cache não inclui a página"
+        ),
+        "mas tests/casca.test.js () fixa a lista": "mas um arquivo do projeto fixa a lista",
+        "Chegamos a uma decisão.": "Chegamos a uma decisão.",
+    }
+    for raw, plain in cases.items():
+        assert sanitize_for_founder(raw) == plain, raw
