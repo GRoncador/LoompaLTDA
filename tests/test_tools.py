@@ -323,3 +323,28 @@ async def test_a_tool_call_without_a_name_never_reaches_the_history(factory: Fac
     assert sent == ["list_dir"]  # the nameless ones were never sent back
     assert "had no tool name" in seen[-1][-1].content
     await ctx.aclose()
+
+
+async def test_an_answer_runs_each_distinct_tool_call_once_and_at_most_the_cap(  # noqa: F811
+    factory: Factory,
+):
+    """ADR-0036 §2, tamagotchi 08/10: one Architect answer asked for 5,331 `find_symbol` calls,
+    96% repeats, and every one of them ran and went into the next request."""
+    from loompa.agents.base import MAX_CALLS_PER_ANSWER
+
+    answer = [ToolCall(f"r{i}", "read_file", {"path": f"app/f{i}.py"}) for i in range(25)]
+    answer += [ToolCall(f"l{i}", "list_dir", {"path": "app"}) for i in range(9)]
+    script, seen = scripted_loop([answer, "terminei"])
+    ctx = make_ctx(factory, script)
+    agent = Prober(ctx)
+    messages = [Message("system", "s"), Message("user", "u")]
+    res = await agent.tool_loop(
+        messages, agent.explore_tools(), story=StoryState(story_id="S-1", title="t")
+    )
+    assert res.ended_by == "text" and res.tool_calls == MAX_CALLS_PER_ANSWER
+    sent = [tc.name for m in seen[-1] for tc in m.tool_calls]
+    assert len(sent) == MAX_CALLS_PER_ANSWER
+    assert "asked for 34 tool calls, 8 of them repeated" in seen[-1][-1].content
+    (ev,) = ctx.store.story_events("S-1", ("tool.trimmed",))
+    assert ev["payload"]["asked"] == 34 and ev["payload"]["ran"] == MAX_CALLS_PER_ANSWER
+    await ctx.aclose()

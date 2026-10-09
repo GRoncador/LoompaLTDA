@@ -1053,3 +1053,81 @@ async def test_the_key_check_tells_an_empty_account_from_a_rate_limit():
     respx.post(url).respond(429, json={"error": {"message": "slow down"}})
     r = await probe_provider(cfg, "xiaomi", secrets={"XIAOMI_API_KEY": "sk-x"})
     assert r.ok and "limite de uso" in r.detail
+
+
+@respx.mock
+async def test_a_tool_call_storm_sends_the_same_model_through_another_upstream():
+    """tamagotchi 08-09/10: 32 answers of 2,500 to 5,300 tool calls, all from the Makora
+    upstream of mimo-v2.6-flash, the other seven upstreams never did it (ADR-0036 §2)."""
+    from loompa.llm.router import UPSTREAM_REST_S
+
+    cfg = byok_config()
+    cfg.providers["openrouter"].stream = False
+    calls = [
+        {
+            "id": f"c{i}",
+            "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path": "a.py"}'},
+        }
+        for i in range(60)
+    ]
+    storm = {
+        "model": "xiaomi/mimo-v2.6-pro",
+        "provider": "Makora",
+        "choices": [{"finish_reason": "tool_calls", "message": {"tool_calls": calls}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 96000},
+    }
+    ok = {**OPENAI_OK, "provider": "DeepInfra"}
+    route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        side_effect=[httpx.Response(200, json=storm), httpx.Response(200, json=ok)]
+    )
+    events: list[tuple[str, dict]] = []
+    router = ModelRouter(
+        cfg,
+        secrets={"OPENROUTER_API_KEY": "k"},
+        on_event=lambda t, **kw: events.append((t, kw)),
+    )
+    rc = await router.complete("worker", [Message("user", "x")], story_id="S-82")
+    assert rc.candidate.model == "xiaomi/mimo-v2.6-pro" and len(rc.response.tool_calls) == 1
+    sent = [json.loads(c.request.content) for c in route.calls]
+    assert "provider" not in sent[0] and sent[1]["provider"] == {"ignore": ["makora"]}
+    (storm_ev,) = [kw for t, kw in events if t == "llm.storm"]
+    assert storm_ev["served_by"] == "Makora" and storm_ev["calls"] == 60
+    (avoided,) = [kw for t, kw in events if t == "llm.upstream_avoided"]
+    assert avoided["upstream"] == "makora" and avoided["rest_s"] == UPSTREAM_REST_S
+    route.side_effect = None
+    route.return_value = httpx.Response(200, json=ok)
+    await router.complete("architect", [Message("user", "y")])
+    assert json.loads(route.calls[-1].request.content)["provider"] == {"ignore": ["makora"]}
+    # a restarted engine keeps it out (`llm.upstream_avoided` events of the last hours)
+    from datetime import UTC, datetime
+
+    again = ModelRouter(cfg, providers={})
+    now = datetime.now(UTC).isoformat()
+    again.remember_rested(
+        [{"type": "llm.upstream_avoided", "created_at": now, "payload": avoided}], now
+    )
+    assert again._skipped_upstreams("openrouter") == ["makora"]
+    await router.aclose()
+
+
+async def test_an_answer_that_fills_the_output_room_is_a_cut_whatever_it_says():
+    """A storm on tamagotchi ended at exactly 96000 tokens reported as `tool_calls`."""
+    cfg = _small_rooms(single_provider_config(), full=1000, ceiling=1000)
+
+    def full(model, messages, tools):
+        return LLMResponse(
+            content="x" * 10,
+            tool_calls=[],
+            model=model,
+            provider="deepseek",
+            input_tokens=10,
+            output_tokens=1000,
+            finish_reason="stop",
+        )
+
+    router = ModelRouter(
+        cfg, providers={"deepseek": MockProvider("deepseek", script=full)}, max_retries=0
+    )
+    with pytest.raises(LLMError, match="cortada"):
+        await router.complete("worker", [Message("user", "x")])

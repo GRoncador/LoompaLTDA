@@ -144,11 +144,12 @@ class EngineContext:
 
         from loompa.store import now_iso
 
-        since = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        # an upstream left out after a tool-call storm stays out longer (ADR-0036 §2)
+        since = (datetime.now(UTC) - timedelta(hours=6)).isoformat()
         rested = [
             e
             for e in self.store.events_between(self.slug, since, now_iso())
-            if e["type"] == "llm.rested"
+            if e["type"] in ("llm.rested", "llm.upstream_avoided")
         ]
         if rested and hasattr(self.router, "remember_rested"):
             self.router.remember_rested(rested, now_iso())

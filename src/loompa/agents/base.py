@@ -30,7 +30,7 @@ from loompa.decider import (
 from loompa.engine.context import EngineContext
 from loompa.engine.state import Stage, StoryState
 from loompa.llm import LLMError, LLMResponse, Message
-from loompa.llm.providers import extract_json, llm_session
+from loompa.llm.providers import ToolCall, extract_json, llm_session
 from loompa.worktrees import WorktreeManager
 
 if TYPE_CHECKING:
@@ -120,6 +120,37 @@ NAMELESS_NOTE = (
     "error: your last tool call had no tool name, so nothing ran. Call the tool again with its "
     "name, or answer if you are done."
 )
+# The most distinct tool calls one answer runs (ADR-0036 §2). Real steps asked for fewer than 20
+# (tamagotchi, 2429 answers); a storm the router did not cut is trimmed here instead of running
+# thousands of reads and filling the next request with their results.
+MAX_CALLS_PER_ANSWER = 20
+TRIMMED_NOTE = (
+    "note: your last answer asked for {asked} tool calls{repeats}; only the first {ran} distinct "
+    "ones ran, and their results are above. Ask only for what your next step needs, and repeat "
+    "a call only after something it reads has changed."
+)
+
+
+def distinct_calls(
+    calls: list[ToolCall], cap: int, keep: tuple[str, ...] = ()
+) -> tuple[list[ToolCall], int]:
+    """The calls of one answer that run: each distinct call once, at most `cap`, in order, plus
+    every call named in `keep` (a terminal `done` is never dropped). Also how many repeats there
+    were, for the note."""
+    seen: set[str] = set()
+    out: list[ToolCall] = []
+    repeats = 0
+    for c in calls:
+        sig = c.name + json.dumps(c.arguments, sort_keys=True, default=str)
+        if sig in seen:
+            repeats += 1
+            continue
+        seen.add(sig)
+        if c.name in keep or len([x for x in out if x.name not in keep]) < cap:
+            out.append(c)
+    return out, repeats
+
+
 _SHADOW: set[asyncio.Task] = set()  # shadow calls in flight: kept so they are not collected
 
 
@@ -345,7 +376,28 @@ class LoompaAgent:
                             Message("user", NAMELESS_NOTE),
                         ]
                         continue
-                round_span.set(tool_calls=len(resp.tool_calls))
+                trimmed = ""
+                asked = len(resp.tool_calls)
+                if asked > 1:
+                    kept, repeats = distinct_calls(
+                        resp.tool_calls, MAX_CALLS_PER_ANSWER, keep=terminal
+                    )
+                    if len(kept) < asked:
+                        resp.tool_calls = kept
+                        self.ctx.emit(
+                            "tool.trimmed",
+                            story_id=story_id,
+                            agent=self.name,
+                            asked=asked,
+                            ran=len(kept),
+                            repeats=repeats,
+                        )
+                        trimmed = TRIMMED_NOTE.format(
+                            asked=asked,
+                            repeats=f", {repeats} of them repeated" if repeats else "",
+                            ran=len(kept),
+                        )
+                round_span.set(tool_calls=len(resp.tool_calls), asked=asked if trimmed else None)
                 if not resp.tool_calls:
                     if nudge and i < max_iterations - 1 and "done" not in (resp.text or "").lower():
                         messages += [Message("assistant", resp.text), Message("user", nudge)]
@@ -415,6 +467,8 @@ class LoompaAgent:
                         )
                     if guard.stuck:  # going in circles: stop here, the caller reads the guard
                         return LoopResult("loop", last_text, tool_calls=calls, raised=raised)
+                if trimmed:
+                    messages.append(Message("user", trimmed))
                 budget = self.ctx.config.schedule.context_compact_chars
                 prune_tool_history(
                     messages,

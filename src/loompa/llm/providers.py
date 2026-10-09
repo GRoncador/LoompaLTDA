@@ -47,12 +47,41 @@ class LLMError(RuntimeError):
 
 class LoopDetected(LLMError):
     """A streamed answer caught repeating itself (ADR-0016 §3): cut on strong evidence only.
-    `partial` is what was written up to the cut, so the attempt is still metered and traced."""
+    `partial` is what was written up to the cut, so the attempt is still metered and traced.
+    `storm`: the repetition was tool calls, not text (ADR-0036 §2)."""
 
-    def __init__(self, message: str, *, partial: LLMResponse, sample: str):
+    def __init__(self, message: str, *, partial: LLMResponse, sample: str, storm: bool = False):
         super().__init__(message, retryable=False)
         self.partial = partial
         self.sample = sample
+        self.storm = storm
+
+
+# A tool-call storm (ADR-0036 §2): one answer asking for more tool calls than any real step needs,
+# or the same call over and over. Measured on tamagotchi (07-09/10, 2429 answers): every answer
+# that was not degenerate asked for fewer than 20 calls, and 1918 of them for 1 to 5. The 32
+# degenerate ones, all from one upstream of one model, asked for 2,500 to 5,300 each, up to 96%
+# of them repeats, writing to the 96k ceiling for 5 to 18 minutes.
+STORM_CALLS = 40
+STORM_REPEATS = 10
+
+
+def tool_storm(calls: list[tuple[str, str]]) -> str:
+    """Why `calls` (name, raw arguments) is a storm, or "" when it is not."""
+    if len(calls) > STORM_CALLS:
+        return f"{len(calls)} tool calls in one answer"
+    if not calls:
+        return ""
+    (name, args), n = collections.Counter(calls).most_common(1)[0]
+    if n >= STORM_REPEATS:
+        return f"the same tool call {n} times in one answer: {name} {args[:120]}"
+    return ""
+
+
+def upstream_slug(served_by: str) -> str:
+    """OpenRouter's slug for the upstream it names in `provider` ("Io Net" -> "io-net"), the
+    form `provider.ignore` takes (checked against /models/<id>/endpoints, 09/10)."""
+    return re.sub(r"[^a-z0-9]+", "-", (served_by or "").lower()).strip("-")
 
 
 # How each provider says "I do not have that model". A 404 is the documented answer, but the one
@@ -472,6 +501,8 @@ class _StreamedAnswer:
         # tokens, so counting chunks read 7k for a call that wrote 18k (live, 2026-10-01)
         self.chars = 0
         self._checked = 0
+        # the calls whose deltas are over (a later index started), as (name, arguments)
+        self._finished: list[tuple[str, str]] = []
 
     @property
     def tokens(self) -> int:
@@ -484,6 +515,11 @@ class _StreamedAnswer:
             return ""
         self._checked = self.chars
         return repetition(_tail(self.reasoning)) or repetition(_tail(self.content))
+
+    def storm(self) -> str:
+        """Whether the tool calls written so far are a storm (`tool_storm`). Checked as each call
+        ends: the storm must be cut minutes before the output ceiling ends it."""
+        return tool_storm(self._finished)
 
     def feed(self, line: str) -> bool:
         """Read one line of the stream; True when it carried tokens (progress)."""
@@ -527,8 +563,12 @@ class _StreamedAnswer:
         return got
 
     def _merge_call(self, tc: dict[str, Any]) -> bool:
+        index = int(tc.get("index", len(self.calls)))
+        if index not in self.calls and self.calls:
+            last = self.calls[max(self.calls)]["function"]
+            self._finished.append((last["name"], last["arguments"]))
         cur = self.calls.setdefault(
-            int(tc.get("index", len(self.calls))),
+            index,
             {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
         )
         if tc.get("id"):
@@ -596,6 +636,11 @@ class OpenAICompatibleProvider(LLMProvider):
     def available(self) -> bool:
         return bool(self.api_key) or not self.cfg.api_key_env
 
+    @property
+    def routes_upstreams(self) -> bool:
+        """OpenRouter serves each model through several upstreams and takes `provider.ignore`."""
+        return is_openrouter_endpoint(self.base_url)
+
     async def complete(
         self,
         model,
@@ -607,6 +652,7 @@ class OpenAICompatibleProvider(LLMProvider):
         json_mode=False,
         reasoning_effort="",
         on_progress: Callable[[int], None] | None = None,
+        ignore_upstreams: list[str] | None = None,
     ) -> LLMResponse:
         try:
             return await self._complete(
@@ -619,6 +665,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 reasoning_effort,
                 dummy_signature=False,
                 on_progress=on_progress,
+                ignore_upstreams=ignore_upstreams,
             )
         except LLMError as exc:
             # Gemini 3 refuses a function call in the history that it did not sign. That happens
@@ -641,6 +688,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 reasoning_effort,
                 dummy_signature=True,
                 on_progress=on_progress,
+                ignore_upstreams=ignore_upstreams,
             )
 
     async def _complete(
@@ -655,6 +703,7 @@ class OpenAICompatibleProvider(LLMProvider):
         *,
         dummy_signature: bool,
         on_progress: Callable[[int], None] | None = None,
+        ignore_upstreams: list[str] | None = None,
     ) -> LLMResponse:
         if not self.available():
             raise LLMError(f"chave de API ausente: defina {self.cfg.api_key_env}", retryable=True)
@@ -672,6 +721,10 @@ class OpenAICompatibleProvider(LLMProvider):
             payload["response_format"] = {"type": "json_object"}
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
+        if self.routes_upstreams:
+            skip = sorted({*self.cfg.ignore_upstreams, *(ignore_upstreams or [])})
+            if skip:
+                payload["provider"] = {"ignore": skip}
         headers = {"Content-Type": "application/json", **self.cfg.extra_headers}
         if _session.get() and is_openrouter_endpoint(self.base_url):
             headers["x-session-id"] = _session.get()
@@ -732,6 +785,8 @@ class OpenAICompatibleProvider(LLMProvider):
                             on_progress(answer.tokens)
                         if why := answer.looping():
                             raise self._loop(model, answer, payload, start, why)
+                        if why := answer.storm():
+                            raise self._loop(model, answer, payload, start, why, storm=True)
                     elif now - last_token > token_idle:
                         raise LLMError(
                             f"{self.name}/{model}: nenhum token por {token_idle:.0f}s",
@@ -759,19 +814,29 @@ class OpenAICompatibleProvider(LLMProvider):
         return self._parse(answer.as_response(), model, duration)
 
     def _loop(
-        self, model: str, answer: _StreamedAnswer, payload: dict[str, Any], start: float, why: str
+        self,
+        model: str,
+        answer: _StreamedAnswer,
+        payload: dict[str, Any],
+        start: float,
+        why: str,
+        *,
+        storm: bool = False,
     ) -> LoopDetected:
         """What was written until the cut, metered on estimates: the stream ends before the
         usage chunk, and the provider bills the tokens anyway."""
         partial = self._parse(answer.as_response(), model, int((time.monotonic() - start) * 1000))
-        partial.finish_reason = "loop"
+        partial.finish_reason = "storm" if storm else "loop"
         partial.output_tokens = partial.output_tokens or answer.tokens
-        partial.reasoning_tokens = partial.reasoning_tokens or answer.tokens
+        if not storm:
+            partial.reasoning_tokens = partial.reasoning_tokens or answer.tokens
         partial.input_tokens = partial.input_tokens or len(json.dumps(payload["messages"])) // 4
+        what = "chamadas de ferramenta em massa" if storm else "raciocínio em loop"
         return LoopDetected(
-            f"{self.name}/{model}: raciocínio em loop, cortado ({why[:160]})",
+            f"{self.name}/{model}: {what}, cortado ({why[:160]})",
             partial=partial,
             sample=why,
+            storm=storm,
         )
 
     def _raise_for_status(self, resp: httpx.Response, model: str) -> None:

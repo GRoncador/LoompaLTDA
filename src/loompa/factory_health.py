@@ -536,6 +536,36 @@ def per_story_counts(w: Window) -> list[Finding]:
     return out
 
 
+def storms(w: Window) -> list[Finding]:
+    """Answers that were tool-call storms, by the upstream that wrote them (ADR-0036 §2).
+    tamagotchi 07-09/10: 32 answers of 2,500 to 5,300 calls each, all from one OpenRouter
+    upstream of one model, 5.5 hours of model time; nothing said where they came from."""
+    by: dict[str, list[dict]] = defaultdict(list)
+    for e in w.of("llm.storm"):
+        by[e["payload"].get("served_by") or e["payload"].get("model", "?")].append(e)
+    return [
+        Finding(
+            signal="llm.storm",
+            key=str(who),
+            title=f"Respostas com chamadas de ferramenta em massa vindas de {who}",
+            detail=(
+                f"{len(evs)} respostas pediram dezenas ou milhares de chamadas de uma vez e foram "
+                "cortadas; o roteador deixa esse fornecedor de fora por algumas horas. Para tirá-lo "
+                "de vez, ponha-o em ignore_upstreams do provedor."
+            ),
+            area="router",
+            severity="high",
+            impact={"calls": len(evs)},
+            evidence=[
+                {"story": e["story_id"], "event": e["id"], "model": e["payload"].get("model")}
+                for e in evs[:6]
+            ],
+            stories=sorted({e["story_id"] for e in evs if e["story_id"]}),
+        )
+        for who, evs in by.items()
+    ]
+
+
 def fallthroughs(w: Window) -> list[Finding]:
     evs = w.of("llm.fallthrough")
     if len(evs) < FALLTHROUGHS:
@@ -956,6 +986,7 @@ SIGNALS: tuple[Callable[[Window], list[Finding]], ...] = (
     runaways,
     task_limits,
     slow_roles,
+    storms,
     stalls,
     per_story_counts,
     fallthroughs,

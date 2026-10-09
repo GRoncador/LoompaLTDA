@@ -7,6 +7,7 @@ escalation ladder (Tier 2 -> Tier 1) is expressed via `tier_override`.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Callable, Mapping
@@ -30,6 +31,8 @@ from loompa.llm.providers import (
     is_openrouter_endpoint,
     model_not_found,
     resolve_key,
+    tool_storm,
+    upstream_slug,
 )
 from loompa.trace import Tracer
 
@@ -46,6 +49,9 @@ LONG_REASONING_TOKENS = 16384
 
 
 RUNAWAY_REST_S = 3600.0  # a candidate that ran away for a role goes last for that role this long
+# An OpenRouter upstream that wrote a tool-call storm is left out of that provider's calls this long
+# (ADR-0036 §2): tamagotchi's 32 storms came from one upstream over 23 hours.
+UPSTREAM_REST_S = 6 * 3600.0
 REASONING_KEEP_CHARS = 12_000  # the loop detector's window: enough to tell a loop from thinking
 
 
@@ -170,6 +176,10 @@ class ModelRouter:
         # provider name -> loop time until which none of its models is tried: it answered 402.
         # Per provider, not per model: Xiaomi's empty account refused both MiMo models.
         self._unpaid: dict[str, float] = {}
+        # (provider name, upstream slug) -> loop time until which OpenRouter is told to skip that
+        # upstream (`provider.ignore`): it wrote a tool-call storm. The model stays; another
+        # upstream serves it (ADR-0036 §2).
+        self._avoided: dict[tuple[str, str], float] = {}
 
     def _resting_until(self, cand: ModelCandidate) -> float:
         """Loop time until which `cand` is skipped (0 when it is not): its own cooldown or its
@@ -181,7 +191,8 @@ class ModelRouter:
 
     def remember_rested(self, events: list[dict[str, Any]], now_iso_: str) -> None:
         """Rests still running from `llm.rested` events (a restarted engine keeps them): each
-        lasts RUNAWAY_REST_S from when it was recorded."""
+        lasts RUNAWAY_REST_S from when it was recorded. `llm.upstream_avoided` ones the same,
+        for UPSTREAM_REST_S."""
         from datetime import datetime
 
         now = datetime.fromisoformat(now_iso_)
@@ -189,8 +200,37 @@ class ModelRouter:
         for e in events:
             p = e.get("payload") or {}
             age = (now - datetime.fromisoformat(e["created_at"])).total_seconds()
-            if p.get("model") and p.get("role") and age < RUNAWAY_REST_S:
+            if e.get("type") == "llm.upstream_avoided":
+                if p.get("provider") and p.get("upstream") and age < UPSTREAM_REST_S:
+                    self._avoided[(p["provider"], p["upstream"])] = mono + UPSTREAM_REST_S - age
+            elif p.get("model") and p.get("role") and age < RUNAWAY_REST_S:
                 self._rested[(p["model"], p["role"])] = mono + RUNAWAY_REST_S - age
+
+    def _skipped_upstreams(self, provider: str) -> list[str]:
+        """The upstreams OpenRouter is told to skip for `provider`'s calls right now."""
+        now = time.monotonic()
+        return sorted(u for (p, u), until in self._avoided.items() if p == provider and until > now)
+
+    def _avoid_upstream(
+        self, provider: str, served_by: str, story_id: str | None, who: str, model: str
+    ) -> bool:
+        """Leave `served_by` out of `provider`'s calls for UPSTREAM_REST_S. False when there is
+        nothing to leave out (no upstream named, or it was already left out)."""
+        slug = upstream_slug(served_by)
+        if not slug or self._avoided.get((provider, slug), 0) > time.monotonic():
+            return False
+        self._avoided[(provider, slug)] = time.monotonic() + UPSTREAM_REST_S
+        self._event(
+            "llm.upstream_avoided",
+            story_id,
+            who,
+            provider=provider,
+            upstream=slug,
+            served_by=served_by,
+            model=model,
+            rest_s=UPSTREAM_REST_S,
+        )
+        return True
 
     def _rest(self, key: str, role: str, story_id: str | None, who: str, why: str) -> None:
         """`key` ran away for `role`: that role tries it last for RUNAWAY_REST_S. The model list
@@ -518,6 +558,43 @@ class ModelRouter:
 
         return report
 
+    def _stormed(
+        self,
+        resp: LLMResponse,
+        why: str,
+        prov: LLMProvider,
+        cand: ModelCandidate,
+        key: str,
+        role: str,
+        story_id: str | None,
+        who: str,
+        stormed: bool,
+    ) -> bool:
+        """An answer that was a tool-call storm (ADR-0036 §2). True: try the same model again
+        with the upstream that wrote it left out (OpenRouter serves it through others). False:
+        rest the model for this role and go to the next candidate, as for a loop."""
+        self._event(
+            "llm.storm",
+            story_id,
+            who,
+            model=key,
+            role=role,
+            served_by=resp.served_by or None,
+            tokens=resp.output_tokens,
+            calls=len(resp.tool_calls),
+            sample=why[:200],
+        )
+        if (
+            not stormed
+            and getattr(prov, "routes_upstreams", False)
+            and self._avoid_upstream(cand.provider, resp.served_by, story_id, who, key)
+        ):
+            log.warning("%s: storm from %s; same model, another upstream", key, resp.served_by)
+            return True
+        self._event("llm.fallthrough", story_id, who, model=key, role=role, reason="storm")
+        self._rest(key, role, story_id, who, "storm")
+        return False
+
     def _no_credit(self, provider: str, detail: str, story_id: str | None, who: str) -> None:
         """`provider` answered 402: every model of it is skipped for `billing_pause_s`, and the
         founder hears it once (`on_billing`). The calls go on through the other providers."""
@@ -605,6 +682,7 @@ class ModelRouter:
             )
             cuts = 0
             retry = 0
+            stormed = False  # one more try on another upstream after a storm, then the next model
             while True:
                 calls.count += 1
                 attempt: dict[str, Any] = {"model": key, "max_tokens": budget}
@@ -613,11 +691,16 @@ class ModelRouter:
                 calls.attempts.append(attempt)
                 started = loop.time()
                 streamed = bool(getattr(prov, "streams", False))
-                extra = (
+                extra: dict[str, Any] = (
                     {"on_progress": self._progress(story_id, who, key, role, started)}
                     if streamed
                     else {}
                 )
+                if getattr(prov, "routes_upstreams", False) and (
+                    skip := self._skipped_upstreams(cand.provider)
+                ):
+                    extra["ignore_upstreams"] = skip
+                    attempt["ignored_upstreams"] = skip
                 try:
                     # A streamed call has no wall-clock limit: it fails on silence and its output
                     # room ends a runaway (ADR-0016 §4); the others keep `call_timeout_s`.
@@ -682,13 +765,22 @@ class ModelRouter:
                     calls.spent += cost
                     calls.errors.append(str(exc))
                     attempt.update(
-                        outcome="loop",
+                        outcome="storm" if exc.storm else "loop",
                         output_tokens=exc.partial.output_tokens,
                         cost_usd=round(cost, 6),
                         ms=int((loop.time() - started) * 1000),
                         loop=exc.sample[:300],
+                        **({"served_by": exc.partial.served_by} if exc.partial.served_by else {}),
                         **_cut_tail(exc.partial, keep),
                     )
+                    if exc.storm:
+                        if self._stormed(
+                            exc.partial, exc.sample, prov, cand, key, role, story_id, who, stormed
+                        ):
+                            stormed = True
+                            continue  # the same model through another upstream
+                        resp = None
+                        break
                     log.warning("%s entrou em loop; cortado e próximo modelo", key)
                     self._event(
                         "llm.loop",
@@ -745,8 +837,14 @@ class ModelRouter:
                     break
                 cost = self._record(resp, cand, tier, role, agent, story_id)
                 calls.spent += cost
+                # The output room ran out whatever the provider says: a storm on tamagotchi ended
+                # at exactly 96000 tokens reported as `tool_calls` (ADR-0036 §2).
+                cut = resp.truncated or resp.output_tokens >= budget
+                storm = tool_storm(
+                    [(c.name, json.dumps(c.arguments, sort_keys=True)) for c in resp.tool_calls]
+                )
                 attempt.update(
-                    outcome="cut" if resp.truncated else "ok",
+                    outcome="storm" if storm else "cut" if cut else "ok",
                     finish_reason=resp.finish_reason,
                     input_tokens=resp.input_tokens,
                     output_tokens=resp.output_tokens,
@@ -758,11 +856,19 @@ class ModelRouter:
                     ),
                     **(
                         _cut_tail(resp, keep)
-                        if resp.truncated or resp.reasoning_tokens > LONG_REASONING_TOKENS
+                        if cut or resp.reasoning_tokens > LONG_REASONING_TOKENS
                         else {}
                     ),
                 )
-                if not resp.truncated:
+                if storm:
+                    # a whole answer that is a storm (not streamed, or written in one chunk)
+                    calls.errors.append(f"{key}: chamadas de ferramenta em massa ({storm})")
+                    if self._stormed(resp, storm, prov, cand, key, role, story_id, who, stormed):
+                        stormed = True
+                        continue
+                    resp = None
+                    break
+                if not cut:
                     if cuts:
                         self._fitted[(key, role)] = budget
                     break

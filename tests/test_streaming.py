@@ -322,3 +322,66 @@ def test_ops_tells_the_founder_a_loop_plainly_and_tries_again_at_once():
 
     t = triage(LLMError("todos os modelos do tier falharam: a/x: raciocínio em loop, cortado (y)"))
     assert not t.transient and "repetitivo" in t.cause and audit_executive_text(t.cause) == []
+
+
+def _calls(n: int, args: str = '{"path": "a.py"}', distinct: bool = False) -> list[dict]:
+    return [
+        delta(
+            tool_calls=[
+                {
+                    "index": i,
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": f'{{"path": "f{i}.py"}}' if distinct else args,
+                    },
+                }
+            ]
+        )
+        for i in range(n)
+    ]
+
+
+def test_a_storm_of_tool_calls_is_told_apart_from_a_step_that_reads_a_few_files():
+    """ADR-0036 §2: real answers asked for fewer than 20 calls; the storms for thousands."""
+    from loompa.llm.providers import STORM_CALLS, STORM_REPEATS
+
+    few = _StreamedAnswer()
+    for c in _calls(6, distinct=True):
+        few.feed("data: " + json.dumps(c))
+    assert few.storm() == ""
+    same = _StreamedAnswer()
+    for c in _calls(STORM_REPEATS + 1):
+        same.feed("data: " + json.dumps(c))
+    assert "the same tool call" in same.storm()
+    many = _StreamedAnswer()
+    for c in _calls(STORM_CALLS + 2, distinct=True):
+        many.feed("data: " + json.dumps(c))
+    assert "tool calls in one answer" in many.storm()
+
+
+@respx.mock
+async def test_a_storm_is_cut_in_the_stream_and_says_who_wrote_it(provider):
+    from loompa.llm.providers import LoopDetected
+
+    body = sse({**delta(content=""), "provider": "Makora"}, *_calls(30), "data: [DONE]")
+    respx.post(URL).mock(return_value=httpx.Response(200, headers=SSE, content=body))
+    with pytest.raises(LoopDetected) as err:
+        await provider.complete("xiaomi/mimo-v2.6-flash", [Message("user", "u")])
+    assert err.value.storm and err.value.partial.served_by == "Makora"
+    assert err.value.partial.finish_reason == "storm"
+
+
+@respx.mock
+async def test_the_founders_ignored_upstreams_go_in_every_openrouter_call(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    cfg = default_config().providers["openrouter"]
+    cfg.ignore_upstreams = ["makora"]
+    route = respx.post(URL).mock(return_value=httpx.Response(200, headers=SSE, content=ANSWER))
+    p = OpenAICompatibleProvider("openrouter", cfg)
+    await p.complete("m", [Message("user", "u")], ignore_upstreams=["io-net"])
+    assert json.loads(route.calls[0].request.content)["provider"] == {
+        "ignore": ["io-net", "makora"]
+    }
+    await p.aclose()

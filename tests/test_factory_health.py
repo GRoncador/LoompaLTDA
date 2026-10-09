@@ -492,3 +492,14 @@ def test_context_is_measured_against_the_compaction_budget(tmp_path: Path):
     assert "Orçamento: 200k caracteres" in found.detail and "70k" in found.detail
     w = window(tmp_path, events, limits={"context_compact_chars": 400_000})
     assert "trace.context_growth" not in by_signal(detect(w))
+
+
+def test_tool_call_storms_are_found_by_the_upstream_that_wrote_them(tmp_path: Path):
+    """tamagotchi 07-09/10: 32 storms, all from one OpenRouter upstream (ADR-0036 §2)."""
+    events = [
+        ev(1, "llm.storm", "S-082", model="openrouter/m", served_by="Makora", calls=5331),
+        ev(2, "llm.storm", "S-089", model="openrouter/m", served_by="Makora", calls=4918),
+    ]
+    found = by_signal(detect(window(tmp_path, events)))
+    assert found["llm.storm"].key == "Makora" and found["llm.storm"].impact["calls"] == 2
+    assert "Makora" in found["llm.storm"].title

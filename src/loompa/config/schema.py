@@ -516,6 +516,10 @@ class ProviderConfig(BaseModel):
     # there: `id_prefix + own id` is the OpenRouter id (Xiaomi: "xiaomi/" + "mimo-v2.6-pro").
     models_dev_id: str = ""
     id_prefix: str = ""
+    # OpenRouter only: upstreams (slugs, as in `provider.ignore`: "makora", "io-net") never to be
+    # routed to, whatever the model. The router adds one for some hours on its own when it
+    # writes a tool-call storm (ADR-0036 §2); this list is the founder's permanent choice.
+    ignore_upstreams: list[str] = Field(default_factory=list)
 
     def takes(self, effort: str | None) -> bool:
         if not effort or self.takes_effort is True:
