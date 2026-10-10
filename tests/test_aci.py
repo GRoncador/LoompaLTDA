@@ -423,3 +423,47 @@ def test_tap_long_error_message_does_not_backtrack():
     s = summarize_tests(out, 1)
     assert time.monotonic() - t < 2
     assert s.failed == 1 and s.failures[0].name == "boom"
+
+
+async def test_tests_covering_lists_the_test_files_that_name_a_file(tmp_path: Path):
+    """ADR-0037 §7: a file covered by many test files was read file after file until the loop
+    guard stopped the task; the Worker now gets the list and runs them."""
+    import subprocess
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "app").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "casca.js").write_text("export const x = 1;\n")
+    (tmp_path / "app" / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (tmp_path / "tests" / "casca.test.js").write_text(
+        "import { x } from '../src/casca.js';\nimport y from '../src/casca.js';\n"
+    )
+    (tmp_path / "tests" / "outro.test.ts").write_text("import { x } from '../src/casca';\n")
+    (tmp_path / "tests" / "nada.test.js").write_text("import z from '../src/cascata.js';\n")
+    (tmp_path / "tests" / "test_calc.py").write_text("from app.calc import add\n")
+    (tmp_path / "src" / "uso.js").write_text("import { x } from './casca.js';\n")  # not a test
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    aci = ACI(tmp_path)
+    js = await aci.call("tests_covering", {"path": "src/casca.js"})
+    assert js.ok and js.output.splitlines() == [
+        "2 test file(s) name src/casca.js:",
+        "  tests/casca.test.js (2 lines)",
+        "  tests/outro.test.ts (1 line)",
+    ]
+    py = await aci.call("tests_covering", {"path": "app/calc.py"})
+    assert "tests/test_calc.py (1 line)" in py.output
+    none = await aci.call("tests_covering", {"path": "tests/nada.test.js"})
+    assert none.output == "no test file names tests/nada.test.js"
+
+
+def test_the_worker_runs_the_tests_that_cover_a_file_instead_of_reading_them():
+    from loompa.agents.toolbox import PROFILES
+    from loompa.agents.worker import SYSTEM
+    from loompa.prompt_ab import VARIANTS, variant_text
+
+    assert "tests_covering" in PROFILES["worker"].tools
+    text = " ".join(SYSTEM.split())
+    assert "`tests_covering` lists them: run them with `run_tests`" in text
+    for prompt, name in VARIANTS:  # the live A/B's edits still fit the prompt
+        if prompt == "worker.SYSTEM":
+            assert variant_text(SYSTEM, prompt, name) != SYSTEM

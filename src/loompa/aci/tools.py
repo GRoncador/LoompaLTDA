@@ -11,14 +11,15 @@ import inspect
 import json
 import re
 import shlex
+import subprocess
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from loompa.aci.filters import summarize_lint, summarize_tests, summarize_typecheck
 from loompa.aci.runner import run_command
-from loompa.hygiene import RESIDUE_NOTE, new_files, run_residue
+from loompa.hygiene import RESIDUE_NOTE, is_test_path, new_files, run_residue
 from loompa.memory.lexical import CodeSearch, SymbolIndex, file_symbols
 
 SHRINK_MIN_LINES = 100  # a whole-file rewrite of a file this long may not drop below a fifth
@@ -33,6 +34,21 @@ class ToolError(Exception):
 _SAFE_ENV_FILES = {".env.example", ".env.sample", ".env.template"}
 _KEY_FILE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
 _KEY_FILE_NAMES = {"secrets.env", "id_rsa", "id_ed25519", "id_ecdsa"}
+
+
+def _repo_files(root: Path) -> list[str]:
+    """The repository's files, tracked or new and not ignored, relative to `root`."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return sorted({line for line in out.stdout.splitlines() if line.strip()})
 
 
 def is_protected(rel: str | Path) -> bool:
@@ -102,6 +118,15 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
+        },
+    },
+    {
+        "name": "tests_covering",
+        "description": "List the test files that name a file (its path, its file name or its module), with how many of their lines mention it, most first. Run them with run_tests (one file per call with `selector`) instead of reading each one; read the ones that fail.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
         },
     },
     {
@@ -383,6 +408,36 @@ class ACI:
         return "\n".join(
             f"{s.kind} {s.name} — {s.path}:{s.line}\n    {s.signature}" for s in syms[:20]
         )
+
+    def tool_tests_covering(self, path: str) -> str:
+        """The test files that name `path`, from the text alone, at no model cost (ADR-0037 §7).
+        In tamagotchi SP-013 the Worker read the tests 493 times against 249 reads of the product,
+        and a file covered by twenty test files was read file after file until the loop guard
+        stopped the task; a run says what breaks in one call per file."""
+        p = self._resolve(path)
+        rel = self._rel(p)
+        pure = PurePosixPath(rel)
+        names = [re.escape(pure.name), rf"[/'\"]{re.escape(pure.stem)}['\"]"]
+        if pure.suffix == ".py":
+            names.append(re.escape(".".join(pure.with_suffix("").parts)) + r"\b")
+        needle = re.compile("|".join(names))
+        found: list[tuple[int, str]] = []
+        for other in _repo_files(self.root):
+            if other == rel or not is_test_path(other) or is_protected(other):
+                continue
+            try:
+                text = (self.root / other).read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            hits = sum(1 for line in text.splitlines() if needle.search(line))
+            if hits:
+                found.append((hits, other))
+        if not found:
+            return f"no test file names {rel}"
+        found.sort(key=lambda x: (-x[0], x[1]))
+        shown = "\n".join(f"  {name} ({n} line{'s' if n > 1 else ''})" for n, name in found[:40])
+        more = f"\n  … {len(found) - 40} more" if len(found) > 40 else ""
+        return f"{len(found)} test file(s) name {rel}:\n{shown}{more}"
 
     async def tool_branch_diff(self, path: str | None = None) -> str:
         """`contas` S-047: a Worker saw a line it had reformatted, could not tell what it was

@@ -195,22 +195,32 @@ and ~9.4 h of model time.
 and after each one. The saving can be at most what SP-013 discarded; if task-level escalations
 end in persistent failures more often than re-plans did, this is reverted.
 
-## §7 Workers that read the whole suite (not decided here)
+## §7 The Worker runs the tests that cover a file instead of reading them
 
 **What happened.** In SP-013 the Worker read `tests/` 493 times (742k tokens) against 249 reads of
 the product (327k), and made 214 edits to tests against 56 to the product. The product's suite is
 5.3× its code (25,046 lines against 4,731; `casca.test.js` alone has 4,631), and 23 test files
 compare the text of `index.html` or `sw.js`. Most of the loops that §6 now escalates without a
 re-plan were a task reading test file after test file without writing (S-070 T4: about 20 files;
-S-088 T1: 30).
+S-088 T1: 30). Step 1 of the Worker's prompt asked it to read "the tests that cover" the file it
+changes, and `src/casca.js` is named by 22 test files.
 
-**Not decided here.** Two changes would address it, and neither fits this ADR:
+**Decision (10/10, at the founder's request, without a bench run).**
 
-- The Worker's prompt ("read the tests that cover it") would change, and prompts change only with
-  the bench;
-- a one-time diet of tamagotchi's suite is the founder's call about the product.
+- **A new tool.** `tests_covering(path)` lists the test files that name a file, at no model cost:
+  its path or file name, an import of its stem, or its dotted module for Python. They come most
+  mentions first. It is offered to the Worker only, so the planning roles' tool lists stay as the
+  bench measured them, and the loop guard counts it as exploring.
+- **The prompt change.** Step 1 of the Worker's prompt reads the file it changes, lists the
+  covering tests with the tool, runs them with `run_tests`, and reads only the ones that fail or
+  that the task changes. The live A/B's edits on this prompt still fit, so both arms get the same
+  step.
+- **In tamagotchi,** the founder asked for a one-time diet of the suite. It was filed as a card
+  through the Product Owner's door and waits for a Sprint Meeting.
 
-Both are on the plan.
+**Measure.** In the next sprints: `read_file` calls on test files per task, tasks ending on the
+loop guard, and the Worker's cost per delivery against SP-013. If they do not drop, the old step 1
+comes back.
 
 ## §8 Findings that are never cards
 

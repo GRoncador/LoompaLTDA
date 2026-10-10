@@ -42,9 +42,11 @@ EXTERNAL = "<external_data"  # how `loompa/mcp` wraps what web tools return
 # results "were not available to read".
 KEEP_EXTERNAL_CHARS = 24_000
 READ_TOOLS = frozenset({"read_file", "list_dir", "search", "find_symbol"})
+# the Worker's only (ADR-0037 §7): the planning roles' tool lists stay as the bench measured them
+COVER_TOOL = "tests_covering"
 DIFF_TOOLS = frozenset({"branch_diff"})  # needs a story branch: the Worker's worktree only
 LOOKUP_TOOLS = (
-    READ_TOOLS | DIFF_TOOLS | {"search_memory"}
+    READ_TOOLS | DIFF_TOOLS | {"search_memory", COVER_TOOL}
 )  # what the loop guard counts as exploring
 WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file", "fix_lint"})
 RUN_TOOLS = frozenset({"run_tests", "run_lint"})
@@ -88,7 +90,12 @@ _MEMORY_KINDS = {
 PROFILES: dict[str, ToolProfile] = {
     "worker": ToolProfile(
         "worker",
-        READ_TOOLS | DIFF_TOOLS | WRITE_TOOLS | RUN_TOOLS | SIGNAL_TOOLS | {MEMORY_TOOL},
+        READ_TOOLS
+        | DIFF_TOOLS
+        | WRITE_TOOLS
+        | RUN_TOOLS
+        | SIGNAL_TOOLS
+        | {MEMORY_TOOL, COVER_TOOL},
         None,
         memory_kinds=CODE_KINDS,
     ),

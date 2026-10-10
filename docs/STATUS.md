@@ -802,9 +802,10 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
 - **Kaizen:** review reservations and findings asking for records are never cards; base-red
   findings close when the base goes green; doubled labels are cleaned.
 - **Decisions:** one proposed ADR per story, rewritten by its re-plan.
-- **Not done:**
-  - the `EXEC_SYSTEM`/`AMEND_SYSTEM` contract fields went in without a bench run;
-  - the Worker reading the whole suite waits for the bench.
+- **Worker:** a `tests_covering` tool lists the test files that name a file; step 1 of the
+  prompt runs them instead of reading each one.
+- **Not benched:** the `EXEC_SYSTEM`/`AMEND_SYSTEM` contract fields and the Worker's new step 1
+  (the founder's call; the next sprints measure it).
 
 ## Known gaps / next steps
 
