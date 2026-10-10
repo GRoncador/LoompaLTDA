@@ -777,6 +777,35 @@ Decided 2026-09-29:
   - no system prompt was edited;
   - the Worker's new "Already failing on the base" block was not benched.
 
+**2026-10-10, ADR-0037 (no answer without an action, no loop without a breaker):** tamagotchi's
+S-094 asked the founder eight times in 24 hours, each answer leading back to the same task.
+
+- **Answers:** every option of a team question is an action. "Already resolved" runs the new
+  `resolve` phase, which checks a line card's failures on the base and then closes the story with
+  the outcome `resolved`. "Rewrite the requirements" goes back to the spec on a clean branch. The
+  ways out are always offered, and the inbox shows what each option does.
+- **Loops:** the repeat of a question is measured where the story stands (open task, fence,
+  criteria, work done). The third question from the same point is not asked: the story goes back
+  to the backlog with one note.
+- **Plan amendments** can withdraw tasks (`drop_tasks`).
+- **Line watch:**
+  - a card keeps its target failures and closes when they leave the base;
+  - an open story that already names the failures is adopted instead of opening a new card;
+  - a failing test that reads `.loompa/` is called out in the card.
+- **Factory records:**
+  - the Inspector judges the worktree as it will land;
+  - criteria naming a record go back to the spec;
+  - the plan gate no longer lets them through on its second round;
+  - the fence has no `.loompa/` paths;
+  - hygiene blocks a test that opens a record.
+- **Escalation:** a task that cannot finish goes to tier 1 on the same branch, with no re-plan.
+- **Kaizen:** review reservations and findings asking for records are never cards; base-red
+  findings close when the base goes green; doubled labels are cleaned.
+- **Decisions:** one proposed ADR per story, rewritten by its re-plan.
+- **Not done:**
+  - the `EXEC_SYSTEM`/`AMEND_SYSTEM` contract fields went in without a bench run;
+  - the Worker reading the whole suite waits for the bench.
+
 ## Known gaps / next steps
 
 **Since 2026-10-05 the plan is `docs/PLANO-2026-10.md`.** Its "Herdado do plano de setembro" section
