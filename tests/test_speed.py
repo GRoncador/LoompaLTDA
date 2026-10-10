@@ -186,9 +186,10 @@ async def test_a_task_going_in_circles_is_not_done_and_never_reaches_the_inspect
     seen = types(ctx, sid)
     # every attempt stopped inside `dev`: the Inspector never judged a half-built story
     assert "inspector.verdict" not in seen and "worker.dod_incomplete" not in seen
-    # the first attempt and three tries (ADR-0016 §5): tier 2 twice, tier 1 twice (re-planned)
+    # the first attempt and three tries (ADR-0016 §5): tier 2 twice, tier 1 twice; a task that
+    # could not finish is not the plan's fault, so the plan is kept (ADR-0037 §6)
     assert seen.count("story.task_unfinished") == 4
-    assert "story.escalated" in seen and "story.replanned" in seen
+    assert "story.escalated" in seen and "story.replanned" not in seen
     assert (
         state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason.value == "persistent_failure"
     )
@@ -269,4 +270,59 @@ async def test_a_task_stopped_after_its_work_is_green_counts_as_done(factory: Fa
     assert "worker.salvaged" in seen and "story.task_unfinished" not in seen
     assert state.blocked_reason.value == "delivery" and state.tasks_done == [1]
     assert "story.escalated" not in seen
+    await ctx.aclose()
+
+
+async def test_a_task_that_loops_climbs_alone_and_keeps_the_work_done(factory: Factory):
+    """ADR-0037 §6, tamagotchi SP-013: S-069 did tasks 1 to 3, task 4 looped twice, and the story
+    was re-planned from a clean branch: ten tasks redone on tier 1. Now tier 1 takes over the task
+    that looped, on the same branch."""
+    import json
+
+    runs: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role == "architect" and "Founder's guidance" not in messages[-1].content:
+            plan = json.loads(dry_run_script(model, messages, tools))
+            plan["files"] = ["app/", "tests/"]
+            plan["tasks"] = [
+                "Criar app/um.py com a função um()",
+                "Criar app/dois.py com a função dois()",
+            ]
+            return json.dumps(plan)
+        if role == "worker" and tools:
+            text = "\n".join(m.content for m in messages if m.role == "user")
+            task = "T2" if "# Task T2" in text else "T1"
+            if not any(m.role == "tool" for m in messages):
+                runs.append(f"{task}:{model}")
+            if task == "T2" and sum(r.startswith("T2") for r in runs) <= 2:  # tier 2, twice
+                return [ToolCall(f"c{len(messages)}", "read_file", {"path": "app/calc.py"})]
+            if not any(m.role == "tool" and "wrote" in m.content.lower() for m in messages):
+                name = "um" if task == "T1" else "dois"
+                return [
+                    ToolCall(
+                        "w",
+                        "write_file",
+                        {"path": f"app/{name}.py", "content": f"def {name}():\n    return 1\n"},
+                    )
+                ]
+            return [ToolCall("d", "done", {"summary": "feito"})]
+        return dry_run_script(model, messages, tools)
+
+    provider = MockProvider("mock", script=script)
+    router = ModelRouter(
+        factory.config, providers=dict.fromkeys(factory.config.providers, provider)
+    )
+    ctx = EngineContext.build(factory, router=router)
+    po = ProductOwnerAgent(ctx)
+    sid = po.add_item("Duas funções", "Criar um() e dois().").story_id
+    po.admit(sid)
+    await Scheduler(ctx).run(until_idle=True)
+    state = load_state(ctx, sid)
+    seen = types(ctx, sid)
+    assert "story.escalated" in seen and "story.replanned" not in seen
+    assert [r.split(":")[0] for r in runs] == ["T1", "T2", "T2", "T2"]  # T1 ran once
+    assert 1 in state.tasks_done and 2 in state.tasks_done
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason.value == "delivery"
     await ctx.aclose()

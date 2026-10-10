@@ -1158,7 +1158,7 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
             task=(res.data or {}).get("unfinished"),
             ended_by=(res.data or {}).get("ended_by"),
         )
-        return await climb(ctx, state, res.summary, executive=UNFINISHED_EXECUTIVE)
+        return await climb(ctx, state, res.summary, executive=UNFINISHED_EXECUTIVE, task_level=True)
     return advance(state)
 
 
@@ -1346,12 +1346,22 @@ def _fresh_branch(ctx: EngineContext, state: StoryState, label: str) -> str:
 
 
 async def climb(
-    ctx: EngineContext, state: StoryState, failure: str, *, executive: str
+    ctx: EngineContext,
+    state: StoryState,
+    failure: str,
+    *,
+    executive: str,
+    task_level: bool = False,
 ) -> StoryState:
     """A failed attempt climbs the escalation ladder: tier 2 once more, then tier 1 twice (re-planned
     on the way up), then the founder — three tries after the first failure (ADR-0016 §5), each
     with the failure before it in hand. Failed means the Inspector's FAIL, or a Worker that could not finish a task
-    (Fase 8.5) — which never costs an Inspector run on a half-built story."""
+    (Fase 8.5) — which never costs an Inspector run on a half-built story.
+
+    `task_level`: the Worker could not finish one task (a loop, the call limit). The plan is not
+    the suspect, so tier 1 takes over that task on the same branch, keeping the tasks done: in
+    tamagotchi SP-013, 7 of 9 stories were re-planned from a clean branch after one task looped,
+    discarding US$ 1.59 and ~9.4 h of good work (ADR-0037 §6)."""
     state.failure_history.append(failure)
     sched = ctx.config.schedule
     if state.current_tier == "tier2":
@@ -1367,7 +1377,10 @@ async def climb(
             story_id=state.story_id,
             to_tier="tier1",
             after_attempts=state.attempts_tier2,
+            **({"task_level": True} if task_level else {}),
         )
+        if task_level:
+            return goto(state, "dev")
         if "plan" in state.route and not state.extra.get(REPLANNED_KEY):
             # Two failed attempts may mean the plan, not the code: its `files` fence the Worker
             # away from the real cause (`contas` S-005 could not touch the module that broke the

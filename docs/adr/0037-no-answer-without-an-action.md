@@ -169,3 +169,28 @@ the steps around them:
 - **Diff hygiene** blocks a test line that opens a file under `.loompa` (`reads_records`). Merely
   mentioning the folder does not count, so a server test that fetches `/.loompa/config.yaml` is
   fine.
+
+## §6 A task that cannot finish climbs alone
+
+**What happened.** The escalation ladder (ADR-0016 §5) counts failures per story. At the second
+failure on tier 2, the story went to tier 1 and was re-planned from a clean branch: the attempt
+was kept under `refs/loompa/attempts/`, and its tasks were redone. In SP-013, 7 of 9 stories
+went this way. In most of them the second failure was one task that stopped on the loop guard or
+the call limit, with the tasks before it done and green. S-069 had done 3 tasks and redid 10
+after the re-plan. The work discarded before those escalations cost US$ 1.59 (30% of the sprint)
+and ~9.4 h of model time.
+
+**Decision.**
+
+- **One task stopped.** When the failure is a task the Worker could not finish (`unfinished`), the
+  plan is not the suspect. The story goes to tier 1 on the same branch, with its tasks done and
+  its commits. The Worker Sr starts at the task that stopped. `story.escalated` carries
+  `task_level`.
+- **The Inspector's FAIL** is still the evidence that the plan may be wrong (the fence keeping the
+  Worker away from the cause, `contas` S-005). It keeps the re-plan from a clean branch once per
+  story.
+- **The counts do not change.** Two tries on tier 2, then tier 1, then the founder.
+
+**Measure.** The next sprint's report shows how many escalations re-planned, and the cost before
+and after each one. The saving can be at most what SP-013 discarded; if task-level escalations
+end in persistent failures more often than re-plans did, this is reverted.
