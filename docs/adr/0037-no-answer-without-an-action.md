@@ -215,8 +215,12 @@ changes, and `src/casca.js` is named by 22 test files.
   covering tests with the tool, runs them with `run_tests`, and reads only the ones that fail or
   that the task changes. The live A/B's edits on this prompt still fit, so both arms get the same
   step.
-- **In tamagotchi,** the founder asked for a one-time diet of the suite. It was filed as a card
-  through the Product Owner's door and waits for a Sprint Meeting.
+- **In tamagotchi,** the founder asked for a one-time diet of the suite. The Product Owner found
+  it too big for one story. A brainstorm split it into S-101 to S-105 (epic "Enxugamento da suíte
+  de testes"), which wait in the backlog for a Sprint Meeting:
+  - S-101: the AC6 first, the test that keeps the base red;
+  - S-102: an inventory, as research;
+  - S-103 to S-105: replacing, cleaning up and merging tests, which depend on the inventory.
 
 **Measure.** In the next sprints: `read_file` calls on test files per task, tasks ending on the
 loop guard, and the Worker's cost per delivery against SP-013. If they do not drop, the old step 1
