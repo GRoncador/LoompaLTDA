@@ -37,7 +37,11 @@ KIND_LABEL = {
 }
 
 
-_LEADING_LABEL = re.compile(r"^\s*\[([^\]]{1,60})\]\s*")
+# "[Oportunidade] …", and the rewrite that lost its "[": "Oportunidade] …" (tamagotchi S-100)
+_LEADING_LABEL = re.compile(r"^\s*\[?([^\]\[]{1,60})\]\s*")
+# A finding whose title asks for the factory's records: the one fix the factory never delivers
+# (tamagotchi S-098: "criar os dois documentos em .loompa/decisions/", ADR-0037 §8)
+_RECORDS_TITLE = re.compile(r"(?<![\w/.-])\.loompa/(?:decisions|specs|learnings|constitution)")
 
 
 def without_label(title: str) -> str:
@@ -48,6 +52,11 @@ def without_label(title: str) -> str:
     while (m := _LEADING_LABEL.match(title)) and m.group(1).strip().lower() in labels:
         title = title[m.end() :]
     return title.strip()
+
+
+def _never_a_card(item: dict) -> bool:
+    """A finding about how the story went, or one asking for the factory's records."""
+    return bool(item.get("process")) or bool(_RECORDS_TITLE.search(str(item.get("title") or "")))
 
 
 SHADOW_CARDS = 8  # the open cards the shadow's duplicate question chooses among
@@ -116,6 +125,7 @@ class KaizenAgent(LoompaAgent):
                     "detail": str(item.get("detail") or "").strip(),
                 }
                 for key, item in keyed.items()
+                if not _never_a_card(item)  # known without asking (ADR-0037 §8)
             ],
         )
         self._shadow_triage(state, keyed, verdicts)
@@ -128,7 +138,9 @@ class KaizenAgent(LoompaAgent):
             detail = str(item.get("detail") or "").strip()
             verdict = verdicts.get(key) or Triage(reviewed=bool(verdicts))
             covered = filed.get(verdict.duplicate_of, verdict.duplicate_of)
-            if verdict.process_only:
+            # how the story went (a review's reservations) or the factory's own records: never a
+            # card about the product, whatever the triage said (ADR-0037 §8)
+            if verdict.process_only or _never_a_card(item) or _RECORDS_TITLE.search(verdict.title):
                 # tamagotchi SP-005: five research cards that only "verified and recorded the
                 # closing" left eight cards asking to run `npm test` and attach the output
                 self.ctx.emit(

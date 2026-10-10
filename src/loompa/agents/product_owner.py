@@ -558,6 +558,8 @@ class ProductOwnerAgent(LoompaAgent):
         """Read the Kaizen findings of one capture (plan 10.1): rewrite, spot the ones an open
         card already covers by meaning, and slot each one. `findings` carry `key`, `label`,
         `title` and `detail`. Empty when the model is unavailable: they go in as written."""
+        if not findings:
+            return {}
         self.set_state("WORKING", story, detail="lendo os achados do Kaizen")
         user = (
             f"## Story where they were found\n{story.story_id}: {story.title}\n\n"

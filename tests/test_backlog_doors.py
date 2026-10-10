@@ -615,6 +615,49 @@ async def test_a_finding_that_changes_nothing_in_the_product_is_not_filed(factor
     await ctx.aclose()
 
 
+async def test_a_reservation_or_a_finding_asking_for_records_is_never_a_card(
+    factory: Factory,  # noqa: F811
+):
+    """ADR-0037 §8, tamagotchi SP-013: "Plano seguiu com ressalvas do Product Owner" became
+    S-098, a product card asking to "criar os dois documentos em .loompa/decisions/" — the fix
+    the factory can never deliver. Neither goes to the triage, and neither is filed."""
+    script = po_answers(
+        **{"Triage the findings": {"findings": [{"key": "F3", "process_only": False}]}}
+    )
+    ctx = make_ctx(factory, script)
+    state = StoryState(story_id="S-094", title="Consertar a versão principal")
+    items = [
+        {
+            "kind": "opportunity",
+            "title": "Plano seguiu com ressalvas do Product Owner",
+            "detail": "x",
+            "process": True,
+        },
+        {
+            "kind": "opportunity",
+            "title": "Registrar a decisão: criar os dois documentos em .loompa/decisions/",
+            "detail": "y",
+        },
+        {"kind": "bug", "title": "O teste de cache lê um arquivo que não existe", "detail": "z"},
+    ]
+    created = await KaizenAgent(ctx).capture(state, items=items)
+    assert len(created) == 1 and len(ctx.store.list_stories(ctx.slug)) == 1
+    (asked,) = script.seen["Triage the findings"]
+    assert "F3" in asked[-1].content and "F1" not in asked[-1].content
+    assert len(events(ctx, "backlog.dropped")) == 2
+    assert all(item.get("_captured") for item in items)
+    await ctx.aclose()
+
+
+def test_a_rewrite_that_lost_the_bracket_of_its_label_is_not_labelled_twice():
+    """tamagotchi S-100: "[Oportunidade] Oportunidade] tests/…"."""
+    from loompa.agents.kaizen import without_label
+
+    assert without_label("Oportunidade] tests/x.js: filtrar") == "tests/x.js: filtrar"
+    assert without_label("[Oportunidade] [Bug] x") == "x"
+    assert without_label("Fora] de contexto") == "Fora] de contexto"  # not a label: kept
+
+
 async def test_the_po_judgment_beats_the_same_file_rule(factory: Factory):  # noqa: F811
     """13.6: S-060's "the game-over loop duplicates the drawing loop" (src/lcd_screen.js) was
     folded into S-059's import cycle in the same file, after the PO had said it was new."""

@@ -328,7 +328,24 @@ class LineWatch:
         return card
 
     def _green(self, before: dict[str, Any]) -> None:
+        from loompa.agents.inspector import BASE_RED_TITLE
+        from loompa.engine.graph import close_resolved
+        from loompa.engine.state import Stage, StoryState
+
         self.ctx.emit("line.green", card=before.get("card"), since=before.get("since"))
+        # the findings filed while the base was red and no card was open say nothing any more
+        # (tamagotchi S-091 waited in the backlog after the base it described was fixed, §8)
+        for row in self.ctx.store.list_stories(self.ctx.slug):
+            if (
+                row["stage"] == Stage.BACKLOG
+                and row.get("origin") == "kaizen"
+                and BASE_RED_TITLE in row["title"]
+            ):
+                close_resolved(
+                    self.ctx,
+                    StoryState.from_row(row),
+                    "a versão principal voltou a passar em todas as verificações",
+                )
         self.ctx.inbox(
             FounderMessage(
                 factory=self.ctx.slug,

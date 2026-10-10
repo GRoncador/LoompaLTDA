@@ -194,3 +194,43 @@ and ~9.4 h of model time.
 **Measure.** The next sprint's report shows how many escalations re-planned, and the cost before
 and after each one. The saving can be at most what SP-013 discarded; if task-level escalations
 end in persistent failures more often than re-plans did, this is reverted.
+
+## §7 Workers that read the whole suite (not decided here)
+
+**What happened.** In SP-013 the Worker read `tests/` 493 times (742k tokens) against 249 reads of
+the product (327k), and made 214 edits to tests against 56 to the product. The product's suite is
+5.3× its code (25,046 lines against 4,731; `casca.test.js` alone has 4,631), and 23 test files
+compare the text of `index.html` or `sw.js`. Most of the loops that §6 now escalates without a
+re-plan were a task reading test file after test file without writing (S-070 T4: about 20 files;
+S-088 T1: 30).
+
+**Not decided here.** Two changes would address it, and neither fits this ADR:
+
+- The Worker's prompt ("read the tests that cover it") would change, and prompts change only with
+  the bench;
+- a one-time diet of tamagotchi's suite is the founder's call about the product.
+
+Both are on the plan.
+
+## §8 Findings that are never cards
+
+**What happened.** In SP-013 the Kaizen loop filed 15 cards; Kaizen stories are 49 of the
+factory's 101. Three of them show the noise:
+
+- **S-098** came from the learning "Plano seguiu com ressalvas do Product Owner", a remark about
+  how S-094's planning went. As a product card, it asked to "criar os dois documentos em
+  `.loompa/decisions/`".
+- **S-091**, "A suíte de verificações já falha na versão principal", waited in the backlog after
+  the base it described was fixed.
+- **S-100** was titled "[Oportunidade] Oportunidade] …": the triage's rewrite lost the `[` of its
+  label, and the label cleaner only knew `[Label]`.
+
+**Decision.**
+
+- **Reservations are process notes.** The learnings "Spec/Plano seguiu com ressalvas do Product
+  Owner" are marked `process`. Such learnings, and findings whose title asks for one of the
+  factory's records, are recorded in `learnings.md` and never become cards. They do not go to the
+  triage either, so no model call is paid for them.
+- **Stale base-red findings close.** When the base goes green, the line watch closes, as resolved
+  (§1), the Kaizen cards titled `BASE_RED_TITLE` that wait in the backlog.
+- **The label cleaner** also strips a known label that lost its `[`.

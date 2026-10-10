@@ -204,3 +204,28 @@ async def test_a_failing_test_that_reads_the_factorys_records_is_named_in_the_ca
     assert "tests/test_records.py lê(em) os registros internos da fábrica" in description
     assert "nunca criar ou editar registros da fábrica" in description
     await ctx.aclose()
+
+
+async def test_a_green_base_closes_the_findings_filed_while_it_was_red(
+    factory: Factory,  # noqa: F811
+):
+    """SP-013: S-091 ("A suíte de verificações já falha na versão principal") stayed in the
+    backlog after the base it described was fixed."""
+    from loompa.agents.inspector import BASE_RED_TITLE
+
+    ctx = make_ctx(factory)
+    watch = LineWatch(ctx)
+    _land(factory.root, "test_a.py", "def test_a_fails_here():\n    assert False\n", "feat(s-1): a")
+    card = (await watch.check())["card"]
+    stale = (
+        ProductOwnerAgent(ctx)
+        .add_item(f"[Débito técnico] {BASE_RED_TITLE}", "Falhas: outra coisa.", origin="kaizen")
+        .story_id
+    )
+    (factory.root / "tests" / "test_a.py").unlink()
+    git("add", "-A", cwd=factory.root)
+    git("commit", "-qm", f"fix({card.lower()}): conserta", cwd=factory.root)
+    assert not (await watch.check())["red"]
+    row = ctx.store.get_story(stale)
+    assert row["stage"] == "CANCELLED" and row["state"]["extra"]["outcome"]["kind"] == "resolved"
+    await ctx.aclose()

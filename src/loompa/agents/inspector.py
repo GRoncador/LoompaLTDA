@@ -113,6 +113,8 @@ def grade(criteria_ok: bool, findings: list[dict[str, str]], tooling_ok: bool) -
     return "PASS"
 
 
+# the finding a story files when the base is red and no line card is open (ADR-0036 §4)
+BASE_RED_TITLE = "A suíte de verificações já falha na versão principal"
 SHOTS_KEY = "shots"  # the screenshots of the last smoke run, for the delivery (ADR-0030)
 LAYOUT_KEY = "layout"  # in the baseline: layout problems the base already has
 
@@ -141,7 +143,7 @@ class InspectorAgent(LoompaAgent):
                 state.learnings.append(
                     {
                         "kind": "tech_debt",
-                        "title": "A suíte de verificações já falha na versão principal",
+                        "title": BASE_RED_TITLE,
                         "detail": "Falhas pré-existentes: "
                         + (", ".join(base["failing"][:8]) or "lint")
                         + ". A fábrica ignora essas falhas nas histórias até serem corrigidas.",

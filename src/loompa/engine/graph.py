@@ -589,6 +589,7 @@ async def node_spec_review(ctx: EngineContext, state: StoryState) -> StoryState:
             {
                 "kind": "opportunity",
                 "title": "Spec seguiu com ressalvas do Product Owner",
+                "process": True,  # about how the story went, not the product (ADR-0037 §8)
                 "detail": review.summary[:500],
             }
         )
@@ -770,6 +771,7 @@ async def node_plan_review(ctx: EngineContext, state: StoryState) -> StoryState:
             {
                 "kind": "opportunity",
                 "title": "Plano seguiu com ressalvas do Product Owner",
+                "process": True,  # about how the story went, not the product (ADR-0037 §8)
                 "detail": sanitize_for_founder(review.summary)[:500],
             }
         )
