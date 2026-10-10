@@ -26,9 +26,19 @@ KEEP = {
     "task": ("text", "origin", "tier", "outcome"),
     "round": ("label", "calls"),
     "llm": (
-        "agent", "provider", "model", "responded", "served_by", "finish_reason",
-        "input_tokens", "output_tokens", "cached_tokens", "reasoning_tokens", "cost_usd",
-        "cuts", "free_fallback",
+        "agent",
+        "provider",
+        "model",
+        "responded",
+        "served_by",
+        "finish_reason",
+        "input_tokens",
+        "output_tokens",
+        "cached_tokens",
+        "reasoning_tokens",
+        "cost_usd",
+        "cuts",
+        "free_fallback",
     ),
     "tool": ("agent", "args", "ok", "chars", "repeat", "note", "error"),
 }
@@ -122,7 +132,9 @@ def outline(root: Path, story_id: str, *, known: str | None = None) -> dict[str,
         "totals": {
             "calls": len(calls),
             "tools": len(tools),
-            "cost_usd": round(sum(float((s.get("attrs") or {}).get("cost_usd") or 0) for s in calls), 4),
+            "cost_usd": round(
+                sum(float((s.get("attrs") or {}).get("cost_usd") or 0) for s in calls), 4
+            ),
             "cuts": sum(int((s.get("attrs") or {}).get("cuts") or 0) for s in calls),
             "model_ms": sum(int(s.get("ms") or 0) for s in calls),
             "tool_ms": sum(int(s.get("ms") or 0) for s in tools),
