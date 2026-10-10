@@ -34,7 +34,13 @@ from loompa.company import ensure_templates
 from loompa.dependencies import WAIT_KEY, in_chain, spec_passed, still_waiting
 from loompa.engine.awake import Awake
 from loompa.engine.context import EngineContext
-from loompa.engine.graph import BlockedReason, apply_founder_answer, back_to_backlog, block
+from loompa.engine.graph import (
+    PARK_KEY,
+    BlockedReason,
+    apply_founder_answer,
+    back_to_backlog,
+    block,
+)
 from loompa.engine.langgraph_engine import GraphRuntime
 from loompa.engine.line import LineWatch
 from loompa.engine.lock import DryRunOnLiveFactory, EngineLock
@@ -320,6 +326,7 @@ class Scheduler:
                 self.not_before.pop(sid, None)
                 if sid not in self.completed:
                     self.completed.append(sid)
+                await self._park(sid)
                 continue
             await self._on_runner_crash(sid, exc)
 
@@ -458,6 +465,12 @@ class Scheduler:
         if not self.ctx.dry_run:
             DeployerAgent(self.ctx).record_company()  # the founder's edits go into git
         self.ctx.listeners.append(self._heard)
+        for row in self.ctx.store.list_stories(self.ctx.slug):
+            # a run that asked to wait in the backlog and stopped before it could (§2)
+            if row["stage"] == Stage.AWAITING_FOUNDER and (row.get("state") or {}).get(
+                "extra", {}
+            ).get(PARK_KEY):
+                await self._park(row["id"])
         awake = Awake(enabled=None if not self.ctx.dry_run else False)
         try:
             while True:
@@ -683,6 +696,18 @@ class Scheduler:
         board.start(new_id, sprint.goal)
         self.ctx.emit("sprint.restarted", sprint_id=sprint_id, as_id=new_id, stories=members)
         return new_id
+
+    async def _park(self, story_id: str) -> None:
+        """A run that ended asking for its story to wait in the backlog (`PARK_KEY`, ADR-0037
+        §2): done here, once the graph has stopped, the way `withdraw_story` does it."""
+        state = load_state(self.ctx, story_id)
+        why = state.extra.pop(PARK_KEY, None)
+        if not why or state.stage in TERMINAL:
+            return
+        back_to_backlog(self.ctx, state)
+        save_state(self.ctx, state, "parked")
+        await runtime_for(self.ctx).inject_founder_answer(state)
+        self.ctx.emit("story.parked", story_id=story_id, why=why)
 
     async def withdraw_story(self, story_id: str, *, leave_sprint: bool = True) -> StoryState:
         """The founder takes a story out of the running sprint (ADR-0018): it waits in the

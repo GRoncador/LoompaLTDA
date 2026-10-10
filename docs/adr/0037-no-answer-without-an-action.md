@@ -65,3 +65,25 @@ for an Architect who could not withdraw a task or close a story.
 
 **Not measured.** The `EXEC_SYSTEM` change is a contract change (one new field), not a rewording.
 It went in without a bench run, so it is on the plan's list of prompts to measure.
+
+## §2 A loop is measured where the story stands, not in the model's words
+
+**What happened.** The repeat detector of ADR-0036 §6 fingerprints a question by its cause in code
+only when the fence refused a file. S-094's Worker asked before writing anything, so the
+fingerprint fell back to its sentence, which was new every time. The founder was never told the
+story was going round, and never offered to stop it.
+
+**Decision.**
+
+- **Where the story stands.** `_progress` reads the story's position in code terms: the phase,
+  the task the Worker would do next and its text, the fence, the criteria, and how many tasks
+  and commits it has.
+- **Counting.** Each question counts how many times in a row it was asked from that same point
+  (`stalled_asks`).
+- **The second question there** opens with a plain sentence saying the team stopped at the same
+  point again. It keeps the team's options, which now include the ways out (§1).
+- **The third question there** is not asked. The node marks the story `park` and sends one INFO
+  note ("voltou ao backlog"). The Scheduler, once the run has stopped, puts the story back in the
+  backlog the way `withdraw_story` does. A park that a stopped engine left behind is done at the
+  next start.
+- **The counter resets** when the story moves: a task done, a commit, a new fence or new criteria.

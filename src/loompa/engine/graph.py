@@ -129,11 +129,18 @@ async def block(
     twice in a row is a repeat whatever words the model used (ADR-0036 §6)."""
     ref = _write_tech_log(ctx, state, technical)
     master = MasterAgent(ctx)
+    # the same point in code terms (open task, fence, work committed), whatever the words: the
+    # third question in a row there is not asked (ADR-0037 §2, tamagotchi S-094 asked eight)
+    stalls = _stalled(ctx, state) if reason == BlockedReason.QUESTION else 0
+    if stalls >= STALL_LIMIT:
+        return _park_stalled(ctx, state, stalls, ref)
     repeats = _count_repeat(state, reason, cause or technical)
     if repeats > 1 and message is None and (reason in _RETRYABLE_BLOCKS or cause):
         message = _repeated_block_message(ctx, state, master, executive or technical, repeats)
     if message is not None:
         message.technical_ref = message.technical_ref or ref
+        if stalls > 1:
+            message.context = f"{REPEAT_NOTE} {message.context}"
         msg = ctx.inbox(message)
     elif reason == BlockedReason.CONFLICT:
         msg = FounderMessage(
@@ -156,6 +163,8 @@ async def block(
         msg = await master.blocked_message(
             state, technical, options=options, technical_ref=ref, executive=executive
         )
+        if stalls > 1:
+            msg.context = f"{REPEAT_NOTE} {msg.context}"
         ctx.inbox(msg)
     state.blocked_reason = reason
     state.blocked_message_id = msg.id
@@ -246,6 +255,92 @@ FENCE_AMEND_KEY = (
 CONFLICT_RETRIES_KEY = "conflict_retries"
 SELFHEAL_KEY = "self_healed"  # a WAIVED verdict already got its Worker round
 _VOLATILE = re.compile(r"[0-9a-f]{7,}|\d+")
+
+
+STALL_KEY = "stalled_asks"  # {"at": where the story stands, "count": questions in a row there}
+PARK_KEY = "park"  # set by a node: the Scheduler puts the story back in the backlog after the run
+STALL_LIMIT = 3
+REPEAT_NOTE = "É a segunda vez seguida que a equipe para neste mesmo ponto, sem conseguir avançar."
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha1(text.encode()).hexdigest()[:10]
+
+
+def _progress(ctx: EngineContext, state: StoryState) -> str:
+    """Where a story stands, in code terms: the phase, the task it would do next and its text,
+    the paths it may touch, the criteria, and how much it has done. Two questions asked with the
+    same answer here were asked about the same thing, whatever the model wrote (ADR-0037 §2)."""
+    open_task = ""
+    paths = story_dir(ctx.root, state.story_id)
+    if paths.tasks.is_file():
+        done = set(state.tasks_done)
+        nxt = next(
+            (
+                t
+                for t in tasks_from_markdown(paths.tasks.read_text(encoding="utf-8"))
+                if not t.done and t.number not in done
+            ),
+            None,
+        )
+        if nxt is not None:
+            open_task = f"T{nxt.number}:{_digest(nxt.text)}"
+    return "|".join(
+        (
+            state.phase,
+            open_task,
+            _digest("\n".join(sorted(state.allowed_paths))),
+            _digest("\n".join(state.acceptance)),
+            str(len(state.commits)),
+            str(len(state.tasks_done)),
+            str(bool(state.spec_ready)),
+            str(bool(state.plan_ready)),
+        )
+    )
+
+
+def _stalled(ctx: EngineContext, state: StoryState) -> int:
+    """How many questions in a row this story asked from the same point (see `_progress`)."""
+    at = _progress(ctx, state)
+    last = state.extra.get(STALL_KEY) or {}
+    count = int(last.get("count", 0)) + 1 if last.get("at") == at else 1
+    state.extra[STALL_KEY] = {"at": at, "count": count}
+    return count
+
+
+def _park_stalled(ctx: EngineContext, state: StoryState, count: int, ref: str) -> StoryState:
+    """The third question in a row from the same point is not asked (ADR-0037 §2). The story goes
+    back to the backlog with all it did and was told, the way the founder withdraws one: the
+    Scheduler does it once this run ends (`PARK_KEY`), and the founder gets one plain note."""
+    ctx.inbox(
+        FounderMessage(
+            factory=ctx.slug,
+            story_id=state.story_id,
+            kind=MessageKind.INFO,
+            sender=MasterAgent.display,
+            title=f"“{state.title}” voltou ao backlog",
+            context=(
+                "A equipe parou três vezes seguidas no mesmo ponto desta história, mesmo com as "
+                "suas respostas, sem conseguir avançar. Para não tomar mais o seu tempo, ela "
+                "voltou ao backlog com tudo o que já foi feito e respondido."
+            ),
+            impact=(
+                "As demais entregas seguem normalmente. Ela pode voltar a um sprint pela reunião "
+                "de sprint."
+            ),
+            technical_ref=ref,
+            allow_free_text=False,
+        )
+    )
+    state.extra.pop(STALL_KEY, None)
+    state.extra[PARK_KEY] = "stalled"
+    state.blocked_reason = BlockedReason.QUESTION
+    state.blocked_message_id = None
+    state.resume_phase = state.phase
+    state.resume_stage = state.stage
+    state.stage = Stage.AWAITING_FOUNDER
+    ctx.emit("story.stalled_asks", story_id=state.story_id, count=count)
+    return state
 
 
 def _count_repeat(state: StoryState, reason: BlockedReason, technical: str) -> int:

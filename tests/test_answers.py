@@ -134,3 +134,85 @@ def test_the_sprint_report_counts_a_resolved_story_apart():
 
     assert RESULT_LABEL["resolved"] == "encerrada como já resolvida"
     assert json.dumps(RESULT_LABEL, ensure_ascii=False)
+
+
+async def test_the_same_point_three_times_goes_back_to_the_backlog_without_asking(
+    factory: Factory,  # noqa: F811
+):
+    """ADR-0037 §2: S-094's Worker stopped at the same task eight times, each question worded
+    anew, so no repeat was ever seen. The point is measured in code: the open task, the fence and
+    the work done. The second question there says it repeated; the third is not asked."""
+    from loompa.engine.graph import REPEAT_NOTE
+
+    asked: list[int] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "worker":
+            asked.append(1)
+            return [
+                ToolCall(
+                    "q",
+                    "blocked",
+                    {
+                        "reason": f"Pergunta número {len(asked)} sobre o mesmo passo.",
+                        "options": [f"Caminho {len(asked)}", "Outro caminho"],
+                    },
+                )
+            ]
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Consertar a versão principal")
+    sched = Scheduler(ctx)
+    await sched.run()
+    first = load_state(ctx, sid)
+    msg1 = ctx.store.get_message(first.blocked_message_id)
+    assert REPEAT_NOTE not in msg1.context
+    await sched.aanswer(msg1.id, FounderAnswer(option_key="opt1"))
+    await sched.run()
+    second = load_state(ctx, sid)
+    msg2 = ctx.store.get_message(second.blocked_message_id)
+    assert msg2.context.startswith(REPEAT_NOTE) and [o.key for o in msg2.options][-2:] == [
+        "skip",
+        "drop",
+    ]
+    await sched.aanswer(msg2.id, FounderAnswer(option_key="opt1"))
+    await sched.run()
+    third = load_state(ctx, sid)
+    assert third.stage == Stage.BACKLOG and len(asked) == 3
+    blocked = [m for m in ctx.store.list_messages(factory.slug) if m.kind.value == "blocked"]
+    assert len(blocked) == 2  # the third question was never sent
+    (note,) = [m for m in ctx.store.list_messages(factory.slug, "pending") if m.story_id == sid]
+    assert note.kind.value == "info" and "voltou ao backlog" in note.title
+    assert note.executive_audit() == []
+    await ctx.aclose()
+
+
+async def test_a_question_after_progress_is_a_new_point(factory: Factory):  # noqa: F811
+    from loompa.engine.graph import STALL_KEY
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "worker":
+            if "Guidance from the founder" not in messages[1].content:
+                return [ToolCall("q", "blocked", {"reason": "Qual?", "options": ["A", "B"]})]
+            if not tool_results(messages):
+                return [
+                    ToolCall(
+                        "w",
+                        "write_file",
+                        {"path": "tests/test_a.py", "content": "def test_a():\n    pass\n"},
+                    )
+                ]
+            return [ToolCall("d", "done", {"summary": "feito"})]
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Uma coisa")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.extra[STALL_KEY]["count"] == 1
+    await Scheduler(ctx).aanswer(state.blocked_message_id, FounderAnswer(option_key="opt1"))
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
+    await ctx.aclose()
