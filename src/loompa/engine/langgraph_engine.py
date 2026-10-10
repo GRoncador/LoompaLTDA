@@ -35,8 +35,9 @@ from langgraph.graph.state import CompiledStateGraph
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent
 from loompa.dependencies import WAIT_KEY
 from loompa.engine.context import EngineContext
-from loompa.engine.graph import BlockedReason, block, gate_plan
-from loompa.engine.phases import PHASES, ensure_route
+from loompa.engine.graph import RESOLVE_KEY, BlockedReason, block, gate_plan
+from loompa.engine.line import line_resolved
+from loompa.engine.phases import PHASES, ensure_route, goto
 from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.store import LOCK_BACKOFF_S, LOCK_RETRIES, is_lock_error
 
@@ -93,6 +94,13 @@ def build_graph(
         async def node(state: StoryState) -> dict[str, Any]:
             ops = OpsAgent(ctx)
             ensure_route(state)
+            run = fn
+            if name != "resolve" and (gone := line_resolved(ctx, state.story_id)) is not None:
+                # a line card whose failures left the base while it waited for this node: it
+                # closes instead of working on nothing (ADR-0037 §4)
+                state.extra[RESOLVE_KEY] = {**gone, "resume": state.phase}
+                goto(state, "resolve")
+                run = PHASES["resolve"].node
             if name == "plan":  # a chain story plans only when its chain is ready (ADR-0021)
                 gated = await gate_plan(ctx, state)
                 if gated is not None:
@@ -110,7 +118,7 @@ def build_graph(
                         attempts_tier2=state.attempts_tier2 or None,
                         attempts_tier1=state.attempts_tier1 or None,
                     ) as span:
-                        new_state = await fn(ctx, state)
+                        new_state = await run(ctx, state)
                         span.set(next=new_state.phase or None, stage_after=new_state.stage.value)
                     ops.on_success(new_state)
                     break

@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
+from pathlib import Path
 from typing import Any
 
 from loompa.comms import FounderMessage, MessageKind
@@ -23,9 +25,14 @@ from loompa.store import now_iso
 
 log = logging.getLogger(__name__)
 
-LINE_KEY = "line"  # kv: {"sha", "red", "failing", "card", "since"} of the base last checked
+# kv: {"sha", "red", "failing", "card", "targets", "since"} of the base last checked
+LINE_KEY = "line"
+# kv: {story id: {"why", "by"}}: line cards whose failures left the base while they were in the
+# pipeline; their next node is `resolve` (ADR-0037 §4)
+RESOLVED_KEY = "line_resolved"
 SENDER = "Inspector Loompa"
 _STORY_IN_SUBJECT = re.compile(r"^\w+\((s-\d+\w*)\)", re.I)
+MIN_NAME = 12  # a failing test's name shorter than this ("CA1") says nothing in another card
 
 
 def line_state(ctx: EngineContext) -> dict[str, Any]:
@@ -45,6 +52,55 @@ def line_card(ctx: EngineContext) -> str | None:
         return None
     row = ctx.store.get_story(card)
     return card if row is not None and row["stage"] not in TERMINAL else None
+
+
+def _resolved_cards(ctx: EngineContext) -> dict[str, Any]:
+    raw = ctx.store.get(RESOLVED_KEY)
+    try:
+        data = json.loads(raw) if raw else {}
+    except ValueError:
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def line_resolved(ctx: EngineContext, story_id: str) -> dict[str, Any] | None:
+    """Why the line card `story_id` has nothing left to fix, when the line watch saw its failures
+    leave the base while it was in the pipeline; None otherwise."""
+    return _resolved_cards(ctx).get(story_id)
+
+
+def forget_resolved(ctx: EngineContext, story_id: str) -> None:
+    cards = _resolved_cards(ctx)
+    if cards.pop(story_id, None) is not None:
+        ctx.store.set(RESOLVED_KEY, json.dumps(cards))
+
+
+def tests_reading_records(root: Path, failing: list[str]) -> list[str]:
+    """The test files, among those holding the failing tests, that read the factory's records
+    under `.loompa/` (ADR-0037 §4). Such a test can only pass where those files happen to be:
+    tamagotchi's AC6 read `.loompa/specs/S-077/plan.md`, which the merge leaves out."""
+    from loompa.hygiene import is_test_path
+
+    try:
+        files = subprocess.run(
+            ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    names = [n.split("::", 1)[0] if "::" in n else n for n in failing]
+    out: list[str] = []
+    for rel in files:
+        if not is_test_path(rel) or rel.startswith(".loompa/"):
+            continue
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if ".loompa" not in text:
+            continue
+        if any(n == rel or (len(n) >= MIN_NAME and n[:80] in text) for n in names):
+            out.append(rel)
+    return out
 
 
 def line_targets(ctx: EngineContext, story_id: str) -> list[str]:
@@ -88,22 +144,90 @@ class LineWatch:
         before = line_state(self.ctx)
         with self.ctx.worktrees.base_checkout(sha) as path:
             checks = await InspectorAgent(self.ctx).checks_at(path, lint=False)
-        red = not checks["tests_ok"]
-        failing = list(checks["failing"])
+            red = not checks["tests_ok"]
+            failing = list(checks["failing"])
+            records = tests_reading_records(path, failing) if red else []
+        card = line_card(self.ctx)
+        targets = list(before.get("targets") or before.get("failing") or [])
+        if card and targets and not set(targets) & set(failing):
+            # what the card was opened for left the base, fixed by another delivery: the card
+            # closes instead of going on with nothing to fix (tamagotchi S-094, ADR-0037 §4)
+            await self._resolved(card, self._merged_since(before.get("sha") or "", sha))
+            card, targets = None, []
         now = {
             "sha": sha,
             "red": red,
             "failing": failing[:40],
-            "card": before.get("card") if red else None,
+            "card": card if red else None,
+            "targets": targets if card and red else [],
             "since": before.get("since") if red and before.get("red") else now_iso(),
         }
-        if red and not line_card(self.ctx):
-            now["card"] = self._stop(before.get("sha") or "", sha, failing)
+        if red and card is None:
+            now["card"] = self._stop(before.get("sha") or "", sha, failing, records)
+            now["targets"] = failing[:40] if now["card"] else []
         elif not red and before.get("red"):
             self._green(before)
         self.ctx.store.set(LINE_KEY, json.dumps(now))
         self.ctx.emit("line.checked", sha=sha[:12], red=red, failing=len(failing))
         return now
+
+    def _already_fixing(self, failing: list[str]) -> str | None:
+        """An open story that already names one of these failures, word for word: the line
+        adopts it instead of opening another card for the same tests (ADR-0037 §4). One in the
+        pipeline first, then one waiting in the backlog (a finding filed before the line red)."""
+        names = [n.casefold() for n in failing if len(n) >= MIN_NAME]
+        if not names:
+            return None
+        found: list[tuple[int, str]] = []
+        for row in self.ctx.store.list_stories(self.ctx.slug):
+            if row["stage"] in TERMINAL:
+                continue
+            text = f"{row['title']}\n{row.get('description', '')}".casefold()
+            if any(n in text for n in names):
+                found.append((1 if row["stage"] == "BACKLOG" else 0, row["id"]))
+        return min(found)[1] if found else None
+
+    async def _resolved(self, card: str, by: list[str]) -> None:
+        """Close the line card whose failures left the base. Waiting (in the backlog or for the
+        founder) it closes now; in the pipeline its next node is `resolve`, which closes it there
+        (a state written from here would be overwritten by the node running it)."""
+        from loompa.engine.graph import close_resolved
+        from loompa.engine.scheduler import runtime_for
+        from loompa.engine.state import Stage, StoryState
+
+        row = self.ctx.store.get_story(card)
+        if row is None or row["stage"] in TERMINAL:
+            return
+        why = "as verificações que o card ia consertar voltaram a passar na versão principal"
+        if row["stage"] in (Stage.BACKLOG, Stage.AWAITING_FOUNDER):
+            state = StoryState.from_row(row)
+            if state.blocked_message_id:
+                self.ctx.store.archive_message(state.blocked_message_id)
+            close_resolved(self.ctx, state, why, by=by)
+            if row["stage"] == Stage.AWAITING_FOUNDER:
+                # its graph waits at the pause: told the way an answer is, it ends there
+                await runtime_for(self.ctx).inject_founder_answer(state)
+        else:
+            cards = _resolved_cards(self.ctx)
+            cards[card] = {"why": why, "by": by}
+            self.ctx.store.set(RESOLVED_KEY, json.dumps(cards))
+        self.ctx.emit("line.resolved", card=card, by=by)
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                story_id=card,
+                kind=MessageKind.INFO,
+                sender=SENDER,
+                title="O conserto da versão principal não é mais necessário",
+                context=(
+                    f"As verificações que o card {card} ia consertar voltaram a passar na versão "
+                    "principal"
+                    + (f", com a entrada de {', '.join(by)}" if by else "")
+                    + ". A equipe encerra esse card sem entrega."
+                ),
+                allow_free_text=False,
+            )
+        )
 
     def _merged_since(self, old: str, new: str) -> list[str]:
         """The stories whose merges took the base from `old` to `new` (their commit subjects)."""
@@ -122,7 +246,9 @@ class LineWatch:
                 out.append(m.group(1).upper())
         return list(reversed(out))
 
-    def _stop(self, old: str, new: str, failing: list[str]) -> str | None:
+    def _stop(
+        self, old: str, new: str, failing: list[str], records: list[str] | None = None
+    ) -> str | None:
         """One card to make the base green again, first in line, and one note to the founder."""
         from loompa.agents.product_owner import ProductOwnerAgent
         from loompa.backlog import MIN_PRIORITY, TOP
@@ -140,7 +266,24 @@ class LineWatch:
             "documento interno da fábrica), o próprio teste. Enquanto este card estiver aberto, "
             "as outras histórias não são cobradas por essas falhas."
         )
-        card = None
+        if records:
+            # said in the card, where the spec is written from: S-094's spec asked to create the
+            # records the test read, the one fix the factory can never deliver (ADR-0037 §4)
+            description += (
+                f" Atenção: {', '.join(records[:5])} lê(em) os registros internos da fábrica "
+                "(a pasta .loompa), que não fazem parte do produto e não chegam à versão "
+                "principal. Ali o conserto é reescrever esse teste para conferir o comportamento "
+                "do produto, ou removê-lo; nunca criar ou editar registros da fábrica."
+            )
+        card = self._already_fixing(failing)
+        if card is not None:
+            try:
+                po.backlog.pin(card, True)
+                po.resolve_finding(card, "sprint")  # a waiting finding joins the running sprint
+            except Exception:  # noqa: BLE001 - adopted even if it could not be moved
+                log.exception("could not move the card that already fixes the base")
+            self.ctx.emit("line.adopted", sha=new[:12], failing=failing[:20], card=card)
+            return card
         try:
             admission = po.add_item(
                 title,

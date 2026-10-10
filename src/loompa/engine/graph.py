@@ -64,7 +64,7 @@ from loompa.dependencies import (
     sync_refs,
 )
 from loompa.engine.context import EngineContext
-from loompa.engine.line import line_targets
+from loompa.engine.line import forget_resolved, line_targets
 from loompa.engine.merge_queue import MergeLock, dequeue, enqueue, merge_queue, queued
 from loompa.engine.phases import (
     Phase,
@@ -1629,6 +1629,7 @@ def close_resolved(
     state.resume_phase = None
     ctx.store.update_story(state.story_id, state=state.model_dump(mode="json"))
     ctx.worktrees.remove(state.story_id)
+    forget_resolved(ctx, state.story_id)
     ctx.emit("story.resolved", story_id=state.story_id, by=list(by or []), reason=(why or "")[:300])
     return state
 

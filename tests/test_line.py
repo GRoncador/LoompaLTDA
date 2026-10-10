@@ -8,7 +8,7 @@ from pathlib import Path
 from conftest import git
 from loompa.agents import ProductOwnerAgent
 from loompa.agents.inspector import InspectorAgent
-from loompa.engine import StoryState
+from loompa.engine import Stage, StoryState
 from loompa.engine.line import LINE_KEY, LineWatch, line_card
 from loompa.factory import Factory
 from loompa.sprints import SprintBoard
@@ -102,4 +102,105 @@ async def test_the_worker_is_told_which_failures_belong_to_the_base(factory: Fac
     await WorkerAgent(ctx)._run_task(st, aci, 1, "Fazer algo", "spec", "plan", "- [ ] T1")
     user = next(m.content for m in seen[0] if m.role == "user")
     assert "Already failing on the base" in user and "test_cache_lists_every_module" in user
+    await ctx.aclose()
+
+
+async def test_a_card_whose_failures_left_the_base_closes_and_the_rest_gets_its_own(
+    factory: Factory,  # noqa: F811
+):
+    """ADR-0037 §4, tamagotchi S-094: S-092 fixed CA1/CA2 at 18:31, and the line card opened for
+    them went on, then asked the founder eight times about failures that no longer existed. Now
+    the card closes when its failures leave the base, and what is still red gets a card of its
+    own."""
+    from loompa.backlog import OUTCOME_KEY
+    from loompa.engine import load_state
+
+    ctx = make_ctx(factory)
+    watch = LineWatch(ctx)
+    _land(factory.root, "test_a.py", "def test_a_fails_here():\n    assert False\n", "feat(s-1): a")
+    first = await watch.check()
+    card = first["card"]
+    assert card and first["targets"] == ["test_a_fails_here"]
+    # another delivery fixes test_a and breaks test_b while the card waits in the backlog
+    (factory.root / "tests" / "test_a.py").unlink()
+    _land(factory.root, "test_b.py", "def test_b_fails_now():\n    assert False\n", "fix(s-2): b")
+    second = await watch.check()
+    state = load_state(ctx, card)
+    assert state.stage == Stage.CANCELLED and state.extra[OUTCOME_KEY]["kind"] == "resolved"
+    assert state.extra[OUTCOME_KEY]["by"] == ["S-2"]
+    assert second["card"] and second["card"] != card
+    assert second["targets"] == ["test_b_fails_now"]
+    notes = [m.title for m in ctx.store.list_messages(ctx.slug, "pending")]
+    assert "O conserto da versão principal não é mais necessário" in notes
+    await ctx.aclose()
+
+
+async def test_a_card_in_the_pipeline_closes_at_its_next_step(factory: Factory):  # noqa: F811
+    from loompa.engine import Scheduler, load_state
+    from loompa.engine.line import line_resolved
+
+    ctx = make_ctx(factory)
+    board = SprintBoard(ctx.store, ctx.slug)
+    other = ProductOwnerAgent(ctx).add_item("Outra frente").story_id
+    board.add(other)
+    board.start(board.draft().id, "meta")
+    watch = LineWatch(ctx)
+    _land(factory.root, "test_a.py", "def test_a_fails_here():\n    assert False\n", "feat(s-1): a")
+    card = (await watch.check())["card"]
+    assert ctx.store.get_story(card)["stage"] != "BACKLOG"  # it joined the running sprint
+    (factory.root / "tests" / "test_a.py").unlink()
+    git("add", "-A", cwd=factory.root)
+    git("commit", "-qm", "fix(s-2): conserta", cwd=factory.root)
+    assert not (await watch.check())["red"]
+    assert line_resolved(ctx, card) is not None
+    await Scheduler(ctx).run()
+    state = load_state(ctx, card)
+    assert state.stage == Stage.CANCELLED and state.extra["outcome"]["kind"] == "resolved"
+    assert line_resolved(ctx, card) is None
+    events = [e["type"] for e in ctx.store.events_since(0, limit=10_000) if e["story_id"] == card]
+    assert "story.resolved" in events and "worker.task_started" not in events
+    await ctx.aclose()
+
+
+async def test_the_line_adopts_a_card_that_already_names_the_failures(
+    factory: Factory,  # noqa: F811
+):
+    """SP-013: S-091 ("A suíte de verificações já falha na versão principal", with the failing
+    tests word for word) waited in the backlog while the line opened S-094 for the same tests."""
+    ctx = make_ctx(factory)
+    name = "tests/test_a.py::test_a_fails_here"
+    existing = (
+        ProductOwnerAgent(ctx)
+        .add_item(
+            "[Débito técnico] A suíte já falha na versão principal",
+            f"Falhas pré-existentes: {name}.",
+            origin="kaizen",
+        )
+        .story_id
+    )
+    _land(factory.root, "test_a.py", "def test_a_fails_here():\n    assert False\n", "feat(s-1): a")
+    state = await LineWatch(ctx).check()
+    assert state["card"] == existing
+    assert ctx.store.get_story(existing)["priority_pinned"]
+    titles = [s["title"] for s in ctx.store.list_stories(ctx.slug)]
+    assert not any(t.startswith("Consertar a versão principal") for t in titles)
+    await ctx.aclose()
+
+
+async def test_a_failing_test_that_reads_the_factorys_records_is_named_in_the_card(
+    factory: Factory,  # noqa: F811
+):
+    """tamagotchi AC6 read `.loompa/specs/S-077/plan.md`; S-094's spec asked to create records."""
+    ctx = make_ctx(factory)
+    _land(
+        factory.root,
+        "test_records.py",
+        "from pathlib import Path\n\n\ndef test_plan_mentions_it():\n"
+        "    assert 'x' in Path('.loompa/specs/S-1/plan.md').read_text()\n",
+        "feat(s-1): a",
+    )
+    card = (await LineWatch(ctx).check())["card"]
+    description = ctx.store.get_story(card)["description"]
+    assert "tests/test_records.py lê(em) os registros internos da fábrica" in description
+    assert "nunca criar ou editar registros da fábrica" in description
     await ctx.aclose()

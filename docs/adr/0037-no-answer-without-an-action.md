@@ -106,3 +106,32 @@ adding tasks that "discard T1 to T3".
 
 **Not measured.** The new `drop_tasks` field is a contract change of `AMEND_SYSTEM`, on the list
 of prompts to measure.
+
+## §4 The line follows its failures, not its card
+
+**What happened.** The line watch (ADR-0036 §4) opened S-094 for CA1/CA2 while S-092, in the same
+sprint, was fixing exactly those. S-092 merged and the failures left the base. The line state
+kept S-094 as its card, now pointing at a different failure (AC6) that the card did not mention.
+S-094 went on with nothing to fix. Nothing told the spec writer that the failing test read the
+factory's records.
+
+**Decision.**
+
+- **The card keeps its failures.** It stores the failures it was opened for (`targets` in the
+  line state).
+- **It closes when they leave the base.** When none of its targets fails any more, the card is
+  resolved (§1), with the stories merged since in `by`. How:
+  - a card waiting in the backlog or for the founder closes at once; its pending question is
+    archived and its graph is told the way an answer is;
+  - a card in the pipeline is recorded under `line_resolved`, and its next node runs `resolve`
+    instead (a state written from the watch would be overwritten by the node running it).
+
+  The founder gets one note ("O conserto da versão principal não é mais necessário"). Failures
+  still red get a card of their own in the same check.
+- **One fixer per failure.** Before opening a card, the watch looks for an open story that
+  already names one of the failing tests word for word (names shorter than 12 characters, like
+  "CA1", say nothing). If it finds one, it adopts it: pinned, joining the running sprint when it
+  was waiting in the backlog.
+- **Tests that read the records.** When a failing test lives in a test file that reads `.loompa/`,
+  the card says so and says what fixing it means: rewrite the test or remove it, never create or
+  edit the factory's records.
