@@ -117,6 +117,14 @@ function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: 
               ))}
             </div>
           )}
+          {/* what an option makes the factory do, readable without hovering (ADR-0037 §1) */}
+          {m.options.some((o) => o.description) && (
+            <ul className="mt-1 space-y-0.5 text-[11px] text-slate-400">
+              {m.options.filter((o) => o.description).map((o) => (
+                <li key={o.key}><span className="text-slate-300">{o.label}:</span> {o.description}</li>
+              ))}
+            </ul>
+          )}
           {m.allow_free_text && (
             <div className="mt-2 flex gap-2">
               <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Orientação livre (opcional)…" className="flex-1 rounded-md border border-line bg-panel px-2 py-1 text-sm" />
