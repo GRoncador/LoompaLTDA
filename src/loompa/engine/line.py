@@ -47,6 +47,14 @@ def line_card(ctx: EngineContext) -> str | None:
     return card if row is not None and row["stage"] not in TERMINAL else None
 
 
+def line_targets(ctx: EngineContext, story_id: str) -> list[str]:
+    """The failures the line card `story_id` was opened for; [] for any other story."""
+    state = line_state(ctx)
+    if state.get("card") != story_id:
+        return []
+    return list(state.get("targets") or state.get("failing") or [])
+
+
 class LineWatch:
     def __init__(self, ctx: EngineContext):
         self.ctx = ctx

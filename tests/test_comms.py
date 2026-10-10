@@ -152,7 +152,13 @@ async def test_a_rewrite_with_a_task_number_is_cleaned_and_kept_not_thrown_away(
     )
     assert msg.title.startswith("A tarefa 1 parou")  # the model's rewrite, cleaned
     assert "roteiro de verificação" in msg.context and "T1" not in msg.context
-    assert [o.label for o in msg.options] == ["Ajustar os testes", "Deixar para depois"]
+    # "Deixar para depois" is the way out already, read by its words; "cancel" joins it
+    assert [o.label for o in msg.options] == [
+        "Ajustar os testes",
+        "Deixar para depois",
+        "Cancelar esta entrega",
+    ]
+    assert [o.key for o in msg.options] == ["opt1", "skip", "drop"]
     assert not audit_executive_text(f"{msg.title}\n{msg.context}\n{msg.impact}")
 
 

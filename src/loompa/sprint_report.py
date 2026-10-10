@@ -49,6 +49,7 @@ RESULT_LABEL = {
     "delivered": "entregue",
     "split": "dividida em épico",
     "cancelled": "cancelada",
+    "resolved": "encerrada como já resolvida",
     "withdrawn": "devolvida ao backlog",
     "retired": "aposentada (coberta por outra entrega ou sem sentido)",
     "waiting": "aguardando você",
@@ -149,7 +150,9 @@ def _story(
     elif stage == "DONE":
         result = "delivered"
     elif stage == "CANCELLED":
-        result = "cancelled"
+        # closed because what it asked already held (ADR-0037 §1): not missing work
+        outcome = (st.get("extra") or {}).get("outcome") or {}
+        result = "resolved" if outcome.get("kind") == "resolved" else "cancelled"
     elif stage == "AWAITING_FOUNDER":
         result = "waiting"
     else:
@@ -405,6 +408,7 @@ def _totals(
         "cancelled": results.get("cancelled", 0),
         "withdrawn": results.get("withdrawn", 0),
         "retired": results.get("retired", 0),
+        "resolved": results.get("resolved", 0),
         "waiting": results.get("waiting", 0),
         "working": results.get("working", 0),
         "duration_s": round(_seconds(start, end)) if sprint.started_at else 0,
@@ -774,6 +778,12 @@ def summary_facts(report: dict[str, Any]) -> str:
             f"; retired on purpose (covered by delivered work or obsolete, NOT missing work) "
             f"{t['retired']}"
             if t.get("retired")
+            else ""
+        )
+        + (
+            f"; closed with nothing to deliver because what they asked already held, NOT missing "
+            f"work {t['resolved']}"
+            if t.get("resolved")
             else ""
         )
         + ".",

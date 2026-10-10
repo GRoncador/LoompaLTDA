@@ -1600,11 +1600,12 @@ async def test_team_written_options_reach_the_founder_in_plain_words(factory: Fa
     msg = await MasterAgent(ctx).blocked_message(
         load_state(ctx, sid), "formatting drift", options=team
     )
-    assert [o.label for o in msg.options] == [
+    assert [o.label for o in msg.options][:2] == [
         "Desfazer o ajuste de formatação",
         "Manter o ajuste e concluir",
     ]
-    assert [o.key for o in msg.options] == ["opt1", "opt2"]
+    # the ways out are always there (ADR-0037 §1)
+    assert [o.key for o in msg.options] == ["opt1", "opt2", "skip", "drop"]
 
     # a rewrite that drops an option keeps the team's labels, filtered
     def short(model: str, messages: list[Message], tools: Any) -> Any:
@@ -1623,7 +1624,7 @@ async def test_team_written_options_reach_the_founder_in_plain_words(factory: Fa
     msg = await MasterAgent(ctx2).blocked_message(
         load_state(ctx2, sid), "formatting drift", options=team
     )
-    assert len(msg.options) == 2 and msg.executive_audit() == []
+    assert len(msg.options) == 4 and msg.executive_audit() == []
     await ctx.aclose()
     await ctx2.aclose()
 

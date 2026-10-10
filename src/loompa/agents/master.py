@@ -21,6 +21,7 @@ from loompa.comms import (
     plain_words,
     sanitize_for_founder,
 )
+from loompa.comms.answers import DROP, GUIDE, RESOLVED, RESPEC, SKIP, executable_options
 from loompa.comms.executive import MAX_FOUNDER_CHARS, clip
 from loompa.conversations import (
     CommitResult,
@@ -126,6 +127,17 @@ Respond with JSON only: {{"summary": str}}
 story is a "história", never "story", and rework is "retrabalho").
 """
 
+# The model's word for an option's action (EXEC_SYSTEM) → the engine's key (comms/answers.py).
+_ACTION_WORDS = {
+    "guide": GUIDE,
+    "respec": RESPEC,
+    "resolved": RESOLVED,
+    "later": SKIP,
+    "skip": SKIP,
+    "cancel": DROP,
+    "drop": DROP,
+}
+
 DEFAULT_BLOCK_OPTIONS = [
     "Tentar novamente com outra abordagem",
     "Deixar para depois (volta ao backlog)",
@@ -151,12 +163,19 @@ leave it out.
 The option labels were written by the team and may name files or commands: rewrite each one in
 plain words, keeping its meaning and its place in the list. Never ask the founder to run a command
 or edit a file themselves; say what the team will do with that choice instead.
-Respond with JSON only: {{"title": str, "context": str, "impact": str, "options": [str]}}
+Respond with JSON only: {{"title": str, "context": str, "impact": str,
+"options": [{{"label": str, "action": str}}]}}
 - title: one sentence;
 - context: 2-3 plain sentences: what we were doing and what happened;
 - impact: what it means for the product, and what keeps going normally only when the material
   says so;
-- options: one short label per listed option, same order and count.
+- options: one per listed option, same order and count. `label` is the option in plain words;
+  `action` is what the team does when the founder picks it: "guide" (the work goes on following
+  that choice), "respec" (the story's requirements are rewritten with it before the work goes
+  on), "resolved" (the story closes without a delivery, because what it asks already holds or
+  is no longer needed), "later" (the story waits in the backlog) or "cancel" (the story is
+  dropped). Why: the factory carries out the action, not the words, and an option read as the
+  wrong action does something the founder did not choose. When unsure, use "guide".
 """
 
 
@@ -962,13 +981,10 @@ class MasterAgent(LoompaAgent):
     ) -> FounderMessage:
         """Compose a BLOCKED inbox message; LLM rewrite when possible, deterministic filter always."""
         # Labels come from the team's own words; the filter keeps a file name or a command out of
-        # the inbox even when the rewrite below fails or skips them.
-        opts = [
-            Option(
-                key=f"opt{i + 1}", label=sanitize_for_founder(o, max_chars=120), recommended=i == 0
-            )
-            for i, o in enumerate(options or [])
-        ]
+        # the inbox even when the rewrite below fails or skips them. Each option is keyed by the
+        # action the engine takes, and "later"/"cancel" are always there (ADR-0037 §1).
+        team = [sanitize_for_founder(o, max_chars=120) for o in options or []]
+        opts = executable_options(team) if team else []
         if not self.ctx.dry_run:
             try:
                 data = await self.ask_json(
@@ -992,20 +1008,21 @@ class MasterAgent(LoompaAgent):
                 title, context, impact = (
                     plain_words(str(data.get(k) or "")) for k in ("title", "context", "impact")
                 )
-                labels = [
-                    plain_words(str(x.get("label") or "") if isinstance(x, dict) else str(x))
+                pairs = [
+                    (
+                        plain_words(str(x.get("label") or "") if isinstance(x, dict) else str(x)),
+                        _ACTION_WORDS.get(str(x.get("action") or "").strip().lower())
+                        if isinstance(x, dict)
+                        else None,
+                    )
                     for x in data.get("options") or []
                 ]
-                labels = [lb.strip() for lb in labels if lb.strip()]
-                if (
-                    opts
-                    and len(labels) == len(opts)
-                    and not audit_executive_text("\n".join(labels))
-                ):
-                    opts = [
-                        o.model_copy(update={"label": clip(lb, 160)})
-                        for o, lb in zip(opts, labels, strict=True)
-                    ]
+                pairs = [(lb.strip(), a) for lb, a in pairs if lb.strip()]
+                if team and len(pairs) == len(team):
+                    labels = [clip(lb, 160) for lb, _ in pairs]
+                    if audit_executive_text("\n".join(labels)):
+                        labels = team  # the team's words, filtered: the action still holds
+                    opts = executable_options(labels, [a for _, a in pairs])
                 if title and not audit_executive_text(f"{title}\n{context}\n{impact}"):
                     msg = compose_blocked_message(
                         factory=self.ctx.slug,

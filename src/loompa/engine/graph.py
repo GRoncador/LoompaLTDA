@@ -36,7 +36,7 @@ from loompa.agents.base import AgentResult
 from loompa.agents.inspector import test_origin
 from loompa.agents.product_owner import CRITERIA_ALIGNED_KEY, CRITERIA_REVIEW_KEY
 from loompa.agents.worker import FOUNDER_CHANGES, unfinished
-from loompa.backlog import TRIAGE_KEY
+from loompa.backlog import OUTCOME_KEY, TRIAGE_KEY
 from loompa.comms import (
     FounderAnswer,
     FounderMessage,
@@ -46,6 +46,7 @@ from loompa.comms import (
     compose_research_message,
     sanitize_for_founder,
 )
+from loompa.comms.answers import RESOLVED, RESPEC, action_of, executable_options
 from loompa.dependencies import (
     BUILT_ON_KEY,
     INTEGRATION_KEY,
@@ -63,6 +64,7 @@ from loompa.dependencies import (
     sync_refs,
 )
 from loompa.engine.context import EngineContext
+from loompa.engine.line import line_targets
 from loompa.engine.merge_queue import MergeLock, dequeue, enqueue, merge_queue, queued
 from loompa.engine.phases import (
     Phase,
@@ -92,6 +94,7 @@ from loompa.risk import needs_preflight
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.sprints import SprintBoard
 from loompa.stack_check import STACK_KEY, foreign_files, mismatch_note
+from loompa.store import now_iso
 from loompa.worktrees import GitError, MergeConflict, Worktree
 
 Node = Callable[[EngineContext, StoryState], Awaitable[StoryState]]
@@ -235,6 +238,7 @@ async def gate_plan(ctx: EngineContext, state: StoryState) -> StoryState | None:
 _RETRYABLE_BLOCKS = (BlockedReason.PERSISTENT_FAILURE, BlockedReason.CONFLICT)
 LAST_BLOCK_KEY = "last_block"
 AMEND_KEY = "amend_plan"
+RESOLVE_KEY = "resolve"  # {"why", "resume"}: the founder said the story is already resolved
 ALIGN_KEY = "align_criteria"  # the founder's request for changes, for the Product Owner first
 FENCE_AMEND_KEY = (
     "fence_amend"  # files the Worker asked for once; the Architect widens the plan once
@@ -1134,6 +1138,23 @@ UNFINISHED_EXECUTIVE = (
 )
 
 
+def _fresh_branch(ctx: EngineContext, state: StoryState, label: str) -> str:
+    """Put the story's branch back where it left the base, the attempt kept under
+    `refs/loompa/attempts/<label>`: what comes next is not built on work done for another plan or
+    other criteria. The kept ref, or "" when the branch had nothing of its own."""
+    kept = ""
+    if (wt := ctx.worktrees.get(state.story_id)) is not None:
+        try:
+            kept = ctx.worktrees.as_role("deployer").keep_attempt_and_reset(wt, label)
+        except GitError as exc:
+            ctx.emit("story.reset_failed", story_id=state.story_id, error=str(exc)[:200])
+    if kept:
+        state.commits = []
+        state.tasks_done = []
+        state.extra.pop("baseline", None)
+    return kept
+
+
 async def climb(
     ctx: EngineContext, state: StoryState, failure: str, *, executive: str
 ) -> StoryState:
@@ -1164,18 +1185,7 @@ async def climb(
             state.extra[REPLANNED_KEY] = True
             state.plan_review_rounds = 0  # the re-plan gets its own gate round (ADR-0026)
             # and a clean branch: the new plan is not built on the old plan's commits (12.1)
-            kept = ""
-            if (wt := ctx.worktrees.get(state.story_id)) is not None:
-                try:
-                    kept = ctx.worktrees.as_role("deployer").keep_attempt_and_reset(
-                        wt, f"{state.story_id}-{state.attempts_tier2}"
-                    )
-                except GitError as exc:
-                    ctx.emit("story.reset_failed", story_id=state.story_id, error=str(exc)[:200])
-            if kept:
-                state.commits = []
-                state.tasks_done = []
-                state.extra.pop("baseline", None)
+            kept = _fresh_branch(ctx, state, f"{state.story_id}-{state.attempts_tier2}")
             ctx.emit("story.replanned", story_id=state.story_id, kept=kept or None)
             return goto(state, "plan")
         return goto(state, "dev")
@@ -1485,6 +1495,75 @@ async def node_research_review(ctx: EngineContext, state: StoryState) -> StorySt
     return state
 
 
+def close_resolved(
+    ctx: EngineContext, state: StoryState, why: str, *, by: list[str] | None = None
+) -> StoryState:
+    """End a story without a delivery because what it asks already holds (ADR-0037 §1). It is
+    cancelled with an outcome that says so (the sprint report reads it as resolved, not as
+    missing work); its worktree goes, its branch and attempts stay for analysis."""
+    ProductOwnerAgent(ctx).set_status(state.story_id, Stage.CANCELLED)
+    state.extra.pop(RESOLVE_KEY, None)
+    state.extra[OUTCOME_KEY] = {
+        "kind": "resolved",
+        "reason": (why or "")[:500],
+        "by": list(by or []),
+        "at": now_iso(),
+    }
+    state.stage = Stage.CANCELLED
+    state.phase = ""
+    state.blocked_reason = None
+    state.blocked_message_id = None
+    state.resume_stage = None
+    state.resume_phase = None
+    ctx.store.update_story(state.story_id, state=state.model_dump(mode="json"))
+    ctx.worktrees.remove(state.story_id)
+    ctx.emit("story.resolved", story_id=state.story_id, by=list(by or []), reason=(why or "")[:300])
+    return state
+
+
+async def node_resolve(ctx: EngineContext, state: StoryState) -> StoryState:
+    """Close a story whose goal already holds (ADR-0037 §1): the founder chose "already resolved",
+    or the line watch saw the failures a line card was opened for leave the base. What can be
+    checked is checked first: those failures run on the base, and while any still fails the
+    founder hears it, instead of a card closed over a red base."""
+    ask = state.extra.get(RESOLVE_KEY) or {}
+    targets = line_targets(ctx, state.story_id)
+    if targets:
+        with ctx.worktrees.base_checkout(ctx.worktrees.default_branch()) as path:
+            checks = await InspectorAgent(ctx).checks_at(path, lint=False)
+        still = sorted(set(targets) & set(checks["failing"]))
+        if still:
+            state.extra.pop(RESOLVE_KEY, None)
+            n = len(still)
+            msg = compose_blocked_message(
+                factory=ctx.slug,
+                story_id=state.story_id,
+                story_title=state.title,
+                reason=(
+                    f"A história foi encerrada como já resolvida, mas {n} verificação(ões) "
+                    "automática(s) que a motivaram ainda falham na versão principal do produto."
+                ),
+                impact="Nada foi encerrado. As demais entregas seguem normalmente.",
+                options=executable_options(["Seguir com o conserto dessas verificações"]),
+            )
+            msg.sender = MasterAgent.display
+            msg.title = f"“{state.title}” ainda não está resolvida"
+            return await block(
+                ctx,
+                state,
+                BlockedReason.QUESTION,
+                "asked to close as resolved, still failing on the base: " + "; ".join(still[:8]),
+                resume=str(ask.get("resume") or "dev"),
+                message=msg,
+            )
+    return close_resolved(
+        ctx,
+        state,
+        str(ask.get("why") or "encerrada como já resolvida"),
+        by=list(ask.get("by") or []),
+    )
+
+
 # --------------------------------------------------------------------- phase registry
 
 register(
@@ -1523,6 +1602,15 @@ register(
 register(Phase("dev", node_dev, Stage.DEV, owner="worker", description="DoD checklist per task"))
 register(Phase("test", node_test, Stage.TEST, owner="inspector", description="graded QA gate"))
 register(Phase("review", node_review, Stage.REVIEW, owner="deployer", reviewer="founder"))
+register(
+    Phase(
+        "resolve",
+        node_resolve,
+        Stage.TEST,
+        owner="inspector",
+        description="close a story whose goal already holds, after checking it on the base",
+    )
+)
 register(
     Phase(
         "research",
@@ -1619,6 +1707,21 @@ def _merge_now(ctx: EngineContext, state: StoryState, wt: Worktree) -> str | Non
     finally:
         lock.release()
     return None
+
+
+def _back_to_spec(ctx: EngineContext, state: StoryState) -> None:
+    """The founder asked for the requirements to be rewritten (ADR-0037 §1): the spec is written
+    again with their guidance, then planned and built again, from a clean branch. The amendment
+    path could only add tasks to a plan written for the old criteria (tamagotchi S-094)."""
+    _fresh_branch(ctx, state, f"{state.story_id}-respec-{len(state.founder_notes)}")
+    state.spec_ready = False
+    state.plan_ready = False
+    state.spec_review_rounds = 0
+    state.plan_review_rounds = 0
+    state.tasks_done = []
+    state.extra.pop(AMEND_KEY, None)
+    ctx.emit("story.respec", story_id=state.story_id)
+    goto(state, "spec")
 
 
 def apply_founder_answer(
@@ -1756,6 +1859,14 @@ def apply_founder_answer(
         # back through `dev`: the base is merged in there and conflicts go to the Worker;
         # retrying the delivery's rebase alone only ever met the same conflict again
         goto(state, "dev" if "dev" in state.route else "review")
+    elif action_of(key) == RESOLVED:  # QUESTION: "it is already resolved" (ADR-0037 §1)
+        # checked and closed by `resolve`, which runs the failures the story was opened for
+        state.extra[RESOLVE_KEY] = {"why": guidance, "resume": resume or "dev"}
+        goto(state, "resolve")
+    elif action_of(key) == RESPEC:  # QUESTION: "rewrite the requirements first"
+        if guidance:
+            state.note(guidance)
+        _back_to_spec(ctx, state)
     else:  # QUESTION
         if guidance:
             state.note(guidance)
