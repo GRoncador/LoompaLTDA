@@ -549,7 +549,9 @@ class ArchitectAgent(LoompaAgent):
         adr = str(data.get("adr_proposal") or "").strip()
         if adr and adr.lower() not in ("", "none", "nenhum", "n/a", "null"):
             self.write_adr(f"{state.story_id}: {state.title}", adr, status="proposed")
-        state.allowed_paths = files + [f".loompa/specs/{state.story_id}/"]
+        # the factory writes the story's spec, plan and checklist in the main checkout; the
+        # worktree has no such folder, and a fence that offered it sent Workers looking (§5)
+        state.allowed_paths = [f for f in files if not f.removeprefix("./").startswith(".loompa/")]
         state.allowed_paths += tests_named(tasks, state.allowed_paths)
         self._follow_tasks(state, tasks, "plan")
         state.tasks_total = len(tasks)

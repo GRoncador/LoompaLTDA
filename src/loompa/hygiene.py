@@ -233,6 +233,15 @@ def _files(diff: str) -> list[_FileDiff]:
     return files
 
 
+# A test line that opens a file under the factory's records (ADR-0037 §5): tamagotchi AC6 read
+# `join(RAIZ, '.loompa', 'specs', 'S-077', nome)`. Not any mention of `.loompa`: "the server
+# never serves /.loompa/config.yaml" is a product test.
+_READS_RECORDS = re.compile(
+    r"(?:read\w*|open\w*|exists\w*|join|resolve|Path|stat\w*|load\w*)\s*\("
+    r"[^\n]*?['\"`](?:\./)?\.loompa(?:['\"`/\\])"
+)
+
+
 def scan_diff(diff: str, allowed: list[str] | None = None) -> list[HygieneIssue]:
     """Hygiene issues in a unified diff (`git diff` output); at most one per rule and file.
     `allowed` is the plan's paths: a root data file they list is the story's own work."""
@@ -273,6 +282,14 @@ def scan_diff(diff: str, allowed: list[str] | None = None) -> list[HygieneIssue]
                     "machine_path",
                     not test,  # in a test it may be data; elsewhere it leaks a machine
                     f"absolute path of a machine or worktree: `{text.strip()[:80]}`",
+                )
+            if test and _READS_RECORDS.search(text):
+                add(
+                    "reads_records",
+                    True,
+                    "a test reads the factory's records under .loompa/, which never reach the "
+                    "base with the story: it passes here and fails after the merge. Test what the "
+                    f"product does instead: `{text.strip()[:80]}`",
                 )
             if _CONFLICT.match(text):
                 add("conflict_marker", True, "merge conflict marker left in the file")

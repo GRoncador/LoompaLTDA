@@ -233,6 +233,36 @@ def factory_records_in_tasks(tasks: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# How `factory_records_in_tasks` words a task that writes or tests the factory's records.
+_RECORD_PROBLEM = re.compile(
+    r"^task (\d+) (?:writes \.loompa/|writes \S+, a copy of the factory's own records"
+    r"|has a test read \.loompa/)"
+)
+# The records a story's criteria have no business asking for: the factory's decisions, specs,
+# lessons and constitution. Not every `.loompa/` path: "the server never serves
+# .loompa/config.yaml" is a product criterion.
+_RECORD_PATH = re.compile(
+    r"(?<![\w/.-])\.loompa/(?:(?:decisions|specs)/[\w./-]*|learnings\.md|constitution\.md)"
+)
+
+
+def record_tasks(problems: list[str]) -> list[int]:
+    """The task numbers the gate refused for writing or testing the factory's records."""
+    return sorted({int(m.group(1)) for p in problems if (m := _RECORD_PROBLEM.match(p))})
+
+
+def records_in_criteria(criteria: list[str]) -> list[tuple[int, str]]:
+    """(number, path) of each acceptance criterion that names one of the factory's records
+    (ADR-0037 §5). tamagotchi S-094: ten criteria asked to create two documents under
+    `.loompa/decisions/` and to change no test, the one fix the factory can never deliver."""
+    out = []
+    for i, text in enumerate(criteria, 1):
+        found = _RECORD_PATH.findall(text or "")
+        if found:
+            out.append((i, found[0]))
+    return out
+
+
 def size_signals(tasks: list[str], files: list[str]) -> list[str]:
     """Only product paths count: tamagotchi S-061 (12.1) changed three source files, and the six
     old tests founder had let it adjust (pixel-exact ones) made it "9 paths", COMPLEX, and a

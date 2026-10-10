@@ -1,0 +1,171 @@
+"""ADR-0037 §5: the factory's records never become a story's work, in code at every step.
+
+tamagotchi SP-013: S-077 and S-087 wrote tests that read `.loompa/`, the Inspector passed them
+(the files were in the worktree) and the base went red after each merge; S-094's spec then asked
+to create the records, and its plan kept the tasks that wrote them after the gate refused them."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from conftest import git
+from loompa.agents.dryrun import dry_run_script, role_of
+from loompa.engine import Scheduler, Stage, load_state
+from loompa.factory import Factory
+from loompa.hygiene import scan_diff
+from loompa.llm import Message
+from loompa.plan_check import record_tasks, records_in_criteria
+from test_engine import factory, make_ctx, seed_story  # noqa: F401
+
+RECORD = ".loompa/decisions/0003-s-077-pwa.md"
+
+
+def test_criteria_that_name_a_record_are_found_and_a_product_one_is_not():
+    criteria = [
+        f"Dado que `{RECORD}` não existe hoje, quando a suíte roda, então passa.",
+        "Dado um pedido a `.loompa/config.yaml`, o servidor responde 404.",
+        "O texto de .loompa/specs/S-077/plan.md cita a S-087.",
+        "A tela mostra o pet.",
+    ]
+    assert records_in_criteria(criteria) == [(1, RECORD), (3, ".loompa/specs/S-077/plan.md")]
+    problems = [
+        f"task 2 writes {RECORD}: the factory keeps its records under .loompa/ itself",
+        "task 3 has a test read .loompa/decisions: the factory's records are not part",
+        "task 4 writes specs/S-1/tasks.md, a copy of the factory's own records in the product",
+        "task 5 changes tests/x.js, which is not in the repository",
+    ]
+    assert record_tasks(problems) == [2, 3, 4]
+
+
+def test_a_test_that_opens_a_record_is_a_blocking_hygiene_issue():
+    diff = (
+        "diff --git a/tests/casca_body.test.js b/tests/casca_body.test.js\n"
+        "new file mode 100644\n--- /dev/null\n+++ b/tests/casca_body.test.js\n"
+        "@@ -0,0 +1,3 @@\n"
+        "+function lerSpec(nome) {\n"
+        "+  return readFileSync(join(RAIZ, '.loompa', 'specs', 'S-077', nome), 'utf8');\n"
+        "+}\n"
+        "diff --git a/tests/servidor.test.js b/tests/servidor.test.js\n"
+        "new file mode 100644\n--- /dev/null\n+++ b/tests/servidor.test.js\n"
+        "@@ -0,0 +1 @@\n"
+        "+  const res = await fetch(base + '/.loompa/config.yaml');\n"
+    )
+    issues = scan_diff(diff)
+    assert [(i.path, i.rule, i.blocking) for i in issues] == [
+        ("tests/casca_body.test.js", "reads_records", True)
+    ]
+
+
+def test_the_inspector_judges_the_tree_that_will_land(factory: Factory):  # noqa: F811
+    """S-087 edited `.loompa/specs/S-077/plan.md` in its worktree and a new test read it: green
+    there, red on the base after the merge (AC6)."""
+    ctx = make_ctx(factory)
+    (factory.root / ".loompa" / "specs" / "S-077").mkdir(parents=True, exist_ok=True)
+    (factory.root / ".loompa" / "specs" / "S-077" / "plan.md").write_text("plano\n")
+    git("add", "-f", ".loompa/specs/S-077/plan.md", cwd=factory.root)
+    git("commit", "-qm", "docs: plano", cwd=factory.root)
+    wt = ctx.worktrees.create("S-1", title="x")
+    plan = wt.path / ".loompa" / "specs" / "S-077" / "plan.md"
+    plan.write_text("plano citando S-087\n")
+    (wt.path / ".loompa" / "decisions").mkdir(parents=True, exist_ok=True)
+    (wt.path / RECORD).write_text("decisão\n")
+    deployer = ctx.worktrees.as_role("deployer")
+    undone = deployer.reset_factory_records(wt)
+    assert sorted(undone) == [RECORD, ".loompa/specs/S-077/plan.md"]
+    assert plan.read_text() == "plano\n" and not (wt.path / RECORD).exists()
+    assert deployer.reset_factory_records(wt) == []
+
+
+async def test_criteria_asking_for_records_go_back_to_the_spec_once(
+    factory: Factory,  # noqa: F811
+):
+    specs: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "product" and "Spec Loompa" in messages[0].content:
+            specs.append(messages[-1].content)
+            first = len(specs) == 1
+            return json.dumps(
+                {
+                    "goal": "Consertar a suíte",
+                    "in_scope": ["a suíte"],
+                    "out_of_scope": [],
+                    "acceptance": [
+                        f"Dado que `{RECORD}` não existe, quando a suíte roda, então passa."
+                        if first
+                        else "Dado o teste reescrito, quando a suíte roda, então passa.",
+                    ],
+                    "rules": [],
+                    "questions": [],
+                    "needs_decision": False,
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Consertar a versão principal")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert len(specs) == 2 and "The factory's checks refused these criteria" in specs[1]
+    assert f"criterion 1 names {RECORD}" in specs[1]
+    assert state.acceptance == ["Dado o teste reescrito, quando a suíte roda, então passa."]
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
+    assert not any(p.startswith(".loompa/") for p in state.allowed_paths)
+    await ctx.aclose()
+
+
+async def test_a_spec_that_is_only_records_after_its_rewrite_closes_as_resolved(
+    factory: Factory,  # noqa: F811
+):
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "product" and "Spec Loompa" in messages[0].content:
+            return json.dumps(
+                {
+                    "goal": "x",
+                    "acceptance": [f"Dado `{RECORD}` criado, então o teste passa."],
+                    "needs_decision": False,
+                }
+            )
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Restaurar os documentos de decisão")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.CANCELLED and state.extra["outcome"]["kind"] == "resolved"
+    events = [e["type"] for e in ctx.store.events_since(0, limit=10_000) if e["story_id"] == sid]
+    assert events.count("spec.records") == 1 and "plan.checked" not in events
+    await ctx.aclose()
+
+
+async def test_a_plan_that_keeps_writing_records_sends_the_spec_back_then_drops_those_tasks(
+    factory: Factory,  # noqa: F811
+):
+    """S-094's plan wrote `.loompa/decisions/…` in both rounds of the gate and went to the Worker
+    anyway, who asked the founder about it eight times."""
+    from loompa.speckit import story_dir
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect" and "Founder's guidance" not in messages[-1].content:
+            plan = json.loads(dry_run_script(model, messages, tools))
+            plan["files"] = ["loompa_dryrun/", "tests/"]
+            plan["tasks"] = [
+                f"Criar {RECORD} com a decisão da S-077",
+                "Registrar a entrega em loompa_dryrun/x.md (simulação)",
+            ]
+            return json.dumps(plan)
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Consertar a versão principal")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    events = [e["type"] for e in ctx.store.events_since(0, limit=10_000) if e["story_id"] == sid]
+    assert events.count("plan.records_to_spec") == 1
+    assert events.count("plan.records_withdrawn") == 1
+    assert state.extra["tasks_withdrawn"] == [1]
+    tasks = story_dir(factory.root, sid).tasks.read_text()
+    assert "[x] T1" in tasks and "retirada pelo ajuste" in tasks
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
+    await ctx.aclose()

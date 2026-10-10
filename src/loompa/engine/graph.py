@@ -31,7 +31,13 @@ from loompa.agents import (
     ProductOwnerAgent,
     WorkerAgent,
 )
-from loompa.agents.architect import FULL_PLAN_KEY, LEAN_KEY, REPLANNED_KEY
+from loompa.agents.architect import (
+    FULL_PLAN_KEY,
+    LEAN_KEY,
+    REPLANNED_KEY,
+    TASKS_WITHDRAWN_KEY,
+    withdraw_tasks,
+)
 from loompa.agents.base import AgentResult
 from loompa.agents.inspector import test_origin
 from loompa.agents.product_owner import CRITERIA_ALIGNED_KEY, CRITERIA_REVIEW_KEY
@@ -89,7 +95,7 @@ from loompa.finance.story_cap import CAP_BASE_KEY, over_cap
 from loompa.hygiene import is_test_path
 from loompa.llm import LLMError
 from loompa.llm.router import TIER_ABOVE
-from loompa.plan_check import PlanReport, check_plan
+from loompa.plan_check import PlanReport, check_plan, record_tasks, records_in_criteria
 from loompa.risk import needs_preflight
 from loompa.speckit import story_dir, tasks_from_markdown
 from loompa.speckit.artifacts import TaskItem
@@ -517,6 +523,17 @@ async def node_intake(ctx: EngineContext, state: StoryState) -> StoryState:
     return goto(state, state.next_phase("intake") or "spec")
 
 
+SPEC_RECORDS_KEY = "spec_records"  # the criteria naming the factory's records, sent back once
+PLAN_RECORDS_KEY = "plan_records"  # a re-plan still writing them: the spec was sent back once
+RECORDS_RULE = (
+    "The factory's own records under .loompa/ (its decisions, specs, lessons and constitution) "
+    "are not part of the product: the factory writes them itself and leaves them out of every "
+    "story's branch at merge. No criterion may ask to create, edit or read them, and no test may "
+    "read them. When a test reads them, the fix is that test: rewrite it to check what the "
+    "product does, or remove it. "
+)
+
+
 async def node_spec(ctx: EngineContext, state: StoryState) -> StoryState:
     res = await ProductAgent(ctx).run(state)
     if res.blocked_reason:
@@ -527,6 +544,32 @@ async def node_spec(ctx: EngineContext, state: StoryState) -> StoryState:
             res.blocked_reason,
             options=res.blocked_options,
             resume="spec",
+        )
+    state.handoff.pop("spec_check", None)  # read by the spec just written
+    if bad := records_in_criteria(state.acceptance):
+        # ADR-0037 §5, tamagotchi S-094: ten criteria asked to create two decision documents
+        # and to change no test, and the plan gate could only refuse the tasks that followed
+        if not state.extra.get(SPEC_RECORDS_KEY):
+            state.extra[SPEC_RECORDS_KEY] = [i for i, _ in bad]
+            state.hand_off(
+                RECORDS_RULE
+                + "Rewrite these criteria: "
+                + "; ".join(f"criterion {i} names {path}" for i, path in bad),
+                phase="spec_check",
+            )
+            state.spec_ready = False
+            ctx.emit("spec.records", story_id=state.story_id, criteria=[i for i, _ in bad])
+            return goto(state, "spec")
+        if len(bad) == len(state.acceptance):
+            # rewritten once and every criterion is still a record: nothing for the product
+            state.extra[RESOLVE_KEY] = {
+                "why": "a história só pedia registros internos da fábrica",
+                "resume": "spec",
+            }
+            return goto(state, "resolve")
+        state.failure_history.append(
+            "Criteria still naming the factory's records after one rewrite: "
+            + ", ".join(str(i) for i, _ in bad)
         )
     return advance(state)
 
@@ -669,7 +712,41 @@ async def node_plan_review(ctx: EngineContext, state: StoryState) -> StoryState:
             phase="plan_review",
         )
         return goto(state, "plan")
-    if report.problems:
+    if report.problems and (records := record_tasks(report.problems)):
+        # ADR-0037 §5: a re-plan that still writes or tests the factory's records never builds:
+        # those tasks are refused by the fence and the Worker asks the founder (S-094, eight
+        # times). The criteria likely ask for it, so the spec is written again first; if the plan
+        # still carries them after that, those tasks are withdrawn.
+        why = [p for p in report.problems if record_tasks([p])]
+        if not state.extra.get(PLAN_RECORDS_KEY):
+            state.extra[PLAN_RECORDS_KEY] = records
+            state.hand_off(
+                RECORDS_RULE + "The plan for these criteria still did it: " + "; ".join(why[:6]),
+                phase="spec_check",
+            )
+            state.spec_ready = False
+            state.plan_ready = False
+            state.spec_review_rounds = 0
+            state.plan_review_rounds = 0
+            ctx.emit("plan.records_to_spec", story_id=state.story_id, tasks=records)
+            return goto(state, "spec")
+        paths.tasks.write_text(
+            withdraw_tasks(paths.tasks.read_text(encoding="utf-8"), records), encoding="utf-8"
+        )
+        state.tasks_done = sorted({*state.tasks_done, *records})
+        gone = state.extra.setdefault(TASKS_WITHDRAWN_KEY, [])
+        gone.extend(n for n in records if n not in gone)
+        state.failure_history.append(
+            "Tasks about the factory's records withdrawn: " + "; ".join(why[:6])
+        )
+        ctx.emit("plan.records_withdrawn", story_id=state.story_id, tasks=records)
+        if _open_task(ctx, state) is None and not state.commits:
+            state.extra[RESOLVE_KEY] = {
+                "why": "o plano só tinha passos sobre registros internos da fábrica",
+                "resume": "plan",
+            }
+            return goto(state, "resolve")
+    elif report.problems:
         # the second plan still carries them: the Architect and the Worker see them as the story's
         # last failure instead of the founder hearing about paths and criterion numbers
         # never "a file is missing": the Worker made an empty stub to satisfy it (12.1, S-061)
@@ -1089,6 +1166,7 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
     """Graded quality gate: PASS / CONCERNS move on, FAIL climbs the escalation ladder,
     WAIVED asks the founder (serious finding the tests do not catch)."""
     wt = _ensure_worktree(ctx, state)
+    DeployerAgent(ctx).as_it_lands(state, wt)  # judged as it will be merged (ADR-0037 §5)
     res = await InspectorAgent(ctx).run(state, wt)
     if (res.data or {}).get("lint_only") and await WorkerAgent(ctx).autofix_lint(state, wt):
         # the linter's own fixes, at no model cost, before a failure is counted (7.2)
@@ -1352,6 +1430,7 @@ async def _bring_up_to_date(ctx: EngineContext, state: StoryState, wt: Worktree)
     # "already failing" moved with the base, as when a story goes back to work
     with ctx.worktrees.base_checkout(wt.base) as base_path:
         state.extra["baseline"] = await InspectorAgent(ctx).baseline(state, wt, at=base_path)
+    DeployerAgent(ctx).as_it_lands(state, wt)
     res = await InspectorAgent(ctx).run(state, wt, judge=False)
     if not res.ok:
         return "with the base merged in, the checks failed:\n" + res.summary[-1500:]

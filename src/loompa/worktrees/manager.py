@@ -664,6 +664,24 @@ class WorktreeManager:
         self.git("clean", "-fdq", cwd=wt.path)
         return ref
 
+    def reset_factory_records(self, wt: Worktree) -> list[str]:
+        """Put the worktree's `.loompa/` back as the branch has it, before a check runs: an edit
+        there never reaches the base (`commit_all` leaves it out), so a check that sees it judges
+        a tree nobody will merge. tamagotchi S-087 edited `.loompa/specs/S-077/plan.md` in its
+        worktree, its new test read it, the Inspector passed, and the base went red (AC6,
+        ADR-0037 §5). Ignored files (the factory's databases) stay. The paths it undid."""
+        changed = [
+            line.split(maxsplit=1)[1]  # "XY path"; the output is stripped, so XY may lose a space
+            for line in self.git(
+                "status", "--porcelain", "--untracked-files=all", "--", ".loompa", cwd=wt.path
+            ).splitlines()
+            if len(line.split(maxsplit=1)) == 2
+        ]
+        if changed:
+            self.git("checkout", "HEAD", "--", ".loompa", cwd=wt.path, check=False)
+            self.git("clean", "-fdq", "--", ".loompa", cwd=wt.path, check=False)
+        return changed
+
     def drop_factory_records(self, wt: Worktree) -> list[str]:
         """Undo on the story branch whatever it changed under `.loompa/` (branches from before
         `commit_all` left those out): each path goes back to the base's version, or out of the

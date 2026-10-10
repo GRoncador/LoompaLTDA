@@ -113,6 +113,13 @@ class ProductAgent(LoompaAgent):
                 else ""
             )
             + (
+                "## The factory's checks refused these criteria (fix this first)\n"
+                + state.handoff["spec_check"]
+                + "\n\n"
+                if state.handoff.get("spec_check")
+                else ""
+            )
+            + (
                 "## The Architect could not plan this spec (fix this first)\n"
                 + state.handoff["plan"]
                 + "\n\n"

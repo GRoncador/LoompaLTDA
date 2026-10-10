@@ -237,6 +237,16 @@ class DeployerAgent(LoompaAgent):
         self.ctx.emit("worktree.merged_base", story_id=state.story_id, agent=self.name, sha=sha)
         return True
 
+    def as_it_lands(self, state: StoryState, wt: Worktree) -> list[str]:
+        """Before a check: the worktree's `.loompa/` as the branch has it, so the check judges
+        the tree that will be merged (ADR-0037 §5, tamagotchi AC6). The paths it undid."""
+        undone = self.git.reset_factory_records(wt)
+        if undone:
+            self.ctx.emit(
+                "deployer.records_reset", story_id=state.story_id, agent=self.name, paths=undone
+            )
+        return undone
+
     def merge(self, state: StoryState, wt: Worktree) -> str:
         if dropped := self.git.drop_factory_records(wt):
             self.ctx.emit(

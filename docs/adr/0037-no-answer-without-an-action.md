@@ -135,3 +135,37 @@ factory's records.
 - **Tests that read the records.** When a failing test lives in a test file that reads `.loompa/`,
   the card says so and says what fixing it means: rewrite the test or remove it, never create or
   edit the factory's records.
+
+## §5 The factory's records are refused at every step, in code
+
+**What happened.** ADR-0036 §5 and §6 refused, in the plan, the tasks that write or test
+`.loompa/`, and turned a refused write into the plain ways out. The class kept leaking through
+the steps around them:
+
+- **the Inspector.** It ran the suite in a worktree that still held the story's uncommitted edits
+  to `.loompa/`. S-087's test read `.loompa/specs/S-077/plan.md`, which it had edited. It passed
+  there and failed on the base once the merge dropped the edit (AC6).
+- **the spec.** Nothing looked at the criteria. S-094's ten criteria asked to create two
+  documents under `.loompa/decisions/` and to change no test.
+- **the plan gate.** On its second round it let a plan that still wrote the records go to the
+  Worker, who could only ask the founder.
+- **the fence.** `.loompa/specs/<id>/` was in every story's fence, though the worktree has no such
+  folder. Workers made 248 calls under `.loompa`/`specs` in SP-013, and 53 failed.
+
+**Decision.**
+
+- **The Inspector judges what will land.** Before the Inspector runs (at `test`, and before the
+  merge queue's checks), the Deployer puts the worktree's `.loompa/` back as the branch has it
+  (`reset_factory_records`). Ignored files, such as the factory's databases, stay.
+- **The spec check.** A criterion that names a record (`.loompa/decisions/`, `.loompa/specs/`,
+  the lessons, the constitution) sends the spec back once, with the rule and the criteria to
+  rewrite. Other `.loompa/` paths do not count: "the server never serves `.loompa/config.yaml`" is
+  a product criterion. If every criterion still names one after the rewrite, the story goes to
+  `resolve`: there is nothing for the product.
+- **The plan gate.** A plan that still writes or tests the records after its re-plan sends the
+  spec back once (the criteria likely ask for it). If the plan still carries them after that,
+  those tasks are withdrawn (§3). When nothing is left, the story goes to `resolve`.
+- **The fence** no longer holds `.loompa/` paths.
+- **Diff hygiene** blocks a test line that opens a file under `.loompa` (`reads_records`). Merely
+  mentioning the folder does not count, so a server test that fetches `/.loompa/config.yaml` is
+  fine.
