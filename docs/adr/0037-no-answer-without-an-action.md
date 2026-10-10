@@ -87,3 +87,22 @@ story was going round, and never offered to stop it.
   backlog the way `withdraw_story` does. A park that a stopped engine left behind is done at the
   next start.
 - **The counter resets** when the story moves: a task done, a commit, a new fence or new criteria.
+
+## §3 An amendment can withdraw a step
+
+**What happened.** `Architect.amend` could only widen a plan: new paths, new tasks after the old
+ones. When the founder's answer made a step pointless, the step stayed open, and the Worker always
+starts at the first open task. In S-094, T1 to T3 stayed open behind six amendments, two of them
+adding tasks that "discard T1 to T3".
+
+**Decision.**
+
+- **Withdrawing a step.** `AMEND_SYSTEM` answers `drop_tasks`: the open tasks the guidance
+  withdraws. The code checks that each one is open, then marks it in the checklist as withdrawn
+  (`[x] … — (retirada pelo ajuste do plano)`). It counts the task as done and records it in
+  `tasks_withdrawn`.
+- **Nothing left to build.** When an amendment withdraws every step left and the branch has no
+  commit, the story goes to `resolve` (§1) instead of running a Worker with nothing to do.
+
+**Not measured.** The new `drop_tasks` field is a contract change of `AMEND_SYSTEM`, on the list
+of prompts to measure.

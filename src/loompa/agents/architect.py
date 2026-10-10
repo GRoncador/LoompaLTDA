@@ -282,9 +282,30 @@ file for the same decision. The story's spec, plan and tasks under `.loompa/` ar
 repository the Worker edits, and the factory updates the spec's criteria itself when the founder
 changes them: never name a `.loompa/` path in `files` or ask a task to edit it. Why: a task told the
 Worker to "adjust criterion 6 of the spec in .loompa/specs/" and it spent 18 rounds looking for it.
-Respond with JSON only: {{"files": [str], "tasks": [str], "reason": str}}
+- `drop_tasks`: the numbers of tasks not done yet that the guidance withdraws or makes pointless
+  (the founder says the problem is already solved, or chose another way than that step). Why: the
+  Worker always starts at the first open task, so a withdrawn step left open is done or asked
+  about again, and the founder's answer changes nothing.
+Respond with JSON only: {{"files": [str], "tasks": [str], "drop_tasks": [int], "reason": str}}
 Write `tasks` and `reason` in {language}; paths as they are.
 """
+
+TASKS_WITHDRAWN_KEY = "tasks_withdrawn"  # task numbers an amendment withdrew (ADR-0037 §3)
+WITHDRAWN_MARK = " — (retirada pelo ajuste do plano)"
+
+
+def withdraw_tasks(tasks_md: str, numbers: list[int]) -> str:
+    """Mark these open tasks as withdrawn: checked, so no Worker starts on them, and labelled, so
+    the checklist still says what was planned and that it went."""
+    out = []
+    wanted = {f"T{n}" for n in numbers}
+    for line in tasks_md.splitlines():
+        m = re.match(r"^(\s*[-*]\s*)\[ \](\s*(T\d+)\b.*)$", line)
+        if m and m.group(3) in wanted and WITHDRAWN_MARK not in line:
+            line = f"{m.group(1)}[x]{m.group(2)}{WITHDRAWN_MARK}"
+        out.append(line)
+    return "\n".join(out) + ("\n" if tasks_md.endswith("\n") else "")
+
 
 # Appended to an amended task that still names the factory's own folder (see AMEND_SYSTEM).
 LOOMPA_NOTE = (
@@ -607,6 +628,17 @@ class ArchitectAgent(LoompaAgent):
         ]
         state.allowed_paths = state.allowed_paths + files
         files += self._follow_tasks(state, tasks, "amend")
+        current = tasks_from_markdown(tasks_md)
+        still_open = {t.number for t in current if not t.done and t.number not in state.tasks_done}
+        dropped = sorted(
+            {int(n) for n in data.get("drop_tasks") or [] if str(n).strip().isdigit()} & still_open
+        )
+        if dropped:
+            # withdrawn, not deleted: the checklist keeps what was planned and why it went
+            tasks_md = withdraw_tasks(tasks_md, dropped)
+            state.tasks_done = sorted({*state.tasks_done, *dropped})
+            gone = state.extra.setdefault(TASKS_WITHDRAWN_KEY, [])
+            gone.extend(n for n in dropped if n not in gone)
         if tasks:
             numbers = [t.number for t in tasks_from_markdown(tasks_md)]
             start = max(numbers, default=0) + 1
@@ -635,9 +667,15 @@ class ArchitectAgent(LoompaAgent):
             files=files,
             tasks=len(tasks),
             source=source,
+            **({"dropped": dropped} if dropped else {}),
         )
         self.set_state("IDLE")
-        return AgentResult(ok=True, summary=f"{len(files)} caminhos e {len(tasks)} tarefas a mais")
+        return AgentResult(
+            ok=True,
+            summary=f"{len(files)} caminhos e {len(tasks)} tarefas a mais"
+            + (f", {len(dropped)} retirada(s)" if dropped else ""),
+            data={"files": files, "tasks": tasks, "dropped": dropped},
+        )
 
     async def preflight(self, state: StoryState) -> AgentResult:
         """Risk analysis before the first commit (Fase 7, 7.5/7.6): facts measured in code,

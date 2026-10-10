@@ -216,3 +216,69 @@ async def test_a_question_after_progress_is_a_new_point(factory: Factory):  # no
     state = load_state(ctx, sid)
     assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
     await ctx.aclose()
+
+
+def _amending(drop: list[int], tasks: list[str], seen: list[str]):
+    """A Worker that asks once at its first task, then does whatever task it is given; and an
+    Architect whose amendment withdraws `drop` and adds `tasks`."""
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role == "architect" and "## Founder's guidance" in messages[-1].content:
+            return json.dumps({"files": [], "tasks": tasks, "drop_tasks": drop, "reason": "x"})
+        if role == "worker":
+            text = "\n".join(m.content for m in messages if m.role == "user")
+            task = text.split("# Task T", 1)[-1][:200]
+            if "Guidance from the founder" not in text:
+                seen.append("asked")
+                return [ToolCall("q", "blocked", {"reason": "Qual?", "options": ["Outro"]})]
+            seen.append(task)
+            if not tool_results(messages):
+                return [
+                    ToolCall(
+                        "w",
+                        "write_file",
+                        {"path": "tests/test_b.py", "content": "def test_b():\n    pass\n"},
+                    )
+                ]
+            return [ToolCall("d", "done", {"summary": "feito"})]
+        return dry_run_script(model, messages, tools)
+
+    return script
+
+
+async def test_an_amendment_that_withdraws_every_step_closes_the_story(
+    factory: Factory,  # noqa: F811
+):
+    """ADR-0037 §3: S-094's founder said "close it, it is solved", and the Architect could only
+    add tasks: T1 stayed open and the Worker went back to it each time."""
+    from loompa.speckit import story_dir
+
+    seen: list[str] = []
+    ctx = make_ctx(factory, _amending([1], [], seen))
+    sid = seed_story(ctx, "Consertar a versão principal")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    await Scheduler(ctx).aanswer(state.blocked_message_id, FounderAnswer(option_key="opt1"))
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert seen == ["asked"] and state.stage == Stage.CANCELLED
+    assert state.extra["outcome"]["kind"] == "resolved"
+    tasks = story_dir(factory.root, sid).tasks.read_text()
+    assert "[x] T1" in tasks and "retirada pelo ajuste" in tasks
+    await ctx.aclose()
+
+
+async def test_a_withdrawn_step_is_not_the_next_one(factory: Factory):  # noqa: F811
+    seen: list[str] = []
+    ctx = make_ctx(factory, _amending([1], ["Criar tests/test_b.py com um teste vazio"], seen))
+    sid = seed_story(ctx, "Outra coisa")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    await Scheduler(ctx).aanswer(state.blocked_message_id, FounderAnswer(option_key="opt1"))
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    assert seen[0] == "asked" and "tests/test_b.py" in seen[1]
+    assert state.extra["tasks_withdrawn"] == [1]
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
+    await ctx.aclose()

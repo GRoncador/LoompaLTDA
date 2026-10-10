@@ -92,6 +92,7 @@ from loompa.llm.router import TIER_ABOVE
 from loompa.plan_check import PlanReport, check_plan
 from loompa.risk import needs_preflight
 from loompa.speckit import story_dir, tasks_from_markdown
+from loompa.speckit.artifacts import TaskItem
 from loompa.sprints import SprintBoard
 from loompa.stack_check import STACK_KEY, foreign_files, mismatch_note
 from loompa.store import now_iso
@@ -267,24 +268,28 @@ def _digest(text: str) -> str:
     return hashlib.sha1(text.encode()).hexdigest()[:10]
 
 
+def _open_task(ctx: EngineContext, state: StoryState) -> TaskItem | None:
+    """The task the Worker would do next: the first one neither checked nor done."""
+    paths = story_dir(ctx.root, state.story_id)
+    if not paths.tasks.is_file():
+        return None
+    done = set(state.tasks_done)
+    return next(
+        (
+            t
+            for t in tasks_from_markdown(paths.tasks.read_text(encoding="utf-8"))
+            if not t.done and t.number not in done
+        ),
+        None,
+    )
+
+
 def _progress(ctx: EngineContext, state: StoryState) -> str:
     """Where a story stands, in code terms: the phase, the task it would do next and its text,
     the paths it may touch, the criteria, and how much it has done. Two questions asked with the
     same answer here were asked about the same thing, whatever the model wrote (ADR-0037 §2)."""
-    open_task = ""
-    paths = story_dir(ctx.root, state.story_id)
-    if paths.tasks.is_file():
-        done = set(state.tasks_done)
-        nxt = next(
-            (
-                t
-                for t in tasks_from_markdown(paths.tasks.read_text(encoding="utf-8"))
-                if not t.done and t.number not in done
-            ),
-            None,
-        )
-        if nxt is not None:
-            open_task = f"T{nxt.number}:{_digest(nxt.text)}"
+    nxt = _open_task(ctx, state)
+    open_task = f"T{nxt.number}:{_digest(nxt.text)}" if nxt is not None else ""
     return "|".join(
         (
             state.phase,
@@ -1026,9 +1031,21 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
     guidance = state.extra.pop(AMEND_KEY, None)
     if guidance:
         try:
-            await ArchitectAgent(ctx).amend(state, guidance, suite=await _red_suite(ctx, wt))
+            amended = await ArchitectAgent(ctx).amend(
+                state, guidance, suite=await _red_suite(ctx, wt)
+            )
         except LLMError as exc:  # the Worker still gets the guidance as a note
             ctx.emit("plan.amend_failed", story_id=state.story_id, error=str(exc)[:200])
+        else:
+            if (
+                (amended.data or {}).get("dropped")
+                and not state.commits
+                and _open_task(ctx, state) is None
+            ):
+                # the guidance withdrew every step left and nothing was built: what the founder
+                # said is "already resolved", checked and closed by `resolve` (ADR-0037 §3)
+                state.extra[RESOLVE_KEY] = {"why": guidance, "resume": "dev"}
+                return goto(state, "resolve")
     if (spent := over_cap(ctx, state)) is not None:
         return await cost_cap_block(ctx, state, spent)
     tier = "tier1" if state.current_tier == "tier1" else None
