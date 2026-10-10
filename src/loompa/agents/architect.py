@@ -290,6 +290,18 @@ Respond with JSON only: {{"files": [str], "tasks": [str], "drop_tasks": [int], "
 Write `tasks` and `reason` in {language}; paths as they are.
 """
 
+
+def _proposal_of(decisions: Path, story_id: str) -> Path | None:
+    """The decision record a story already proposed, if it is still a proposal."""
+    key = f"-{story_id.lower()}-"
+    for path in sorted(decisions.glob("*.md")):
+        if key in path.name and path.name[:4].isdigit():
+            head = path.read_text(encoding="utf-8", errors="ignore")[:400]
+            if "**Status:** proposed" in head:
+                return path
+    return None
+
+
 TASKS_WITHDRAWN_KEY = "tasks_withdrawn"  # task numbers an amendment withdrew (ADR-0037 §3)
 WITHDRAWN_MARK = " — (retirada pelo ajuste do plano)"
 
@@ -548,7 +560,9 @@ class ArchitectAgent(LoompaAgent):
         )
         adr = str(data.get("adr_proposal") or "").strip()
         if adr and adr.lower() not in ("", "none", "nenhum", "n/a", "null"):
-            self.write_adr(f"{state.story_id}: {state.title}", adr, status="proposed")
+            self.write_adr(
+                f"{state.story_id}: {state.title}", adr, status="proposed", story_id=state.story_id
+            )
         # the factory writes the story's spec, plan and checklist in the main checkout; the
         # worktree has no such folder, and a fence that offered it sent Workers looking (§5)
         state.allowed_paths = [f for f in files if not f.removeprefix("./").startswith(".loompa/")]
@@ -765,12 +779,21 @@ class ArchitectAgent(LoompaAgent):
         return repo_outline(at or self.ctx.root, max_entries)
 
     # --------------------------------------------------------------- stewardship
-    def write_adr(self, title: str, body: str, *, status: str = "accepted") -> str:
+    def write_adr(
+        self, title: str, body: str, *, status: str = "accepted", story_id: str | None = None
+    ) -> str:
+        """A decision record under `.loompa/decisions/`. A story's proposal is one file: a re-plan
+        rewrites it instead of adding another (tamagotchi S-094 had two, and the Architect then
+        read both back as precedents of itself, ADR-0037 §9)."""
         decisions = self.ctx.factory.paths.decisions
         decisions.mkdir(parents=True, exist_ok=True)
-        n = len(list(decisions.glob("*.md"))) + 1
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:50]
-        path = decisions / f"{n:04d}-{slug}.md"
+        path = _proposal_of(decisions, story_id) if status == "proposed" and story_id else None
+        if path is not None:
+            n = int(path.name[:4])
+        else:
+            n = len(list(decisions.glob("*.md"))) + 1
+            path = decisions / f"{n:04d}-{slug}.md"
         path.write_text(
             f"# ADR-{n:04d}: {title}\n\n**Status:** {status} · **Date:** {date.today().isoformat()}\n\n{body.strip()}\n",
             encoding="utf-8",

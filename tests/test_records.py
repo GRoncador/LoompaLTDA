@@ -169,3 +169,20 @@ async def test_a_plan_that_keeps_writing_records_sends_the_spec_back_then_drops_
     assert "[x] T1" in tasks and "retirada pelo ajuste" in tasks
     assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "delivery"
     await ctx.aclose()
+
+
+def test_a_story_has_one_proposed_decision_rewritten_by_its_replan(factory: Factory):  # noqa: F811
+    """ADR-0037 §9: S-094's two plans left `0004-s-094-…` and `0005-s-094-…`, and the Architect
+    read both back as precedents of itself."""
+    from loompa.agents import ArchitectAgent
+
+    ctx = make_ctx(factory)
+    arch = ArchitectAgent(ctx)
+    first = arch.write_adr("S-094: Consertar", "primeira", status="proposed", story_id="S-094")
+    again = arch.write_adr("S-094: Consertar", "segunda", status="proposed", story_id="S-094")
+    other = arch.write_adr("S-095: Outra", "x", status="proposed", story_id="S-095")
+    assert first == again and other != first
+    from pathlib import Path
+
+    assert "segunda" in Path(again).read_text() and "primeira" not in Path(again).read_text()
+    assert len(list(factory.paths.decisions.glob("*.md"))) == 2

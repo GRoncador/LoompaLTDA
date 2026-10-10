@@ -234,3 +234,13 @@ factory's 101. Three of them show the noise:
 - **Stale base-red findings close.** When the base goes green, the line watch closes, as resolved
   (§1), the Kaizen cards titled `BASE_RED_TITLE` that wait in the backlog.
 - **The label cleaner** also strips a known label that lost its `[`.
+
+## §9 One proposed decision per story
+
+**What happened.** Each plan with an `adr_proposal` wrote a new numbered file. S-094's two plans
+left `0004-s-094-…` and `0005-s-094-…` under `.loompa/decisions/`. They took the numbers the
+failing test expected for S-077's records, and the Architect's next plan listed both as
+"precedentes recuperados da memória".
+
+**Decision.** A story's proposal is one file. `write_adr(…, story_id=…)` rewrites the story's
+record while it is still `proposed`, keeping its number. An accepted record is never rewritten.
