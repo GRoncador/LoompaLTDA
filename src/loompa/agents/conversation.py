@@ -76,6 +76,9 @@ Never say a card was created or a sprint started. Operations:
 - {{"op": "retire", "ref": "S-010", "reason": str}}  (a backlog card the founder calls obsolete or
    unwanted leaves the backlog for good when the meeting is applied; only when the founder asks;
    {{"op": "unretire", "ref": "S-010"}} undoes it)
+- {{"op": "groom", "ref": "S-010", "accept": bool}}  (the founder's answer to one of the
+   Product Owner's backlog proposals the draft lists as waiting; also undoes one already in the
+   draft. Only for a proposal the founder answers)
 - {{"op": "goal", "text": str}}  (the sprint goal, one sentence)
 `priority` is 1 (urgent) to 5 (nice to have). `questions` repeats any question you asked in the
 reply (at most two), or is empty. Return "ops": [] when the message needs no change to the draft.
@@ -458,7 +461,10 @@ class Conversations:
         return conv
 
     async def propose(self, conversation_id: str) -> TurnResult:
-        """The Product Owner's sprint proposal (plan 10.2); the sprint starts only after one."""
+        """The Product Owner's sprint proposal (plan 10.2); the sprint starts only after one.
+        A meeting that plans a sprint has the backlog groomed first, once (ADR-0038): every
+        sprint starts from this proposal, and it is the step where the founder already waits on
+        the Product Owner (in the meeting's opening the panel would wait minutes)."""
         from loompa.agents.product_owner import ProductOwnerAgent
 
         conv = self.board.require(conversation_id)
@@ -468,7 +474,11 @@ class Conversations:
             raise ConversationError(
                 "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
             )
-        turn = await ProductOwnerAgent(self.ctx).propose_sprint(conv)
+        po = ProductOwnerAgent(self.ctx)
+        if conv.mode == MeetingMode.NEXT and not conv.draft.groomed:
+            await po.groom(conv)
+            self.board.save(conv)
+        turn = await po.propose_sprint(conv)
         self.board.save(conv)
         return turn
 

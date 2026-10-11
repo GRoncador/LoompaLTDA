@@ -807,6 +807,21 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
 - **Not benched:** the `EXEC_SYSTEM`/`AMEND_SYSTEM` contract fields and the Worker's new step 1
   (the founder's call; the next sprints measure it).
 
+**2026-10-11, ADR-0038 (the backlog is groomed at every Sprint Meeting):**
+
+- **When:** before the sprint proposal of a planning meeting, once per meeting.
+- **What the Product Owner does:** judges every waiting card against the code, the delivered
+  stories and the company documents: keep, retire, merge into another, or split.
+- **Who confirms:**
+  - changes to factory-filed cards are confirmed by the Master and land in the draft;
+  - changes to the founder's cards, or ones the Master held, wait for the founder (panel buttons,
+    `/aceitar` and `/manter`, or the `groom` op).
+- **On commit:** a merge amends the card that stays, and every card that leaves records why
+  (`outcome`).
+- **Order:** the proposal skips cards that are leaving, and `rerank` reads where the product is
+  going.
+- **Not benched:** `GROOM_SYSTEM` and `CONFIRM_GROOMING_SYSTEM`.
+
 ## Known gaps / next steps
 
 **Since 2026-10-05 the plan is `docs/PLANO-2026-10.md`.** Its "Herdado do plano de setembro" section

@@ -164,6 +164,28 @@ class Kickoff(BaseModel):
         return self.stacks[self.chosen - 1]
 
 
+GROOM_ACTIONS = ("retire", "merge", "split")
+FACTORY_ORIGINS = ("kaizen",)  # cards the factory filed itself; every other origin is the founder's
+
+
+class GroomProposal(BaseModel):
+    """One change the Product Owner proposes to a waiting card when it grooms the backlog at a
+    Sprint Meeting (ADR-0038). A card the factory filed is confirmed by the Master and lands in the
+    draft at once; a card that came from the founder, or one the Master held, waits for the
+    founder's answer. Either way nothing leaves the backlog until the meeting is saved."""
+
+    ref: str  # the card: S-074
+    action: str  # retire | merge | split
+    reason: str = ""  # for the founder, plain words
+    into: str = ""  # merge: the waiting card that takes this one's content
+    parts: list[dict[str, str]] = Field(default_factory=list)  # split: [{"title", "description"}]
+    founder: bool = False  # only the founder answers it (the founder's card, or held by the Master)
+    held: str = ""  # the Master's reason when it did not confirm a change to a factory card
+    accepted: bool | None = None  # None: waiting for the founder; True: in the draft; False: no
+    keys: list[str] = Field(default_factory=list)  # draft keys this proposal added (split parts)
+    pulled: bool = False  # merge: the target was pulled into the draft by this proposal
+
+
 class Draft(BaseModel):
     goal: str = ""
     items: list[DraftItem] = Field(default_factory=list)
@@ -180,6 +202,9 @@ class Draft(BaseModel):
     # backlog cards the founder wants gone (obsolete, unwanted): story id -> reason. The Product
     # Owner cancels them on commit (tamagotchi SP-002: "S-010 is obsolete" had no op at all)
     retire: dict[str, str] = Field(default_factory=dict)
+    # the Product Owner's grooming of the waiting backlog, once per meeting (ADR-0038)
+    grooming: list[GroomProposal] = Field(default_factory=list)
+    groomed: bool = False
     # a brainstorm (ADR-0020): the ideas are `items` until the founder approves the direction,
     # then the Product Owner's split into cards waits in `split` for the second OK
     direction: str = ""
@@ -397,6 +422,10 @@ def apply_ops(
             report.ignored.append("um brainstorm não aposenta cards; isso é na reunião de sprint")
         elif op in ("retire", "unretire"):
             _retire(draft, raw, cards, op == "retire", report)
+        elif op == "groom" and brainstorm:
+            report.ignored.append("a limpeza do backlog é na reunião de sprint")
+        elif op == "groom":
+            _groom(draft, raw, cards, report)
         elif op == "goal":
             goal = (_text(raw, "text", 200) or _text(raw, "goal", 200) or "").strip()
             draft.goal = goal
@@ -438,6 +467,12 @@ def _retire(
     Owner). Only a card waiting in the backlog: work in progress leaves a sprint another way."""
     ref = _ref(raw).upper()
     if not retire:
+        groomed = next((g for g in draft.grooming if g.ref == ref and g.accepted), None)
+        if groomed is not None:  # the whole change goes: its merged text or its new parts too
+            dematerialize(draft, groomed)
+            groomed.accepted = False
+            report.changes.append(f"{ref} continua no backlog")
+            return
         if draft.retire.pop(ref, None) is not None:
             report.changes.append(f"{ref} continua no backlog")
         return
@@ -461,6 +496,97 @@ def _retire(
     if item is not None:
         draft.items.remove(item)
     report.changes.append(f"“{card.title}” ({ref}) sai do backlog ao aplicar (cancelado)")
+
+
+def _groom(
+    draft: Draft, raw: dict[str, Any], cards: Mapping[str, OpenCard], report: OpsReport
+) -> None:
+    """The founder's answer to one of the Product Owner's grooming proposals (ADR-0038): yes puts
+    it in the draft, no takes it out again. The same op undoes a change the Master confirmed."""
+    ref = _ref(raw).upper()
+    prop = next((g for g in draft.grooming if g.ref == ref), None)
+    if prop is None:
+        report.ignored.append(f"não há proposta do Product Owner para {ref or 'esse card'}")
+        return
+    accept = _bool(raw.get("accept"))
+    if accept is None:
+        report.ignored.append(f"diga se aceita ou não a proposta para {ref}")
+        return
+    if accept and prop.accepted is not True:
+        if materialize(draft, prop, cards, report):
+            prop.accepted = True
+    elif not accept and prop.accepted is not False:
+        if prop.accepted:
+            dematerialize(draft, prop)
+        prop.accepted = False
+        report.changes.append(f"{ref} fica no backlog como está")
+
+
+def materialize(
+    draft: Draft, prop: GroomProposal, cards: Mapping[str, OpenCard], report: OpsReport
+) -> bool:
+    """Write a grooming proposal into the draft as the edits a meeting already knows: the card is
+    retired, and a merge adds its content to the card it goes into (`amend`), a split adds its
+    parts as new cards. Checked like any edit: a card that started, or one another card still
+    depends on, is not touched."""
+    card = cards.get(prop.ref)
+    if card is None or not card.waiting:
+        report.ignored.append(f"{prop.ref} não está mais esperando no backlog")
+        return False
+    if any(prop.ref in c.depends_on for c in cards.values() if c.id != prop.ref):
+        report.ignored.append(f"outro card depende de {prop.ref}: decida na conversa")
+        return False
+    if prop.action == "merge":
+        target = cards.get(prop.into)
+        if target is None or not target.waiting or target.id == prop.ref:
+            report.ignored.append(
+                f"{prop.into or 'o card de destino'} não está esperando no backlog"
+            )
+            return False
+    draft.retire[prop.ref] = prop.reason or "removido na limpeza do backlog"
+    if prop.action == "merge":
+        item = draft.find(prop.into)
+        if item is None:
+            item = _pull(draft, cards[prop.into])
+            prop.pulled = True
+        item.amend = f"Juntado de {prop.ref} (“{card.title}”). {prop.reason}".strip()
+        report.changes.append(f"{prop.ref} junta-se a {prop.into}")
+    elif prop.action == "split":
+        prop.keys = []
+        for part in prop.parts[:4]:
+            title = str(part.get("title") or "").strip()[:MAX_TITLE]
+            if not title or len(draft.items) >= MAX_ITEMS:
+                continue
+            item = DraftItem(
+                key=f"D{draft.next_key}",
+                title=title,
+                description=str(part.get("description") or "").strip()[:4000],
+                epic=card.epic,
+                priority=card.priority,
+                origin=card.origin,
+                note=f"parte de {prop.ref}",
+            )
+            draft.next_key += 1
+            draft.items.append(item)
+            prop.keys.append(item.key)
+        report.changes.append(f"{prop.ref} dividida em {len(prop.keys)} cards")
+    else:
+        report.changes.append(f"{prop.ref} sai do backlog ao aplicar")
+    return True
+
+
+def dematerialize(draft: Draft, prop: GroomProposal) -> None:
+    draft.retire.pop(prop.ref, None)
+    if prop.action == "merge":
+        item = draft.find(prop.into)
+        if item is not None:
+            item.amend = ""
+            if prop.pulled and not item.in_sprint:
+                draft.items.remove(item)
+        prop.pulled = False
+    elif prop.action == "split":
+        draft.items = [i for i in draft.items if i.key not in prop.keys]
+        prop.keys = []
 
 
 def _dismiss(draft: Draft, raw: dict[str, Any], dismissed: bool, report: OpsReport) -> None:
@@ -670,7 +796,7 @@ def _drop(draft: Draft, raw: dict[str, Any], report: OpsReport) -> None:
 
 
 def render_draft(draft: Draft) -> str:
-    if not draft.items and not draft.goal:
+    if not draft.items and not draft.goal and not draft.retire and not draft.grooming:
         return "(empty)"
     lines = [f"Sprint goal: {draft.goal or '(not set)'}"]
     if draft.members:
@@ -697,6 +823,19 @@ def render_draft(draft: Draft) -> str:
             lines.append(f"    {i.description[:400]}")
         if i.note:
             lines.append(f"    Product Owner: {i.note[:300]}")
+    for sid, reason in draft.retire.items():
+        lines.append(f"- {sid} · LEAVES THE BACKLOG when the meeting is saved · {reason[:200]}")
+    waiting = [g for g in draft.grooming if g.accepted is None]
+    if waiting:
+        lines.append(
+            "The Product Owner's backlog proposals waiting for the founder's answer "
+            '(answer with {"op": "groom", "ref": ..., "accept": true|false}):'
+        )
+        for g in waiting:
+            what = {"merge": f"merge into {g.into}", "split": f"split in {len(g.parts)}"}.get(
+                g.action, "retire"
+            )
+            lines.append(f"- {g.ref} · {what} · {g.reason[:200]}")
     return "\n".join(lines)
 
 

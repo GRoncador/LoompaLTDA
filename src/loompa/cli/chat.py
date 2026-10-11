@@ -77,7 +77,8 @@ HELP = {
         "/incluir D1 S-004  põe cards no sprint (e /excluir tira do sprint)\n"
         "/aposentar S-010 [motivo]  cancela um card do backlog ao salvar\n"
         "/revisar [S-017 …]  o Product Owner revê cards antigos no código e propõe aposentar\n"
-        "/manter S-017      desfaz uma aposentadoria do rascunho\n"
+        "/manter S-017      desfaz uma aposentadoria do rascunho, ou recusa a proposta do PO\n"
+        "/aceitar S-017     aceita a proposta do Product Owner para o card (limpeza do backlog)\n"
         "/proposta          o Product Owner propõe o sprint (vem antes de /sprint)\n"
         "/sprint [meta]     salva no backlog e começa o sprint\n"
         "/montar [meta]     salva e deixa o sprint montado, esperando o atual terminar\n"
@@ -324,7 +325,16 @@ async def handle(
         await convs.review_cards(conv.id, args)
         say_aloud(convs, convs.board.require(conv.id))
     elif command == "/manter" and args and meeting:
-        _show(convs.edit(conv.id, [{"op": "unretire", "ref": a} for a in args]))
+        groomed = {g.ref for g in convs.board.require(conv.id).draft.grooming}
+        ops = [
+            {"op": "groom", "ref": a.upper(), "accept": False}
+            if a.upper() in groomed
+            else {"op": "unretire", "ref": a}
+            for a in args
+        ]
+        _show(convs.edit(conv.id, ops))
+    elif command == "/aceitar" and args and meeting:
+        _show(convs.edit(conv.id, [{"op": "groom", "ref": a, "accept": True} for a in args]))
     elif command == "/proposta" and meeting:
         await convs.propose(conv.id)
         say_aloud(convs, convs.board.require(conv.id))

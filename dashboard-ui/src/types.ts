@@ -148,6 +148,12 @@ export type QuickStoryResult =
 
 export interface Turn { who: "founder" | "agent"; name: string; text: string; changes: string[]; at: string }
 
+export interface GroomProposal {
+  ref: string; action: "retire" | "merge" | "split"; reason: string; into: string;
+  parts: { title: string; description: string }[]; founder: boolean; held: string;
+  accepted: boolean | null;
+}
+
 export interface CommitResult { created: string[]; existing: string[]; held: { key: string; title: string; reason: string }[]; skipped: string[]; sprint_id: string | null; joined?: string[]; withdrawn?: string[]; restarted?: string[]; amended?: string[] }
 
 export interface Conversation {
@@ -166,6 +172,8 @@ export interface Conversation {
     split?: DraftItem[] | null;
     /** backlog cards that leave (cancelled) when the meeting is saved: id -> reason */
     retire?: Record<string, string>;
+    /** ADR-0038: the Product Owner's grooming of the waiting backlog */
+    grooming?: GroomProposal[];
     /** plan 10.10: the opening brainstorm of a greenfield factory with no code */
     kickoff?: Kickoff | null;
   };

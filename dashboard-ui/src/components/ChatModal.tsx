@@ -269,6 +269,25 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
             <ul className="scroll-thin flex-1 space-y-1.5 overflow-y-auto p-3">
               {items.length === 0 && <li className="text-xs text-slate-500">O rascunho está vazio. Conte suas ideias na conversa.</li>}
               {items.map((i) => <Item key={i.key} item={i} sprint={isMeeting} member={isCurrent && !!i.story_id && members.includes(i.story_id)} editable={open && !busy && !conv?.draft.cancel_sprint} onEdit={edit} />)}
+              {isMeeting && (conv?.draft.grooming ?? []).some((g) => g.accepted === null) && (
+                <li className="space-y-1.5 rounded-md border border-amber-800/60 bg-amber-950/20 p-2 text-xs">
+                  <div className="text-[10px] uppercase tracking-wide text-amber-300">Limpeza do backlog: o Product Owner pede a sua confirmação</div>
+                  {(conv?.draft.grooming ?? []).filter((g) => g.accepted === null).map((g) => (
+                    <div key={g.ref} className="flex items-start justify-between gap-2">
+                      <span className="text-slate-300">
+                        <span className="font-mono text-slate-400">{g.ref}</span>{" "}
+                        {g.action === "merge" ? `junta-se a ${g.into}` : g.action === "split" ? `divide-se em ${g.parts.length} cards (${g.parts.map((p) => p.title).join("; ")})` : "sai do backlog"}
+                        {g.reason ? ` · ${g.reason}` : ""}
+                        {g.held ? <span className="text-slate-500"> · o Master preferiu perguntar: {g.held}</span> : null}
+                      </span>
+                      <span className="flex flex-shrink-0 gap-1">
+                        <button className="btn-primary px-1.5 py-0 text-[11px]" disabled={!open || busy} onClick={() => edit([{ op: "groom", ref: g.ref, accept: true }])}>aceitar</button>
+                        <button className="btn-ghost px-1.5 py-0 text-[11px]" disabled={!open || busy} title="O card fica como está" onClick={() => edit([{ op: "groom", ref: g.ref, accept: false }])}>manter</button>
+                      </span>
+                    </div>
+                  ))}
+                </li>
+              )}
               {isMeeting && Object.keys(conv?.draft.retire ?? {}).length > 0 && (
                 <li className="space-y-1 rounded-md border border-red-900/60 bg-red-950/20 p-2 text-xs">
                   <div className="text-[10px] uppercase tracking-wide text-red-300">Saem do backlog ao salvar (canceladas)</div>
