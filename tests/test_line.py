@@ -285,3 +285,41 @@ async def test_the_line_adopts_a_sprint_story_that_names_the_test_by_its_label(
         watch._already_fixing(["AC7: outro critério"], ["tests/casca_body_scripts.test.js"]) is None
     )
     await ctx.aclose()
+
+
+async def test_a_line_card_plans_the_fix_without_a_new_reproducer(factory: Factory):  # noqa: F811
+    """tamagotchi S-106 (11/10): "reproducer first" gave the line card a test file that copied
+    the repository and ran the whole suite again, to show what the red base already showed."""
+    from typing import Any
+
+    from loompa.agents.architect import REPRO_KEY, REPRODUCER_TASK
+    from loompa.agents.dryrun import dry_run_script, role_of
+    from loompa.engine import Scheduler, load_state
+    from loompa.llm import Message
+    from loompa.speckit import story_dir
+
+    prompts: list[str] = []
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect" and "## Spec" in messages[-1].content:
+            prompts.append(messages[-1].content)
+        if "Classify the story" in messages[0].content:  # as the Master classified S-106
+            data = json.loads(dry_run_script(model, messages, tools))
+            return json.dumps({**data, "kind": "bugfix"})
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    board = SprintBoard(ctx.store, ctx.slug)
+    other = ProductOwnerAgent(ctx).add_item("Outra frente").story_id
+    board.add(other)
+    board.start(board.draft().id, "meta")
+    _land(factory.root, "test_a.py", "def test_a_fails_here():\n    assert False\n", "feat(s-1): a")
+    card = (await LineWatch(ctx).check())["card"]
+    await Scheduler(ctx).run()
+    state = load_state(ctx, card)
+    mine = [p for p in prompts if card in p]
+    assert mine and "This story fixes tests that fail on the main branch" in mine[0]
+    assert "reproducer first" not in mine[0] and "test_a_fails_here" in mine[0]
+    assert state.extra[REPRO_KEY]["status"] == "base_red"
+    assert REPRODUCER_TASK not in story_dir(factory.root, card).tasks.read_text()
+    await ctx.aclose()
