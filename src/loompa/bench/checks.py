@@ -22,7 +22,6 @@ from loompa.llm.providers import extract_json
 # Fields of each prompt's answer that the founder reads, and the sentence limit the prompt sets.
 FOUNDER_TEXT: dict[str, tuple[tuple[str, ...], int | None]] = {
     "deployer.SUMMARY_SYSTEM": (("summary",), 4),
-    "master.BRIEF_SYSTEM": (("reply",), 4),
     "master.SPRINT_REPORT_SYSTEM": (("summary",), 5),
     "master.EXEC_SYSTEM": (("title", "context", "impact", "options"), None),
     "product_owner.PROPOSE_SYSTEM": (("reply",), 5),

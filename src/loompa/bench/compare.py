@@ -68,10 +68,6 @@ RUBRICS: dict[str, str] = {
         "The founder must choose one option from the inbox. Best: they understand what happened "
         "and what each option means, nothing false or reassuring that the material does not back."
     ),
-    "master.BRIEF_SYSTEM": (
-        "Opening a planning meeting. Best: true to the facts, says what moves, what is stuck and "
-        "on what, and suggests one sensible next step."
-    ),
 }
 
 

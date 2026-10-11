@@ -832,10 +832,13 @@ class ProductOwnerAgent(LoompaAgent):
         draft stands as it is, and the founder is told so."""
         from loompa.agents.master import render_running
 
-        if not conv.draft.items:
-            raise ConversationError("o rascunho está vazio")
         board = ConversationBoard(self.ctx.store, self.ctx.slug)
         cards = board.cards()
+        # an empty draft is the meeting's opening: the proposal comes from the waiting backlog
+        if not conv.draft.items and not any(
+            c.waiting for k, c in cards.items() if k not in conv.draft.retire
+        ):
+            raise ConversationError("o rascunho e o backlog estão vazios")
         listed = {
             k: c for k, c in cards.items() if k not in conv.draft.retire
         }  # leaving (ADR-0038)

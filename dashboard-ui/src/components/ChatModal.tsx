@@ -88,7 +88,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
     } else if (kind === "meeting" && !opening.current) {
       // the Master opens the meeting with where the project stands (plan 10.2)
       opening.current = true;
-      setBusy(true); setWaitingFor("Master Loompa está preparando o parecer");
+      setBusy(true); setWaitingFor("Abrindo a reunião");
       api.openConversation(slug, "meeting", "").then((r) => { setConv(r.conversation); if (r.sprints) setSprints(r.sprints); }).catch((e) => setErr(detail(e))).finally(() => { setBusy(false); setWaitingFor(null); });
     } else if (kind === "brainstorm" && kickoff && !initialText && !opening.current) {
       // a new factory's opening (plan 10.10): the fixed first question is waiting in the session
@@ -198,6 +198,12 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
             {!conv && !pending && !busy && <p className="text-slate-500">{copy.placeholder}</p>}
             {conv?.turns.map((t, i) => <Bubble key={i} who={t.who} name={t.name || copy.agent} text={t.text} changes={t.changes} />)}
             {pending && <Bubble who="founder" name="" text={pending} changes={[]} />}
+            {/* right after the briefing: straight to the Product Owner, no turn with the Master */}
+            {isMeeting && open && conv?.mode === "next" && !proposal && !busy && (
+              <button className="btn-primary w-full text-left" title="O Product Owner propõe o que entra no próximo sprint, a partir do backlog e do rascunho" onClick={propose}>
+                📋 {reviewingPlanned && planned ? `Revisar o ${planned.id} com o Product Owner` : "Pedir a sugestão do Product Owner para o próximo sprint"}
+              </button>
+            )}
             {busy && waitingFor && <p className="text-xs text-slate-500">{waitingFor}…</p>}
             <div ref={endRef} />
           </div>
@@ -322,7 +328,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
             {open && conv && !isCurrent && (
               <div className="space-y-1 border-t border-line p-2">
                 {isMeeting && (
-                  <button className="btn-ghost w-full" disabled={busy || items.length === 0} title="O Product Owner propõe o que entra no sprint, em que ordem e como os cards se relacionam" onClick={propose}>
+                  <button className="btn-ghost w-full" disabled={busy} title="O Product Owner propõe o que entra no sprint, em que ordem e como os cards se relacionam" onClick={propose}>
                     📋 {reviewingPlanned && planned ? `Revisar o ${planned.id} com o Product Owner` : proposal ? "Pedir nova proposta ao Product Owner" : "Pedir a proposta do Product Owner"}
                   </button>
                 )}

@@ -427,21 +427,46 @@ async def test_a_meeting_opens_with_the_state_of_the_project(factory: Factory):
     await ctx.aclose()
 
 
-async def test_the_briefing_is_worded_by_the_model_from_counted_facts(factory: Factory):
-    seen: list[str] = []
-
+async def test_the_briefing_calls_no_model(factory: Factory):
     def script(model: str, messages: list[Message], tools: Any) -> Any:
-        if role_of(messages) == "master" and "Brief the founder" in messages[0].content:
-            seen.append(messages[-1].content)
-            return json.dumps({"reply": "Tudo calmo; sugiro planejar o relatório."})
-        return dry_run_script(model, messages, tools)
+        raise AssertionError("the briefing is worded in code")
 
     ctx = make_ctx(factory, script)
     ProductOwnerAgent(ctx).add_item("Relatório")
     chats = Conversations(ctx)
     conv = chats.open(ConversationKind.MEETING)
-    assert await chats.brief(conv.id) == "Tudo calmo; sugiro planejar o relatório."
-    assert "## Backlog\n1 cards waiting" in seen[0] and 'S-001 "Relatório"' in seen[0]
+    text = await chats.brief(conv.id)
+    assert "Primeiros da fila: S-001 “Relatório”" in text
+    assert "peça a proposta do Product Owner" in text
+    await ctx.aclose()
+
+
+async def test_the_product_owner_proposes_from_the_backlog_with_an_empty_draft(factory: Factory):
+    """tamagotchi: the founder asked for the proposal right after the briefing and the Master
+    said it would call the Product Owner, but an empty draft never reached it."""
+
+    def master(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "master" and "Sprint Meeting" in messages[0].content:
+            return json.dumps({"reply": "Vou pedir a proposta.", "ops": [], "consult_po": True})
+        return script(model, messages, tools)
+
+    script = po_answers(
+        **{
+            "Propose the sprint": {
+                "reply": "Proponho o relatório.",
+                "picks": [{"ref": "S-001", "in_sprint": True, "priority": 1}],
+            }
+        }
+    )
+    ctx = make_ctx(factory, master)
+    ProductOwnerAgent(ctx).add_item("Relatório")
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    assert not conv.draft.items
+    await chats.say(conv.id, "Qual a proposta do PO?")
+    conv = chats.board.require(conv.id)
+    assert conv.draft.proposal is not None
+    assert [(i.key, i.in_sprint) for i in conv.draft.items] == [("S-001", True)]
     await ctx.aclose()
 
 
