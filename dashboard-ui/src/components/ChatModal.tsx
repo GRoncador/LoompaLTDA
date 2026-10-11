@@ -198,18 +198,18 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
             {!conv && !pending && !busy && <p className="text-slate-500">{copy.placeholder}</p>}
             {conv?.turns.map((t, i) => <Bubble key={i} who={t.who} name={t.name || copy.agent} text={t.text} changes={t.changes} />)}
             {pending && <Bubble who="founder" name="" text={pending} changes={[]} />}
-            {/* right after the briefing: straight to the Product Owner, no turn with the Master */}
-            {isMeeting && open && conv?.mode === "next" && !proposal && !busy && (
-              <button className="btn-primary w-full text-left" title="O Product Owner propõe o que entra no próximo sprint, a partir do backlog e do rascunho" onClick={propose}>
-                📋 {reviewingPlanned && planned ? `Revisar o ${planned.id} com o Product Owner` : "Pedir a sugestão do Product Owner para o próximo sprint"}
-              </button>
-            )}
             {busy && waitingFor && <p className="text-xs text-slate-500">{waitingFor}…</p>}
             <div ref={endRef} />
           </div>
           {notes.length > 0 && <div className="border-t border-line px-3 py-1 text-[11px] text-amber-300">{notes.map((n, i) => <div key={i}>! {n}</div>)}</div>}
           {open ? (
             <div className="border-t border-line p-2">
+              {/* always at hand: the Product Owner's proposal reads the conversation so far */}
+              {isMeeting && conv?.mode === "next" && (
+                <button className="btn-primary mb-2 w-full text-left" disabled={busy} title="O Product Owner propõe o que entra no próximo sprint, a partir do backlog, do rascunho e do que já foi dito nesta conversa" onClick={propose}>
+                  📋 {reviewingPlanned && planned && !proposal ? `Revisar o ${planned.id} com o Product Owner` : proposal ? "Pedir nova sugestão ao Product Owner (considera a conversa)" : "Pedir a sugestão do Product Owner para o próximo sprint"}
+                </button>
+              )}
               <textarea
                 value={text} rows={3} disabled={(busy && !!pending) || choosing}
                 onChange={(e) => setText(e.target.value)}
