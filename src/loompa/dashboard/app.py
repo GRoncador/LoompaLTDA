@@ -84,6 +84,7 @@ class ReplyBody(BaseModel):
     option_key: str | None = None
     text: str | None = None
     decisions: dict[str, str] = {}
+    answers: dict[str, str] = {}  # question id -> option key or the founder's words (15.4)
 
 
 class ProbeBody(BaseModel):
@@ -729,7 +730,12 @@ def create_app(
         try:
             state = await Scheduler(ctx).aanswer(
                 message_id,
-                FounderAnswer(option_key=body.option_key, text=body.text, decisions=body.decisions),
+                FounderAnswer(
+                    option_key=body.option_key,
+                    text=body.text,
+                    decisions=body.decisions,
+                    answers=body.answers,
+                ),
             )
         except KeyError:
             raise HTTPException(404, message_id) from None
@@ -747,9 +753,10 @@ def create_app(
         from loompa.smoke import VIEWPORTS
 
         hub.get(slug)  # 404 for an unknown factory
-        if name not in {f"{v[0]}.png" for v in VIEWPORTS} or not re.fullmatch(
-            r"S-\d+[A-Z]?", story_id
-        ):
+        known = name in {f"{v[0]}.png" for v in VIEWPORTS} or re.fullmatch(
+            r"compare-[a-z0-9-]+-(desktop|mobile)\.png", name
+        )  # the smoke's pictures and the design check's side-by-side ones (ADR-0039)
+        if not known or not re.fullmatch(r"S-\d+[A-Z]?", story_id):
             raise HTTPException(404, name)
         path = shots_dir(slug, story_id) / name
         if not path.is_file():
@@ -1446,6 +1453,10 @@ def create_app(
             pass
         finally:
             rt.listeners.discard(queue)
+
+    from loompa.dashboard import design_api
+
+    design_api.register(app, hub)
 
     # ---------------------------------------------------------------- static
     if (STATIC_DIR / "assets").is_dir():

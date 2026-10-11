@@ -97,6 +97,39 @@ export interface Message {
   answer?: { option_key: string | null; text: string | null; answered_at: string } | null;
   sprint_id?: string | null; // a note about a sprint opens its report (8.2)
   images?: string[]; // screenshots of the page with a delivery (ADR-0030)
+  questions?: Question[]; // answered together (plan 15.4)
+  screens?: DesignScreen[]; // a design approval (ADR-0039): paths under .loompa/design/
+}
+
+export interface Question { id: string; text: string; why: string; options: Option[] }
+
+/** One state of one screen: its static page and its pictures, as paths under `.loompa/design/`. */
+export interface DesignScreen {
+  title: string; screen?: string; state: string; alt?: string; route?: string;
+  html?: string; desktop?: string; mobile?: string;
+}
+
+export interface DesignReference {
+  id: string; kind: "image" | "link" | "figma" | "text"; title: string; note: string; url: string;
+  story_id: string | null; file: string; created_at: string;
+}
+
+export interface DesignRound { round: number; assumptions: string[]; problems: string[]; screens: DesignScreen[] }
+
+export interface DesignOverview {
+  base: { tokens: Record<string, unknown>; board: string; desktop?: string; mobile?: string } | null;
+  references: DesignReference[];
+  pending: { message: Message; story_id: string; title: string; reason: string }[];
+  stories: string[];
+  gate: string;
+  sees: boolean;
+}
+
+export interface StoryDesign {
+  story_id: string;
+  rounds: DesignRound[];
+  approved: { round: number; alternative: string; screens: DesignScreen[] } | null;
+  references: DesignReference[];
 }
 
 export type ConversationKind = "meeting" | "brainstorm" | "review";
@@ -310,9 +343,11 @@ export type TierName = "tier1" | "tier2" | "tier3";
 export type ModelMatrix = Record<string, Record<string, Candidate[]>>;
 
 export type FactoryKind = "personal" | "commercial";
+export type DesignGate = "auto" | "full" | "light" | "off";
 
 export interface Settings {
   factory?: { name: string; kind: FactoryKind; kinds: { key: FactoryKind; label: string; hint: string }[] };
+  design?: { gate: DesignGate; diff_threshold: number; figma_token_env: string; figma_key: { configured: boolean; label?: string }; vision: Candidate[] };
   providers: ProviderInfo[];
   models?: { tier1_ceiling: number; tier2_floor: number; clusters_enabled: boolean; default_route?: "auto" | "openrouter" };
   tiers: Record<string, Candidate[]>;
@@ -341,6 +376,10 @@ export interface SettingsPatch {
   max_parallel?: number;
   tools?: Record<string, { enabled?: boolean; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
   factory_kind?: FactoryKind;
+  design_gate?: DesignGate;
+  vision?: Candidate[];
+  figma_key?: string;
+  clear_figma_key?: boolean;
 }
 
 export interface ProbeResult { name: string; ok: boolean; detail: string; model: string; latency_ms: number }

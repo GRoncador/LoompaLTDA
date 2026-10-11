@@ -21,6 +21,8 @@ from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance
 from loompa.agents.product_owner import CRITERIA_ALIGNED_KEY, CRITERIA_REVIEW_KEY
 from loompa.callers import callers_of_diff
 from loompa.config.secrets import hub_home
+from loompa.design import approved_manifest, load_tokens
+from loompa.design.check import DesignCheck, check_design
 from loompa.engine.state import StoryState
 from loompa.hygiene import (
     HygieneIssue,
@@ -277,6 +279,13 @@ class InspectorAgent(LoompaAgent):
             + "\n"
             + self.ctx.worktrees.diff_working(wt, max_chars=200_000)
         )
+        # the design (ADR-0039): colours outside the tokens, the built page against the approved
+        design = await self._design_check(state, wt, full_diff, smoke_cmd if ok else "")
+        if text := design.report():
+            parts.append(text)
+        if design.problems:
+            ok = others_ok = False
+        state.extra[SHOTS_KEY] = [*(state.extra.get(SHOTS_KEY) or []), *design.shots]
         issues = scan_diff(full_diff, state.allowed_paths or None)
         for rel in residue:
             # the suite wrote into the repository: a test that will leave files behind on every
@@ -310,7 +319,7 @@ class InspectorAgent(LoompaAgent):
         failed: list[dict] = []
         findings: list[dict[str, str]] = []
         if ok and judge:
-            findings = _numbered(weak_tests(full_diff))
+            findings = _numbered([*weak_tests(full_diff), *design.findings])
         if ok and judge and state.acceptance and not self.ctx.dry_run:
             judge = await self._judge(state, wt, "\n".join(parts), full_diff)
             failed = [c for c in judge.get("criteria", []) if not c.get("pass")]
@@ -366,6 +375,34 @@ class InspectorAgent(LoompaAgent):
                 ],
             },
         )
+
+    async def _design_check(
+        self, state: StoryState, wt: Worktree, diff: str, smoke_cmd: str
+    ) -> DesignCheck:
+        from loompa.agents.ux import UXAgent
+
+        if not (load_tokens(self.ctx.root) or approved_manifest(self.ctx.root, state.story_id)):
+            return DesignCheck()
+        self.set_state("TESTING", state, detail="conferindo as telas aprovadas")
+        result = await check_design(
+            self.ctx.root,
+            wt.path,
+            state,
+            diff,
+            smoke_cmd=smoke_cmd,
+            shots_dir=shots_dir(self.ctx.slug, state.story_id),
+            threshold=self.ctx.config.design.diff_threshold,
+            ux=UXAgent(self.ctx),
+        )
+        self.ctx.emit(
+            "inspector.design",
+            story_id=state.story_id,
+            agent=self.name,
+            problems=result.problems[:5],
+            findings=len(result.findings),
+            compared=len(result.shots),
+        )
+        return result
 
     async def _layout_baseline(self, state: StoryState, wt: Worktree, smoke_cmd: str) -> set[str]:
         """The layout problems the base already has, measured once per baseline: a page that

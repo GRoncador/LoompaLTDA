@@ -11,7 +11,8 @@ Two OKs close it. The first approves the direction; the Product Owner then propo
 into cards (new ones, or additions to cards already waiting). The second files that split
 (`ProductOwnerAgent.apply_split`); ideas left out stay in the session for another round.
 
-Future roles (legal, UX) join by adding a row to `CONSULTANTS` once the factory has them.
+Future roles (legal, the product manager) join by adding a row to `CONSULTANTS` once the factory
+has them; the UX Loompa joined with the design gate (plan 15.8).
 """
 
 from __future__ import annotations
@@ -143,8 +144,9 @@ class Consultant:
     def agent(self, ctx: EngineContext) -> LoompaAgent:
         from loompa.agents.analyst import AnalystAgent
         from loompa.agents.architect import ArchitectAgent
+        from loompa.agents.ux import UXAgent
 
-        return {"analyst": AnalystAgent, "architect": ArchitectAgent}[self.role](ctx)
+        return {"analyst": AnalystAgent, "architect": ArchitectAgent, "ux": UXAgent}[self.role](ctx)
 
 
 CONSULTANTS: dict[str, Consultant] = {
@@ -168,6 +170,16 @@ CONSULTANTS: dict[str, Consultant] = {
             "risk, rough size, and conflicts with recorded technical decisions",
             tools_rule="Ground yourself first: read the repository (list_dir, search, find_symbol, "
             "read_file) to see what the idea would touch, and read no more than an opinion needs.",
+        ),
+        Consultant(
+            role="ux",
+            label="telas, fluxos e experiência de uso",
+            lens="the person using the product: the screens and steps the idea needs, what they "
+            "see and do at each one, the empty and error states, and how it fits the screens "
+            "and the visual base that already exist",
+            tools_rule="Ground yourself first: read the existing pages and components (list_dir, "
+            "search, read_file) to see the screens the idea would change, and read no more than "
+            "an opinion needs.",
         ),
     )
 }

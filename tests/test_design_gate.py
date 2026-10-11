@@ -146,3 +146,223 @@ async def test_a_factory_without_a_screen_skips_the_gate(git_repo: Path, hub):
     state = load_state(ctx, "S-001")
     assert "design" not in state.route and state.blocked_reason == "delivery"
     assert json.dumps(state.extra).find(DESIGN_KEY) == -1
+
+
+def test_colours_outside_the_tokens_in_style_files_are_refused():
+    from loompa.design.check import stray_colours
+
+    tokens = {"color": {"primary": "#0b57d0", "bg": "#fff"}}
+    diff = (
+        "diff --git a/src/app.css b/src/app.css\n+++ b/src/app.css\n"
+        "+.a { color: #0B57D0; background: #ffffff; border-color: #123456 }\n"
+        "diff --git a/src/sprites.js b/src/sprites.js\n+++ b/src/sprites.js\n"
+        "+const PALETTE = ['#ff00ff']\n"
+        "diff --git a/tests/page.test.css b/tests/page.test.css\n+++ b/tests/page.test.css\n"
+        "+.x { color: #abcdef }\n"
+    )
+    assert stray_colours(diff, tokens) == [("src/app.css", "#123456")]
+
+
+def test_a_figma_link_names_its_file_and_frame():
+    from loompa.design.figma import FigmaError, parse_link
+
+    ref = parse_link("https://www.figma.com/design/AbC123/Loja?node-id=12-34&t=x")
+    assert (ref.key, ref.node) == ("AbC123", "12:34")
+    for bad in ("https://example.com/design/x?node-id=1-2", "https://www.figma.com/design/AbC"):
+        with pytest.raises(FigmaError):
+            parse_link(bad)
+
+
+async def test_a_figma_frame_is_read_through_the_rest_api():
+    import httpx
+
+    from loompa.design.figma import fetch_frame
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("X-Figma-Token") in (None, "tok")
+        if request.url.path == "/v1/images/AbC123":
+            return httpx.Response(200, json={"images": {"1:2": "https://cdn.figma/x.png"}})
+        if request.url.host == "cdn.figma":
+            return httpx.Response(200, content=b"PNG")
+        doc = {
+            "name": "Home",
+            "type": "FRAME",
+            "children": [{"type": "TEXT", "name": "t", "characters": "Olá"}],
+        }
+        return httpx.Response(200, json={"nodes": {"1:2": {"document": doc}}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        picture, outline = await fetch_frame(
+            "https://www.figma.com/file/AbC123/x?node-id=1-2", "tok", client=client
+        )
+    assert picture == b"PNG" and "Olá" in outline and "frame Home" in outline
+
+
+async def test_front_end_questions_are_asked_once_and_answered_together(web: Factory):
+    from loompa.agents.dryrun import dry_run_script, role_of
+
+    def script(model, messages, tools):  # noqa: ANN001
+        if role_of(messages) == "ux" and "front-end questions" in messages[0].content:
+            return json.dumps(
+                {
+                    "questions": [
+                        {
+                            "text": "Aparelho principal?",
+                            "why": "muda o layout",
+                            "options": ["Celular", "Computador"],
+                            "recommended": 0,
+                        },
+                        {
+                            "text": "Lista vazia mostra?",
+                            "why": "estado vazio",
+                            "options": ["Uma mensagem", "Um exemplo"],
+                            "recommended": 1,
+                        },
+                    ],
+                    "assumptions": [],
+                }
+            )
+        if role_of(messages) == "ux" and "Draw the screens" in messages[0].content:
+            seen.append(messages[-1].content)
+        return dry_run_script(model, messages, tools)
+
+    seen: list[str] = []
+    ctx = make_ctx(web, script, dry_run=True)
+    from loompa.design import DesignPaths as _P
+
+    tokens = _P.of(web.root)
+    tokens.root.mkdir(parents=True, exist_ok=True)
+    tokens.tokens.write_text(json.dumps({"color": {"bg": "#ffffff", "text": "#111111"}}))
+    master = MasterAgent(ctx)
+    await master.meeting("Tela de histórico")
+    master.start_sprint()
+    await Scheduler(ctx).run()
+    state = load_state(ctx, "S-001")
+    assert state.blocked_reason == "design_questions"
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert [q.id for q in msg.questions] == ["q1", "q2"]
+    assert [o.recommended for o in msg.questions[1].options] == [False, True]
+    await Scheduler(ctx).aanswer(
+        msg.id, FounderAnswer(option_key="answer", answers={"q1": "1", "q2": "uma ilustração"})
+    )
+    await Scheduler(ctx).run()
+    state = load_state(ctx, "S-001")
+    assert state.blocked_reason == "design" and state.extra[DESIGN_KEY]["asked"]
+    assert "Aparelho principal? → Computador" in seen[-1]
+    assert "Lista vazia mostra? → uma ilustração" in seen[-1]
+
+
+def test_references_are_kept_listed_and_served(web: Factory, hub):
+    from fastapi.testclient import TestClient
+
+    from loompa.dashboard.app import create_app
+
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"
+        b"\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa7\x35\x81"
+        b"\x84\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    with TestClient(create_app(dry_run=True, run_engine=False, store=hub)) as c:
+        slug = web.slug
+        r = c.post(
+            f"/api/factories/{slug}/design/references",
+            data={"kind": "image", "title": "paleta", "note": "algo assim, mais claro"},
+            files={"file": ("p.png", png, "image/png")},
+        )
+        assert r.status_code == 200, r.text
+        ref = r.json()["reference"]
+        assert ref["id"] == "R-001" and ref["file"] == "R-001.png"
+        r = c.post(
+            f"/api/factories/{slug}/design/references",
+            data={"kind": "text", "note": "minimalista", "story_id": "S-009"},
+        )
+        assert r.json()["reference"]["story_id"] == "S-009"
+        assert c.get(f"/api/factories/{slug}/design/file/references/R-001.png").content == png
+        assert c.get(f"/api/factories/{slug}/design/file/../config.yaml").status_code == 404
+        view = c.get(f"/api/factories/{slug}/design").json()
+        assert [r["id"] for r in view["references"]] == ["R-001"]  # S-009's is the story's
+        story = c.get(f"/api/factories/{slug}/stories/S-009/design").json()
+        assert [r["id"] for r in story["references"]] == ["R-001", "R-002"]
+        assert c.delete(f"/api/factories/{slug}/design/references/R-001").status_code == 200
+        bad = c.post(
+            f"/api/factories/{slug}/design/references", data={"kind": "link", "url": "ftp://x"}
+        )
+        assert bad.status_code == 400
+
+
+async def test_the_built_page_is_compared_with_the_approved_screen(web: Factory, tmp_path: Path):
+    """15.6: past the threshold a model with vision judges; a deviation fails with the pictures."""
+    import sys
+
+    from loompa.agents.ux import UXAgent
+    from loompa.config.schema import ModelCandidate
+    from loompa.design import write_json
+    from loompa.design.check import check_design
+    from loompa.design.render import file_url, look_at
+    from loompa.engine import StoryState
+    from loompa.smoke import find_chrome
+
+    if find_chrome() is None:
+        pytest.skip("no Chrome or Chromium here")
+    paths = DesignPaths.of(web.root)
+    approved = paths.approved("S-001") / "home"
+    approved.mkdir(parents=True)
+    page = "<!doctype html><html lang='pt'><body style='margin:0'><div style='height:900px;background:{c}'>x</div></body></html>"
+    (approved / "main.html").write_text(page.format(c="#ffffff"))
+    await look_at([(file_url(approved / "main.html"), approved / "main")])
+    write_json(
+        paths.approved("S-001") / "manifest.json",
+        {
+            "screens": [
+                {"id": "home", "dir": "home", "title": "Início", "route": "/", "states": ["main"]}
+            ]
+        },
+    )
+    built = tmp_path / "built"
+    built.mkdir()
+    (built / "index.html").write_text(page.format(c="#0b57d0"))
+    asked: list[str] = []
+
+    def script(model, messages, tools):  # noqa: ANN001
+        asked.append(messages[-1].content)
+        assert messages[-1].images and messages[-1].images[0].startswith("data:image/png;base64,")
+        return json.dumps({"deviation": True, "workaround": False, "changes": ["the page is blue"]})
+
+    web.config.models.vision = [ModelCandidate(provider="openrouter", model="seer")]
+    ctx = make_ctx(web, script)
+    serve = f"""sh -c '"{sys.executable}" -m http.server $PORT --bind 127.0.0.1'"""
+    out = await check_design(
+        web.root,
+        built,
+        StoryState(story_id="S-001", title="Início"),
+        "",
+        smoke_cmd=serve,
+        shots_dir=tmp_path / "shots",
+        threshold=0.1,
+        ux=UXAgent(ctx),
+    )
+    assert out.problems and "deviates: the page is blue" in out.problems[0]
+    assert "compare-home-desktop.png" in out.shots
+    assert (tmp_path / "shots" / "compare-home-desktop.png").is_file()
+    assert asked and "approved on the left" in asked[0]
+    await ctx.aclose()
+
+
+def test_the_gate_and_the_vision_models_are_set_in_the_settings(web: Factory):
+    from loompa.config.schema import ModelCandidate
+    from loompa.config.settings import SettingsPatch, apply_settings
+    from loompa.factory_kind import design_gate
+
+    cfg = web.config
+    assert design_gate(cfg) == "light"  # a personal factory, gate on auto
+    cfg.factory.kind = "commercial"
+    assert design_gate(cfg) == "full"
+    seer = ModelCandidate(provider="openrouter", model="seer")
+    notes = apply_settings(web.root, cfg, SettingsPatch(design_gate="off", vision=[seer]))
+    assert notes == ["sem telas antes do código", "modelos com visão atualizados"]
+    assert design_gate(cfg) == "off" and cfg.models.vision[0].model == "seer"
+    assert apply_settings(web.root, cfg, SettingsPatch(design_gate="off", vision=[seer])) == []
+    with pytest.raises(ValueError):
+        apply_settings(
+            web.root, cfg, SettingsPatch(vision=[ModelCandidate(provider="x", model="y")])
+        )

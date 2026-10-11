@@ -8,7 +8,7 @@ import AgentTrace from "./AgentTrace";
 type Tab = "spec" | "plan" | "tasks" | "research" | "diff" | "log" | "agent";
 type Diff = { source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string };
 
-export default function StoryDrawer({ slug, id, onClose, onOpenSprint }: { slug: string; id: string; onClose: () => void; onOpenSprint: (id: string) => void }) {
+export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDesign }: { slug: string; id: string; onClose: () => void; onOpenSprint: (id: string) => void; onOpenDesign: (id: string) => void }) {
   const [data, setData] = useState<any>(null);
   // the order Spec Kit writes them in: what, then how, then the steps (plan 11.2)
   const [tab, setTab] = useState<Tab>("spec");
@@ -45,6 +45,11 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint }: { slug:
           </span>
         } />
         <Row k="Classificação" v={`${KIND_LABEL[st.kind] ?? st.kind} · ${COMPLEXITY_LABEL[st.complexity] ?? st.complexity ?? "padrão"}${s.epic ? ` · ${s.epic}` : ""}`} />
+        {st.extra?.design && <Row k="Telas" v={
+          <button className="chip bg-fuchsia-900/50 text-fuchsia-200 hover:bg-fuchsia-800/60" onClick={() => onOpenDesign(id)}>
+            🎨 {st.extra.design.approved ? `aprovadas (rodada ${st.extra.design.approved})` : `em desenho · modo ${st.extra.design.mode === "full" ? "completo" : "leve"}`}
+          </button>
+        } />}
         {s.tasks_total > 0 && <Row k="Tarefas do plano" v={
           <span className="flex items-center gap-2">
             <span className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">

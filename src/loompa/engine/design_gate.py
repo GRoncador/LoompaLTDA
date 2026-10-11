@@ -44,6 +44,7 @@ from loompa.design import (
     write_frontend_section,
     write_json,
 )
+from loompa.design.references import get_reference, list_references
 from loompa.design.render import file_url, look_at
 from loompa.engine.context import EngineContext
 from loompa.engine.phases import Phase, advance, goto, register
@@ -174,7 +175,7 @@ async def _propose_base(ctx: EngineContext, state: StoryState) -> StoryState:
     write_json(folder / "proposal.json", proposal)
     state.extra[BASE_KEY] = "asked"
     d["base_round"] = n
-    lines = [f"**{a['key']}. {a['name']}** — {a['idea']}" for a in alts]
+    lines = [f"{a['key']}. {a['name']}: {a['idea']}" for a in alts]
     msg = FounderMessage(
         factory=ctx.slug,
         story_id=state.story_id,
@@ -187,7 +188,7 @@ async def _propose_base(ctx: EngineContext, state: StoryState) -> StoryState:
             "valer para todas as telas e para o código.\n\n"
             + "\n".join(lines)
             + (
-                "\n\nO que eu decidi sozinho: " + "; ".join(proposal["assumptions"])
+                "\n\nO que eu decidi sozinho: " + _sentences(proposal["assumptions"])
                 if proposal["assumptions"]
                 else ""
             )
@@ -232,6 +233,12 @@ def adopt_base(ctx: EngineContext, n: int, key: str) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------------ the phases
+
+
+def _sentences(items: list[str]) -> str:
+    """Short sentences joined into one: "a; b; c." whatever punctuation each one brought."""
+    parts = [i.strip().rstrip(".;").strip() for i in items if i.strip()]
+    return "; ".join(parts) + "." if parts else ""
 
 
 def _root(ctx: EngineContext) -> Path:
@@ -422,7 +429,7 @@ async def node_design_review(ctx: EngineContext, state: StoryState) -> StoryStat
             "história."
         )
     if assumptions:
-        parts.append("O que eu decidi sozinho: " + "; ".join(assumptions[:8]) + ".")
+        parts.append("O que eu decidi sozinho: " + _sentences(assumptions[:8]))
     if left:
         parts.append(
             f"A conferência automática ainda aponta {len(left)} ponto(s) que não consegui "
@@ -433,6 +440,15 @@ async def node_design_review(ctx: EngineContext, state: StoryState) -> StoryStat
         Option(key=f"alt_{a}", label=f"Aprovar com a alternativa {a}", recommended=i == 0)
         for i, a in enumerate(alts)
     ]
+    for ref in list_references(ctx.root, state.story_id):
+        if ref.get("kind") == "figma" and ref.get("file"):
+            options.append(
+                Option(
+                    key=f"figma_{ref['id']}",
+                    label=f"Aprovar com o quadro do Figma {ref['id']} no lugar da tela principal",
+                    description="A foto do Figma vira a tela aprovada; o código é conferido com ela.",
+                )
+            )
     options.append(
         Option(
             key="adjust",
@@ -495,9 +511,11 @@ def apply_design_answer(
         return
     # BlockedReason.DESIGN: the approval
     n = int(d.get("round") or 1)
-    if key == "approve" or key.startswith("alt_"):
+    if key == "approve" or key.startswith(("alt_", "figma_")):
         alt = key.removeprefix("alt_").upper() if key.startswith("alt_") else ""
-        approve_round(ctx.root, state.story_id, n, alternative=alt)
+        approved = approve_round(ctx.root, state.story_id, n, alternative=alt)
+        if key.startswith("figma_"):
+            use_figma_frame(ctx, state.story_id, approved, key.removeprefix("figma_"))
         if text:
             state.note(f"Ao aprovar as telas: {text}")
         d["approved"] = n
@@ -510,6 +528,23 @@ def apply_design_answer(
     d["round"] = n + 1
     d["tries"] = 0
     goto(state, "design")
+
+
+def use_figma_frame(ctx: EngineContext, story_id: str, approved: Path, ref_id: str) -> None:
+    """A Figma frame stands in for the main screen's computer picture (15.9): the built page is
+    compared with it. The UX's HTML stays, for the structure the Worker reuses."""
+    ref = get_reference(ctx.root, ref_id)
+    if not ref or not ref.get("file"):
+        return
+    picture = DesignPaths.of(ctx.root).references / str(ref["file"])
+    data = read_json(approved / "manifest.json")
+    main = next((f for f in screen_files(approved, data) if f["state"] == "main"), None)
+    if main is None or not picture.is_file():
+        return
+    shutil.copyfile(picture, main["desktop"])
+    data["figma"] = {"reference": ref_id, "screen": main["screen"]}
+    write_json(approved / "manifest.json", data)
+    ctx.emit("design.figma_approved", story_id=story_id, reference=ref_id)
 
 
 def _answers(msg: FounderMessage, answer: FounderAnswer, *, use_defaults: bool) -> list[str]:

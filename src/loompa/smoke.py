@@ -466,6 +466,44 @@ def _collect(msg: dict, errors: list[str]) -> None:
             errors.append(str(entry.get("text", ""))[:200])
 
 
+@dataclass
+class Served:
+    base: str = ""  # the app's address, "" when it did not answer
+    page: str = ""  # the home page's HTML
+    problem: str = ""  # why it did not answer
+
+
+@contextlib.asynccontextmanager
+async def served(root: Path, command: str):  # type: ignore[no-untyped-def]
+    """Start `command` in `root` with a free `PORT` and wait for the home page; the app is always
+    stopped on the way out."""
+    port = _free_port()
+    env = {**os.environ, "PORT": str(port)}
+    base = f"http://127.0.0.1:{port}/"
+    server = await _spawn(shlex.split(command), root, env)
+    out = Served()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            loop = asyncio.get_running_loop()
+            end = loop.time() + START_TIMEOUT_S
+            while loop.time() < end and server.returncode is None:
+                with contextlib.suppress(httpx.HTTPError):
+                    r = await client.get(base)
+                    if r.status_code == 200:
+                        out.base, out.page = base, r.text
+                        break
+                await asyncio.sleep(0.3)
+        if not out.base:
+            tail = await _stop(server)
+            out.problem = (
+                f"`{command}` did not serve the page on {base} within {START_TIMEOUT_S:.0f}s"
+                + (f"; its output ended with: {tail.strip()[-300:]}" if tail.strip() else "")
+            )
+        yield out
+    finally:
+        await _stop(server)
+
+
 async def smoke(
     root: Path,
     command: str,
@@ -479,37 +517,17 @@ async def smoke(
     the base already has (keys of `SmokeResult.layout`); `shots_dir` gets one screenshot per
     viewport."""
     out = SmokeResult(ran=True)
-    port = _free_port()
-    env = {**os.environ, "PORT": str(port)}
-    base = f"http://127.0.0.1:{port}/"
-    server = None
-    try:
-        server = await _spawn(shlex.split(command), root, env)
-        page = ""
+    async with served(root, command) as app:
+        if not app.base:
+            out.problems.append(app.problem)
+            return out
         async with httpx.AsyncClient(timeout=5) as client:
-            loop = asyncio.get_running_loop()
-            end = loop.time() + START_TIMEOUT_S
-            while loop.time() < end and server.returncode is None:
-                with contextlib.suppress(httpx.HTTPError):
-                    r = await client.get(base)
-                    if r.status_code == 200:
-                        page = r.text
-                        break
-                await asyncio.sleep(0.3)
-            if not page:
-                tail = await _stop(server)
-                server = None
-                out.problems.append(
-                    f"`{command}` did not serve the page on {base} within {START_TIMEOUT_S:.0f}s"
-                    + (f"; its output ended with: {tail.strip()[-300:]}" if tail.strip() else "")
-                )
-                return out
-            await _check_modules(client, base, page, out)
+            await _check_modules(client, app.base, app.page, out)
         browser = chrome if chrome is not None else find_chrome()
         if browser:
-            await _render(browser, base, out, shots_dir=shots_dir, layout_baseline=layout_baseline)
+            await _render(
+                browser, app.base, out, shots_dir=shots_dir, layout_baseline=layout_baseline
+            )
         else:
             out.notes.append("no Chrome or Chromium found: the page was loaded but not rendered")
         return out
-    finally:
-        await _stop(server)

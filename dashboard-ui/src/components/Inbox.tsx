@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Message, Overview } from "../types";
+import { DesignScreens } from "./DesignScreens";
 
 const KIND: Record<Message["kind"], { label: string; cls: string }> = {
   decision: { label: "Decisão", cls: "bg-violet-900/60 text-violet-200" },
@@ -12,7 +13,7 @@ const KIND: Record<Message["kind"], { label: string; cls: string }> = {
 
 export default function Inbox(props: {
   messages: Message[]; finance: Overview["finance"] | null; kaizen: number; onProductFindings: () => void;
-  onReply: (m: Message, option: string | null, text: string | null, decisions?: Record<string, string>) => Promise<void>;
+  onReply: (m: Message, option: string | null, text: string | null, decisions?: Record<string, string>, answers?: Record<string, string>) => Promise<void>;
   onArchive: (m: Message) => Promise<void>;
   onOpenStory: (id: string) => void;
   onOpenSprint: (id: string) => void;
@@ -60,7 +61,7 @@ function Shots({ m }: { m: Message }) {
   );
 }
 
-function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: Message } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint">) {
+export function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: Message } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint">) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(m.kind !== "info");
@@ -68,10 +69,19 @@ function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: 
   const open_decisions = m.decisions.filter((d) => !d.chosen);
   const [picked, setPicked] = useState<Record<string, string>>({});
   const choice = (d: Message["decisions"][number]) => picked[d.id] ?? d.options.find((o) => o.recommended)?.key ?? d.options[0]?.key ?? "backlog";
+  // the batch questions (plan 15.4): the recommended option unless the founder picks or writes another
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const answerOf = (q: NonNullable<Message["questions"]>[number]) => answers[q.id] ?? q.options.find((o) => o.recommended)?.key ?? q.options[0]?.key ?? "";
+  // what to adjust in each screen of a design approval, joined into the answer's text
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const adjustText = () => [text, ...Object.entries(notes).filter(([, v]) => v.trim()).map(([k, v]) => `${k}: ${v.trim()}`)].filter(Boolean).join("\n");
   const k = KIND[m.kind];
   const send = async (opt: string | null) => {
     setBusy(true);
-    try { await onReply(m, opt, text || null, Object.fromEntries(open_decisions.map((d) => [d.id, choice(d)]))); } finally { setBusy(false); }
+    try {
+      const qa = Object.fromEntries((m.questions ?? []).map((q) => [q.id, answerOf(q)]));
+      await onReply(m, opt, (m.screens?.length ? adjustText() : text) || null, Object.fromEntries(open_decisions.map((d) => [d.id, choice(d)])), qa);
+    } finally { setBusy(false); }
   };
   return (
     <article className="rounded-md border border-line bg-ink/70 p-3">
@@ -85,6 +95,30 @@ function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: 
           <p className="mt-2 whitespace-pre-line text-sm text-slate-300">{m.context}</p>
           {m.impact && <p className="mt-1 text-xs italic text-slate-400">{m.impact}</p>}
           {m.story_id && (m.images?.length ?? 0) > 0 && <Shots m={m} />}
+          {(m.screens?.length ?? 0) > 0 && (
+            <DesignScreens slug={m.factory} screens={m.screens!} notes={m.status === "pending" ? notes : undefined} onNote={(key, v) => setNotes((n) => ({ ...n, [key]: v }))} />
+          )}
+          {(m.questions?.length ?? 0) > 0 && (
+            <div className="mt-3 space-y-3 rounded-md border border-line bg-panel/60 p-2">
+              {m.questions!.map((q) => {
+                const typed = !q.options.some((o) => o.key === answerOf(q));
+                return (
+                  <div key={q.id} className="text-xs">
+                    <div className="text-sm text-slate-100">{q.text}</div>
+                    {q.why && <div className="text-slate-400">{q.why}</div>}
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {q.options.map((o) => (
+                        <button key={o.key} type="button" onClick={() => setAnswers((a) => ({ ...a, [q.id]: o.key }))} className={`rounded border px-2 py-0.5 ${answerOf(q) === o.key ? "border-brand bg-brand/20 text-slate-50" : "border-line text-slate-400 hover:text-slate-200"}`}>
+                          {o.label}{o.recommended ? " ★" : ""}
+                        </button>
+                      ))}
+                    </div>
+                    <input value={typed ? answerOf(q) : ""} onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))} placeholder="…ou escreva outra resposta" className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-0.5" />
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {m.sprint_id && <button className="btn-ghost mt-2 text-xs" onClick={() => onOpenSprint(m.sprint_id!)}>📊 Ver o relatório do {m.sprint_id}</button>}
           {m.decisions.length > 0 && (
             <div className="mt-3 space-y-2 rounded-md border border-line bg-panel/60 p-2">

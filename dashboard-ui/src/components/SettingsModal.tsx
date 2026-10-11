@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, ClusterName, FactoryKind, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
+import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, ClusterName, DesignGate, FactoryKind, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
 import { KindPicker } from "./KindPicker";
 import { Modal } from "./Modal";
 import { PROVIDER_NAMES, ProviderBadge, ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
@@ -48,15 +48,51 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
 
 // ------------------------------------------------------------------- the factory itself
 
+const GATE_OPTIONS: { key: DesignGate; title: string; note: string }[] = [
+  { key: "auto", title: "Conforme o tipo", note: "Completo num produto comercial, leve num pessoal." },
+  { key: "full", title: "Completo", note: "Todas as telas da história, com os estados que a spec pede; a primeira tela de uma área nova vem em duas alternativas." },
+  { key: "light", title: "Leve", note: "Uma tela por história, só o estado principal." },
+  { key: "off", title: "Desligado", note: "Sem telas antes do código." },
+];
+
 function FactoryPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) => Promise<void> }) {
   const [kind, setKind] = useState<FactoryKind>(s.factory?.kind ?? "personal");
-  useEffect(() => { setKind(s.factory?.kind ?? "personal"); }, [s]);
+  const [gate, setGate] = useState<DesignGate>(s.design?.gate ?? "auto");
+  const [vision, setVision] = useState((s.design?.vision ?? []).map((c) => `${c.provider}/${c.model}`).join("\n"));
+  const [figma, setFigma] = useState("");
+  useEffect(() => {
+    setKind(s.factory?.kind ?? "personal");
+    setGate(s.design?.gate ?? "auto");
+    setVision((s.design?.vision ?? []).map((c) => `${c.provider}/${c.model}`).join("\n"));
+  }, [s]);
+  const visionList = (): Candidate[] => vision.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const i = l.indexOf("/");
+    return { provider: l.slice(0, i), model: l.slice(i + 1) } as Candidate;
+  });
   return (
-    <div className="max-w-3xl space-y-3">
+    <div className="max-w-3xl space-y-4">
       <KindPicker value={kind} onChange={setKind} />
       <p className="text-[11px] text-slate-500">Trocar o tipo não mexe no que já foi feito: vale para as próximas reuniões, telas e fases.</p>
+      <fieldset className="space-y-1">
+        <legend className="mb-1">Telas antes do código</legend>
+        {GATE_OPTIONS.map((o) => (
+          <label key={o.key} className={`flex cursor-pointer gap-2 rounded-md border p-2 text-xs transition-colors ${gate === o.key ? "border-brand/60 bg-brand/10" : "border-line/60 hover:border-line"}`}>
+            <input type="radio" name="design_gate" className="mt-0.5" checked={gate === o.key} onChange={() => setGate(o.key)} />
+            <span><span className="font-medium text-slate-200">{o.title}</span><span className="mt-0.5 block text-slate-400">{o.note}</span></span>
+          </label>
+        ))}
+      </fieldset>
+      <label className="block text-xs text-slate-400">
+        Modelos com visão (um por linha, provedor/modelo)
+        <textarea className={`${input} mt-1 font-mono`} rows={2} value={vision} onChange={(e) => setVision(e.target.value)} placeholder="openrouter/google/gemini-…" />
+        <span className="mt-0.5 block text-[11px] text-slate-500">Usados quando um Loompa precisa olhar imagens: o UX revisando as próprias telas e comparando o produto com as aprovadas. Vazio: essas olhadas ficam de fora.</span>
+      </label>
+      <label className="block text-xs text-slate-400">
+        Token pessoal do Figma ({s.design?.figma_key?.configured ? "configurado" : "não configurado"})
+        <input type="password" className={`${input} mt-1`} value={figma} onChange={(e) => setFigma(e.target.value)} placeholder="só leitura: baixar a imagem de um quadro a partir do link" />
+      </label>
       <div className="text-right">
-        <button className="btn-primary" disabled={kind === s.factory?.kind} onClick={() => onSave({ factory_kind: kind })}>Salvar tipo</button>
+        <button className="btn-primary" onClick={() => onSave({ factory_kind: kind, design_gate: gate, vision: visionList(), ...(figma ? { figma_key: figma } : {}) }).then(() => setFigma(""))}>Salvar</button>
       </div>
     </div>
   );

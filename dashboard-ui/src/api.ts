@@ -1,5 +1,6 @@
 import type { AASuggestion, AvailableDTO, FactoryFinding, FactoryScan, ProductFinding } from "./types";
 import type { TraceDetail, TraceOutline } from "./types";
+import type { DesignOverview, DesignReference, StoryDesign } from "./types";
 import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -42,7 +43,7 @@ export const api = {
   overview: (slug: string) => req<Overview>(`/api/factories/${slug}/overview`),
   engine: (slug: string, action: "start" | "pause" | "stop") => req<{ engine: boolean; engine_state: string }>(`/api/factories/${slug}/engine/${action}`, { method: "POST" }),
   inbox: (slug: string, status = "pending") => req<Message[]>(`/api/factories/${slug}/inbox?status=${status}`),
-  reply: (slug: string, id: string, body: { option_key?: string | null; text?: string | null; decisions?: Record<string, string> }) =>
+  reply: (slug: string, id: string, body: { option_key?: string | null; text?: string | null; decisions?: Record<string, string>; answers?: Record<string, string> }) =>
     req<{ stage: string | null }>(`/api/factories/${slug}/inbox/${id}/reply`, { method: "POST", body: JSON.stringify(body) }),
   archive: (slug: string, id: string) => req(`/api/factories/${slug}/inbox/${id}/archive`, { method: "POST" }),
   meeting: (slug: string, goals: string) =>
@@ -92,6 +93,17 @@ export const api = {
   /** The sprint's report (8.2): saved once it ended, measured as of now while it runs. */
   sprintReport: (slug: string, id: string) => req<SprintReport>(`/api/factories/${slug}/sprints/${id}/report`),
   report: (slug: string) => req<Message>(`/api/factories/${slug}/report`, { method: "POST" }),
+  design: (slug: string) => req<DesignOverview>(`/api/factories/${slug}/design`),
+  storyDesign: (slug: string, id: string) => req<StoryDesign>(`/api/factories/${slug}/stories/${id}/design`),
+  addReference: async (slug: string, fields: { kind: string; title?: string; note?: string; url?: string; story_id?: string; file?: File | null }) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) if (v && k !== "file") fd.append(k, String(v));
+    if (fields.file) fd.append("file", fields.file);
+    const r = await fetch(`/api/factories/${slug}/design/references`, { method: "POST", body: fd });
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return (await r.json()) as { reference: DesignReference; note: string };
+  },
+  removeReference: (slug: string, id: string) => req(`/api/factories/${slug}/design/references/${id}`, { method: "DELETE" }),
   transcribe: async (slug: string, blob: Blob) => {
     const fd = new FormData();
     fd.append("audio", blob, "meeting.webm");

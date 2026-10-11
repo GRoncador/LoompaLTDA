@@ -104,6 +104,13 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
             "kind": config.factory.kind,
             "kinds": [{"key": k, "label": KIND_LABEL[k], "hint": KIND_HINT[k]} for k in KINDS],
         },
+        "design": {
+            "gate": config.design.gate,
+            "diff_threshold": config.design.diff_threshold,
+            "figma_token_env": config.design.figma_token_env,
+            "figma_key": secrets.status(config.design.figma_token_env),
+            "vision": [c.model_dump() for c in config.models.vision],
+        },
         "providers": providers,
         "models": {
             "tier1_ceiling": config.models.tier1_ceiling,
@@ -198,6 +205,10 @@ class SettingsPatch(BaseModel):
     worker_backend: str | None = None  # "aci" | "opencode" (Fase 2 spike, ADR-0007)
     tools: dict[str, ToolPatch] = Field(default_factory=dict)
     factory_kind: str | None = None  # "personal" | "commercial" (16.1)
+    design_gate: Literal["auto", "full", "light", "off"] | None = None  # ADR-0039
+    vision: list[ModelCandidate] | None = None  # the models that look at pictures (15.1)
+    figma_key: str | None = None  # written to the secrets file, never to config (15.9)
+    clear_figma_key: bool = False
 
 
 def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> list[str]:
@@ -213,6 +224,31 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
         if kind != config.factory.kind:
             config.factory.kind = kind
             notes.append(f"fábrica {KIND_LABEL[kind]}")
+    if patch.design_gate is not None and patch.design_gate != config.design.gate:
+        config.design.gate = patch.design_gate
+        notes.append(
+            {
+                "auto": "telas antes do código conforme o tipo da fábrica",
+                "full": "telas antes do código no modo completo",
+                "light": "telas antes do código no modo leve",
+                "off": "sem telas antes do código",
+            }[patch.design_gate]
+        )
+    if patch.vision is not None:
+        unknown = {c.provider for c in patch.vision} - set(config.providers)
+        if unknown:
+            raise ValueError("provedores desconhecidos: " + ", ".join(sorted(unknown)))
+        vision = [c for c in patch.vision if c.model.strip()]
+        if [c.model_dump() for c in vision] != [c.model_dump() for c in config.models.vision]:
+            config.models.vision = vision
+            notes.append("modelos com visão atualizados")
+    if patch.clear_figma_key:
+        for scope in ("hub", "factory"):
+            store_key(root, config.design.figma_token_env, None, scope=scope)
+        notes.append("token do Figma removido")
+    elif patch.figma_key:
+        store_key(root, config.design.figma_token_env, patch.figma_key.strip(), scope="hub")
+        notes.append("token do Figma guardado")
     for name, pp in patch.providers.items():
         cfg = config.providers.get(name) or ProviderConfig()
         if pp.kind is not None:
