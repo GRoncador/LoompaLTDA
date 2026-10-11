@@ -524,10 +524,12 @@ Decided 2026-09-29:
     the Product Owner reads again, or, after saying why, files it anyway with the objection on the card.
     The founder's own words become the card's founder notes whenever the text was rewritten, so the
     spec review still traces criteria to them. Model down → the request goes in as written.
-  - **Meeting (10.2, 10.3).** The Master opens with a briefing counted in code (moving, stuck, ready the
-    longest, backlog) and worded by one `low` call; the draft starts with the cards the inbox planned into
-    the sprint. The Master hands the sprint to the Product Owner (`consult_po`, the "Pedir a proposta"
-    button, `/proposta`), whose proposal edits the draft (picks, order 1–5, how cards relate). "Começar
+  - **Meeting (10.2, 10.3).** The Master opens with a briefing counted and worded in code (moving, stuck,
+    ready the longest, backlog and its first cards, deliveries of the week; no model call since
+    2026-10-11); the draft starts with the cards the inbox planned into the sprint. The Product Owner
+    proposes the sprint (`consult_po`, the "Pedir a sugestão do Product Owner" button, `/proposta`),
+    from the draft and the waiting backlog, reading the conversation so far; its proposal edits the
+    draft (picks, order 1–5, how cards relate). "Começar
     Sprint" needs a proposal that saw every sprint card. `POST /sprints/start` and `/meeting`'s `run` are
     gone from the API; the CLI keeps `sprint start` and `meeting --run`.
   - **Order (10.5).** A new card is slotted without moving any other; the full ranking runs only when a
@@ -845,6 +847,20 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
 - **Hygiene:** a negated existence check of `.loompa` (the copy test's guard) is not a records
   read.
 - **Not benched:** `BASE_RED_NOTE`, the `restore_file` description.
+
+**2026-10-11, Sprint Meeting opening (founder's request after a tamagotchi meeting):**
+
+- **Briefing without a model:** `MasterAgent.brief` words `project_facts` in code (`facts_text`),
+  now with the first backlog cards and the week's deliveries; `BRIEF_SYSTEM` and its bench
+  entries are gone.
+- **Product Owner from an empty draft:** `consult_po` only reached the Product Owner when the
+  draft had cards, so right after the briefing the Master said it would ask and never did.
+  `propose_sprint` now picks from the waiting backlog too and refuses only when draft and backlog
+  are both empty.
+- **Panel:** in a planning meeting the "Pedir a sugestão do Product Owner" button sits fixed above
+  the chat box from the opening on (after a proposal: "Pedir nova sugestão", which reads the
+  conversation so far). Writing instead talks to the Master as before.
+- Commits `b470286`, `c7c86e7`; tests in `tests/test_backlog_doors.py`.
 
 ## Known gaps / next steps
 
