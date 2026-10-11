@@ -138,6 +138,18 @@ TOOL_SPECS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "restore_file",
+        "description": 'Bring one file back to a saved version, undoing your changes to it: `to` "saved" (the default) is the version last committed in this story, "main" the main branch\'s. A file that version does not have is deleted. Use it instead of rewriting a file by hand from memory.',
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "to": {"type": "string", "enum": ["saved", "main"], "default": "saved"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
         "name": "write_file",
         "description": "Create a file, or replace a whole file. Use it for new or small files; prefer edit_file for changes to an existing one.",
         "parameters": {
@@ -476,6 +488,43 @@ class ACI:
         if untracked:
             out += "\nnew files: " + ", ".join(untracked[:50])
         return out + "\nCall branch_diff with `path` to see one file's changes."
+
+    async def tool_restore_file(self, path: str, to: str = "saved") -> str:
+        """tamagotchi S-106 (11/10): told to undo its change to a test file, the Worker spent 26
+        minutes and 32 calls rebuilding the committed version by hand, then asked the founder
+        because it "had no access to the saved history"."""
+        p = self._resolve(path, for_write=True)
+        rel = self._rel(p)
+        if to not in ("saved", "main"):
+            raise ToolError('`to` is "saved" or "main"')
+        ref = "HEAD"
+        if to == "main":
+            if not self.diff_base:
+                raise ToolError("the main branch's version is known only inside a story branch")
+            base = await run_command(
+                shlex.join(["git", "merge-base", self.diff_base, "HEAD"]), self.root, timeout=60
+            )
+            if base.returncode != 0:
+                raise ToolError("could not find where this branch started")
+            ref = base.stdout.strip().splitlines()[-1]
+        # bytes, whole: `run_command` caps its output, and a long test file must come back exact
+        shown = subprocess.run(
+            ["git", "show", f"{ref}:{rel}"], cwd=self.root, capture_output=True, timeout=60
+        )
+        where = "the last saved version" if to == "saved" else "the main branch"
+        if shown.returncode != 0:
+            if not p.is_file():
+                return f"{rel} is not in {where} and does not exist now: nothing to restore"
+            p.unlink()
+            self._wrote(p)
+            return f"deleted {rel}: it is not in {where}"
+        if p.is_file() and p.read_bytes() == shown.stdout:
+            return f"{rel} already matches {where}"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(shown.stdout)
+        self._wrote(p)
+        lines = len(shown.stdout.splitlines())
+        return f"restored {rel} to {where} ({lines} lines)"
 
     def tool_write_file(self, path: str, content: str) -> str:
         p = self._resolve(path, for_write=True)

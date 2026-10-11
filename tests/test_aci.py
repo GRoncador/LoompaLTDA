@@ -338,6 +338,46 @@ async def test_branch_diff_shows_what_the_story_changed(tmp_path: Path):
     assert not (await nothing.call("branch_diff", {})).ok
 
 
+async def test_restore_file_brings_back_the_saved_version(tmp_path: Path):
+    """tamagotchi S-106 (11/10): told to undo its change to the test file its first task had
+    committed, the Worker rebuilt it by hand for 26 minutes, then asked the founder because it
+    "had no access to the saved history"."""
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    (tmp_path / "tests").mkdir()
+    big = "".join(f"// linha {i} — ação\n" for i in range(6000))  # past any output cap
+    (tmp_path / "tests" / "casca.test.js").write_text(big)
+    git("add", ".")
+    git("commit", "-q", "-m", "base")
+    git("checkout", "-q", "-b", "story")
+    copy = "tests/suite_sem_registros.test.js"
+    saved = "const filtro = (p) => !p.startsWith('.');\n"
+    (tmp_path / copy).write_text(saved)
+    git("add", ".")
+    git("commit", "-q", "-m", "test(s-106): T1")
+    (tmp_path / copy).write_text("// cabeçalho novo\nconst filtro = (p) => p !== '.loompa';\n")
+    (tmp_path / "tests" / "casca.test.js").write_text("quebrado\n")
+
+    aci = ACI(tmp_path, diff_base="main", allowed_paths=[copy, "tests/casca.test.js"])
+    res = await aci.call("restore_file", {"path": copy})
+    assert res.ok and "restored" in res.output
+    assert (tmp_path / copy).read_text() == saved
+    assert "already matches" in (await aci.call("restore_file", {"path": copy})).output
+    res = await aci.call("restore_file", {"path": "tests/casca.test.js"})
+    assert res.ok and (tmp_path / "tests" / "casca.test.js").read_text() == big
+    res = await aci.call("restore_file", {"path": copy, "to": "main"})
+    assert res.ok and "deleted" in res.output and not (tmp_path / copy).exists()
+    fenced = await aci.call("restore_file", {"path": "index.html"})
+    assert not fenced.ok and "outside the plan's paths" in fenced.output
+    assert not (await ACI(tmp_path).call("restore_file", {"path": copy, "to": "main"})).ok
+
+
 async def test_read_file_returns_a_file_whole_or_its_outline(tmp_path: Path):
     """contas Sprint 2 paged an 815-line test file in 120-line windows: 386 reads in 34 tasks,
     each one a model round that sends the whole history again."""

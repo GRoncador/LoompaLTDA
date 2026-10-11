@@ -37,6 +37,12 @@ story branch against the merge-base with its base, committed or not, one file or
 `contas` S-047 a Worker reformatted a line, could not see its original form, and blocked to the
 founder asking them to run git. It needs a story branch, so no other role has it.
 
+*Amendment (2026-10-11, ADR-0043 §5):* the Worker also gets `restore_file`, a write tool inside
+its fence: one file back to the version last committed in the story (`to: "saved"`) or to the
+main branch's (`to: "main"`), deleted when that version does not have it. In tamagotchi S-106 a
+Worker told to undo its change rebuilt the committed file by hand for 26 minutes, then asked the
+founder because it "had no access to the saved history".
+
 ### 2. One tool loop, in `LoompaAgent`
 
 `tool_loop` is the loop the Worker used to carry (same nudge, terminal tools `done`/`blocked`,

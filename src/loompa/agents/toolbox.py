@@ -50,7 +50,9 @@ DIFF_TOOLS = frozenset({"branch_diff"})  # needs a story branch: the Worker's wo
 LOOKUP_TOOLS = (
     READ_TOOLS | DIFF_TOOLS | {"search_memory", COVER_TOOL}
 )  # what the loop guard counts as exploring
-WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file", "fix_lint"})
+WRITE_TOOLS = frozenset(
+    {"write_file", "edit_file", "apply_patch", "delete_file", "fix_lint", "restore_file"}
+)
 RUN_TOOLS = frozenset({"run_tests", "run_lint"})
 SIGNAL_TOOLS = frozenset({"done", "blocked", "note_learning"})
 
