@@ -75,10 +75,12 @@ def forget_resolved(ctx: EngineContext, story_id: str) -> None:
         ctx.store.set(RESOLVED_KEY, json.dumps(cards))
 
 
-def tests_reading_records(root: Path, failing: list[str]) -> list[str]:
-    """The test files, among those holding the failing tests, that read the factory's records
-    under `.loompa/` (ADR-0037 §4). Such a test can only pass where those files happen to be:
-    tamagotchi's AC6 read `.loompa/specs/S-077/plan.md`, which the merge leaves out."""
+def test_files_holding(root: Path, failing: list[str]) -> dict[str, str]:
+    """The test files that hold the failing tests, each with its text: the file a pytest id
+    names, or the one whose source carries a runner's test title (node's "AC6: …"). Those that
+    read the factory's records under `.loompa/` are named in the card (ADR-0037 §4): such a test
+    passes only where those files happen to be (tamagotchi's AC6 read
+    `.loompa/specs/S-077/plan.md`, which the merge leaves out)."""
     from loompa.hygiene import is_test_path
 
     try:
@@ -86,9 +88,9 @@ def tests_reading_records(root: Path, failing: list[str]) -> list[str]:
             ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
         ).stdout.splitlines()
     except (OSError, subprocess.CalledProcessError):
-        return []
+        return {}
     names = [n.split("::", 1)[0] if "::" in n else n for n in failing]
-    out: list[str] = []
+    out: dict[str, str] = {}
     for rel in files:
         if not is_test_path(rel) or rel.startswith(".loompa/"):
             continue
@@ -96,11 +98,26 @@ def tests_reading_records(root: Path, failing: list[str]) -> list[str]:
             text = (root / rel).read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        if ".loompa" not in text:
-            continue
         if any(n == rel or (len(n) >= MIN_NAME and n[:80] in text) for n in names):
-            out.append(rel)
+            out[rel] = text
     return out
+
+
+# The short label a failing test goes by in a story: "AC6" of node's "AC6: o plano/tasks …", the
+# function of a pytest id.
+_LABEL = re.compile(r"^\s*([\w.-]{2,12}):\s")
+
+
+def _label(name: str) -> str:
+    if "::" in name:
+        return name.rsplit("::", 1)[-1]
+    m = _LABEL.match(name)
+    return m.group(1) if m else ""
+
+
+def _stem(rel: str) -> str:
+    """`casca_body_scripts` of tests/casca_body_scripts.test.js: how a story names a test file."""
+    return Path(rel).name.split(".", 1)[0]
 
 
 def line_targets(ctx: EngineContext, story_id: str) -> list[str]:
@@ -146,7 +163,9 @@ class LineWatch:
             checks = await InspectorAgent(self.ctx).checks_at(path, lint=False)
             red = not checks["tests_ok"]
             failing = list(checks["failing"])
-            records = tests_reading_records(path, failing) if red else []
+            holding = test_files_holding(path, failing) if red else {}
+            holders = list(holding)
+            records = [rel for rel, text in holding.items() if ".loompa" in text]
         card = line_card(self.ctx)
         targets = list(before.get("targets") or before.get("failing") or [])
         if card and targets and not set(targets) & set(failing):
@@ -163,7 +182,7 @@ class LineWatch:
             "since": before.get("since") if red and before.get("red") else now_iso(),
         }
         if red and card is None:
-            now["card"] = self._stop(before.get("sha") or "", sha, failing, records)
+            now["card"] = self._stop(before.get("sha") or "", sha, failing, records, holders)
             now["targets"] = failing[:40] if now["card"] else []
         elif not red and before.get("red"):
             self._green(before)
@@ -171,19 +190,35 @@ class LineWatch:
         self.ctx.emit("line.checked", sha=sha[:12], red=red, failing=len(failing))
         return now
 
-    def _already_fixing(self, failing: list[str]) -> str | None:
-        """An open story that already names one of these failures, word for word: the line
-        adopts it instead of opening another card for the same tests (ADR-0037 §4). One in the
-        pipeline first, then one waiting in the backlog (a finding filed before the line red)."""
+    def _already_fixing(self, failing: list[str], holders: list[str] | None = None) -> str | None:
+        """An open story that already names one of these failures: the line adopts it instead of
+        opening another card for the same tests (ADR-0037 §4). One in the pipeline first, then
+        one waiting in the backlog (a finding filed before the line red). Named word for word,
+        or by the test's label in the file that holds it: tamagotchi S-101 ("Trocar o critério
+        AC6 de casca_body_scripts…", 11/10) was in the sprint for the failing "AC6: o
+        plano/tasks da T8 …" of tests/casca_body_scripts.test.js, and the line opened S-106
+        for the same test; both ran at once."""
         names = [n.casefold() for n in failing if len(n) >= MIN_NAME]
-        if not names:
+        labels = [
+            re.compile(rf"(?<![\w-]){re.escape(lb)}(?![\w-])", re.I)
+            for lb in dict.fromkeys(_label(n) for n in failing)
+            if lb
+        ]
+        files = [
+            (rel.casefold(), _stem(rel).casefold()) for rel in holders or [] if len(_stem(rel)) >= 6
+        ]
+        if not names and not (labels and files):
             return None
         found: list[tuple[int, str]] = []
         for row in self.ctx.store.list_stories(self.ctx.slug):
             if row["stage"] in TERMINAL:
                 continue
             text = f"{row['title']}\n{row.get('description', '')}".casefold()
-            if any(n in text for n in names):
+            named = any(n in text for n in names) or (
+                any(rel in text or stem in text for rel, stem in files)
+                and any(lb.search(text) for lb in labels)
+            )
+            if named:
                 found.append((1 if row["stage"] == "BACKLOG" else 0, row["id"]))
         return min(found)[1] if found else None
 
@@ -247,7 +282,12 @@ class LineWatch:
         return list(reversed(out))
 
     def _stop(
-        self, old: str, new: str, failing: list[str], records: list[str] | None = None
+        self,
+        old: str,
+        new: str,
+        failing: list[str],
+        records: list[str] | None = None,
+        holders: list[str] | None = None,
     ) -> str | None:
         """One card to make the base green again, first in line, and one note to the founder."""
         from loompa.agents.product_owner import ProductOwnerAgent
@@ -275,7 +315,7 @@ class LineWatch:
                 "principal. Ali o conserto é reescrever esse teste para conferir o comportamento "
                 "do produto, ou removê-lo; nunca criar ou editar registros da fábrica."
             )
-        card = self._already_fixing(failing)
+        card = self._already_fixing(failing, holders)
         if card is not None:
             try:
                 po.backlog.pin(card, True)

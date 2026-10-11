@@ -255,3 +255,33 @@ async def test_a_card_still_failing_says_who_thought_it_was_over(factory: Factor
         "A equipe concluiu que não havia mais nada a fazer nesta história",
     ]
     await ctx.aclose()
+
+
+async def test_the_line_adopts_a_sprint_story_that_names_the_test_by_its_label(
+    factory: Factory,  # noqa: F811
+):
+    """tamagotchi 11/10: S-101 ("Trocar o critério AC6 de casca_body_scripts por teste de
+    comportamento ou removê-lo") was in the running sprint for node's failing "AC6: o
+    plano/tasks da T8 da S-077 declara…", and the line opened S-106 for the same test."""
+    ctx = make_ctx(factory)
+    board = SprintBoard(ctx.store, ctx.slug)
+    s101 = (
+        ProductOwnerAgent(ctx)
+        .add_item(
+            "Trocar o critério AC6 de casca_body_scripts por teste de comportamento ou removê-lo",
+            "Em tests/casca_body_scripts.test.js, o critério AC6 lê um documento interno da "
+            "fábrica em vez de conferir o jogo e mantém a versão principal vermelha.",
+        )
+        .story_id
+    )
+    board.add(s101)
+    board.start(board.draft().id, "meta")
+    name = "AC6: o plano/tasks da T8 da S-077 declara a atualização de tests/casca.test.js"
+    watch = LineWatch(ctx)
+    other = ["casca_extra.test.js", "AC6: outro teste qualquer de outro arquivo"]
+    assert watch._already_fixing([other[1]], [f"tests/{other[0]}"]) is None
+    assert watch._already_fixing([name], ["tests/casca_body_scripts.test.js"]) == s101
+    assert (
+        watch._already_fixing(["AC7: outro critério"], ["tests/casca_body_scripts.test.js"]) is None
+    )
+    await ctx.aclose()
