@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, ClusterName, DesignGate, FactoryKind, ImageSuggestion, ImagesSettings, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
+import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, ClusterName, DesignGate, FactoryKind, ImagePick, ImageSuggestion, ImagesSettings, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
 import { KindPicker } from "./KindPicker";
 import { Modal } from "./Modal";
 import { PROVIDER_NAMES, ProviderBadge, ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
@@ -32,7 +32,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
           </div>
           {err && <p className="text-xs text-red-300">{err}</p>}
           {notes.length > 0 && <p className="text-xs text-emerald-300">✔ {notes.join(" · ")}</p>}
-          {tab === "factory" && <><FactoryPanel s={s} onSave={save} /><ImagesPanel slug={slug} s={s} onSave={save} /></>}
+          {tab === "factory" && <FactoryPanel s={s} onSave={save} />}
           {tab === "providers" && <ProvidersPanel slug={slug} s={s} onSave={save} />}
           {tab === "models" && <ModelsPanel slug={slug} s={s} onSave={save} onReload={load} />}
           {tab === "budget" && <BudgetPanel s={s} onSave={save} />}
@@ -60,8 +60,10 @@ function FactoryPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =
   const [gate, setGate] = useState<DesignGate>(s.design?.gate ?? "auto");
   const [vision, setVision] = useState((s.design?.vision ?? []).map((c) => `${c.provider}/${c.model}`).join("\n"));
   const [figma, setFigma] = useState("");
+  const [logo, setLogo] = useState<ImagesSettings["logo"]>(s.design?.images?.logo ?? "auto");
   useEffect(() => {
     setKind(s.factory?.kind ?? "personal");
+    setLogo(s.design?.images?.logo ?? "auto");
     setGate(s.design?.gate ?? "auto");
     setVision((s.design?.vision ?? []).map((c) => `${c.provider}/${c.model}`).join("\n"));
   }, [s]);
@@ -82,6 +84,14 @@ function FactoryPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =
           </label>
         ))}
       </fieldset>
+      <label className="block text-xs text-slate-400">Logo na base visual
+        <select className={`${select} mt-1 w-full`} value={logo} onChange={(e) => setLogo(e.target.value as ImagesSettings["logo"])}>
+          <option value="auto">conforme o tipo (só no produto comercial)</option>
+          <option value="on">sempre</option>
+          <option value="off">nunca</option>
+        </select>
+        <span className="mt-0.5 block text-[11px] text-slate-500">Os modelos que desenham ficam no cluster Imagem, em Modelos e papéis.</span>
+      </label>
       <label className="block text-xs text-slate-400">
         Modelos com visão (um por linha, provedor/modelo)
         <textarea className={`${input} mt-1 font-mono`} rows={2} value={vision} onChange={(e) => setVision(e.target.value)} placeholder="openrouter/google/gemini-…" />
@@ -92,7 +102,7 @@ function FactoryPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =
         <input type="password" className={`${input} mt-1`} value={figma} onChange={(e) => setFigma(e.target.value)} placeholder="só leitura: baixar a imagem de um quadro a partir do link" />
       </label>
       <div className="text-right">
-        <button className="btn-primary" onClick={() => onSave({ factory_kind: kind, design_gate: gate, vision: visionList(), ...(figma ? { figma_key: figma } : {}) }).then(() => setFigma(""))}>Salvar</button>
+        <button className="btn-primary" onClick={() => onSave({ factory_kind: kind, design_gate: gate, vision: visionList(), images: { logo }, ...(figma ? { figma_key: figma } : {}) }).then(() => setFigma(""))}>Salvar</button>
       </div>
     </div>
   );
@@ -100,74 +110,130 @@ function FactoryPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =
 
 // ------------------------------------------------------------------- the Image cluster (15.13)
 
-function ImagesPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave: (p: SettingsPatch) => Promise<void> }) {
-  const im = s.design?.images;
-  const [draft, setDraft] = useState((im?.draft ?? []).join("\n"));
-  const [final, setFinal] = useState((im?.final ?? []).join("\n"));
-  const [ceiling, setCeiling] = useState(im?.final_ceiling_usd ?? 0.15);
-  const [logo, setLogo] = useState<ImagesSettings["logo"]>(im?.logo ?? "auto");
+/** The Image cluster's two slots. Image models are rated in their own arena and billed per
+ * picture, so they never share a list with the text models: the cluster stands beside the general
+ * one and beside the three split ones alike. */
+const IMAGE_SLOTS = [
+  { key: "draft", label: "Rascunho", sublabel: "Explorar barato", rankedBy: "ELO por dólar", badgeColor: "text-cyan-300 border-cyan-800/60 bg-cyan-950/40" },
+  { key: "final", label: "Final", sublabel: "A peça aprovada", rankedBy: "melhor ELO até o teto por imagem", badgeColor: "text-amber-300 border-amber-800/60 bg-amber-950/40" },
+] as const;
+type ImageSlot = (typeof IMAGE_SLOTS)[number]["key"];
+const MAX_MODELS_PER_SLOT = 4;
+
+function ImageClusterCard({ slug, slots, setSlots, ceiling, setCeiling }: {
+  slug: string;
+  slots: Record<ImageSlot, string[]>;
+  setSlots: (s: Record<ImageSlot, string[]>) => void;
+  ceiling: number;
+  setCeiling: (v: number) => void;
+}) {
   const [sug, setSug] = useState<ImageSuggestion | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    setDraft((im?.draft ?? []).join("\n")); setFinal((im?.final ?? []).join("\n"));
-    setCeiling(im?.final_ceiling_usd ?? 0.15); setLogo(im?.logo ?? "auto");
-  }, [s]);
-  const lines = (t: string) => t.split("\n").map((l) => l.trim()).filter(Boolean);
-  const suggest = async (refresh: boolean) => { setBusy(true); try { setSug(await api.imageSuggest(slug, refresh)); } finally { setBusy(false); } };
-  const use = (slot: "draft" | "final", id: string) => (slot === "draft" ? setDraft : setFinal)(id);
+  const [open, setOpen] = useState<ImageSlot | null>(null);
+  const [adding, setAdding] = useState<Record<ImageSlot, string>>({ draft: "", final: "" });
+  useEffect(() => { api.imageSuggest(slug).then(setSug).catch(() => {}); }, [slug]);
+  const known = useMemo(() => {
+    const m: Record<string, ImagePick> = {};
+    for (const p of [...(sug?.draft ?? []), ...(sug?.final ?? [])]) m[p.id] = p;
+    return m;
+  }, [sug]);
+  const write = (slot: ImageSlot, list: string[]) => setSlots({ ...slots, [slot]: list.slice(0, MAX_MODELS_PER_SLOT) });
+  const move = (slot: ImageSlot, i: number, d: number) => {
+    const list = [...slots[slot]]; const j = i + d;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]]; write(slot, list);
+  };
+  const add = (slot: ImageSlot, id: string, first = false) => {
+    const clean = id.trim(); if (!clean) return;
+    const rest = slots[slot].filter((m) => m !== clean);
+    write(slot, first ? [clean, ...rest] : [...rest, clean]);
+  };
   return (
-    <div className="mt-6 max-w-4xl space-y-3 border-t border-line pt-4">
-      <div className="font-semibold text-slate-100">🖼 Cluster Imagem (Designer Loompa)</div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="block text-xs text-slate-400">Rascunho (explorar barato), um por linha
-          <textarea className={`${input} mt-1 font-mono`} rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} />
-        </label>
-        <label className="block text-xs text-slate-400">Final (a peça aprovada), um por linha
-          <textarea className={`${input} mt-1 font-mono`} rows={2} value={final} onChange={(e) => setFinal(e.target.value)} />
-        </label>
-        <label className="block text-xs text-slate-400">Teto por imagem na vaga final (US$)
-          <input type="number" min={0} step={0.01} className={`${input} mt-1`} value={ceiling} onChange={(e) => setCeiling(Number(e.target.value))} />
-        </label>
-        <label className="block text-xs text-slate-400">Logo na base visual
-          <select className={`${select} mt-1 w-full`} value={logo} onChange={(e) => setLogo(e.target.value as ImagesSettings["logo"])}>
-            <option value="auto">conforme o tipo (só no produto comercial)</option>
-            <option value="on">sempre</option>
-            <option value="off">nunca</option>
-          </select>
-        </label>
-      </div>
-      <div className="flex items-center gap-2">
-        <button className="btn-ghost" disabled={busy} onClick={() => suggest(false)}>Ver sugestão</button>
-        <button className="btn-ghost" disabled={busy} onClick={() => suggest(true)}>Atualizar a lista</button>
-        <button className="btn-primary ml-auto" onClick={() => onSave({ images: { draft: lines(draft), final: lines(final), final_ceiling_usd: ceiling, logo } })}>Salvar modelos de imagem</button>
-      </div>
-      {sug && (
-        <div className="space-y-2 text-xs">
-          {sug.note && <p className="text-amber-300">{sug.note}</p>}
-          {(["draft", "final"] as const).map((slot) => (
-            <div key={slot}>
-              <div className="font-medium text-slate-200">{slot === "draft" ? "Rascunho · ELO por dólar" : `Final · melhor ELO até US$ ${ceiling.toFixed(2)}`}</div>
-              <table className="mt-1 w-full">
-                <thead className="text-slate-500"><tr><th className="text-left">modelo</th><th>US$/imagem</th><th>ELO</th><th>edição</th><th /></tr></thead>
-                <tbody>
-                  {sug[slot].map((m) => (
-                    <tr key={m.id} className="border-t border-line/40">
-                      <td className="py-0.5 text-slate-300" title={m.id}>{m.name}</td>
-                      <td className="text-center tabular-nums">{m.price.toFixed(3)}</td>
-                      <td className="text-center tabular-nums">{Math.round(m.elo)}</td>
-                      <td className="text-center tabular-nums">{m.edit_elo ? Math.round(m.edit_elo) : "—"}</td>
-                      <td className="text-right"><button className="text-brand hover:underline" onClick={() => use(slot, m.id)}>usar</button></td>
-                    </tr>
-                  ))}
-                  {sug[slot].length === 0 && <tr><td className="text-slate-500" colSpan={5}>sem modelos com preço e nota</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          ))}
-          <p className="text-[11px] text-slate-500">{sug.attribution}. Sugestão: nada muda até você salvar, e nunca no meio de um sprint.</p>
+    <div className="space-y-2.5 rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs">
+      <div className="space-y-1 border-b border-line/40 pb-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-100">
+          <span className="text-sm" aria-hidden="true">🖼</span>Imagem
         </div>
-      )}
+        <div className="text-[10px] text-slate-400">Loompas: Designer</div>
+        <div className="text-[10px] text-slate-500">Modelos de imagem da OpenRouter, cobrados por imagem e ranqueados pelo ELO da arena de imagens. Ficam fora do cluster geral: um bom modelo de texto não desenha, e vice-versa.</div>
+      </div>
+      {IMAGE_SLOTS.map((slot) => {
+        const list = slots[slot.key];
+        const picks = sug?.[slot.key] ?? [];
+        return (
+          <div key={slot.key} className="space-y-1.5 rounded-md border border-slate-700/60 bg-slate-900/60 p-2">
+            <div className="flex items-center justify-between">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className={`rounded border px-1.5 text-[10px] font-semibold ${slot.badgeColor}`}>{slot.label}</span>
+                <span className="truncate text-[10px] text-slate-400">{slot.sublabel}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button type="button" className="btn-ghost px-1 py-0 text-[11px]" title={`Sugestões para a vaga ${slot.label.toLowerCase()} (${slot.rankedBy})`}
+                  onClick={() => setOpen(open === slot.key ? null : slot.key)}>💡</button>
+                <span className="font-mono text-[9px] text-slate-500">{list.length}/{MAX_MODELS_PER_SLOT}</span>
+              </div>
+            </div>
+            {list.length === 0 && <div className="py-1 text-center text-[10px] italic text-slate-500">Nenhum modelo: o Designer fica sem desenhar.</div>}
+            {list.map((id, i) => {
+              const info = known[id];
+              return (
+                <div key={id} className="flex min-w-0 items-center gap-1.5 rounded border border-line/60 bg-slate-950/70 p-1.5">
+                  <span className="w-3 flex-shrink-0 font-mono text-[10px] text-slate-500">{i + 1}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-cyan-300" title={id}>{info?.name ?? id}</span>
+                  {info && <span className="flex-shrink-0 font-mono text-[10px] text-slate-400">US$ {info.price.toFixed(3)} · ELO {Math.round(info.elo)}</span>}
+                  {slot.key === "final" && info && info.price > ceiling && (
+                    <span className="flex-shrink-0 rounded border border-amber-800 bg-amber-950/80 px-1 text-[10px] text-amber-300">acima do teto</span>
+                  )}
+                  <button type="button" className="btn-ghost px-1 py-0 text-[10px] disabled:opacity-30" disabled={i === 0} title="Subir (prioridade maior)" onClick={() => move(slot.key, i, -1)}>↑</button>
+                  <button type="button" className="btn-ghost px-1 py-0 text-[10px] disabled:opacity-30" disabled={i === list.length - 1} title="Descer (usado como reserva)" onClick={() => move(slot.key, i, 1)}>↓</button>
+                  <button type="button" className="btn-ghost px-1 py-0 text-[10px] text-rose-400 hover:text-rose-200" title="Remover" onClick={() => write(slot.key, list.filter((m) => m !== id))}>✕</button>
+                </div>
+              );
+            })}
+            {list.length < MAX_MODELS_PER_SLOT && (
+              <div className="flex gap-1">
+                <input className="min-w-0 flex-1 rounded border border-line bg-ink px-1.5 py-0.5 font-mono text-[11px] text-slate-200"
+                  placeholder="id na OpenRouter, ex.: black-forest-labs/…" list="image-models" value={adding[slot.key]}
+                  onChange={(e) => setAdding({ ...adding, [slot.key]: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") { add(slot.key, adding[slot.key]); setAdding({ ...adding, [slot.key]: "" }); } }} />
+                <button type="button" className="btn-ghost px-1.5 py-0 text-[10px] text-brand" onClick={() => { add(slot.key, adding[slot.key]); setAdding({ ...adding, [slot.key]: "" }); }}>+ modelo</button>
+              </div>
+            )}
+            {open === slot.key && (
+              <div className="space-y-1 rounded border border-brand/40 bg-slate-950/80 p-1.5">
+                <div className="text-[10px] text-slate-400">Sugestão · {slot.rankedBy}{slot.key === "final" ? ` (US$ ${ceiling.toFixed(2)})` : ""}</div>
+                {sug?.note && <p className="text-[10px] text-amber-300">{sug.note}</p>}
+                <ImagePicksTable picks={picks.slice(0, 5)} onUse={(p) => { add(slot.key, p.id, true); setOpen(null); }} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <label className="flex items-center gap-2 text-[10px] text-slate-400">
+        Teto por imagem na vaga final (US$)
+        <input type="number" min={0} step={0.01} className="w-20 rounded border border-line bg-ink px-1 py-0 text-[11px] text-slate-200" value={ceiling} onChange={(e) => setCeiling(Number(e.target.value))} />
+      </label>
+      <datalist id="image-models">{Object.values(known).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</datalist>
     </div>
+  );
+}
+
+function ImagePicksTable({ picks, onUse }: { picks: ImagePick[]; onUse?: (p: ImagePick) => void }) {
+  if (picks.length === 0) return <p className="text-[10px] text-slate-500">Sem modelos com preço e nota: atualize a lista na aba Benchmark de modelos.</p>;
+  return (
+    <table className="w-full text-[11px]">
+      <thead className="text-slate-500"><tr><th className="text-left font-normal">modelo</th><th className="font-normal">US$/imagem</th><th className="font-normal">ELO</th><th className="font-normal">ELO edição</th>{onUse && <th />}</tr></thead>
+      <tbody>
+        {picks.map((m) => (
+          <tr key={m.id} className="border-t border-line/40">
+            <td className="py-0.5 text-slate-300" title={m.id}>{m.name}</td>
+            <td className="text-center tabular-nums">{m.price.toFixed(3)}</td>
+            <td className="text-center tabular-nums">{Math.round(m.elo)}</td>
+            <td className="text-center tabular-nums">{m.edit_elo ? Math.round(m.edit_elo) : "—"}</td>
+            {onUse && <td className="text-right"><button type="button" className="text-brand hover:underline" onClick={() => onUse(m)}>usar</button></td>}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -867,6 +933,9 @@ function ModelsPanel({
   );
   const [clustersEnabled, setClustersEnabled] = useState(s.models?.clusters_enabled ?? true);
   const [defaultRoute, setDefaultRoute] = useState<"auto" | "openrouter">(s.models?.default_route ?? "auto");
+  const imageSlotsOf = (x: Settings) => ({ draft: x.design?.images?.draft ?? [], final: x.design?.images?.final ?? [] });
+  const [imageSlots, setImageSlots] = useState<Record<ImageSlot, string[]>>(imageSlotsOf(s));
+  const [imageCeiling, setImageCeiling] = useState(s.design?.images?.final_ceiling_usd ?? 0.15);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncNote, setSyncNote] = useState<string | null>(null);
@@ -891,6 +960,8 @@ function ModelsPanel({
     setRoleTasks(Object.fromEntries((s.role_tasks ?? []).map((t) => [t.key, t.tier])));
     setClustersEnabled(s.models?.clusters_enabled ?? true);
     setDefaultRoute(s.models?.default_route ?? "auto");
+    setImageSlots(imageSlotsOf(s));
+    setImageCeiling(s.design?.images?.final_ceiling_usd ?? 0.15);
   }, [s]);
 
   /** The maker that also serves an OpenRouter id with its own API, keyed or not (plan 9.6). */
@@ -969,7 +1040,9 @@ function ModelsPanel({
     JSON.stringify(roles) !== JSON.stringify(s.roles) ||
     JSON.stringify(roleTasks) !== JSON.stringify(Object.fromEntries((s.role_tasks ?? []).map((t) => [t.key, t.tier]))) ||
     clustersEnabled !== (s.models?.clusters_enabled ?? true) ||
-    defaultRoute !== (s.models?.default_route ?? "auto");
+    defaultRoute !== (s.models?.default_route ?? "auto") ||
+    JSON.stringify(imageSlots) !== JSON.stringify(imageSlotsOf(s)) ||
+    imageCeiling !== (s.design?.images?.final_ceiling_usd ?? 0.15);
 
   const runSync = async (forceRefresh: boolean) => {
     if (!openrouterReady) { setSyncError(NO_OPENROUTER_HINT); setSyncNote(null); return; }
@@ -1047,6 +1120,7 @@ function ModelsPanel({
       role_tasks: roleTasks,
       clusters_enabled: clustersEnabled,
       default_route: defaultRoute,
+      images: { ...imageSlots, final_ceiling_usd: imageCeiling },
     });
 
   return (
@@ -1132,6 +1206,7 @@ function ModelsPanel({
               Ligado, cada grupo de Loompas tem a sua lista, pesada para o que ele faz. Desligado, todos usam um
               <strong className="text-slate-300"> cluster geral</strong> com os mesmos três tiers, ranqueado só pela nota de
               inteligência — a que existe para mais modelos, então nenhum bom modelo fica de fora por falta das outras notas.
+              Nos dois casos o <strong className="text-slate-300">cluster Imagem</strong> fica à parte, com os modelos que desenham.
             </span>
           </span>
         </label>
@@ -1177,7 +1252,7 @@ function ModelsPanel({
       )}
 
       {/* ------------------------------------------------------------ the matrix */}
-      <div className={`grid grid-cols-1 gap-3 ${clustersEnabled ? "lg:grid-cols-3" : ""}`}>
+      <div className={`grid grid-cols-1 gap-3 ${clustersEnabled ? "lg:grid-cols-2 2xl:grid-cols-4" : "lg:grid-cols-2"}`}>
         {activeClusters.map((col) => (
           <div key={col.key} className="space-y-2.5 rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs">
             <div className="space-y-1 border-b border-line/40 pb-2">
@@ -1385,6 +1460,7 @@ function ModelsPanel({
             </div>
           </div>
         ))}
+        <ImageClusterCard slug={slug} slots={imageSlots} setSlots={setImageSlots} ceiling={imageCeiling} setCeiling={setImageCeiling} />
       </div>
 
       {/* ------------------------------------------------------------ roles */}
@@ -1693,6 +1769,17 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
   };
   const saveCeiling = async () => { await onSave({ tier1_ceiling: ceiling }); await load(); };
   const quarter = Math.round(((s.budget?.cap_usd ?? 0) / 4) * 100) / 100;
+  // the same switch as Modelos e papéis: the general profile alone, or the three split ones
+  const split = s.models?.clusters_enabled ?? true;
+  const shown = (data?.profiles ?? []).filter((p) => (p.profile === "general") !== split);
+  const [img, setImg] = useState<ImageSuggestion | null>(null);
+  const [imgBusy, setImgBusy] = useState(false);
+  useEffect(() => { api.imageSuggest(slug).then(setImg).catch(() => {}); }, [slug]);
+  const refreshImg = async () => {
+    setImgBusy(true);
+    try { setImg(await api.imageSuggest(slug, true)); } catch (e) { setErr(String(e)); } finally { setImgBusy(false); }
+  };
+  const imgCeiling = s.design?.images?.final_ceiling_usd ?? 0.15;
   return (
     <div className="space-y-4">
       <div className="space-y-2 rounded-lg border border-line bg-slate-900/60 p-3">
@@ -1701,7 +1788,7 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
             <div className="text-sm font-semibold text-slate-100">Benchmark de modelos (Artificial Analysis)</div>
             <p>
               Todos os modelos que a Artificial Analysis avalia, cada um num nível de esforço, ranqueados para cada cluster com os benchmarks do que ele faz,
-              sem olhar suas chaves ou provedores. Os 10 melhores de cada tier; o 💡 de cada vaga em Modelos e papéis mostra os 5 primeiros e põe um deles na vaga.
+              sem olhar suas chaves ou provedores. Mostra o cluster geral ou os três separados, conforme Modelos e papéis, e sempre o de Imagem. Os 10 melhores de cada tier; o 💡 de cada vaga em Modelos e papéis mostra os 5 primeiros e põe um deles na vaga.
             </p>
             {data && <p>{aaDate(data)} · {data.entries} modelos avaliados · {data.attribution}</p>}
             {data && <p className="text-amber-300/90">{data.price_note}</p>}
@@ -1727,7 +1814,7 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
       {err && <p className="text-xs text-red-300">{err}</p>}
       {!data ? <p className="text-xs text-slate-400">carregando…</p> : data.entries === 0 ? (
         <p className="text-xs text-slate-400">Ainda não há dados: use “Atualizar benchmark”.</p>
-      ) : data.profiles.map((prof) => (
+      ) : shown.map((prof) => (
         <div key={prof.profile} className="space-y-2 rounded-lg border border-line bg-panel p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div className="font-semibold text-slate-100">{PROFILE_ICON[prof.profile] ?? ""} {prof.label}</div>
@@ -1742,6 +1829,29 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
           ))}
         </div>
       ))}
+      <div className="space-y-2 rounded-lg border border-line bg-panel p-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="font-semibold text-slate-100">🖼 Imagem (Designer)</div>
+          <button className="btn-ghost whitespace-nowrap text-xs" disabled={imgBusy} onClick={refreshImg}
+            title="Busca de novo o catálogo de imagens da OpenRouter e as notas da arena de imagens da Artificial Analysis">
+            {imgBusy ? "⟳ consultando…" : "📡 Atualizar lista de imagem"}
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-400">
+          Modelos que desenham, à parte dos de texto: cobrados por imagem e ranqueados pelo ELO da arena de imagens. O 💡 de cada vaga do cluster Imagem em Modelos e papéis põe um deles na vaga.
+        </p>
+        {img?.note && <p className="text-[11px] text-amber-300">{img.note}</p>}
+        {!img ? <p className="text-xs text-slate-400">carregando…</p> : (["draft", "final"] as const).map((slot) => (
+          <div key={slot}>
+            <div className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-slate-500">
+              {slot === "draft" ? "Rascunho · " : "Final · "}
+              <span className="normal-case">{slot === "draft" ? "ELO por dólar" : `melhor ELO até US$ ${imgCeiling.toFixed(2)} por imagem`}</span>
+            </div>
+            <ImagePicksTable picks={img[slot]} />
+          </div>
+        ))}
+        {img && <p className="text-[11px] text-slate-500">{img.attribution}</p>}
+      </div>
       <p className="text-[11px] text-slate-500">* nota com parte do peso redistribuída: o modelo não tem todos os benchmarks do perfil.</p>
     </div>
   );

@@ -203,21 +203,26 @@ def register(app: FastAPI, hub: Any) -> None:
         return {"reference": ref, "note": picture_note}
 
     @app.get("/api/factories/{slug}/images/suggest")
-    async def images_suggest(slug: str, refresh: bool = False) -> dict[str, Any]:
+    async def images_suggest(
+        slug: str, refresh: bool = False, cached: bool = False
+    ) -> dict[str, Any]:
         """The Image cluster's suggestion (15.13): OpenRouter's image catalog with the price per
-        picture and Artificial Analysis' arena ratings. A suggestion only: the founder applies."""
+        picture and Artificial Analysis' arena ratings. A suggestion only: the founder applies.
+        `cached` reads the saved list alone: opening a settings tab never goes to the network."""
         from loompa.config.secrets import hub_home
         from loompa.llm import image_catalog
 
         ctx = hub.get(slug).ctx
         home = hub_home()
-        cached = image_catalog.load(home)
+        cached_list = image_catalog.load(home)
         aa = ctx.config.tools.artificial_analysis
         key = ctx.secrets.get(aa.api_key_env) or ""
         note = ""
-        if refresh or not cached:
+        if not cached_list and cached:
+            note = "Ainda sem a lista de modelos de imagem: use “Atualizar lista de imagem”."
+        elif refresh or not cached_list:
             try:
-                cached = await image_catalog.refresh(home, aa_key=key, aa_base=aa.base_url)
+                cached_list = await image_catalog.refresh(home, aa_key=key, aa_base=aa.base_url)
             except Exception:  # noqa: BLE001 - the old list stays, with a note
                 note = "Não consegui atualizar a lista agora; mostrando a última guardada."
         if not key:
@@ -227,13 +232,13 @@ def register(app: FastAPI, hub: Any) -> None:
             )
         images = ctx.config.design.images
         ranked = image_catalog.rank(
-            cached.get("catalog") or [],
-            cached.get("ratings") or {},
+            cached_list.get("catalog") or [],
+            cached_list.get("ratings") or {},
             final_ceiling=images.final_ceiling_usd,
         )
         return {
             **ranked,
-            "fetched_at": cached.get("fetched_at"),
+            "fetched_at": cached_list.get("fetched_at"),
             "note": note,
             "attribution": "Notas: Artificial Analysis (artificialanalysis.ai)",
         }

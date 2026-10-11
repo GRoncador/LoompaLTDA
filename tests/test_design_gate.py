@@ -451,3 +451,23 @@ async def test_pieces_the_screens_need_are_made_and_placed_in_the_product(web: F
     assert state.extra[DESIGN_KEY]["pieces_placed"]
     log = git("log", "--all", "--name-only", "--format=%s", cwd=web.root)
     assert "public/img/heroi.png" in log and "etc/x.png" not in log
+
+
+def test_the_image_suggestion_reads_the_saved_list_unless_refreshed(web: Factory, hub, monkeypatch):
+    """Opening Modelos e papéis or Benchmark asks with `cached`: only the founder's button goes to
+    OpenRouter and Artificial Analysis."""
+    from fastapi.testclient import TestClient
+
+    from loompa.dashboard.app import create_app
+    from loompa.llm import image_catalog
+
+    async def no_network(*a, **k):
+        raise AssertionError("the settings tab went to the network")
+
+    monkeypatch.setattr(image_catalog, "refresh", no_network)
+    with TestClient(create_app(dry_run=True, run_engine=False, store=hub)) as c:
+        r = c.get(f"/api/factories/{web.slug}/images/suggest?cached=true")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["draft"] == [] and body["final"] == []
+        assert "Atualizar lista de imagem" in body["note"]

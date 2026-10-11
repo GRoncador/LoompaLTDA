@@ -93,7 +93,7 @@ export const api = {
   /** The sprint's report (8.2): saved once it ended, measured as of now while it runs. */
   sprintReport: (slug: string, id: string) => req<SprintReport>(`/api/factories/${slug}/sprints/${id}/report`),
   report: (slug: string) => req<Message>(`/api/factories/${slug}/report`, { method: "POST" }),
-  imageSuggest: (slug: string, refresh = false) => req<ImageSuggestion>(`/api/factories/${slug}/images/suggest${refresh ? "?refresh=true" : ""}`),
+  imageSuggest: (slug: string, refresh = false) => req<ImageSuggestion>(`/api/factories/${slug}/images/suggest${refresh ? "?refresh=true" : "?cached=true"}`),
   growth: (slug: string) => req<GrowthView>(`/api/factories/${slug}/growth`),
   growthPiece: (slug: string, body: { kind: string; brief: string; networks?: string[] }) => req<{ id: string }>(`/api/factories/${slug}/growth/pieces`, { method: "POST", body: JSON.stringify(body) }),
   growthLanding: (slug: string) => req<{ story_id: string | null; refused: boolean }>(`/api/factories/${slug}/growth/landing`, { method: "POST" }),

@@ -74,7 +74,12 @@ picture, so the whole flow runs offline.
 - **What is left out.** A model with no price or no rating is left out of the suggestion. Vector
   models are left out of the ranking: vectorising is a step in code, and the vector model
   (`vector_model`, Recraft v4.1 Vector) is that step's reserve.
-- **Applying it.** The suggestion sits in the settings' Fábrica tab. The founder applies it
+- **Where it shows.** (11/10, founder's correction) The Image cluster is a card of its own in Modelos e
+  papéis, beside the general cluster when the split is off and beside the three clusters when it is
+  on: image models never join the general text list. Its 💡 per slot shows the suggestion, and the
+  Benchmark tab lists it after the text profiles (which follow the same switch). Opening a tab
+  reads the saved list only; the refresh button goes to the network. The logo option stays in Fábrica.
+- **Applying it.** The founder applies it
   (ADR-0011/0025), as with the text models.
 - **Editing.** No editing slot yet: the logo's adjustment round uses the draft slot with the
   chosen draft as reference. The editing ELO is shown for when it is needed.
