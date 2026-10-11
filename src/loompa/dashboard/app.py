@@ -1467,10 +1467,11 @@ def create_app(
         finally:
             rt.listeners.discard(queue)
 
-    from loompa.dashboard import design_api, product_api
+    from loompa.dashboard import design_api, growth_api, product_api
 
     design_api.register(app, hub)
     product_api.register(app, hub)
+    growth_api.register(app, hub)
 
     # ---------------------------------------------------------------- static
     if (STATIC_DIR / "assets").is_dir():

@@ -18,6 +18,7 @@ import FactoryModal from "./components/FactoryModal";
 import ProductFindingsModal from "./components/ProductFindingsModal";
 import DesignModal from "./components/DesignModal";
 import ProductModal from "./components/ProductModal";
+import GrowthModal from "./components/GrowthModal";
 
 export default function App() {
   const [factories, setFactories] = useState<FactoryRef[]>([]);
@@ -32,6 +33,7 @@ export default function App() {
   const [productOpen, setProductOpen] = useState(false); // today's Kaizen findings in the product
   const [design, setDesign] = useState<{ story?: string | null } | null>(null); // the design gate (ADR-0039)
   const [productOpen2, setProductOpen2] = useState(false); // phases and epics (plan 16)
+  const [growthOpen, setGrowthOpen] = useState(false); // marketing drafts (plan 17)
   // the Sprints tab (10.8): open, and on which sprint ("" = the current one)
   const [sprintsAt, setSprintsAt] = useState<string | null>(null);
   const [agentName, setAgentName] = useState<string | null>(null);
@@ -103,7 +105,7 @@ export default function App() {
     <div className="flex h-screen flex-col">
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
-        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onEngine={engineAction} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")} onFactory={() => setFactoryOpen(true)} onDesign={() => setDesign({})}
+        onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onEngine={engineAction} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")} onFactory={() => setFactoryOpen(true)} onDesign={() => setDesign({})} onGrowth={overview?.factory.kind === "commercial" ? () => setGrowthOpen(true) : undefined}
         designPending={(overview?.inbox ?? []).filter((m) => (m.screens?.length ?? 0) > 0 || (m.questions?.length ?? 0) > 0).length}
       />
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
@@ -135,6 +137,7 @@ export default function App() {
       {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} kickoff={!!overview?.factory.kickoff} commercial={overview?.factory.kind === "commercial"} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
       {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
       {factoryOpen && slug && <FactoryModal slug={slug} onClose={() => setFactoryOpen(false)} onOpenSprint={(id) => { setFactoryOpen(false); setSprintsAt(id); }} onOpenStory={setStoryId} />}
+      {growthOpen && slug && <GrowthModal slug={slug} onClose={() => { setGrowthOpen(false); refresh(); }} />}
       {productOpen2 && slug && <ProductModal slug={slug} onClose={() => { setProductOpen2(false); refresh(); }} />}
       {design && slug && <DesignModal slug={slug} story={design.story} onReply={reply} onOpenStory={setStoryId} onClose={() => { setDesign(null); refresh(); }} />}
       {productOpen && slug && <ProductFindingsModal slug={slug} onClose={() => setProductOpen(false)} onOpenStory={setStoryId} />}

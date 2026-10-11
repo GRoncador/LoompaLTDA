@@ -130,6 +130,18 @@ Uma por linha: “Acreditamos que X; saberemos pela métrica Y.”
 """,
     ),
 )
+# The marketing plan the Storyteller drafts and the founder approves (plan 17.3).
+DOCS += (
+    CompanyDoc(
+        "marketing",
+        "marketing.md",
+        "Marketing and acquisition plan",
+        """# Plano de marketing e aquisição
+
+Canais, mensagens por canal, metas e as primeiras semanas.
+""",
+    ),
+)
 BY_KIND = {d.kind: d for d in DOCS}
 KINDS = tuple(BY_KIND)
 
@@ -139,11 +151,18 @@ KINDS = tuple(BY_KIND)
 READERS: dict[str, tuple[str, ...]] = {
     "master": ("business", "positioning", "glossary", "hypotheses"),
     "product_owner": ("business", "customer", "glossary", "hypotheses"),
-    "product_manager": ("business", "customer", "positioning", "competitors", "hypotheses"),
+    "product_manager": (
+        "business",
+        "customer",
+        "positioning",
+        "competitors",
+        "hypotheses",
+        "marketing",
+    ),
     "product": ("customer", "glossary"),
     "analyst": ("business", "customer", "positioning", "competitors"),
     "architect": ("glossary",),
-    "storyteller": ("brand", "positioning", "customer", "glossary"),
+    "storyteller": ("brand", "positioning", "customer", "glossary", "hypotheses", "marketing"),
     "compliance": ("business", "customer"),
     "metrics": ("business", "hypotheses"),
     "ux": ("customer", "brand", "positioning", "glossary"),

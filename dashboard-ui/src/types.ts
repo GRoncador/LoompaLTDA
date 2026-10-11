@@ -511,3 +511,7 @@ export interface ProductPhase {
 }
 export interface ProductEpic { id: string; name: string; goal: string; metric: string; phase: string; status: string; why: string; cards: number; done: number }
 export interface ProductView { kind: string; kind_label: string; discovery: boolean; phases: ProductPhase[]; epics: ProductEpic[] }
+
+// ---------------------------------------------------------------- growth (plan 17)
+export interface GrowthPiece { id: string; kind: "plan" | "copy" | "emails" | "posts"; title?: string; brief: string; round: number; status: string; files: string[]; images: string[]; networks: string[] }
+export interface GrowthView { pieces: GrowthPiece[]; networks: { key: string; label: string; size: string }[] }

@@ -50,6 +50,8 @@ from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.factory import ensure_gitignore
 from loompa.finance import BudgetStatus
 from loompa.finance.story_cap import story_spent
+from loompa.growth import on_answer as growth_answer
+from loompa.growth import redo_pending as growth_redo
 from loompa.lifecycle import Lifecycle
 from loompa.llm import EnginePaused
 from loompa.memory.sources import answer_document
@@ -57,6 +59,7 @@ from loompa.models_sync import ModelSync
 from loompa.store import now_iso
 
 log = logging.getLogger("loompa.scheduler")
+SIDE_TASKS: set[asyncio.Task] = set()  # work an answer started that outlives the reply
 
 # The wall clock ran this far ahead of the monotonic one between two ticks: the machine slept.
 SLEPT_S = 60.0
@@ -586,6 +589,11 @@ class Scheduler:
             self.ctx.factory.save()
         ModelSync(self.ctx).on_answer(msg, answer)
         Lifecycle(self.ctx).on_answer(msg, answer)  # phases, epics, discovery (plan 16)
+        if (piece := growth_answer(self.ctx, msg, answer)) and piece["status"] == "adjusting":
+            # a new round calls models: it runs beside the reply, which returns at once
+            task = asyncio.create_task(growth_redo(self.ctx))
+            SIDE_TASKS.add(task)  # held here: a Scheduler made for one reply does not outlive it
+            task.add_done_callback(SIDE_TASKS.discard)
         if not msg.story_id:
             return None
         state = load_state(self.ctx, msg.story_id)

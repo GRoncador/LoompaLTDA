@@ -151,6 +151,8 @@ def register(app: FastAPI, hub: Any) -> None:
         suffix = target.suffix.lower()
         if suffix in MEDIA:
             return FileResponse(target, media_type=MEDIA[suffix])
+        if suffix == ".md":  # a growth piece's text (Phase 17)
+            return FileResponse(target, media_type="text/markdown; charset=utf-8")
         if suffix == ".html":
             return FileResponse(
                 target,

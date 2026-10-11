@@ -94,6 +94,8 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
         return _designer(messages)
     if role == "product_manager":
         return _product_manager(messages)
+    if role == "storyteller" and "Storyteller Loompa of an autonomous" in messages[0].content:
+        return _growth(messages)
     if role == "metrics" and "how to measure" in messages[0].content:
         return json.dumps({"measure": "Simulação: contar no produto quem usou na semana."})
     if role == "master":
@@ -450,3 +452,44 @@ def _product_manager(messages: list[Message]) -> str:
             }
         )
     return json.dumps({"exit_met": "unknown", "evidence": "Simulação.", "missing": []})
+
+
+def _growth(messages: list[Message]) -> str:
+    system = messages[0].content
+    if "marketing\nand acquisition plan" in system or "marketing and acquisition plan" in system:
+        return json.dumps(
+            {"title": "Plano (simulação)", "plan": "## Canais\n- Simulação: a definir."}
+        )
+    if "social posts" in system:
+        nets = messages[-1].content.split("## Networks\n", 1)[-1].split("\n", 1)[0].split(", ")
+        return json.dumps(
+            {
+                "title": "Posts (simulação)",
+                "posts": [
+                    {
+                        "network": n.strip(),
+                        "text": "Simulação: texto do post.",
+                        "hashtags": ["teste"],
+                        "art": "flat illustration",
+                    }
+                    for n in nets
+                    if n.strip()
+                ],
+                "notes": [],
+            }
+        )
+    return json.dumps(
+        {
+            "title": "Textos (simulação)",
+            "pieces": [
+                {
+                    "name": "Boas-vindas",
+                    "subject": "Olá",
+                    "preview": "Simulação",
+                    "body": "Simulação: texto.",
+                    "day": 0,
+                }
+            ],
+            "notes": [],
+        }
+    )

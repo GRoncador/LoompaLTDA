@@ -1,6 +1,6 @@
 import type { AASuggestion, AvailableDTO, FactoryFinding, FactoryScan, ProductFinding } from "./types";
 import type { TraceDetail, TraceOutline } from "./types";
-import type { DesignOverview, DesignReference, ImageSuggestion, ProductView, StoryDesign } from "./types";
+import type { DesignOverview, DesignReference, GrowthView, ImageSuggestion, ProductView, StoryDesign } from "./types";
 import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -94,6 +94,9 @@ export const api = {
   sprintReport: (slug: string, id: string) => req<SprintReport>(`/api/factories/${slug}/sprints/${id}/report`),
   report: (slug: string) => req<Message>(`/api/factories/${slug}/report`, { method: "POST" }),
   imageSuggest: (slug: string, refresh = false) => req<ImageSuggestion>(`/api/factories/${slug}/images/suggest${refresh ? "?refresh=true" : ""}`),
+  growth: (slug: string) => req<GrowthView>(`/api/factories/${slug}/growth`),
+  growthPiece: (slug: string, body: { kind: string; brief: string; networks?: string[] }) => req<{ id: string }>(`/api/factories/${slug}/growth/pieces`, { method: "POST", body: JSON.stringify(body) }),
+  growthLanding: (slug: string) => req<{ story_id: string | null; refused: boolean }>(`/api/factories/${slug}/growth/landing`, { method: "POST" }),
   product: (slug: string) => req<ProductView>(`/api/factories/${slug}/product`),
   setPhase: (slug: string, key: string, body: { goal?: string; exit_criterion?: string; facts?: string; measure?: string }) =>
     req<ProductView>(`/api/factories/${slug}/product/phases/${key}`, { method: "PUT", body: JSON.stringify(body) }),
