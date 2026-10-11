@@ -154,6 +154,7 @@ class FactoryBody(BaseModel):
     keys: dict[str, str] = {}  # ENV_NAME -> value, written to the secrets file only
     secrets_scope: str = "hub"
     mission: str = ""
+    kind: str | None = None  # "personal" | "commercial" (16.1); None keeps the config's
 
 
 class HubBody(BaseModel):
@@ -426,13 +427,17 @@ def create_app(
             root = typed_path(body.path)
             if not root.is_absolute():  # relative to wherever the dashboard was started
                 raise HTTPException(400, "Use o caminho completo da pasta, começando por / ou ~.")
-        result = bootstrap_factory(
-            root,
-            name=body.name,
-            preset=body.stack,
-            mission=body.mission,
-            store=hub.store,
-        )
+        try:
+            result = bootstrap_factory(
+                root,
+                name=body.name,
+                preset=body.stack,
+                mission=body.mission,
+                kind=body.kind,
+                store=hub.store,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
         f = result.factory
         if body.keys:
             from loompa.config.settings import store_key

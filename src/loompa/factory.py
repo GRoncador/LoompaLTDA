@@ -16,6 +16,7 @@ from loompa.config import (
     save_config,
 )
 from loompa.config.schema import slugify
+from loompa.factory_kind import parse_kind
 from loompa.onboarding import (
     BrownfieldScanner,
     GreenfieldInitializer,
@@ -208,11 +209,16 @@ def bootstrap_factory(
     name: str | None = None,
     preset: str = "custom",
     mission: str = "",
+    kind: str | None = None,
     force_mode: str | None = None,
     store: ConfigStore | None = None,
     overwrite_constitution: bool = False,
 ) -> BootstrapResult:
-    """Implementation of `loompa init`: detect stage, calibrate, create `.loompa/`, register."""
+    """Implementation of `loompa init`: detect stage, calibrate, create `.loompa/`, register.
+    `kind` is the founder's answer (16.1); None keeps what the config has (personal if new)."""
+    parsed_kind = parse_kind(kind)
+    if kind is not None and parsed_kind is None:
+        raise ValueError(f"tipo de fábrica desconhecido: {kind} (use pessoal ou comercial)")
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     mode = force_mode or detect_mode(root)
@@ -225,6 +231,8 @@ def bootstrap_factory(
     config.factory.name = name
     config.factory.slug = slug
     config.factory.mode = mode  # type: ignore[assignment]
+    if parsed_kind is not None:
+        config.factory.kind = parsed_kind
 
     audit: RepoAudit | None = None
     created_git = False

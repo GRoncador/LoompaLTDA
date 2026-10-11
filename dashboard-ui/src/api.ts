@@ -14,7 +14,7 @@ export const api = {
   hub: () => req<{ projects_dir: string | null; suggested_projects_dir: string }>("/api/hub"),
   setProjectsDir: (projects_dir: string) =>
     req<{ projects_dir: string }>("/api/hub", { method: "PUT", body: JSON.stringify({ projects_dir }) }),
-  addFactory: (body: { folder?: string; path?: string; name?: string; stack?: string; mission?: string; keys?: Record<string, string>; secrets_scope?: "hub" | "factory" }) =>
+  addFactory: (body: { folder?: string; path?: string; name?: string; stack?: string; mission?: string; kind?: "personal" | "commercial"; keys?: Record<string, string>; secrets_scope?: "hub" | "factory" }) =>
     req<{ slug: string; mode: string; report: string }>("/api/factories", { method: "POST", body: JSON.stringify(body) }),
   storyTrace: (slug: string, id: string, known?: string | null) => req<TraceOutline>(`/api/factories/${slug}/stories/${id}/trace${known ? `?known=${encodeURIComponent(known)}` : ""}`),
   storyTraceSpan: (slug: string, id: string, span: string) => req<TraceDetail>(`/api/factories/${slug}/stories/${id}/trace/${span}`),

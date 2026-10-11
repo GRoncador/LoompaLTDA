@@ -12,6 +12,7 @@ from rich.table import Table
 from loompa import __version__
 from loompa.config import ConfigStore
 from loompa.factory import Factory, bootstrap_factory
+from loompa.factory_kind import KIND_HINT, KIND_LABEL, KINDS, parse_kind
 from loompa.onboarding import STACK_PRESETS, detect_mode
 
 app = typer.Typer(
@@ -64,6 +65,9 @@ def init(
         None, "--stack", "-s", help=f"Preset greenfield: {', '.join(STACK_PRESETS)}."
     ),
     mission: str = typer.Option("", "--mission", "-m", help="Missão do produto em uma frase."),
+    kind: str | None = typer.Option(
+        None, "--kind", "-k", help="pessoal | comercial (padrão: pergunta; com --yes, pessoal)."
+    ),
     mode: str | None = typer.Option(
         None, "--mode", help="Força greenfield|brownfield (padrão: detecta)."
     ),
@@ -95,12 +99,20 @@ def init(
             stack = typer.prompt("Stack", default="python-fastapi")
     if not mission and not yes:
         mission = typer.prompt("Missão do produto (uma frase)", default="", show_default=False)
+    if kind is None and not yes:
+        for key in KINDS:
+            console.print(f"  [cyan]{KIND_LABEL[key]:10}[/cyan] {KIND_HINT[key]}")
+        while parse_kind(kind) is None:
+            kind = typer.prompt("Tipo da fábrica (pessoal|comercial)", default="pessoal")
+    if kind is not None and parse_kind(kind) is None:
+        raise typer.BadParameter("use pessoal ou comercial", param_hint="--kind")
 
     result = bootstrap_factory(
         path,
         name=name,
         preset=stack or "custom",
         mission=mission,
+        kind=kind,
         force_mode=mode,
         overwrite_constitution=overwrite_constitution,
     )

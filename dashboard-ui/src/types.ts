@@ -309,7 +309,10 @@ export type ClusterName = "strategy" | "engineering" | "routine" | "general";
 export type TierName = "tier1" | "tier2" | "tier3";
 export type ModelMatrix = Record<string, Record<string, Candidate[]>>;
 
+export type FactoryKind = "personal" | "commercial";
+
 export interface Settings {
+  factory?: { name: string; kind: FactoryKind; kinds: { key: FactoryKind; label: string; hint: string }[] };
   providers: ProviderInfo[];
   models?: { tier1_ceiling: number; tier2_floor: number; clusters_enabled: boolean; default_route?: "auto" | "openrouter" };
   tiers: Record<string, Candidate[]>;
@@ -337,6 +340,7 @@ export interface SettingsPatch {
   budget?: { period?: BudgetPeriod; cap_usd?: number; warn_at_fraction?: number; on_exceed?: OnExceed; story_cap_usd?: number };
   max_parallel?: number;
   tools?: Record<string, { enabled?: boolean; api_key?: string; clear_key?: boolean; scope?: "hub" | "factory" }>;
+  factory_kind?: FactoryKind;
 }
 
 export interface ProbeResult { name: string; ok: boolean; detail: string; model: string; latency_ms: number }

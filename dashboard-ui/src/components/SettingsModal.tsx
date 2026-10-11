@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, ClusterName, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
+import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, ClusterName, FactoryKind, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
+import { KindPicker } from "./KindPicker";
 import { Modal } from "./Modal";
 import { PROVIDER_NAMES, ProviderBadge, ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
 
@@ -11,7 +12,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
   const [s, setS] = useState<Settings | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
-  const [tab, setTab] = useState<"providers" | "models" | "budget" | "benchmark">("providers");
+  const [tab, setTab] = useState<"factory" | "providers" | "models" | "budget" | "benchmark">("providers");
   const load = () => api.settings(slug).then(setS).catch((e) => setErr(String(e)));
   useEffect(() => { load(); }, [slug]);
   const save = async (patch: SettingsPatch) => {
@@ -23,14 +24,15 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
       {!s ? <p className="text-sm text-slate-400">{err ?? "carregando…"}</p> : (
         <div className="scroll-thin max-h-[82vh] space-y-4 overflow-y-auto pr-1 text-sm">
           <div className="flex gap-2 border-b border-line pb-2">
-            {(["providers", "models", "budget", "benchmark"] as const).map((t) => (
+            {(["factory", "providers", "models", "budget", "benchmark"] as const).map((t) => (
               <button key={t} className={tab === t ? "btn-primary" : "btn-ghost"} onClick={() => setTab(t)}>
-                {t === "providers" ? "Provedores e chaves" : t === "models" ? "Modelos e papéis" : t === "budget" ? "Orçamento" : "Benchmark de modelos"}
+                {t === "factory" ? "Fábrica" : t === "providers" ? "Provedores e chaves" : t === "models" ? "Modelos e papéis" : t === "budget" ? "Orçamento" : "Benchmark de modelos"}
               </button>
             ))}
           </div>
           {err && <p className="text-xs text-red-300">{err}</p>}
           {notes.length > 0 && <p className="text-xs text-emerald-300">✔ {notes.join(" · ")}</p>}
+          {tab === "factory" && <FactoryPanel s={s} onSave={save} />}
           {tab === "providers" && <ProvidersPanel slug={slug} s={s} onSave={save} />}
           {tab === "models" && <ModelsPanel slug={slug} s={s} onSave={save} onReload={load} />}
           {tab === "budget" && <BudgetPanel s={s} onSave={save} />}
@@ -41,6 +43,22 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
         </div>
       )}
     </Modal>
+  );
+}
+
+// ------------------------------------------------------------------- the factory itself
+
+function FactoryPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) => Promise<void> }) {
+  const [kind, setKind] = useState<FactoryKind>(s.factory?.kind ?? "personal");
+  useEffect(() => { setKind(s.factory?.kind ?? "personal"); }, [s]);
+  return (
+    <div className="max-w-3xl space-y-3">
+      <KindPicker value={kind} onChange={setKind} />
+      <p className="text-[11px] text-slate-500">Trocar o tipo não mexe no que já foi feito: vale para as próximas reuniões, telas e fases.</p>
+      <div className="text-right">
+        <button className="btn-primary" disabled={kind === s.factory?.kind} onClick={() => onSave({ factory_kind: kind })}>Salvar tipo</button>
+      </div>
+    </div>
   );
 }
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { Settings, SettingsPatch } from "../types";
+import type { FactoryKind, Settings, SettingsPatch } from "../types";
 import { Modal } from "./Modal";
+import { KindPicker } from "./KindPicker";
 import { ProvidersPanel } from "./SettingsModal";
 
 export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: string) => void }) {
@@ -12,6 +13,7 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
   const [name, setName] = useState("");
   const [stack, setStack] = useState("custom");
   const [mission, setMission] = useState("");
+  const [kind, setKind] = useState<FactoryKind>("personal");
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<string | null>(null);
   const [slug, setSlug] = useState<string | null>(null);
@@ -34,7 +36,7 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const r = await api.addFactory({ folder, name: name || undefined, stack, mission });
+      const r = await api.addFactory({ folder, name: name || undefined, stack, mission, kind });
       setReport(r.report); setSlug(r.slug); setStep(2);
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   };
@@ -66,6 +68,7 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
           )}
           <label className="block">Nome do produto<input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-1" /></label>
           <label className="block">Missão (uma frase)<input value={mission} onChange={(e) => setMission(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-1" /></label>
+          <KindPicker value={kind} onChange={setKind} />
           <label className="block">Stack (só para projetos novos)
             <select value={stack} onChange={(e) => setStack(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-1">
               <option value="python-fastapi">Python + FastAPI + PostgreSQL</option>

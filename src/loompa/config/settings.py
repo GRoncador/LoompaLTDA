@@ -96,7 +96,14 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
             }
         )
     t = config.tools.tavily
+    from loompa.factory_kind import KIND_HINT, KIND_LABEL, KINDS
+
     return {
+        "factory": {
+            "name": config.factory.name,
+            "kind": config.factory.kind,
+            "kinds": [{"key": k, "label": KIND_LABEL[k], "hint": KIND_HINT[k]} for k in KINDS],
+        },
         "providers": providers,
         "models": {
             "tier1_ceiling": config.models.tier1_ceiling,
@@ -190,12 +197,22 @@ class SettingsPatch(BaseModel):
     max_parallel: int | None = None
     worker_backend: str | None = None  # "aci" | "opencode" (Fase 2 spike, ADR-0007)
     tools: dict[str, ToolPatch] = Field(default_factory=dict)
+    factory_kind: str | None = None  # "personal" | "commercial" (16.1)
 
 
 def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> list[str]:
     """Mutate `config` in place and write keys to the secrets files. Returns a list of
     founder-readable change notes. The caller saves config.yaml and reloads secrets."""
     notes: list[str] = []
+    if patch.factory_kind is not None:
+        from loompa.factory_kind import KIND_LABEL, parse_kind
+
+        kind = parse_kind(patch.factory_kind)
+        if kind is None:
+            raise ValueError("o tipo da fábrica deve ser pessoal ou comercial")
+        if kind != config.factory.kind:
+            config.factory.kind = kind
+            notes.append(f"fábrica {KIND_LABEL[kind]}")
     for name, pp in patch.providers.items():
         cfg = config.providers.get(name) or ProviderConfig()
         if pp.kind is not None:

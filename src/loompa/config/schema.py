@@ -11,6 +11,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Mode = Literal["greenfield", "brownfield"]
+# Plan 16.1: a commercial product gets the whole life cycle (market discovery, phases with exit
+# criteria, growth) and the full design gate; a personal one skips the market and growth, has one
+# phase ("in use") and the light design gate. Factories made before the field migrate as personal,
+# which changes nothing they already do. What each kind turns on lives in `loompa.factory_kind`.
+FactoryKind = Literal["personal", "commercial"]
 # Roles are an open set: any agent role maps to a tier through `models.roles`, defaulting to
 # tier2. `ROLES` lists the ones shipped today (used for defaults and the dashboard office).
 Role = str
@@ -42,6 +47,7 @@ class FactoryConfig(BaseModel):
     name: str = ""
     slug: str = ""
     mode: Mode = "greenfield"
+    kind: FactoryKind = "personal"
     language: str = "pt-BR"
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
