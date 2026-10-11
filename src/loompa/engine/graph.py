@@ -92,7 +92,7 @@ from loompa.engine.state import (
     StoryState,
 )
 from loompa.finance.story_cap import CAP_BASE_KEY, over_cap
-from loompa.hygiene import is_test_path
+from loompa.hygiene import is_test_path, unsaved_changes
 from loompa.llm import LLMError
 from loompa.llm.router import TIER_ABOVE
 from loompa.plan_check import PlanReport, check_plan, record_tasks, records_in_criteria
@@ -1147,6 +1147,9 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
         return await cost_cap_block(ctx, state, float(res.data["cost_cap"]))
     if res.blocked_reason:
         refused = sorted((res.data or {}).get("fence_refused") or [])
+        # what is not saved yet, measured: S-106's question called a change to the copy the
+        # suite ran in "three lines of comments", and the founder chose to undo it
+        unsaved = unsaved_changes(ctx.worktrees.diff_working(wt, max_chars=200_000))
         return await block(
             ctx,
             state,
@@ -1154,6 +1157,12 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
             res.blocked_reason,
             options=res.blocked_options,
             resume="dev",
+            executive=(
+                "Changes in this story not saved yet (an option may keep or undo them; describe "
+                "them as measured here):\n" + "\n".join(f"- {u}" for u in unsaved[:8])
+                if unsaved
+                else None
+            ),
             cause=f"fence refused: {', '.join(refused)}" if refused else None,
             # a write under .loompa/ is never the founder's to allow: no option may offer it
             message=_records_block_message(ctx, state) if _records(refused) else None,

@@ -137,7 +137,7 @@ def is_debris(path: str) -> bool:
     )
 
 
-def _covered(path: str, allowed: list[str] | None) -> bool:
+def covered(path: str, allowed: list[str] | None) -> bool:
     """Whether the plan's paths include `path` (an exact file, a folder or a glob)."""
     for a in allowed or []:
         if path == a or path.startswith(a.rstrip("/") + "/") or PurePosixPath(path).match(a):
@@ -155,7 +155,7 @@ def is_stray_data(path: str, allowed: list[str] | None = None) -> bool:
         and not name.startswith(".")
         and name not in ROOT_CONFIG
         and not _ROOT_CONFIG_PATTERN.match(name)
-        and not _covered(path, allowed)
+        and not covered(path, allowed)
     )
 
 
@@ -457,3 +457,27 @@ def test_ratio(files: list[_FileDiff]) -> dict[str, str] | None:
         f"{TEST_RATIO_MAX}x): test the behaviour and its limits, not the same path again or "
         "details of the implementation",
     }
+
+
+# A line that is only a comment, or blank: what changed in it does not run.
+_COMMENT_LINE = re.compile(r"^\s*(?:$|#|//|/\*|\*|<!--|-->|\"\"\"|''')")
+
+
+def unsaved_changes(diff: str) -> list[str]:
+    """One English line per file of an uncommitted diff: how many lines changed and whether any
+    of them runs. tamagotchi S-106 (11/10): the founder read "três linhas de comentário" about a
+    file whose change also kept `.git` in a copy the suite ran in, chose to undo it, and the
+    suite went red; the facts go to whoever words the question, so it cannot say otherwise."""
+    out = []
+    for f in _files(diff):
+        changed = (f.added or []) + (f.removed or [])
+        if not changed:
+            continue
+        kind = (
+            "comments or blank lines only"
+            if all(_COMMENT_LINE.match(line) for line in changed)
+            else "code that runs, not only comments"
+        )
+        state = "new file" if f.new else "deleted" if f.deleted else "changed"
+        out.append(f"{f.path} ({state}): {len(changed)} lines, {kind}")
+    return out
