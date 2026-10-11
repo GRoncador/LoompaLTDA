@@ -259,3 +259,20 @@ async def test_a_plan_left_without_tasks_asks_the_founder_instead_of_closing(
     assert "não foi encerrada" in msg.impact and msg.executive_audit() == []
     assert [o.key for o in msg.options] == ["opt1", "skip", "drop"]
     await ctx.aclose()
+
+
+def test_a_test_that_checks_the_records_are_absent_does_not_read_them():
+    """tamagotchi S-106: the copy test asserted the records folder is not in its copy."""
+    lines = [
+        "+        !existsSync(join(destino, '.loompa')),",
+        "+    assert.equal(existsSync(join(destino, '.loompa')), false);",
+        "+    assert not (copia / '.loompa').exists()",
+    ]
+    diff = (
+        "diff --git a/tests/suite_sem_registros.test.js b/tests/suite_sem_registros.test.js\n"
+        "new file mode 100644\n--- /dev/null\n+++ b/tests/suite_sem_registros.test.js\n"
+        "@@ -0,0 +1,3 @@\n" + "\n".join(lines) + "\n"
+    )
+    assert scan_diff(diff) == []
+    reads = diff.replace("!existsSync(join(destino", "readFileSync(join(RAIZ")
+    assert [i.rule for i in scan_diff(reads)] == ["reads_records"]

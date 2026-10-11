@@ -74,6 +74,10 @@ the traces and the worktree:
 6. **A line card plans without a new reproducer.** For a bugfix that is the line card, the
    Architect gets `BASE_RED_NOTE` with the failing tests instead of `REPRODUCER_NOTE`. No
    reproducer task is prepended, and `REPRO_KEY` is `{"status": "base_red", "failing": […]}`.
+7. **A test that checks the records are absent does not read them.** Seen live after the founder's
+   third answer: the hygiene scan flagged `!existsSync(join(destino, '.loompa'))`, the copy test's
+   guard that the records stay out, as "a test reads the factory's records". `reads_records`
+   now skips a negated existence check (`!`, `not`, `…exists…(…), false`).
 
 ## Consequences
 

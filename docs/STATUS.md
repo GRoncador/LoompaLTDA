@@ -842,6 +842,8 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
 - **Worker:** `restore_file` (to the last commit or to the main branch).
 - **Bugfix route:** a line card plans the fix with the base's failing tests as the reproduction
   (`BASE_RED_NOTE`), no new reproducer test.
+- **Hygiene:** a negated existence check of `.loompa` (the copy test's guard) is not a records
+  read.
 - **Not benched:** `BASE_RED_NOTE`, the `restore_file` description.
 
 ## Known gaps / next steps

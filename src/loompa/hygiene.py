@@ -241,6 +241,14 @@ _READS_RECORDS = re.compile(
     r"[^\n]*?['\"`](?:\./)?\.loompa(?:['\"`/\\])"
 )
 
+# ...unless the line checks that the records are *not* there: tamagotchi S-106 (11/10) copied the
+# repository without `.loompa/` and asserted `!existsSync(join(destino, '.loompa'))` in the copy,
+# the one test that guards against the records leaking in, and was told it reads them.
+_RECORDS_ABSENT = re.compile(
+    r"(?:!\s*|\bnot\s+)(?:[\w.]+\.)?exists\w*\s*\(|exists\w*\s*\([^\n]*\.loompa[^\n]*\)\s*,\s*false\b",
+    re.I,
+)
+
 
 def scan_diff(diff: str, allowed: list[str] | None = None) -> list[HygieneIssue]:
     """Hygiene issues in a unified diff (`git diff` output); at most one per rule and file.
@@ -283,7 +291,7 @@ def scan_diff(diff: str, allowed: list[str] | None = None) -> list[HygieneIssue]
                     not test,  # in a test it may be data; elsewhere it leaks a machine
                     f"absolute path of a machine or worktree: `{text.strip()[:80]}`",
                 )
-            if test and _READS_RECORDS.search(text):
+            if test and _READS_RECORDS.search(text) and not _RECORDS_ABSENT.search(text):
                 add(
                     "reads_records",
                     True,
