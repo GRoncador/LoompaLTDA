@@ -826,6 +826,24 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
   going.
 - **Not benched:** `GROOM_SYSTEM` and `CONFIRM_GROOMING_SYSTEM`.
 
+**2026-10-11, ADR-0043 (tamagotchi S-106: a records fix is not a records read):**
+
+- **Records gate:** a task clause that removes a records read, excludes `.loompa/` from a copy,
+  describes today's failure or checks nothing reads it is no longer "a test reads records"
+  (real S-101/S-106 texts in `tests/test_records.py`).
+- **Empty plan:** every task withdrawn and nothing built asks the founder ("precisa de um plano
+  novo", re-plan first) instead of closing as resolved (S-101 was cancelled over a red base).
+  `resolve` says who thought it was over and that the story stays open.
+- **Line:** adopts an open story that names the failing test's label with its file (S-101 had
+  "AC6 de casca_body_scripts").
+- **Self-check:** never undoes a change in another planned file the task does not name
+  (`worker.dod_scope_kept`). A Worker question carries the measured unsaved changes (code or
+  comments only) to the Master.
+- **Worker:** `restore_file` (to the last commit or to the main branch).
+- **Bugfix route:** a line card plans the fix with the base's failing tests as the reproduction
+  (`BASE_RED_NOTE`), no new reproducer test.
+- **Not benched:** `BASE_RED_NOTE`, the `restore_file` description.
+
 ## Known gaps / next steps
 
 **Since 2026-10-05 the plan is `docs/PLANO-2026-10.md`.** Its "Herdado do plano de setembro" section
