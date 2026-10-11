@@ -1,6 +1,6 @@
 import type { AASuggestion, AvailableDTO, FactoryFinding, FactoryScan, ProductFinding } from "./types";
 import type { TraceDetail, TraceOutline } from "./types";
-import type { DesignOverview, DesignReference, StoryDesign } from "./types";
+import type { DesignOverview, DesignReference, ImageSuggestion, StoryDesign } from "./types";
 import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -93,6 +93,7 @@ export const api = {
   /** The sprint's report (8.2): saved once it ended, measured as of now while it runs. */
   sprintReport: (slug: string, id: string) => req<SprintReport>(`/api/factories/${slug}/sprints/${id}/report`),
   report: (slug: string) => req<Message>(`/api/factories/${slug}/report`, { method: "POST" }),
+  imageSuggest: (slug: string, refresh = false) => req<ImageSuggestion>(`/api/factories/${slug}/images/suggest${refresh ? "?refresh=true" : ""}`),
   design: (slug: string) => req<DesignOverview>(`/api/factories/${slug}/design`),
   storyDesign: (slug: string, id: string) => req<StoryDesign>(`/api/factories/${slug}/stories/${id}/design`),
   addReference: async (slug: string, fields: { kind: string; title?: string; note?: string; url?: string; story_id?: string; file?: File | null }) => {

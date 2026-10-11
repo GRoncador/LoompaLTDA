@@ -110,6 +110,7 @@ def describe_settings(config: LoompaConfig, secrets: Secrets) -> dict[str, Any]:
             "figma_token_env": config.design.figma_token_env,
             "figma_key": secrets.status(config.design.figma_token_env),
             "vision": [c.model_dump() for c in config.models.vision],
+            "images": config.design.images.model_dump(),
         },
         "providers": providers,
         "models": {
@@ -209,6 +210,7 @@ class SettingsPatch(BaseModel):
     vision: list[ModelCandidate] | None = None  # the models that look at pictures (15.1)
     figma_key: str | None = None  # written to the secrets file, never to config (15.9)
     clear_figma_key: bool = False
+    images: dict[str, Any] | None = None  # the Image cluster's slots (15.13)
 
 
 def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> list[str]:
@@ -242,6 +244,13 @@ def apply_settings(root: Path, config: LoompaConfig, patch: SettingsPatch) -> li
         if [c.model_dump() for c in vision] != [c.model_dump() for c in config.models.vision]:
             config.models.vision = vision
             notes.append("modelos com visão atualizados")
+    if patch.images is not None:
+        from loompa.config.schema import ImagesConfig
+
+        merged = ImagesConfig.model_validate({**config.design.images.model_dump(), **patch.images})
+        if merged != config.design.images:
+            config.design.images = merged
+            notes.append("modelos de imagem atualizados")
     if patch.clear_figma_key:
         for scope in ("hub", "factory"):
             store_key(root, config.design.figma_token_env, None, scope=scope)

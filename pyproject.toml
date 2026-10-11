@@ -38,6 +38,8 @@ dependencies = [
     "fastembed>=0.3",
     # the design gate (plan 15.6): approved and built screens compared in code
     "pillow>=10",
+    # the chosen logo traced to a vector locally, before any paid vector model (plan 15.14)
+    "vtracer>=0.6",
 ]
 
 [project.optional-dependencies]

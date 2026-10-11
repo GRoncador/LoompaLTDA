@@ -49,6 +49,7 @@ class BlockedReason(StrEnum):
     STACK = "stack"  # re-planned and still writes code outside the product's language
     # the design gate (ADR-0039): the visual base to choose, the front-end questions, the screens
     DESIGN_BASE = "design_base"
+    DESIGN_LOGO = "design_logo"  # the logo's drafts, in the visual base (ADR-0040)
     DESIGN_QUESTIONS = "design_questions"
     DESIGN = "design"
 

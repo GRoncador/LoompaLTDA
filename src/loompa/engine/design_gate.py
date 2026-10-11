@@ -34,6 +34,7 @@ from loompa.dependencies import WAIT_KEY
 from loompa.design import (
     DesignPaths,
     approve_round,
+    approved_manifest,
     colours_in,
     contrast_problems,
     ensure_gitignore,
@@ -49,14 +50,19 @@ from loompa.design.render import file_url, look_at
 from loompa.engine.context import EngineContext
 from loompa.engine.phases import Phase, advance, goto, register
 from loompa.engine.state import TERMINAL, BlockedReason, Stage, StoryState
-from loompa.factory_kind import design_gate
+from loompa.factory_kind import design_gate, profile
 
 DESIGN_KEY = "design"  # state.extra: the story's progress through the gate
 BASE_KEY = "design_base"  # state.extra: "asked" while this story's base proposal waits
 UX_TRIES = 3  # the founder's rule: three attempts before the founder (ADR-0016)
 ROUNDS_NOTE_FROM = 3
 SENDER = "UX Loompa"
-DESIGN_REASONS = (BlockedReason.DESIGN_BASE, BlockedReason.DESIGN_QUESTIONS, BlockedReason.DESIGN)
+DESIGN_REASONS = (
+    BlockedReason.DESIGN_BASE,
+    BlockedReason.DESIGN_LOGO,
+    BlockedReason.DESIGN_QUESTIONS,
+    BlockedReason.DESIGN,
+)
 
 
 FRONTEND_SUFFIXES = {".html", ".htm", ".css", ".scss", ".jsx", ".tsx", ".vue", ".svelte"}
@@ -261,6 +267,13 @@ async def node_design(ctx: EngineContext, state: StoryState) -> StoryState:
             ctx.emit("story.waiting", story_id=state.story_id, design_base=owner)
             return state
         return await _propose_base(ctx, state)
+    if wants_logo(ctx) and not has_logo(ctx):
+        owner = base_owner(ctx, state.story_id)
+        if owner:
+            state.extra[WAIT_KEY] = {"design_base": owner}
+            ctx.emit("story.waiting", story_id=state.story_id, design_base=owner)
+            return state
+        return await _logo_step(ctx, state)
     state.extra.pop(BASE_KEY, None)
     ux = UXAgent(ctx)
     if not d.get("asked"):
@@ -288,8 +301,11 @@ async def node_design(ctx: EngineContext, state: StoryState) -> StoryState:
         answers=list(d.get("answers") or []),
         feedback=str(d.get("feedback") or ""),
         alternatives=bool(d.get("alternatives")),
+        pieces=4 if pictures_allowed(ctx) else 0,
     )
+    made = await _pieces(ctx, state, result)
     problems, shots = await _check_round(ctx, state, folder, result)
+    problems += [f"piece {m['name']}: {pr}" for m in made for pr in m.get("problems") or []]
     seen = await ux.look(state, shots) if shots else None
     problems += [f"{i.get('screen')} ({i.get('state')}): {i.get('problem')}" for i in (seen or [])]
     tries = int(d.get("tries") or 0) + 1
@@ -310,6 +326,7 @@ async def node_design(ctx: EngineContext, state: StoryState) -> StoryState:
         )
         return goto(state, "design")
     result["review"] = {"problems": problems[:20], "looked": seen is not None}
+    result["pieces"] = made
     result["assumptions"] = list(
         dict.fromkeys([*(d.get("assumptions") or []), *result["assumptions"]])
     )
@@ -416,6 +433,16 @@ async def node_design_review(ctx: EngineContext, state: StoryState) -> StoryStat
             if f[v].is_file():
                 item[v] = _rel(ctx, f[v])
         screens.append(item)
+    pieces_dir = DesignPaths.of(ctx.root).story(state.story_id) / "pieces"
+    for piece in data.get("pieces") or []:
+        if (pieces_dir / str(piece.get("file"))).is_file():
+            screens.append(
+                {
+                    "title": f"Peça: {piece['name']}",
+                    "state": "",
+                    "desktop": _rel(ctx, pieces_dir / str(piece["file"])),
+                }
+            )
     alts = sorted({str(s.get("alt")) for s in data.get("screens") or [] if s.get("alt")})
     assumptions = list(data.get("assumptions") or [])
     left = list((data.get("review") or {}).get("problems") or [])
@@ -505,6 +532,10 @@ def apply_design_answer(
             state.extra.pop(BASE_KEY, None)
         goto(state, "design")
         return
+    if reason == BlockedReason.DESIGN_LOGO:
+        apply_logo_answer(ctx, d, key, text or guidance)
+        goto(state, "design")
+        return
     if reason == BlockedReason.DESIGN_QUESTIONS:
         d["answers"] = _answers(msg, answer, use_defaults=key == "defaults")
         goto(state, "design")
@@ -527,6 +558,7 @@ def apply_design_answer(
     )
     d["round"] = n + 1
     d["tries"] = 0
+    d["redo_pieces"] = True  # the adjustment may be about a picture: they are made again
     goto(state, "design")
 
 
@@ -560,6 +592,233 @@ def _answers(msg: FounderMessage, answer: FounderAnswer, *, use_defaults: bool) 
         if reply:
             out.append(f"{q.text} → {reply}")
     return out
+
+
+# --------------------------------------------------------- the Designer (ADR-0040)
+
+
+def pictures_allowed(ctx: EngineContext) -> bool:
+    return ctx.config.design.images.per_story > 0 and bool(ctx.config.design.images.draft)
+
+
+def wants_logo(ctx: EngineContext) -> bool:
+    """The logo is part of the visual base on a commercial product (`design.images.logo`)."""
+    setting = ctx.config.design.images.logo
+    if setting == "off" or not pictures_allowed(ctx):
+        return False
+    return setting == "on" or profile(ctx.config).growth
+
+
+def _brand(ctx: EngineContext) -> Path:
+    return DesignPaths.of(ctx.root).root / "brand"
+
+
+def has_logo(ctx: EngineContext) -> bool:
+    """A logo exists, or the founder said the product goes without one."""
+    b = _brand(ctx)
+    return (b / "logo-512.png").is_file() or (b / "skipped").is_file()
+
+
+async def _logo_step(ctx: EngineContext, state: StoryState) -> StoryState:
+    """Flat drafts → the founder picks (or adjusts once over a pick) → the chosen one is traced
+    into a vector in code; only when the trace fails its check does the vector model redraw it."""
+    from loompa.agents.designer import DesignerAgent
+    from loompa.engine.graph import block
+
+    d = _progress(state)
+    designer = DesignerAgent(ctx)
+    drafts_dir = _brand(ctx) / "drafts"
+    if d.get("logo_pick"):
+        chosen = drafts_dir / str(d.pop("logo_pick"))
+        await _finish_logo(ctx, state, designer, chosen)
+        return goto(state, "design")
+    if d.get("logo_adjust"):
+        adj = d.pop("logo_adjust")
+        drafts = await designer.logo_variants(
+            state, drafts_dir / adj["file"], adj["note"], drafts_dir
+        )
+    else:
+        drafts = await designer.logo_drafts(
+            state, drafts_dir, feedback=str(d.pop("logo_feedback", ""))
+        )
+    if not drafts:
+        raise RuntimeError("the Designer Loompa made no logo draft")
+    state.extra[BASE_KEY] = "asked"
+    write_json(drafts_dir / "drafts.json", {"drafts": drafts})
+    screens = [
+        {
+            "title": f"{i}. {x['direction']}".strip(),
+            "state": "",
+            "desktop": _rel(ctx, drafts_dir / x["file"]),
+        }
+        for i, x in enumerate(drafts, 1)
+    ]
+    directions = list(dict.fromkeys(x["direction"] for x in drafts if x.get("direction")))
+    msg = FounderMessage(
+        factory=ctx.slug,
+        story_id=state.story_id,
+        kind=MessageKind.DECISION,
+        sender="Designer Loompa",
+        title="Escolha um rascunho para a logo",
+        context=(
+            f"Fiz {len(drafts)} rascunhos chapados"
+            + (f" em {len(directions)} direções ({', '.join(directions)})" if directions else "")
+            + ". Escolha um: ele vira a logo em vetor e os tamanhos do produto. Se quiser mudar "
+            "algo num deles, escolha “Ajustar” e diga qual e o quê. A busca de marcas parecidas e "
+            "o registro no INPI ficam com você."
+        ),
+        impact="As telas esperam a logo; o resto da fábrica segue.",
+        options=[
+            *(
+                Option(key=x["key"], label=f"Usar o {i}", recommended=i == 1)
+                for i, x in enumerate(drafts, 1)
+            ),
+            Option(
+                key="adjust",
+                label="Ajustar um deles",
+                description="Escreva o número e o que mudar, por exemplo: “3, letras mais grossas”.",
+            ),
+            Option(key="redo", label="Outros rascunhos", description="Diga o que procurar."),
+            Option(key="no_logo", label="Seguir sem logo"),
+        ],
+        screens=screens,
+    )
+    return await block(
+        ctx,
+        state,
+        BlockedReason.DESIGN_LOGO,
+        f"logo: {len(drafts)} drafts",
+        resume="design",
+        message=msg,
+    )
+
+
+def apply_logo_answer(ctx: EngineContext, d: dict[str, Any], key: str, text: str) -> None:
+    drafts_dir = _brand(ctx) / "drafts"
+    drafts = read_json(drafts_dir / "drafts.json").get("drafts") or []
+    by_key = {x["key"]: x for x in drafts}
+    if key in by_key:
+        d["logo_pick"] = by_key[key]["file"]
+    elif key == "no_logo":
+        _brand(ctx).mkdir(parents=True, exist_ok=True)
+        (_brand(ctx) / "skipped").write_text("the founder chose no logo\n", encoding="utf-8")
+    elif key == "adjust" and drafts:
+        import re
+
+        m = re.match(r"\s*(\d+)\s*[,:.-]?\s*(.*)", text or "", re.S)
+        i = int(m.group(1)) if m else 1
+        base = drafts[min(max(i, 1), len(drafts)) - 1]
+        d["logo_adjust"] = {"file": base["file"], "note": (m.group(2) if m else text) or text}
+    else:
+        d["logo_feedback"] = text
+
+
+async def _finish_logo(ctx: EngineContext, state: StoryState, designer: Any, chosen: Path) -> None:
+    from loompa.design.brand import export_brand, trace
+
+    brand = _brand(ctx)
+    traced = await trace(chosen, brand / "logo.svg")
+    note = ""
+    svg: Path | None = traced.svg if traced.ok else None
+    if not traced.ok:
+        try:
+            svg = await designer.vector_redraw(state, chosen, brand / "logo.svg")
+            note = "redesenhada pelo modelo de vetor (confira se ficou igual ao rascunho)"
+        except Exception:  # noqa: BLE001 - the PNGs still make a usable brand
+            svg = None
+            note = "sem vetor: o traçado falhou e o modelo de vetor não respondeu"
+    written = export_brand(chosen, svg, brand)
+    drafts = read_json(brand / "drafts" / "drafts.json").get("drafts") or []
+    picked = next((x for x in drafts if x.get("file") == chosen.name), {})
+    write_json(
+        brand / "logo.json",
+        {
+            "from": chosen.name,
+            "prompt": picked.get("prompt", ""),
+            "model": picked.get("model", ""),
+            "seed": picked.get("seed"),
+            "trace": {"ok": traced.ok, "paths": traced.paths, "moved": traced.moved},
+            "note": note,
+            "files": written,
+        },
+    )
+    _note_brand(ctx, written, note)
+    ctx.emit("design.logo", story_id=state.story_id, traced=traced.ok, note=note or None)
+
+
+def _note_brand(ctx: EngineContext, files: list[str], note: str) -> None:
+    """The logo's files in the company's brand document (13.2), for every role that reads it."""
+    company = ctx.factory.paths.company
+    company.mkdir(parents=True, exist_ok=True)
+    doc = company / "brand.md"
+    text = doc.read_text(encoding="utf-8") if doc.is_file() else "# Marca\n"
+    section = (
+        "## Logo\n\nArquivos em `.loompa/design/brand/`: "
+        + ", ".join(f"`{f}`" for f in files)
+        + (f". Observação: {note}." if note else ".")
+        + "\n"
+    )
+    import re
+
+    pattern = re.compile(r"^## Logo\s*$.*?(?=^## |\Z)", re.M | re.S)
+    text = (
+        pattern.sub(section + "\n", text, count=1)
+        if pattern.search(text)
+        else (text.rstrip() + "\n\n" + section)
+    )
+    doc.write_text(text, encoding="utf-8")
+
+
+async def _pieces(ctx: EngineContext, state: StoryState, result: dict[str, Any]) -> list[dict]:
+    """The pictures the UX asked for, made once per founder round (internal tries reuse them)."""
+    from loompa.agents.designer import DesignerAgent, ImageBudgetSpent, piece_specs
+
+    specs = piece_specs(result.get("pieces"))
+    d = _progress(state)
+    folder = DesignPaths.of(ctx.root).story(state.story_id) / "pieces"
+    if d.pop("redo_pieces", False) and folder.exists():
+        shutil.rmtree(folder)
+    if not specs:
+        return []
+    known = read_json(folder / "pieces.json").get("pieces") or []
+    have = {k["name"]: k for k in known if (folder / str(k.get("file"))).is_file()}
+    missing = [sp for sp in specs if sp.name not in have]
+    made: list[dict] = []
+    if missing:
+        screens_note = "\n".join(f"- {s['title']} ({s.get('route')})" for s in result["screens"])
+        try:
+            made = await DesignerAgent(ctx).pieces(state, missing, folder, screens_note)
+        except ImageBudgetSpent as exc:
+            ctx.emit("designer.budget", story_id=state.story_id, why=str(exc))
+    out = [have[sp.name] for sp in specs if sp.name in have] + made
+    write_json(folder / "pieces.json", {"pieces": out})
+    return out
+
+
+def place_pieces(ctx: EngineContext, state: StoryState, wt: Any) -> list[str]:
+    """Copy the approved pieces into the story's worktree at their targets and commit them:
+    the Worker never generates a picture, it builds around the approved files."""
+    data = approved_manifest(ctx.root, state.story_id)
+    d = state.extra.get(DESIGN_KEY) or {}
+    if not data or d.get("pieces_placed"):
+        return []
+    folder = DesignPaths.of(ctx.root).story(state.story_id) / "pieces"
+    placed = []
+    for piece in data.get("pieces") or []:
+        src = folder / str(piece.get("file") or "")
+        target = str(piece.get("target") or "")
+        if not target or not src.is_file():
+            continue
+        dst = Path(wt.path) / target
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        placed.append(target)
+    if placed:
+        ctx.worktrees.commit_all(wt, f"feat({state.story_id.lower()}): peças visuais aprovadas")
+        state.allowed_paths = list(dict.fromkeys([*state.allowed_paths, *placed]))
+        ctx.emit("design.pieces_placed", story_id=state.story_id, files=placed)
+    d["pieces_placed"] = True
+    return placed
 
 
 register(

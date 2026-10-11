@@ -90,6 +90,8 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
         )
     if role == "ux":
         return _ux(messages, title)
+    if role == "designer":
+        return _designer(messages)
     if role == "master":
         if "Classify the story" in messages[0].content:
             researching = re.search(
@@ -401,3 +403,20 @@ def _ux(messages: list[Message], title: str) -> str:
     if "Look at the pictures" in system:
         return json.dumps({"ok": True, "issues": []})
     return json.dumps({"deviation": False, "workaround": False, "changes": []})
+
+
+def _designer(messages: list[Message]) -> str:
+    system = messages[0].content
+    if "drafts of the product's logo" in system:
+        return json.dumps(
+            {
+                "directions": [
+                    {"name": "Símbolo", "why": "Simulação.", "prompt": "flat round symbol"},
+                    {"name": "Letra", "why": "Simulação.", "prompt": "flat lettermark"},
+                ]
+            }
+        )
+    if "image prompt for each picture" in system:
+        names = re.findall(r"^- ([a-z0-9-]+):", messages[-1].content, re.M)
+        return json.dumps({"prompts": [{"name": n, "prompt": f"flat {n}"} for n in names]})
+    return json.dumps({"pictures": [], "best": 1})

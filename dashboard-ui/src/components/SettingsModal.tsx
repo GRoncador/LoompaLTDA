@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, ClusterName, DesignGate, FactoryKind, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
+import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, ClusterName, DesignGate, FactoryKind, ImageSuggestion, ImagesSettings, ModelMatrix, ModelPick, ModelProposalDTO, ProbeResult, ProviderInfo, RoleTaskInfo, Settings, SettingsPatch } from "../types";
 import { KindPicker } from "./KindPicker";
 import { Modal } from "./Modal";
 import { PROVIDER_NAMES, ProviderBadge, ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
@@ -32,7 +32,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
           </div>
           {err && <p className="text-xs text-red-300">{err}</p>}
           {notes.length > 0 && <p className="text-xs text-emerald-300">✔ {notes.join(" · ")}</p>}
-          {tab === "factory" && <FactoryPanel s={s} onSave={save} />}
+          {tab === "factory" && <><FactoryPanel s={s} onSave={save} /><ImagesPanel slug={slug} s={s} onSave={save} /></>}
           {tab === "providers" && <ProvidersPanel slug={slug} s={s} onSave={save} />}
           {tab === "models" && <ModelsPanel slug={slug} s={s} onSave={save} onReload={load} />}
           {tab === "budget" && <BudgetPanel s={s} onSave={save} />}
@@ -94,6 +94,79 @@ function FactoryPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =
       <div className="text-right">
         <button className="btn-primary" onClick={() => onSave({ factory_kind: kind, design_gate: gate, vision: visionList(), ...(figma ? { figma_key: figma } : {}) }).then(() => setFigma(""))}>Salvar</button>
       </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------- the Image cluster (15.13)
+
+function ImagesPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave: (p: SettingsPatch) => Promise<void> }) {
+  const im = s.design?.images;
+  const [draft, setDraft] = useState((im?.draft ?? []).join("\n"));
+  const [final, setFinal] = useState((im?.final ?? []).join("\n"));
+  const [ceiling, setCeiling] = useState(im?.final_ceiling_usd ?? 0.15);
+  const [logo, setLogo] = useState<ImagesSettings["logo"]>(im?.logo ?? "auto");
+  const [sug, setSug] = useState<ImageSuggestion | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setDraft((im?.draft ?? []).join("\n")); setFinal((im?.final ?? []).join("\n"));
+    setCeiling(im?.final_ceiling_usd ?? 0.15); setLogo(im?.logo ?? "auto");
+  }, [s]);
+  const lines = (t: string) => t.split("\n").map((l) => l.trim()).filter(Boolean);
+  const suggest = async (refresh: boolean) => { setBusy(true); try { setSug(await api.imageSuggest(slug, refresh)); } finally { setBusy(false); } };
+  const use = (slot: "draft" | "final", id: string) => (slot === "draft" ? setDraft : setFinal)(id);
+  return (
+    <div className="mt-6 max-w-4xl space-y-3 border-t border-line pt-4">
+      <div className="font-semibold text-slate-100">🖼 Cluster Imagem (Designer Loompa)</div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block text-xs text-slate-400">Rascunho (explorar barato), um por linha
+          <textarea className={`${input} mt-1 font-mono`} rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} />
+        </label>
+        <label className="block text-xs text-slate-400">Final (a peça aprovada), um por linha
+          <textarea className={`${input} mt-1 font-mono`} rows={2} value={final} onChange={(e) => setFinal(e.target.value)} />
+        </label>
+        <label className="block text-xs text-slate-400">Teto por imagem na vaga final (US$)
+          <input type="number" min={0} step={0.01} className={`${input} mt-1`} value={ceiling} onChange={(e) => setCeiling(Number(e.target.value))} />
+        </label>
+        <label className="block text-xs text-slate-400">Logo na base visual
+          <select className={`${select} mt-1 w-full`} value={logo} onChange={(e) => setLogo(e.target.value as ImagesSettings["logo"])}>
+            <option value="auto">conforme o tipo (só no produto comercial)</option>
+            <option value="on">sempre</option>
+            <option value="off">nunca</option>
+          </select>
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <button className="btn-ghost" disabled={busy} onClick={() => suggest(false)}>Ver sugestão</button>
+        <button className="btn-ghost" disabled={busy} onClick={() => suggest(true)}>Atualizar a lista</button>
+        <button className="btn-primary ml-auto" onClick={() => onSave({ images: { draft: lines(draft), final: lines(final), final_ceiling_usd: ceiling, logo } })}>Salvar modelos de imagem</button>
+      </div>
+      {sug && (
+        <div className="space-y-2 text-xs">
+          {sug.note && <p className="text-amber-300">{sug.note}</p>}
+          {(["draft", "final"] as const).map((slot) => (
+            <div key={slot}>
+              <div className="font-medium text-slate-200">{slot === "draft" ? "Rascunho · ELO por dólar" : `Final · melhor ELO até US$ ${ceiling.toFixed(2)}`}</div>
+              <table className="mt-1 w-full">
+                <thead className="text-slate-500"><tr><th className="text-left">modelo</th><th>US$/imagem</th><th>ELO</th><th>edição</th><th /></tr></thead>
+                <tbody>
+                  {sug[slot].map((m) => (
+                    <tr key={m.id} className="border-t border-line/40">
+                      <td className="py-0.5 text-slate-300" title={m.id}>{m.name}</td>
+                      <td className="text-center tabular-nums">{m.price.toFixed(3)}</td>
+                      <td className="text-center tabular-nums">{Math.round(m.elo)}</td>
+                      <td className="text-center tabular-nums">{m.edit_elo ? Math.round(m.edit_elo) : "—"}</td>
+                      <td className="text-right"><button className="text-brand hover:underline" onClick={() => use(slot, m.id)}>usar</button></td>
+                    </tr>
+                  ))}
+                  {sug[slot].length === 0 && <tr><td className="text-slate-500" colSpan={5}>sem modelos com preço e nota</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          ))}
+          <p className="text-[11px] text-slate-500">{sug.attribution}. Sugestão: nada muda até você salvar, e nunca no meio de um sprint.</p>
+        </div>
+      )}
     </div>
   );
 }

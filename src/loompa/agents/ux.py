@@ -13,6 +13,7 @@ still run and the looking is skipped with a note.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,8 @@ from loompa.llm import image_data_url
 from loompa.speckit import story_dir
 
 MAX_SCREENS = 6
+# a screen shows a piece as `pieces/<name>.png`; on disk the pieces sit beside the rounds
+PIECE_SRC = re.compile(r"""((?:src|href)=["'])(?:\./)?pieces/""")
 MAX_QUESTIONS = 5
 
 BASE_SYSTEM = """<!-- role:ux -->
@@ -107,6 +110,12 @@ Steps:
    injected by code; never define them yourself.
 5. `route` is the path where the screen will live in the product ("/" for the home page,
    "/settings", "/#/history" in a single-page app); it is where the built page is photographed.
+6. `pieces`: the pictures the screens need that the repository does not have yet (an
+   illustration, an icon, a cover, a game sprite), at most {max_pieces}. The Designer makes them
+   and they go to the founder with the screens. Show each one in the HTML as
+   <img src="pieces/<name>.png" alt="…"> at its size; `target` is where its file goes in the
+   product (for example "public/images/<name>.png"). Leave `pieces` empty when the screens need
+   no picture: text, colour and layout are yours, never a picture's.
 Rules:
 - Draw what the spec asks, nothing more: a new feature, section or button nobody asked for is
   invention. Every choice the spec, the founder's answers and the references did not settle goes
@@ -118,8 +127,11 @@ the founder wants, choose the simplest screen that meets the criteria and say so
 Respond with JSON only:
 {{"screens": [{{"id": str, "title": str, "route": str, "alt": str, "criteria": [int],
   "states": [{{"state": "main"|"empty"|"error"|"loading", "html": str}}]}}],
-  "not_visible": [int], "assumptions": [str]}}
-`alt` is "" unless two alternatives were asked for (then "A" and "B" on two versions of the same
+  "not_visible": [int], "assumptions": [str],
+  "pieces": [{{"name": str, "purpose": str, "width": int, "height": int,
+    "background": "transparent"|"solid", "format": "png"|"jpg"|"webp", "pixel_art": bool,
+    "grid": int, "target": str}}]}}
+`grid` is the sprite's size in game pixels, for pixel art only. `alt` is "" unless two alternatives were asked for (then "A" and "B" on two versions of the same
 screen id). Write `title` and `assumptions` in {language}; the screen texts are in {language} too.
 """
 
@@ -292,8 +304,10 @@ class UXAgent(LoompaAgent):
         answers: list[str],
         feedback: str = "",
         alternatives: bool = False,
+        pieces: int = 4,
     ) -> dict[str, Any]:
-        """Round `n` of the story's screens, written under `<story>/round-n/` with a manifest."""
+        """Round `n` of the story's screens, written under `<story>/round-n/` with a manifest.
+        `pieces` caps the pictures the UX may ask the Designer for (0 when none may be made)."""
         self.set_state("WORKING", state, detail=f"desenhando as telas (rodada {n})")
         if mode == "light":
             how = (
@@ -325,7 +339,8 @@ class UXAgent(LoompaAgent):
             + self.grounding(4000)
         )
         data = await self.ask_json_with_tools(
-            SCREENS_SYSTEM.format(language=self.language, mode=how) + EXPLORE_HINT,
+            SCREENS_SYSTEM.format(language=self.language, mode=how, max_pieces=pieces)
+            + EXPLORE_HINT,
             user,
             self.explore_tools(),
             story=state,
@@ -356,7 +371,8 @@ class UXAgent(LoompaAgent):
                     continue
                 target = folder / d / f"{name}.html"
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(with_tokens(str(st["html"]), css), encoding="utf-8")
+                html = PIECE_SRC.sub(r"\1../../pieces/", str(st["html"]))
+                target.write_text(with_tokens(html, css), encoding="utf-8")
                 states.append(name)
             if not states:
                 continue
@@ -378,6 +394,7 @@ class UXAgent(LoompaAgent):
             "screens": screens,
             "not_visible": [int(c) for c in data.get("not_visible") or [] if str(c).isdigit()],
             "assumptions": self._list(data, "assumptions")[:10],
+            "pieces": (data.get("pieces") or [])[:pieces] if pieces else [],
         }
         write_json(folder / "manifest.json", result)
         self.set_state("IDLE")

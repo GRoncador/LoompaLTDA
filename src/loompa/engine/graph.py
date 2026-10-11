@@ -1085,6 +1085,7 @@ async def node_dev(ctx: EngineContext, state: StoryState) -> StoryState:
         ctx.emit("story.waiting", story_id=state.story_id, pending=[moving], parent_rework=True)
         return state
     wt = _ensure_worktree(ctx, state)
+    place_pieces(ctx, state, wt)  # the approved pictures, before the Worker (ADR-0040)
     if "baseline" not in state.extra:
         if ctx.worktrees.changed_files(wt):
             # resumed mid-node (engine restart): the worktree already holds the story's own
@@ -2103,4 +2104,5 @@ from loompa.engine.design_gate import (  # noqa: E402
     apply_design_answer,
     gated,
     opens_area,
+    place_pieces,
 )

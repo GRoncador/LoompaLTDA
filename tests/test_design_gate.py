@@ -366,3 +366,88 @@ def test_the_gate_and_the_vision_models_are_set_in_the_settings(web: Factory):
         apply_settings(
             web.root, cfg, SettingsPatch(vision=[ModelCandidate(provider="x", model="y")])
         )
+
+
+async def test_a_commercial_product_gets_a_logo_traced_in_code(web: Factory):
+    """15.14: flat drafts, the founder picks one, it is traced into a vector and exported."""
+    web.config.factory.kind = "commercial"
+    web.save()
+    ctx = make_ctx(Factory.open(web.root), dry_run=True)
+    master = MasterAgent(ctx)
+    await master.meeting("Tela inicial")
+    master.start_sprint()
+    await Scheduler(ctx).run()
+    msg = ctx.store.get_message(load_state(ctx, "S-001").blocked_message_id)
+    await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="1"))  # the visual base
+    await Scheduler(ctx).run()
+    state = load_state(ctx, "S-001")
+    assert state.blocked_reason == "design_logo"
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert len(msg.screens) == 8 and msg.options[0].key == "logo_1"
+    await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="adjust", text="2, mais grosso"))
+    await Scheduler(ctx).run()
+    msg = ctx.store.get_message(load_state(ctx, "S-001").blocked_message_id)
+    assert msg.options[0].key == "logo_adj_1"
+    await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="logo_adj_2"))
+    await Scheduler(ctx).run()
+    brand = DesignPaths.of(web.root).root / "brand"
+    assert (brand / "logo-512.png").is_file() and (brand / "favicon.ico").is_file()
+    logo = json.loads((brand / "logo.json").read_text())
+    assert logo["from"].startswith("logo-adj-2") and "mais grosso" in logo["prompt"]
+    assert "## Logo" in (web.paths.company / "brand.md").read_text()
+    state = load_state(ctx, "S-001")
+    assert state.blocked_reason == "design"  # on to the screens (full mode: commercial)
+    assert state.extra["images_made"] == 12
+    usage = ctx.store.usage_totals(ctx.slug, story_id="S-001")
+    assert usage is not None
+
+
+async def test_pieces_the_screens_need_are_made_and_placed_in_the_product(web: Factory):
+    from loompa.agents.dryrun import dry_run_script, role_of
+
+    def script(model, messages, tools):  # noqa: ANN001
+        out = dry_run_script(model, messages, tools)
+        if role_of(messages) == "ux" and "Draw the screens" in messages[0].content:
+            data = json.loads(out)
+            data["screens"][0]["states"][0]["html"] += "<img src='pieces/heroi.png' alt='herói'>"
+            data["pieces"] = [
+                {
+                    "name": "heroi",
+                    "purpose": "a hero",
+                    "width": 64,
+                    "height": 64,
+                    "background": "transparent",
+                    "format": "png",
+                    "pixel_art": True,
+                    "grid": 16,
+                    "target": "public/img/heroi.png",
+                },
+                {"name": "fora", "purpose": "x", "target": "../../etc/x.png"},
+            ]
+            return json.dumps(data)
+        return out
+
+    paths = DesignPaths.of(web.root)
+    paths.root.mkdir(parents=True, exist_ok=True)
+    paths.tokens.write_text(json.dumps({"color": {"bg": "#ffffff", "primary": "#2563eb"}}))
+    ctx = make_ctx(web, script, dry_run=True)
+    master = MasterAgent(ctx)
+    await master.meeting("Tela do herói")
+    master.start_sprint()
+    await Scheduler(ctx).run()
+    state = load_state(ctx, "S-001")
+    msg = ctx.store.get_message(state.blocked_message_id)
+    titles = [s["title"] for s in msg.screens]
+    assert "Peça: heroi" in titles and "Peça: fora" in titles
+    html = (paths.root / msg.screens[0]["html"]).read_text()
+    assert "../../pieces/heroi.png" in html
+    from PIL import Image
+
+    hero = Image.open(paths.story("S-001") / "pieces" / "heroi.png")
+    assert hero.size == (64, 64) and len(hero.getcolors(4096) or []) <= 4
+    await Scheduler(ctx).aanswer(msg.id, FounderAnswer(option_key="approve"))
+    await Scheduler(ctx).run()
+    state = load_state(ctx, "S-001")
+    assert state.extra[DESIGN_KEY]["pieces_placed"]
+    log = git("log", "--all", "--name-only", "--format=%s", cwd=web.root)
+    assert "public/img/heroi.png" in log and "etc/x.png" not in log

@@ -35,6 +35,7 @@ ROLES: tuple[str, ...] = (
     "storyteller",
     "kaizen",
     "ux",
+    "designer",
 )
 
 
@@ -197,7 +198,7 @@ ALL_CLUSTERS: tuple[str, ...] = (*CLUSTERS, GENERAL_CLUSTER)
 
 CLUSTER_ROLES: dict[str, tuple[str, ...]] = {
     "strategy": ("master", "architect", "product", "product_owner", "analyst"),
-    "engineering": ("worker", "inspector", "ux"),
+    "engineering": ("worker", "inspector", "ux", "designer"),
     "routine": ("deployer", "storyteller", "compliance", "metrics"),
 }
 
@@ -687,6 +688,22 @@ class DeciderConfig(BaseModel):
     timeout_s: float = Field(20.0, gt=0)
 
 
+class ImagesConfig(BaseModel):
+    """The Image cluster (plan 15.13, ADR-0040): OpenRouter image models, tried in order."""
+
+    # exploring cheaply: flat drafts, several options (Seedream 5.0 Flash: US$ 0.018 a picture)
+    draft: list[str] = Field(default_factory=lambda: ["bytedance-seed/seedream-5-0-flash"])
+    # the approved piece at high quality (FLUX 3 at 1k: US$ 0.048)
+    final: list[str] = Field(default_factory=lambda: ["black-forest-labs/flux-3-image"])
+    final_ceiling_usd: float = Field(0.15, ge=0)  # the final slot's price cap per picture
+    # redraws the chosen logo as a vector only when tracing it in code fails its check
+    vector_model: str = "recraft/recraft-v4.1-vector"
+    # at most this many pictures a story may ask for (drafts, finals and retries together)
+    per_story: int = Field(24, ge=0)
+    # the logo and identity in the visual base: `auto` on a commercial product only
+    logo: Literal["auto", "on", "off"] = "auto"
+
+
 class DesignConfig(BaseModel):
     """The design gate (plan Phase 15, ADR-0039)."""
 
@@ -699,6 +716,7 @@ class DesignConfig(BaseModel):
     diff_threshold: float = Field(0.12, ge=0, le=1)
     # The Figma personal token's environment variable (15.9): read only, never written to config.
     figma_token_env: str = "FIGMA_TOKEN"
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
 
 
 class DashboardConfig(BaseModel):

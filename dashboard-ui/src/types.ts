@@ -344,10 +344,13 @@ export type ModelMatrix = Record<string, Record<string, Candidate[]>>;
 
 export type FactoryKind = "personal" | "commercial";
 export type DesignGate = "auto" | "full" | "light" | "off";
+export interface ImagesSettings { draft: string[]; final: string[]; final_ceiling_usd: number; vector_model: string; per_story: number; logo: "auto" | "on" | "off" }
+export interface ImagePick { id: string; name: string; price: number; elo: number; edit_elo: number | null; value: number; references: number }
+export interface ImageSuggestion { draft: ImagePick[]; final: ImagePick[]; fetched_at?: number; note: string; attribution: string }
 
 export interface Settings {
   factory?: { name: string; kind: FactoryKind; kinds: { key: FactoryKind; label: string; hint: string }[] };
-  design?: { gate: DesignGate; diff_threshold: number; figma_token_env: string; figma_key: { configured: boolean; label?: string }; vision: Candidate[] };
+  design?: { gate: DesignGate; diff_threshold: number; figma_token_env: string; figma_key: { configured: boolean; label?: string }; vision: Candidate[]; images: ImagesSettings };
   providers: ProviderInfo[];
   models?: { tier1_ceiling: number; tier2_floor: number; clusters_enabled: boolean; default_route?: "auto" | "openrouter" };
   tiers: Record<string, Candidate[]>;
@@ -380,6 +383,7 @@ export interface SettingsPatch {
   vision?: Candidate[];
   figma_key?: string;
   clear_figma_key?: boolean;
+  images?: Partial<ImagesSettings>;
 }
 
 export interface ProbeResult { name: string; ok: boolean; detail: string; model: string; latency_ms: number }

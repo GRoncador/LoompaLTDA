@@ -11,6 +11,7 @@ role that hallucinates a call to a tool it was never offered is refused in code.
 | architect, product, product_owner, analyst,    | repo  | `.loompa/specs/`, plus `docs/` when | no         |
 | master                                         |       | running inside a story worktree     |            |
 | ux                                             | repo  | `.loompa/design/`                   | no         |
+| designer (and `generate_image`)                | repo  | `.loompa/design/`                   | no         |
 | anyone else                                    | repo  | nothing                             | no         |
 
 Roles that browse the web (Analyst) also get the MCP tools of the servers configured for them.
@@ -116,6 +117,13 @@ PROFILES: dict[str, ToolProfile] = {
     # no repository tools: they answer from what they are given and what memory holds
     "ux": ToolProfile(
         "ux", _DOC_ROLE_TOOLS | {MEMORY_TOOL}, DESIGN_DIRS, memory_kinds=DESIGN_KINDS
+    ),
+    # the only role that makes pictures (plan 15.12): `generate_image` is checked when it is used
+    "designer": ToolProfile(
+        "designer",
+        READ_TOOLS | {MEMORY_TOOL, "generate_image"},
+        DESIGN_DIRS,
+        memory_kinds=DESIGN_KINDS,
     ),
     **{
         role: ToolProfile(

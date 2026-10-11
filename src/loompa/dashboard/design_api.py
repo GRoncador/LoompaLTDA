@@ -34,7 +34,9 @@ if TYPE_CHECKING:
 
 MEDIA = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
 # a static screen opens with no scripts and no network: it is a picture the founder can scroll
-SCREEN_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:"
+SCREEN_CSP = (
+    "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src data:"
+)
 STORY_ID = re.compile(r"S-\d+[A-Z]?")
 
 
@@ -197,6 +199,42 @@ def register(app: FastAPI, hub: Any) -> None:
             pass
         ctx.emit("design.reference", reference=ref["id"], kind=kind, story_id=story_id or None)
         return {"reference": ref, "note": picture_note}
+
+    @app.get("/api/factories/{slug}/images/suggest")
+    async def images_suggest(slug: str, refresh: bool = False) -> dict[str, Any]:
+        """The Image cluster's suggestion (15.13): OpenRouter's image catalog with the price per
+        picture and Artificial Analysis' arena ratings. A suggestion only: the founder applies."""
+        from loompa.config.secrets import hub_home
+        from loompa.llm import image_catalog
+
+        ctx = hub.get(slug).ctx
+        home = hub_home()
+        cached = image_catalog.load(home)
+        aa = ctx.config.tools.artificial_analysis
+        key = ctx.secrets.get(aa.api_key_env) or ""
+        note = ""
+        if refresh or not cached:
+            try:
+                cached = await image_catalog.refresh(home, aa_key=key, aa_base=aa.base_url)
+            except Exception:  # noqa: BLE001 - the old list stays, with a note
+                note = "Não consegui atualizar a lista agora; mostrando a última guardada."
+        if not key:
+            note = (
+                note
+                or "Sem a chave da Artificial Analysis não há notas: configure-a em Provedores."
+            )
+        images = ctx.config.design.images
+        ranked = image_catalog.rank(
+            cached.get("catalog") or [],
+            cached.get("ratings") or {},
+            final_ceiling=images.final_ceiling_usd,
+        )
+        return {
+            **ranked,
+            "fetched_at": cached.get("fetched_at"),
+            "note": note,
+            "attribution": "Notas: Artificial Analysis (artificialanalysis.ai)",
+        }
 
     @app.delete("/api/factories/{slug}/design/references/{ref_id}")
     def design_remove_reference(slug: str, ref_id: str) -> dict[str, Any]:
