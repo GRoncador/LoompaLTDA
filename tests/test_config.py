@@ -114,11 +114,12 @@ def test_turning_clusters_off_sends_every_role_to_the_general_cluster():
 def test_a_named_task_can_have_its_own_tier():
     """The Master decides on tier 1, but classifying a story is not a decision."""
     cfg = default_config()
-    assert cfg.models.tier_for("architect") == "tier1"
+    assert cfg.models.tier_for("architect") == "tier2"
     assert cfg.models.tier_for_task("architect", "architect.preflight") == "tier2"
     cfg.models.role_tasks["architect.preflight"] = "tier3"
     assert cfg.models.tier_for_task("architect", "architect.preflight") == "tier3"
     # an unknown task is the role's tier, never an error
+    cfg.models.roles["architect"] = "tier1"
     assert cfg.models.tier_for_task("architect", "architect.inventada") == "tier1"
 
 

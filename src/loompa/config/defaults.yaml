@@ -136,7 +136,7 @@ models:
         model: openrouter/free
   roles:                     # any role not listed here uses tier2
     master: tier2            # meetings and chat; its decisions go through the PO and the founder
-    architect: tier1
+    architect: tier2         # its plan has its own rule (tier 1 on COMPLEX, see role_tasks)
     product: tier2
     product_owner: tier2
     analyst: tier2
@@ -147,9 +147,9 @@ models:
     metrics: tier2
     storyteller: tier3       # wording only; tier 2 when no free model answers
   # Named calls whose profile differs from the role's default tier (loompa/config/schema.py:
-  # ROLE_TASKS). Absent keys use the task's own default: tier 3 (free models, tier 2 when none
-  # answers) for wording what is already decided, tier 2 for checking a plan or a spec, and the
-  # Architect's plan on tier 1 only for a COMPLEX story.
+  # ROLE_TASKS). Absent keys use the task's own default: tier 2 for all of them (wording on the
+  # free tier 3 came back broken or worse on the bench, 2026-10-06), and the Architect's plan
+  # and the PO's plan review on tier 1 only for a COMPLEX story.
   role_tasks: {}
   temperature: 0.2
   # Output room is a backstop (ADR-0016): only what a model writes is billed. `low` calls get

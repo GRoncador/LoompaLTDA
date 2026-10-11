@@ -17,7 +17,6 @@ from loompa.company import company_dir, filled
 from loompa.dependencies import INTEGRATION_KEY
 from loompa.engine.state import StoryState
 from loompa.hygiene import is_debris, is_stray_data, new_files
-from loompa.llm.router import TIER_ABOVE
 from loompa.worktrees import Worktree
 
 SUMMARY_SYSTEM = """<!-- role:deployer -->
@@ -365,10 +364,10 @@ class DeployerAgent(LoompaAgent):
                 DIAGNOSE_SYSTEM.format(language=self.language),
                 user,
                 story=state,
-                tier_override=TIER_ABOVE["tier2"] if attempt else None,
-                # one of four actions: tamagotchi S-054 spent 11k tokens and 220 s choosing
-                max_tokens=600,
-                reasoning_effort="low",
+                # one of four actions: tamagotchi S-054 spent 11k tokens and 220 s choosing. A
+                # retry thinks harder on the same tier: the routine cluster has no tier 1 of its own
+                max_tokens=600 if not attempt else 4000,
+                reasoning_effort="high" if attempt else "low",
             )
             action = str(data.get("action") or "")
             reason = str(data.get("reason") or "")[:300]

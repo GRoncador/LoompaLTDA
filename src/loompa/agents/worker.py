@@ -985,6 +985,8 @@ class WorkerAgent(LoompaAgent):
                 agent=self.name,
                 story_id=state.story_id,
                 task="worker.self_check",
+                # a Senior Worker (tier 1) is not checked by a weaker model than itself
+                tier_override=self.tier_override,
                 json_mode=True,
                 max_tokens=600,
                 complexity=str(state.complexity),

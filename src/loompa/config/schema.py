@@ -299,6 +299,13 @@ ROLE_TASKS: tuple[RoleTask, ...] = (
         default_tier="tier2",
     ),
     RoleTask(
+        key="product_owner.groom",
+        role="product_owner",
+        label="Revisar o backlog na conversa",
+        hint="relê os cards contra o código de hoje e propõe ajustes; muitas leituras, pouco texto",
+        default_tier="tier2",
+    ),
+    RoleTask(
         key="worker.self_check",
         role="worker",
         label="Autoconferência do Worker",

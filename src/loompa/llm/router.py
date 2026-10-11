@@ -339,8 +339,9 @@ class ModelRouter:
     ) -> tuple[str, list[ModelCandidate]]:
         """Tier for a call: explicit override > declared task > story complexity > role/cluster
         default. A declared task (ROLE_TASKS) carries its own complexity rule; SIMPLE never runs
-        above tier 2. Candidates are resolved from the matrix: cluster(role) x tier. With `lift`
-        (a retry of a step that failed) the call goes one tier above what it would have used."""
+        above tier 2 by itself. Candidates are resolved from the matrix: cluster(role) x tier.
+        With `lift` (a retry of a step that failed) the call goes one tier above what it would
+        have used, on a SIMPLE story too: a failure is reason enough to climb."""
         cluster = self.config.models.cluster_for_role(role)
         tier = tier_override or self.config.models.task_tier(role, task, complexity)
         if tier is None:
@@ -371,6 +372,11 @@ class ModelRouter:
         # Fallback to legacy tiers if cluster matrix has no models
         if not cands:
             cands = self.config.models.tiers.get(tier, [])
+            if cands:
+                # the legacy lists mix clusters (tier 1 from strategy, tier 2 from engineering)
+                log.warning(
+                    "cluster %s has no models; %s uses the legacy %s list", cluster, role, tier
+                )
 
         return tier, list(cands)
 
