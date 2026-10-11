@@ -96,7 +96,9 @@ def test_a_brainstorm_over_the_api_ends_in_the_backlog(client: TestClient):
     body = r.json()
     conv = body["conversation"]
     assert conv["kind"] == "brainstorm" and conv["turns"][1]["name"] == "Master Loompa"
-    assert {c["role"] for c in body["consultants"]} == {"analyst", "architect", "ux"}
+    assert {"analyst", "architect", "ux", "product_manager"} <= {
+        c["role"] for c in body["consultants"]
+    }
     cid = conv["id"]
     r = client.post(f"{BASE}/conversations/{cid}/commit", json={})
     assert r.status_code == 409 and "aprove o rumo" in r.json()["detail"]

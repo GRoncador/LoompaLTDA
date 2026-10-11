@@ -109,6 +109,27 @@ Um termo por linha: `termo` — o que significa neste produto (e o que não sign
 """,
     ),
 )
+# Written by the product manager's discovery (plan 16.2) and saved only with the founder's OK.
+DOCS += (
+    CompanyDoc(
+        "competitors",
+        "competitors.md",
+        "Competitors and alternatives",
+        """# Concorrentes e alternativas
+
+Um por linha: quem é, o que faz, em que este produto é diferente, e a fonte.
+""",
+    ),
+    CompanyDoc(
+        "hypotheses",
+        "hypotheses.md",
+        "Hypotheses to validate",
+        """# Hipóteses
+
+Uma por linha: “Acreditamos que X; saberemos pela métrica Y.”
+""",
+    ),
+)
 BY_KIND = {d.kind: d for d in DOCS}
 KINDS = tuple(BY_KIND)
 
@@ -116,14 +137,17 @@ KINDS = tuple(BY_KIND)
 # words; the Product Owner and the Master weigh the backlog against the business; the Storyteller
 # writes in the brand's voice; the Architect only needs the domain's words.
 READERS: dict[str, tuple[str, ...]] = {
-    "master": ("business", "positioning", "glossary"),
-    "product_owner": ("business", "customer", "glossary"),
+    "master": ("business", "positioning", "glossary", "hypotheses"),
+    "product_owner": ("business", "customer", "glossary", "hypotheses"),
+    "product_manager": ("business", "customer", "positioning", "competitors", "hypotheses"),
     "product": ("customer", "glossary"),
-    "analyst": ("business", "customer", "positioning"),
+    "analyst": ("business", "customer", "positioning", "competitors"),
     "architect": ("glossary",),
     "storyteller": ("brand", "positioning", "customer", "glossary"),
     "compliance": ("business", "customer"),
-    "metrics": ("business",),
+    "metrics": ("business", "hypotheses"),
+    "ux": ("customer", "brand", "positioning", "glossary"),
+    "designer": ("brand", "positioning", "customer"),
 }
 
 

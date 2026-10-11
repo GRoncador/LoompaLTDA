@@ -37,8 +37,8 @@ function detail(e: unknown): string {
   try { return String(JSON.parse(json).detail ?? raw); } catch { return raw; }
 }
 
-export default function ChatModal({ slug, kind, resumeId, initialText, kickoff = false, onBrainstorm, onClose }: {
-  slug: string; kind: ConversationKind; resumeId?: string; initialText?: string; kickoff?: boolean;
+export default function ChatModal({ slug, kind, resumeId, initialText, kickoff = false, commercial = false, onBrainstorm, onClose }: {
+  slug: string; kind: ConversationKind; resumeId?: string; initialText?: string; kickoff?: boolean; commercial?: boolean;
   onBrainstorm?: (text: string) => void; onClose: () => void;
 }) {
   const [conv, setConv] = useState<Conversation | null>(null);
@@ -149,6 +149,8 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   };
   const approve = () => conv && run(() => api.approve(slug, conv.id), "O Product Owner está dividindo o rumo em cards");
   const reopen = () => conv && run(() => api.reopen(slug, conv.id));
+  // plan 16.2: the Analyst's cited competitors, then the PM's Lean Canvas and hypotheses
+  const discover = () => conv && run(() => api.discover(slug, conv.id) as never, "O Analyst pesquisa concorrentes e o PM escreve a descoberta");
   const editSplit = (ops: Record<string, unknown>[]) => conv && run(() => api.editDraft(slug, conv.id, ops, true));
   const toBrainstorm = async () => {
     if (!conv) return;
@@ -222,7 +224,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
 
         {current === "brainstorm" ? (
           <BrainstormPanel conv={conv} consultants={consultants} busy={busy} open={open} question={text.trim()}
-            onConsult={consult} onEdit={(ops) => edit(ops)} onEditSplit={editSplit} onApprove={approve} onReopen={reopen}
+            onConsult={consult} onEdit={(ops) => edit(ops)} onEditSplit={editSplit} onApprove={approve} onReopen={reopen} onDiscover={commercial ? discover : undefined}
             onCommit={() => commit(false)} onDiscard={discard} />
         ) : isReview ? (
           <ReviewPanel conv={conv} review={review} busy={busy} open={open} founderTurns={founderTurns}
@@ -387,7 +389,8 @@ function KickoffBox({ k, editable, onEdit }: { k: Kickoff; editable: boolean; on
 
 /** A brainstorm (ADR-0020): the direction and the ideas while it is a conversation, the opinions
  *  the roles gave, and, after the first OK, the Product Owner's split waiting for the second. */
-function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, onEdit, onEditSplit, onApprove, onReopen, onCommit, onDiscard }: {
+function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, onEdit, onEditSplit, onApprove, onReopen, onCommit, onDiscard, onDiscover }: {
+  onDiscover?: () => void;
   conv: Conversation | null; consultants: Consultant[]; busy: boolean; open: boolean; question: string;
   onConsult: (c: Consultant) => void; onEdit: (ops: Record<string, unknown>[]) => void; onEditSplit: (ops: Record<string, unknown>[]) => void;
   onApprove: () => void; onReopen: () => void; onCommit: () => void; onDiscard: () => void;
@@ -463,6 +466,10 @@ function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, o
           ) : (
             <button className={`w-full ${draft?.ready ? "btn-primary" : "btn-ghost"}`} disabled={busy || !conv || (ideas.length === 0 && !draft?.direction)}
               title="1º OK: o rumo fica aprovado e o Product Owner propõe os cards" onClick={onApprove}>✅ Aprovar o rumo</button>
+          )}
+          {onDiscover && (
+            <button className="btn-ghost w-full text-xs" disabled={busy || !conv || (ideas.length === 0 && !draft?.direction)}
+              title="Produto comercial: concorrentes com fontes, Lean Canvas e hipóteses, para você revisar na Caixa de Entrada" onClick={onDiscover}>🔎 Descoberta</button>
           )}
           <button className="w-full text-[11px] text-slate-500 hover:text-red-300" disabled={busy || !conv} onClick={onDiscard}>Descartar conversa</button>
         </div>

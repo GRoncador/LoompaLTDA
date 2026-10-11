@@ -208,6 +208,10 @@ class Backlog:
         )
         if after is not None:
             self.place(story_id, after)
+        if state.epic:
+            from loompa.lifecycle import Lifecycle
+
+            Lifecycle(self.ctx).link(story_id, state.epic)  # a product epic's card (16.5)
         return Admission(story_id, created=True)
 
     def set_priority(self, story_id: str, priority: int) -> None:

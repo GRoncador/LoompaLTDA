@@ -839,9 +839,13 @@ class ProductOwnerAgent(LoompaAgent):
         listed = {
             k: c for k, c in cards.items() if k not in conv.draft.retire
         }  # leaving (ADR-0038)
+        from loompa.lifecycle import Lifecycle
+
         user = (
             f"{self.grounding(2000)}\n\n"
-            f"## Backlog\n{render_backlog(listed, delivered=board.delivered())}\n\n"
+            # the phase and its epics frame the proposal (plan 16.6)
+            + Lifecycle(self.ctx).brief()
+            + f"## Backlog\n{render_backlog(listed, delivered=board.delivered())}\n\n"
             + (
                 f"{render_running(self.ctx, conv.draft.sprint_id)}\n\n"
                 if conv.draft.members

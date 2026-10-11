@@ -17,6 +17,7 @@ import SprintsModal from "./components/SprintsModal";
 import FactoryModal from "./components/FactoryModal";
 import ProductFindingsModal from "./components/ProductFindingsModal";
 import DesignModal from "./components/DesignModal";
+import ProductModal from "./components/ProductModal";
 
 export default function App() {
   const [factories, setFactories] = useState<FactoryRef[]>([]);
@@ -30,6 +31,7 @@ export default function App() {
   const [factoryOpen, setFactoryOpen] = useState(false); // the factory's self-diagnosis (8.4)
   const [productOpen, setProductOpen] = useState(false); // today's Kaizen findings in the product
   const [design, setDesign] = useState<{ story?: string | null } | null>(null); // the design gate (ADR-0039)
+  const [productOpen2, setProductOpen2] = useState(false); // phases and epics (plan 16)
   // the Sprints tab (10.8): open, and on which sprint ("" = the current one)
   const [sprintsAt, setSprintsAt] = useState<string | null>(null);
   const [agentName, setAgentName] = useState<string | null>(null);
@@ -121,6 +123,7 @@ export default function App() {
             onOpenSprint={setSprintsAt}
             columns={overview?.columns ?? []} agents={overview?.factory.engine ? overview.agents : []} sprint={overview?.sprint ?? null} nextSprint={overview?.next_sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now} storyCap={overview?.finance.story_cap_usd ?? 0} engine={!!overview?.factory.engine}
             kickoff={!!overview?.factory.kickoff}
+            epics={overview?.epics ?? {}} phase={overview?.phase ?? null} onProduct={() => setProductOpen2(true)}
             onChat={(kind, resumeId) => setChat({ kind, resumeId })} onOpen={setStoryId}
             onCreate={createStory}
             onReorder={async (ids, dragged) => { if (slug) { try { await api.reorderBacklog(slug, ids, dragged); } catch (e) { setError(String(e)); } refresh(); } }}
@@ -129,9 +132,10 @@ export default function App() {
         </section>
       </main>
       <EventTicker events={events} agents={overview?.agents ?? []} factory={overview?.factory.name ?? ""} />
-      {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} kickoff={!!overview?.factory.kickoff} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
+      {chat && slug && <ChatModal key={chat.resumeId ?? chat.kind} slug={slug} kind={chat.kind} resumeId={chat.resumeId} initialText={chat.text} kickoff={!!overview?.factory.kickoff} commercial={overview?.factory.kind === "commercial"} onBrainstorm={(text) => setChat({ kind: "brainstorm", text })} onClose={() => { setChat(null); refresh(); }} />}
       {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
       {factoryOpen && slug && <FactoryModal slug={slug} onClose={() => setFactoryOpen(false)} onOpenSprint={(id) => { setFactoryOpen(false); setSprintsAt(id); }} onOpenStory={setStoryId} />}
+      {productOpen2 && slug && <ProductModal slug={slug} onClose={() => { setProductOpen2(false); refresh(); }} />}
       {design && slug && <DesignModal slug={slug} story={design.story} onReply={reply} onOpenStory={setStoryId} onClose={() => { setDesign(null); refresh(); }} />}
       {productOpen && slug && <ProductFindingsModal slug={slug} onClose={() => setProductOpen(false)} onOpenStory={setStoryId} />}
       {sprintsAt !== null && slug && <SprintsModal slug={slug} initial={sprintsAt || null} onClose={() => setSprintsAt(null)} onOpenStory={setStoryId} />}

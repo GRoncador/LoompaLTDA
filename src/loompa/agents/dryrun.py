@@ -92,6 +92,10 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
         return _ux(messages, title)
     if role == "designer":
         return _designer(messages)
+    if role == "product_manager":
+        return _product_manager(messages)
+    if role == "metrics" and "how to measure" in messages[0].content:
+        return json.dumps({"measure": "Simulação: contar no produto quem usou na semana."})
     if role == "master":
         if "Classify the story" in messages[0].content:
             researching = re.search(
@@ -420,3 +424,29 @@ def _designer(messages: list[Message]) -> str:
         names = re.findall(r"^- ([a-z0-9-]+):", messages[-1].content, re.M)
         return json.dumps({"prompts": [{"name": n, "prompt": f"flat {n}"} for n in names]})
     return json.dumps({"pictures": [], "best": 1})
+
+
+def _product_manager(messages: list[Message]) -> str:
+    system = messages[0].content
+    if "Propose the product epics" in system:
+        return json.dumps(
+            {
+                "epics": [
+                    {
+                        "name": "Primeiro uso",
+                        "goal": "Simulação: usar sem ajuda.",
+                        "metric": "Simulação: 5 pessoas",
+                        "why": "Simulação.",
+                    }
+                ]
+            }
+        )
+    if "discovery documents" in system:
+        return json.dumps(
+            {
+                "canvas": "## Problema\n- Simulação: a definir.",
+                "competitors": "Simulação: o Analyst não pesquisou.",
+                "hypotheses": ["Acreditamos que X; saberemos pela métrica Y."],
+            }
+        )
+    return json.dumps({"exit_met": "unknown", "evidence": "Simulação.", "missing": []})

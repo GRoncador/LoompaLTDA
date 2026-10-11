@@ -469,6 +469,7 @@ def create_app(
     # -------------------------------------------------------------- overview
     @app.get("/api/factories/{slug}/overview")
     def overview(slug: str) -> dict[str, Any]:
+        from loompa.dashboard.product_api import phase_chip
         from loompa.kickoff import needs_kickoff
 
         rt = hub.get(slug)
@@ -529,6 +530,7 @@ def create_app(
                 "engine_state": hub.engine_state(slug),
                 "in_flight": hub.in_flight(slug),
                 "dry_run": hub.dry_run,
+                "kind": ctx.config.factory.kind,  # plan 16.1
                 "kickoff": needs_kickoff(ctx),  # plan 10.10: only the opening brainstorm
             },
             "columns": [
@@ -551,6 +553,8 @@ def create_app(
             # product findings (Kaizen), not the factory's: no repeats, the founder's own day (8.4)
             "kaizen_today": len(_product_findings(ctx)),
             "sprint": _sprint_summary(ctx),
+            "phase": phase_chip(ctx),  # "MVP: 60%" (plan 16.7)
+            "epics": {e["id"]: e["name"] for e in ctx.store.list_epics(ctx.slug)},
             "next_sprint": _sprint_context(ctx)["planned"],
             "conversations": [
                 _conversation_summary(c)
@@ -959,6 +963,15 @@ def create_app(
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
                 turn = await chats.consult(conversation_id, body.role, body.question)
+                return _payload(chats.board.require(conversation_id), turn=asdict(turn))
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/discover")
+    async def discover_product(slug: str, conversation_id: str) -> dict[str, Any]:
+        """A commercial product's discovery in the brainstorm (plan 16.2)."""
+        rt, chats = _chat(slug)
+        async with rt.chat_lock(conversation_id):
+            with _chat_errors():
+                turn = await chats.discover(conversation_id)
                 return _payload(chats.board.require(conversation_id), turn=asdict(turn))
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/approve")
@@ -1454,9 +1467,10 @@ def create_app(
         finally:
             rt.listeners.discard(queue)
 
-    from loompa.dashboard import design_api
+    from loompa.dashboard import design_api, product_api
 
     design_api.register(app, hub)
+    product_api.register(app, hub)
 
     # ---------------------------------------------------------------- static
     if (STATIC_DIR / "assets").is_dir():
@@ -1518,6 +1532,7 @@ def _story_card(s: dict[str, Any]) -> dict[str, Any]:
         "id": s["id"],
         "title": s["title"],
         "epic": s.get("epic", ""),
+        "epic_id": s.get("epic_id", ""),
         "stage": s["stage"],
         "column": kanban_column(s["stage"]),
         "priority": s.get("priority", 100),

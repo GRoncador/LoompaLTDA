@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS stories (
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     epic TEXT NOT NULL DEFAULT '',
+    epic_id TEXT NOT NULL DEFAULT '',
     stage TEXT NOT NULL,
     priority INTEGER NOT NULL DEFAULT 100,
     priority_pinned INTEGER NOT NULL DEFAULT 0,
@@ -134,6 +135,32 @@ CREATE TABLE IF NOT EXISTS conversations (
     updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS phases (
+    factory TEXT NOT NULL,
+    key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    goal TEXT NOT NULL DEFAULT '',
+    exit_criterion TEXT NOT NULL DEFAULT '',
+    measure TEXT NOT NULL DEFAULT '',
+    facts TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'planned',
+    started_at TEXT,
+    ended_at TEXT,
+    PRIMARY KEY (factory, key)
+);
+CREATE TABLE IF NOT EXISTS epics (
+    id TEXT PRIMARY KEY,
+    factory TEXT NOT NULL,
+    name TEXT NOT NULL,
+    goal TEXT NOT NULL DEFAULT '',
+    metric TEXT NOT NULL DEFAULT '',
+    phase TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    why TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -198,6 +225,8 @@ class Store:
             ("priority_pinned", "INTEGER NOT NULL DEFAULT 0"),
             # the cards this one needs delivered first; only the Product Owner writes it (ADR-0021)
             ("depends_on", "TEXT NOT NULL DEFAULT '[]'"),
+            # the product epic the card belongs to (plan 16.5); `epic` stays the group label
+            ("epic_id", "TEXT NOT NULL DEFAULT ''"),
         ),
         "usage": (
             ("served_by", "TEXT NOT NULL DEFAULT ''"),
@@ -260,6 +289,7 @@ class Store:
             "title",
             "description",
             "epic",
+            "epic_id",
             "stage",
             "priority",
             "priority_pinned",
@@ -289,6 +319,7 @@ class Store:
             defaults = {
                 "description": "",
                 "epic": "",
+                "epic_id": "",
                 "priority": 100,
                 "priority_pinned": 0,
                 "depends_on": "[]",
@@ -345,6 +376,52 @@ class Store:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY priority ASC, created_at ASC"
         return [self._hydrate(r) for r in self._q(sql, tuple(params))]
+
+    # --------------------------------------------------- phases and epics (plan 16.3, 16.5)
+    def list_phases(self, factory: str) -> list[dict[str, Any]]:
+        return self._q("SELECT * FROM phases WHERE factory = ? ORDER BY position", (factory,))
+
+    def upsert_phase(self, factory: str, key: str, **fields: Any) -> None:
+        existing = {p["key"]: p for p in self.list_phases(factory)}.get(key)
+        if existing is None:
+            row = {"factory": factory, "key": key, "name": key, **fields}
+            cols = list(row)
+            self._x(
+                f"INSERT INTO phases ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
+                tuple(row.values()),
+            )
+            return
+        if fields:
+            sets = ", ".join(f"{k} = ?" for k in fields)
+            self._x(
+                f"UPDATE phases SET {sets} WHERE factory = ? AND key = ?",
+                (*fields.values(), factory, key),
+            )
+
+    def list_epics(self, factory: str) -> list[dict[str, Any]]:
+        return self._q("SELECT * FROM epics WHERE factory = ? ORDER BY id", (factory,))
+
+    def get_epic(self, epic_id: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT * FROM epics WHERE id = ?", (epic_id,))
+        return rows[0] if rows else None
+
+    def upsert_epic(self, epic: dict[str, Any]) -> str:
+        epic = dict(epic)
+        epic["updated_at"] = now_iso()
+        if not epic.get("id"):
+            epic["id"] = f"E-{self._next_number('epics', 'E-', epic['factory']):03d}"
+        if self.get_epic(epic["id"]) is None:
+            epic.setdefault("created_at", epic["updated_at"])
+            cols = list(epic)
+            self._x(
+                f"INSERT INTO epics ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
+                tuple(epic.values()),
+            )
+        else:
+            fields = {k: v for k, v in epic.items() if k not in ("id", "factory", "created_at")}
+            sets = ", ".join(f"{k} = ?" for k in fields)
+            self._x(f"UPDATE epics SET {sets} WHERE id = ?", (*fields.values(), epic["id"]))
+        return str(epic["id"])
 
     def next_story_id(self, factory: str) -> str:
         return f"S-{self._next_number('stories', 'S-', factory):03d}"

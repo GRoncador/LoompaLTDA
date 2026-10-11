@@ -11,8 +11,8 @@ Two OKs close it. The first approves the direction; the Product Owner then propo
 into cards (new ones, or additions to cards already waiting). The second files that split
 (`ProductOwnerAgent.apply_split`); ideas left out stay in the session for another round.
 
-Future roles (legal, the product manager) join by adding a row to `CONSULTANTS` once the factory
-has them; the UX Loompa joined with the design gate (plan 15.8).
+The roster is the table of plan 10.10 (16.8): the Analyst, the Architect, the UX (15.8), the
+Product Owner, the product manager, Compliance, Metrics, the Storyteller and the Inspector.
 """
 
 from __future__ import annotations
@@ -144,9 +144,22 @@ class Consultant:
     def agent(self, ctx: EngineContext) -> LoompaAgent:
         from loompa.agents.analyst import AnalystAgent
         from loompa.agents.architect import ArchitectAgent
+        from loompa.agents.inspector import InspectorAgent
+        from loompa.agents.product_manager import ProductManagerAgent
+        from loompa.agents.product_owner import ProductOwnerAgent
+        from loompa.agents.support import SupportAgent
         from loompa.agents.ux import UXAgent
 
-        return {"analyst": AnalystAgent, "architect": ArchitectAgent, "ux": UXAgent}[self.role](ctx)
+        if self.role in ("compliance", "metrics", "storyteller"):
+            return SupportAgent(ctx, self.role)
+        return {
+            "analyst": AnalystAgent,
+            "architect": ArchitectAgent,
+            "ux": UXAgent,
+            "product_owner": ProductOwnerAgent,
+            "product_manager": ProductManagerAgent,
+            "inspector": InspectorAgent,
+        }[self.role](ctx)
 
 
 CONSULTANTS: dict[str, Consultant] = {
@@ -180,6 +193,52 @@ CONSULTANTS: dict[str, Consultant] = {
             tools_rule="Ground yourself first: read the existing pages and components (list_dir, "
             "search, read_file) to see the screens the idea would change, and read no more than "
             "an opinion needs.",
+        ),
+        # plan 16.8 (the table of 10.10): who else the Master can ask, and what each one brings
+        Consultant(
+            role="product_owner",
+            label="backlog, prioridade e o que já existe",
+            lens="the backlog and what was delivered: what the idea duplicates or conflicts "
+            "with, how it splits into cards, and where it would rank",
+            tools_rule="Ground yourself first: read the repository and memory only as far as the "
+            "backlog and the deliveries need.",
+        ),
+        Consultant(
+            role="product_manager",
+            label="fase do produto, épicos e roadmap",
+            lens="the product's phase and epics: whether the idea serves the current phase's "
+            "goal, which epic it belongs to, and what it would push to a later phase",
+            tools_rule="Use only the memory search and the material given; do not guess numbers.",
+        ),
+        Consultant(
+            role="compliance",
+            label="LGPD, termos e privacidade",
+            lens="privacy and terms: personal data the idea collects or exposes, consent, "
+            "retention, and what a lawyer should review",
+            tools_rule="Use only the memory search and the material given; say when a fact you "
+            "need (what data, where it is stored) is missing.",
+        ),
+        Consultant(
+            role="metrics",
+            label="como medir",
+            lens="measurement: how the idea's success would be counted, what the product must "
+            "record for that, and the smallest instrumentation",
+            tools_rule="Read the data model (search, read_file) only as far as the measure needs.",
+        ),
+        Consultant(
+            role="storyteller",
+            label="texto, nome e comunicação",
+            lens="the words: how the idea is named and explained to users, in the brand's voice, "
+            "and what would make it hard to explain",
+            tools_rule="Use only the material given; never invent features or numbers.",
+        ),
+        Consultant(
+            role="inspector",
+            label="riscos de qualidade e testes",
+            lens="quality: how the idea would be tested, what is hard to verify, and the "
+            "regressions it risks in what exists",
+            tools_rule="Read the tests and the code they cover (list_dir, search, read_file), no "
+            "more than an opinion needs.",
         ),
     )
 }

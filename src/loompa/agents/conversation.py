@@ -410,6 +410,29 @@ class Conversations:
         opinion = await consult(self.ctx, self.board, conv, who.role, question, asked_by="founder")
         return TurnResult(opinion_text(opinion), failed=opinion.failed)
 
+    async def discover(self, conversation_id: str) -> TurnResult:
+        """Discovery in a commercial product's brainstorm (plan 16.2): the Analyst's cited
+        competitors, then the product manager's Lean Canvas and hypotheses, to the inbox."""
+        from loompa.discovery import DiscoveryError, run_discovery
+
+        conv = self._brainstorm(conversation_id)
+        self._reopen(conv)
+        conv.turns.append(Turn(who="founder", text="Descoberta do produto"))
+        self.board.save(conv)
+        try:
+            msg = await run_discovery(self.ctx, self.board, conv)
+        except DiscoveryError as exc:
+            raise ConversationError(str(exc)) from None
+        conv = self.board.require(conversation_id)
+        reply = (
+            "O Product Manager escreveu o Lean Canvas, os concorrentes e as hipóteses. Estão na "
+            "Caixa de Entrada para você revisar: só entram nos documentos da empresa se você mandar "
+            "gravar."
+        )
+        conv.turns.append(Turn(who="agent", name="Product Manager Loompa", text=reply))
+        self.board.save(conv)
+        return TurnResult(reply, extra={"message_id": msg.id})
+
     async def approve(self, conversation_id: str) -> TurnResult:
         """The founder's first OK: the direction stands, and the Product Owner proposes how it
         becomes cards. Nothing is written until the second OK (`commit`)."""

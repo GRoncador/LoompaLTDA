@@ -1,6 +1,6 @@
 import type { AASuggestion, AvailableDTO, FactoryFinding, FactoryScan, ProductFinding } from "./types";
 import type { TraceDetail, TraceOutline } from "./types";
-import type { DesignOverview, DesignReference, ImageSuggestion, StoryDesign } from "./types";
+import type { DesignOverview, DesignReference, ImageSuggestion, ProductView, StoryDesign } from "./types";
 import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -94,6 +94,14 @@ export const api = {
   sprintReport: (slug: string, id: string) => req<SprintReport>(`/api/factories/${slug}/sprints/${id}/report`),
   report: (slug: string) => req<Message>(`/api/factories/${slug}/report`, { method: "POST" }),
   imageSuggest: (slug: string, refresh = false) => req<ImageSuggestion>(`/api/factories/${slug}/images/suggest${refresh ? "?refresh=true" : ""}`),
+  product: (slug: string) => req<ProductView>(`/api/factories/${slug}/product`),
+  setPhase: (slug: string, key: string, body: { goal?: string; exit_criterion?: string; facts?: string; measure?: string }) =>
+    req<ProductView>(`/api/factories/${slug}/product/phases/${key}`, { method: "PUT", body: JSON.stringify(body) }),
+  startPhase: (slug: string, key: string) => req<ProductView>(`/api/factories/${slug}/product/phases/${key}/start`, { method: "POST" }),
+  proposeEpics: (slug: string) => req<{ proposed: number; message_id: string | null }>(`/api/factories/${slug}/product/epics/propose`, { method: "POST" }),
+  setEpic: (slug: string, id: string, status: string) => req<ProductView>(`/api/factories/${slug}/product/epics/${id}`, { method: "PUT", body: JSON.stringify({ status }) }),
+  reviewPhase: (slug: string) => req<{ exit_met: string; evidence: string; missing: string[]; asked: boolean }>(`/api/factories/${slug}/product/review`, { method: "POST" }),
+  discover: (slug: string, conv: string) => req<{ conversation: unknown; turn?: unknown }>(`/api/factories/${slug}/conversations/${conv}/discover`, { method: "POST" }),
   design: (slug: string) => req<DesignOverview>(`/api/factories/${slug}/design`),
   storyDesign: (slug: string, id: string) => req<StoryDesign>(`/api/factories/${slug}/stories/${id}/design`),
   addReference: async (slug: string, fields: { kind: string; title?: string; note?: string; url?: string; story_id?: string; file?: File | null }) => {

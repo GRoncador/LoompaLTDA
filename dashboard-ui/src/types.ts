@@ -16,6 +16,7 @@ export interface StoryCard {
   id: string;
   title: string;
   epic: string;
+  epic_id?: string; // the product epic (plan 16.5)
   stage: string;
   column: string;
   priority: number;
@@ -226,7 +227,7 @@ export interface ChatReply {
 }
 
 export interface Overview {
-  factory: { slug: string; name: string; mode: string; language: string; engine: boolean; dry_run: boolean; kickoff?: boolean;
+  factory: { slug: string; name: string; mode: string; language: string; engine: boolean; dry_run: boolean; kickoff?: boolean; kind?: string;
     engine_state?: EngineState; in_flight?: InFlight[] };
   columns: Column[];
   agents: Agent[];
@@ -235,6 +236,8 @@ export interface Overview {
   kaizen_today: number;
   sprint: SprintSummary | null;
   next_sprint: { id: string; goal: string; story_ids: string[] } | null; // assembled, waiting (ADR-0018)
+  phase?: { key: string; name: string; percent: number; cards: number } | null; // plan 16.7
+  epics?: Record<string, string>;
   conversations: ConversationSummary[];
   last_event_id: number;
 }
@@ -500,3 +503,11 @@ export interface TraceDetail {
 /** stopped · running · pausing (the model calls in flight are finishing) · paused */
 export type EngineState = "stopped" | "running" | "pausing" | "paused";
 export interface InFlight { story: string; minutes: number; doing: string }
+
+// ---------------------------------------------------------------- product (plan 16)
+export interface ProductPhase {
+  key: string; name: string; position: number; goal: string; exit_criterion: string; measure: string;
+  facts: string; status: "planned" | "current" | "done"; percent: number; cards: number;
+}
+export interface ProductEpic { id: string; name: string; goal: string; metric: string; phase: string; status: string; why: string; cards: number; done: number }
+export interface ProductView { kind: string; kind_label: string; discovery: boolean; phases: ProductPhase[]; epics: ProductEpic[] }

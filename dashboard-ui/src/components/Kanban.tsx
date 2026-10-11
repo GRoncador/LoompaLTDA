@@ -8,8 +8,10 @@ const TONE: Record<string, string> = {
 
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
 
-export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, storyCap = 0, engine = false, kickoff = false, onChat, onOpen, onCreate, onReorder, onUnpin }: {
+export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, storyCap = 0, engine = false, kickoff = false, epics = {}, phase = null, onProduct, onChat, onOpen, onCreate, onReorder, onUnpin }: {
   onOpenSprint: (id: string) => void; kickoff?: boolean;
+  epics?: Record<string, string>; // product epics by id (plan 16.7)
+  phase?: { name: string; percent: number; cards: number } | null; onProduct?: () => void;
   columns: Column[]; agents?: Agent[]; sprint: SprintSummary | null; nextSprint: { id: string; goal: string; story_ids: string[] } | null;
   conversations: ConversationSummary[]; live: Record<string, StoryActivity>; now: number;
   storyCap?: number; // o teto por história da aba Orçamento (0 = sem teto)
@@ -26,6 +28,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
   // the mouse over a sprint tag, or over what blocks a card, puts those stories in bold: the
   // titles are plain otherwise, so the board has one weight and the pointer does the pointing
   const [hl, setHl] = useState<{ sprint?: string; ids?: string[] }>({});
+  const [epicFilter, setEpicFilter] = useState(""); // only one product epic's cards (16.7)
   const dropped = useRef(false); // dragend fires after drop: only a cancelled drag resets
   const backlog = columns.find((c) => c.key === "BACKLOG")?.stories ?? [];
   const ordered = (c: Column) => {
@@ -83,6 +86,17 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
               próximo: {nextSprint.id} · {nextSprint.story_ids.length} {nextSprint.story_ids.length === 1 ? "card" : "cards"}
             </span>
           )}
+          {phase && (
+            <button className="chip bg-violet-900/50 text-violet-200 hover:bg-violet-800/60" title="Fase do produto e o quanto dos cards dos épicos dela já foi entregue" onClick={onProduct}>
+              {phase.name}{phase.cards > 0 ? `: ${phase.percent}%` : ""}
+            </button>
+          )}
+          {Object.keys(epics).length > 0 && (
+            <select className="rounded-md border border-line bg-ink px-1 py-0.5 text-xs" value={epicFilter} onChange={(e) => setEpicFilter(e.target.value)} title="Mostrar só os cards de um épico">
+              <option value="">todos os épicos</option>
+              {Object.entries(epics).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          )}
           {/* a sprint starts only from a meeting, after the Product Owner's proposal (ADR-0017) */}
           <button className={`${kickoff ? "btn-ghost opacity-50" : "btn-primary"} text-xs`} disabled={kickoff}
             title={kickoff ? "Comece pelo brainstorm de abertura: ele decide a visão, a primeira versão e a stack" : "O Master abre com o estado do projeto; o Product Owner propõe o sprint"}
@@ -124,7 +138,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
               <span>{c.label}</span><span className="text-slate-500">{c.stories.length}</span>
             </div>
             <div className="scroll-thin flex-1 space-y-1.5 overflow-y-auto px-2 pb-2 pt-1">
-              {ordered(c).map((s) =>
+              {ordered(c).filter((s) => !epicFilter || s.epic_id === epicFilter).map((s) =>
                 c.key === "BACKLOG" ? (
                   <div
                     key={s.id}
@@ -136,10 +150,10 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                     onDrop={(e) => { e.preventDefault(); drop(); }}
                     onDragEnd={() => { if (!dropped.current) { setDragId(null); setPreview(null); } }}
                   >
-                    <Card s={s} cap={storyCap} hl={hl} onHl={setHl} onOpen={onOpen} onUnpin={onUnpin} />
+                    <Card s={s} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now, engine)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  <Card key={s.id} s={s} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now, engine)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
                 ),
               )}
             </div>
@@ -184,7 +198,7 @@ const COMPLEXITY: Record<string, { text: string; cls: string; title: string }> =
   COMPLEX: { text: "complexa", cls: "bg-fuchsia-900/50 text-fuchsia-300", title: "História complexa: mais tarefas, mais revisão e mais custo" },
 };
 
-function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl, onOpen, onUnpin }: { s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; cap?: number; hl?: { sprint?: string; ids?: string[] }; onHl?: (h: { sprint?: string; ids?: string[] }) => void; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
+function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl, onOpen, onUnpin, epicName }: { epicName?: string; s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; cap?: number; hl?: { sprint?: string; ids?: string[] }; onHl?: (h: { sprint?: string; ids?: string[] }) => void; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
   const pinned = s.priority_pinned && s.stage === "BACKLOG";
   const kind = KIND_ICON[s.kind] ?? KIND_ICON.feature;
   const open = !["DONE", "CANCELLED"].includes(s.stage);
@@ -251,6 +265,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
           <span className="cursor-default rounded bg-sky-950/70 px-1 text-sky-500/80 hover:text-sky-300" title={`Sprint ${s.sprint_id}: passe o mouse para destacar as histórias dele`}
             onMouseEnter={() => onHl?.({ sprint: s.sprint_id ?? undefined })} onMouseLeave={() => onHl?.({})}>{s.sprint_id}</span>
         )}
+        {epicName && <span className="max-w-[7rem] truncate rounded bg-violet-950/70 px-1 text-violet-300/90" title={`Épico: ${epicName}`}>{epicName}</span>}
         <span className="ml-auto flex items-center gap-1">
           {pinned && onUnpin && (
             <button className="text-[11px] opacity-80 hover:opacity-100" title="Posição fixada por você: o Product Owner não move este card. Clique para devolver a ordem a ele." onClick={() => onUnpin(s.id)}>📌</button>

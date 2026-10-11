@@ -50,6 +50,7 @@ from loompa.engine.state import PAUSED, TERMINAL, Stage, StoryState
 from loompa.factory import ensure_gitignore
 from loompa.finance import BudgetStatus
 from loompa.finance.story_cap import story_spent
+from loompa.lifecycle import Lifecycle
 from loompa.llm import EnginePaused
 from loompa.memory.sources import answer_document
 from loompa.models_sync import ModelSync
@@ -245,8 +246,30 @@ class Scheduler:
         """Close sprints whose stories all finished (the Master reports to the founder)."""
         from loompa.agents.master import MasterAgent
 
-        await MasterAgent(self.ctx).close_finished_sprints()
-        ModelSync(self.ctx).apply_deferred()  # an approved model swap waits for the work to end
+        closed = await MasterAgent(self.ctx).close_finished_sprints()
+        ModelSync(self.ctx).apply_deferred()
+        if closed:
+            await self._review_phase()
+
+    async def _review_phase(self) -> None:
+        """Once per closed sprint, the product manager reads the phase's exit criterion against
+        the founder's facts; when it holds, the founder is asked about the move (16.3)."""
+        from loompa.agents.product_manager import ProductManagerAgent
+
+        lc = Lifecycle(self.ctx)
+        cur = lc.current()
+        if cur is None or not cur["exit_criterion"] or lc.next_phase() is None:
+            return
+        try:
+            review = await ProductManagerAgent(self.ctx).review_phase()
+        except Exception:  # noqa: BLE001 - a review is advice; the line never waits on it
+            log.exception("phase review failed")
+            return
+        self.ctx.emit("lifecycle.reviewed", phase=cur["key"], exit_met=review["exit_met"])
+        if review["exit_met"] == "yes":
+            lc.propose_move(
+                review["evidence"], review["missing"]
+            )  # an approved model swap waits for the work to end
 
     def budget_ok(self) -> BudgetStatus:
         st = self.ctx.tracker.status()
@@ -562,6 +585,7 @@ class Scheduler:
             self.ctx.config.budget.cap_usd += small if answer.option_key == "raise_10" else large
             self.ctx.factory.save()
         ModelSync(self.ctx).on_answer(msg, answer)
+        Lifecycle(self.ctx).on_answer(msg, answer)  # phases, epics, discovery (plan 16)
         if not msg.story_id:
             return None
         state = load_state(self.ctx, msg.story_id)

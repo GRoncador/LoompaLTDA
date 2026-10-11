@@ -85,7 +85,8 @@ HELP = {
         "/backlog           só salva no backlog\n" + HELP_COMMON
     ),
     ConversationKind.BRAINSTORM: (
-        "/consultar analyst|architect <pergunta>  pede um parecer preliminar\n"
+        "/consultar <papel> <pergunta>  pede um parecer (analyst, architect, ux, product_manager…)\n"
+        "/descoberta        produto comercial: Lean Canvas, concorrentes e hipóteses\n"
         "/deixar O1         deixa um parecer de lado (e /retomar O1 o traz de volta)\n"
         "/stack 1|2         na abertura: escolhe a stack (sem número: nova proposta)\n"
         "/aprovar           aprova o rumo (1º OK): o Product Owner propõe os cards\n"
@@ -294,6 +295,9 @@ async def handle(
     elif command == "/consultar" and brainstorm and len(args) >= 2:
         await convs.consult(conv.id, args[0], rest.partition(" ")[2])
         say_aloud(convs, convs.board.require(conv.id))
+    elif command == "/descoberta" and brainstorm:
+        turn = await convs.discover(conv.id)
+        console.print(turn.reply)
     elif command in ("/deixar", "/retomar") and brainstorm and args:
         op = "dismiss" if command == "/deixar" else "restore"
         _show(convs.edit(conv.id, [{"op": op, "ref": a} for a in args]))

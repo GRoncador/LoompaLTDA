@@ -36,6 +36,7 @@ ROLES: tuple[str, ...] = (
     "kaizen",
     "ux",
     "designer",
+    "product_manager",
 )
 
 
@@ -197,7 +198,7 @@ GENERAL_CLUSTER = "general"
 ALL_CLUSTERS: tuple[str, ...] = (*CLUSTERS, GENERAL_CLUSTER)
 
 CLUSTER_ROLES: dict[str, tuple[str, ...]] = {
-    "strategy": ("master", "architect", "product", "product_owner", "analyst"),
+    "strategy": ("master", "architect", "product", "product_owner", "analyst", "product_manager"),
     "engineering": ("worker", "inspector", "ux", "designer"),
     "routine": ("deployer", "storyteller", "compliance", "metrics"),
 }
