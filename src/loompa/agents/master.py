@@ -207,9 +207,13 @@ decides which phases it goes through and how strong the models working on it are
   change that runs through the model, the commands and the tests (a migration, a new unit or
   type) is ONE story, however large, because no layer works or passes its tests without the
   others. Guidance to work "in small steps" is about the plan's tasks, not a reason to split.
+- screen: true when the story changes what a person sees or does on a screen of the product (a
+  page, a form, a layout, a visual element, the words shown); false for logic, data, setup and
+  fixes with no visible change. Why: a story with a screen gets its screens drawn and approved
+  before code.
 Respond with JSON only:
 {{"kind": "feature"|"bugfix"|"research", "complexity": "SIMPLE"|"STANDARD"|"COMPLEX",
-  "children": [{{"title": str, "description": str}}], "reason": str}}
+  "screen": bool, "children": [{{"title": str, "description": str}}], "reason": str}}
 Write titles and descriptions in {language}; `reason` is one sentence.
 """
 
@@ -220,6 +224,7 @@ class Classification:
     complexity: Complexity = Complexity.STANDARD
     children: list[dict[str, str]] = field(default_factory=list)
     reason: str = ""
+    screen: bool = False  # changes what a person sees: the design gate's question (ADR-0039)
 
 
 class MasterAgent(LoompaAgent):
@@ -269,6 +274,7 @@ class MasterAgent(LoompaAgent):
             if isinstance(c, dict) and str(c.get("title", "")).strip()
         ][:6]
         out.reason = str(data.get("reason") or "")[:300]
+        out.screen = data.get("screen") is True
         self.set_state("IDLE")
         return out
 

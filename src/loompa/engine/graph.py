@@ -511,7 +511,10 @@ async def node_intake(ctx: EngineContext, state: StoryState) -> StoryState:
         ctx.emit("story.split", story_id=state.story_id, children=ids)
         return state
     state.autonomy = autonomy_for(state.complexity, ctx.config.schedule.autonomy)
-    state.route = build_route(state.kind, state.complexity, state.autonomy)
+    mode = gated(ctx, verdict.screen) if state.kind != StoryKind.RESEARCH else ""
+    if mode:
+        state.extra[DESIGN_KEY] = {"mode": mode, "alternatives": opens_area(ctx, state, mode)}
+    state.route = build_route(state.kind, state.complexity, state.autonomy, design=bool(mode))
     ctx.emit(
         "story.classified",
         story_id=state.story_id,
@@ -519,6 +522,7 @@ async def node_intake(ctx: EngineContext, state: StoryState) -> StoryState:
         complexity=state.complexity.value,
         autonomy=state.autonomy.value,
         route=state.route,
+        design=mode or None,
     )
     return goto(state, state.next_phase("intake") or "spec")
 
@@ -2066,6 +2070,8 @@ def apply_founder_answer(
         # back through `dev`: the base is merged in there and conflicts go to the Worker;
         # retrying the delivery's rebase alone only ever met the same conflict again
         goto(state, "dev" if "dev" in state.route else "review")
+    elif reason in DESIGN_REASONS:  # the design gate (ADR-0039)
+        apply_design_answer(ctx, state, msg, answer, key, guidance)
     elif action_of(key) == RESOLVED:  # QUESTION: "it is already resolved" (ADR-0037 §1)
         # checked and closed by `resolve`, which runs the failures the story was opened for
         state.extra[RESOLVE_KEY] = {"why": guidance, "resume": resume or "dev"}
@@ -2088,3 +2094,13 @@ def apply_founder_answer(
         "story.resumed", story_id=state.story_id, stage=state.stage.value, answer=key or "text"
     )
     return state
+
+
+# the design gate's phases register themselves; imported last, it builds on `block` above
+from loompa.engine.design_gate import (  # noqa: E402
+    DESIGN_KEY,
+    DESIGN_REASONS,
+    apply_design_answer,
+    gated,
+    opens_area,
+)

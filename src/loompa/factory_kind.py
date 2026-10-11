@@ -70,6 +70,12 @@ def profile(config: LoompaConfig) -> KindProfile:
     return PROFILES.get(config.factory.kind, PROFILES["personal"])
 
 
+def design_gate(config: LoompaConfig) -> DesignGate:
+    """The design gate's mode: the factory's setting, or its kind's default under `auto`."""
+    gate = config.design.gate
+    return profile(config).design_gate if gate == "auto" else gate  # type: ignore[return-value]
+
+
 def parse_kind(value: str | None) -> FactoryKind | None:
     """The kind a person typed (English or pt-BR, any case); None when it is none of them."""
     if value is None:

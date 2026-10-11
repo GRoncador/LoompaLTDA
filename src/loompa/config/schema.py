@@ -34,6 +34,7 @@ ROLES: tuple[str, ...] = (
     "metrics",
     "storyteller",
     "kaizen",
+    "ux",
 )
 
 
@@ -196,7 +197,7 @@ ALL_CLUSTERS: tuple[str, ...] = (*CLUSTERS, GENERAL_CLUSTER)
 
 CLUSTER_ROLES: dict[str, tuple[str, ...]] = {
     "strategy": ("master", "architect", "product", "product_owner", "analyst"),
-    "engineering": ("worker", "inspector"),
+    "engineering": ("worker", "inspector", "ux"),
     "routine": ("deployer", "storyteller", "compliance", "metrics"),
 }
 
@@ -333,6 +334,10 @@ class ModelsConfig(BaseModel):
     # `<role>.<task>` -> tier, for the calls in ROLE_TASKS whose profile differs from the role's
     # default. A key that is absent uses the task's `default_tier`.
     role_tasks: dict[str, str] = Field(default_factory=dict)
+    # The models a call goes to when it carries pictures (plan 15.1: the UX Loompa looks at the
+    # screens it drew, and compares the built page with the approved one). Most text models refuse
+    # an image, so these are tried first, in order, whatever the role; empty = the role's models.
+    vision: list[ModelCandidate] = Field(default_factory=list)
     temperature: float = 0.2
     # Output room is a backstop, not an estimate (ADR-0016): a call pays only for what it writes,
     # and room that is too small cuts it and pays for the discarded attempt. `low` calls get the
@@ -682,6 +687,20 @@ class DeciderConfig(BaseModel):
     timeout_s: float = Field(20.0, gt=0)
 
 
+class DesignConfig(BaseModel):
+    """The design gate (plan Phase 15, ADR-0039)."""
+
+    # `auto` follows the factory's kind (16.1): full on a commercial product, light on a personal
+    # one. `full`: the states the spec asks for and, for the first screen of a new epic, two
+    # alternatives. `light`: one screen per story, its main state. `off`: no screens before code.
+    gate: Literal["auto", "full", "light", "off"] = "auto"
+    # A built page whose picture differs from the approved one by more than this share of pixels
+    # (after both are shrunk, see `loompa.design.compare`) is looked at by a model with vision.
+    diff_threshold: float = Field(0.12, ge=0, le=1)
+    # The Figma personal token's environment variable (15.9): read only, never written to config.
+    figma_token_env: str = "FIGMA_TOKEN"
+
+
 class DashboardConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(8765, ge=1, le=65535)
@@ -739,6 +758,7 @@ class LoompaConfig(BaseModel):
     quality: QualityConfig = Field(default_factory=QualityConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     decider: DeciderConfig = Field(default_factory=DeciderConfig)
+    design: DesignConfig = Field(default_factory=DesignConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     trace: TraceConfig = Field(default_factory=TraceConfig)
     stack: StackProfile = Field(default_factory=StackProfile)

@@ -18,6 +18,7 @@ from loompa.agents.architect import REPRO_KEY, task_origin, writable_tests
 from loompa.agents.base import AgentResult, LoompaAgent, founder_guidance, lifted, repo_outline
 from loompa.agents.loopguard import LoopGuard
 from loompa.agents.toolbox import PROFILES, Toolbox, prune_tool_history  # noqa: F401 (re-exported)
+from loompa.design import approved_html
 from loompa.engine.state import Autonomy, StoryKind, StoryState
 from loompa.finance.story_cap import over_cap, story_spent
 from loompa.hygiene import cited_criteria, new_files, scan_diff, tests_to_trim
@@ -838,7 +839,9 @@ class WorkerAgent(LoompaAgent):
             system.format(language=self.language)
             + f"\n## Story {state.story_id} — {state.title}\n\n## Allowed paths\n{json.dumps(state.allowed_paths, ensure_ascii=False)}\n\n"
             f"## Spec\n{fit_sections(spec, SPEC_ROOM, SPEC_FOR_BUILDING)}\n\n"
-            f"## Plan\n{fit_sections(plan, PLAN_ROOM, PLAN_FOR_BUILDING)}\n\n{self.grounding(3000)}\n"
+            f"## Plan\n{fit_sections(plan, PLAN_ROOM, PLAN_FOR_BUILDING)}\n\n"
+            + approved_html(self.ctx.root, state.story_id)
+            + f"{self.grounding(3000)}\n"
             + (
                 f"\n## Repository outline (at the start of this run)\n{outline}\n"
                 if outline

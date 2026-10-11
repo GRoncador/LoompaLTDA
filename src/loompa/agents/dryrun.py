@@ -88,15 +88,23 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
         return json.dumps(
             {"decisions": [{"ref": r, "confirm": True, "reason": "simulação"} for r in refs]}
         )
+    if role == "ux":
+        return _ux(messages, title)
     if role == "master":
         if "Classify the story" in messages[0].content:
             researching = re.search(
                 r"^# Story S-\d+[A-Z]?: (pesquis|research)", messages[-1].content, re.I
             )
+            screen = re.search(
+                r"^# Story S-\d+[A-Z]?: .*\b(tela|página|pagina|screen|page)\b",
+                messages[-1].content,
+                re.I | re.M,
+            )
             return json.dumps(
                 {
                     "kind": "research" if researching else "feature",
                     "complexity": "STANDARD",
+                    "screen": bool(screen) and not researching,
                     "children": [],
                     "reason": "simulação",
                 }
@@ -322,3 +330,74 @@ def dry_run_script(model: str, messages: list[Message], tools: list[dict[str, An
 
 def dry_run_provider() -> MockProvider:
     return MockProvider("dry-run", script=dry_run_script)
+
+
+_PAGE = (
+    "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'><title>{t}</title>"
+    "<style>body{{margin:0;font-family:var(--font-body);background:var(--color-bg);"
+    "color:var(--color-text)}}main{{max-width:960px;margin:0 auto;padding:var(--space-3)}}"
+    ".card{{background:var(--color-surface);border:1px solid var(--color-border);"
+    "border-radius:var(--radius-md);padding:var(--space-3)}}button{{background:var(--color-primary);"
+    "color:var(--color-on-primary);border:0;border-radius:var(--radius-sm);padding:var(--space-2) "
+    "var(--space-3);font:inherit}}</style></head><body><main><h1>{t}</h1>"
+    "<div class='card'><p>Simulação: tela de exemplo, sem desenho real.</p>"
+    "<button type='button'>Continuar</button></div></main></body></html>"
+)
+_TOKENS = {
+    "color": {
+        "bg": "#ffffff", "surface": "#f5f5f7", "text": "#1d1d1f", "muted": "#6e6e73",
+        "primary": "#0b57d0", "on-primary": "#ffffff", "accent": "#7c3aed",
+        "danger": "#b3261e", "success": "#146c2e", "border": "#d2d2d7",
+    },
+    "font": {
+        "body": "system-ui, sans-serif", "heading": "system-ui, sans-serif",
+        "mono": "ui-monospace, monospace", "size-sm": "14px", "size-md": "16px",
+        "size-lg": "20px", "size-xl": "28px",
+    },
+    "space": ["4px", "8px", "16px", "24px", "32px"],
+    "radius": {"sm": "4px", "md": "8px", "lg": "16px"},
+    "shadow": {"card": "0 1px 2px #0000001a"},
+}  # fmt: skip
+
+
+def _ux(messages: list[Message], title: str) -> str:
+    system = messages[0].content
+    if "Propose the visual base" in system:
+        return json.dumps(
+            {
+                "alternatives": [
+                    {
+                        "name": name,
+                        "idea": "Simulação: proposta de exemplo, sem desenho real.",
+                        "tokens": _TOKENS,
+                        "board_html": _PAGE.format(t="Prancha de estilo"),
+                    }
+                    for name in ("Sóbria", "Viva")
+                ],
+                "assumptions": ["Simulação: nenhuma escolha real foi feita."],
+            }
+        )
+    if "front-end questions" in system:
+        return json.dumps({"questions": [], "assumptions": ["Simulação: sem perguntas."]})
+    if "Draw the screens" in system:
+        n = _criteria_count(messages) or 1
+        return json.dumps(
+            {
+                "screens": [
+                    {
+                        "id": "principal",
+                        "title": title[:60],
+                        "route": "/",
+                        "alt": "",
+                        "criteria": list(range(1, n + 1)),
+                        "states": [{"state": "main", "html": _PAGE.format(t=title[:60])}],
+                    }
+                ],
+                "not_visible": [],
+                "assumptions": ["Simulação: tela de exemplo."],
+            }
+        )
+    if "Look at the pictures" in system:
+        return json.dumps({"ok": True, "issues": []})
+    return json.dumps({"deviation": False, "workaround": False, "changes": []})

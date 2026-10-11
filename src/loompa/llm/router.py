@@ -28,6 +28,7 @@ from loompa.llm.providers import (
     Message,
     QuotaExhausted,
     build_provider,
+    has_images,
     is_openrouter_endpoint,
     model_not_found,
     resolve_key,
@@ -393,6 +394,10 @@ class ModelRouter:
         if self.holding:
             raise EnginePaused(role)
         tier, cands = self.candidates(role, tier_override, complexity, task, lift)
+        if has_images(messages) and self.config.models.vision:
+            # a picture goes to a model that sees; the role's own come after, as a reserve
+            tier = "vision"
+            cands = [*self.config.models.vision, *cands]
         cands = self.direct_first(cands, reasoning_effort)
         with self.tracer.span(
             "llm",

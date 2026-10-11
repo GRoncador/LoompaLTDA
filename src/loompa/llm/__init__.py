@@ -11,6 +11,8 @@ from loompa.llm.providers import (
     QuotaExhausted,
     ToolCall,
     build_provider,
+    has_images,
+    image_data_url,
     model_not_found,
 )
 from loompa.llm.router import ModelRouter, RoutedCall
@@ -33,4 +35,6 @@ __all__ = [
     "RoutedCall",
     "ToolCall",
     "build_provider",
+    "has_images",
+    "image_data_url",
 ]

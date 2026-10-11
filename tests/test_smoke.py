@@ -94,6 +94,7 @@ async def test_the_inspector_fails_a_page_that_does_not_load(factory, monkeypatc
     git("add", ".", cwd=root)
     git("commit", "-qm", "feat: page", cwd=root)
     factory.config.quality.smoke_command = SERVE
+    factory.config.design.gate = "off"  # the smoke is under test, not the screens before code
     factory.save()
     seen: list[str] = []
 

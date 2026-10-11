@@ -531,6 +531,7 @@ class LoompaAgent:
         reasoning_effort: str | None = None,
         task: str | None = None,
         tier_override: str | None = None,
+        images: list[str] | None = None,
     ) -> dict[str, Any]:
         """Like `ask_json`, but the model may use `toolbox` first. Falls back to the one-shot
         call when there is nothing to offer or `schedule.agent_tool_iterations` is 0. `task`
@@ -549,8 +550,9 @@ class LoompaAgent:
                 task=task,
                 max_tokens=max_tokens,
                 reasoning_effort=reasoning_effort,
+                images=images,
             )
-        messages = [Message("system", system), Message("user", user)]
+        messages = [Message("system", system), Message("user", user, images=list(images or []))]
         loop = await self.tool_loop(
             messages,
             toolbox,
@@ -596,12 +598,14 @@ class LoompaAgent:
         task: str | None = None,
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
+        images: list[str] | None = None,
     ) -> dict[str, Any]:
-        """One-shot structured call; retries once asking for valid JSON.
+        """One-shot structured call; retries once asking for valid JSON. `images` (data URLs) go
+        with the user message, to the models in `models.vision` first (plan 15.1).
 
         `task` names one of `ROLE_TASKS`, so the founder can give that call its own tier without
         it being hard-coded here (a summary does not need the tier a decision does)."""
-        messages = [Message("system", system), Message("user", user)]
+        messages = [Message("system", system), Message("user", user, images=list(images or []))]
         for attempt in range(2):
             routed = await self.ctx.router.complete(
                 self.role,

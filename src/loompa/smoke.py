@@ -281,14 +281,54 @@ async def _check_modules(client: httpx.AsyncClient, base: str, page: str, out: S
         out.notes.append(f"{len(seen)} module(s) loaded")
 
 
-async def _render(
-    chrome: str,
-    url: str,
-    out: SmokeResult,
-    *,
-    shots_dir: Path | None = None,
-    layout_baseline: set[str] | None = None,
-) -> None:
+class BrowserPage:
+    """One headless Chrome tab driven through the DevTools protocol: `call` sends a command and
+    returns its result, `settle` lets the page's own timers run while errors are collected."""
+
+    def __init__(self, ws) -> None:  # type: ignore[no-untyped-def]
+        self.ws = ws
+        self.errors: list[str] = []
+        self._ids = iter(range(1, 1_000_000))
+
+    async def call(self, method: str, **params: object) -> dict:
+        n = next(self._ids)
+        await self.ws.send(json.dumps({"id": n, "method": method, "params": params}))
+        while True:
+            msg = json.loads(await asyncio.wait_for(self.ws.recv(), 15))
+            _collect(msg, self.errors)
+            if msg.get("id") == n:
+                return msg.get("result") or {}
+
+    async def settle(self, seconds: float) -> None:
+        loop = asyncio.get_running_loop()
+        end = loop.time() + seconds
+        while (left := end - loop.time()) > 0:
+            with contextlib.suppress(TimeoutError):
+                _collect(json.loads(await asyncio.wait_for(self.ws.recv(), left)), self.errors)
+
+    async def evaluate(self, expression: str, *, await_promise: bool = False) -> str:
+        res = await self.call(
+            "Runtime.evaluate",
+            expression=expression,
+            returnByValue=True,
+            awaitPromise=await_promise,
+        )
+        return str((res.get("result") or {}).get("value") or "")
+
+    async def viewport(self, width: int, height: int, mobile: bool) -> None:
+        await self.call(
+            "Emulation.setDeviceMetricsOverride",
+            width=width,
+            height=height,
+            deviceScaleFactor=1,
+            mobile=mobile,
+        )
+
+
+@contextlib.asynccontextmanager
+async def browser_page(chrome: str):  # type: ignore[no-untyped-def]
+    """A headless Chrome with one blank tab, stopped and its profile removed on the way out.
+    Yields None when the browser did not start."""
     import websockets  # comes with uvicorn[standard], the dashboard's server
 
     port = _free_port()
@@ -299,6 +339,7 @@ async def _render(
         "--disable-gpu",
         "--no-first-run",
         "--no-default-browser-check",
+        "--allow-file-access-from-files",
         f"--remote-debugging-port={port}",
         f"--user-data-dir={profile}",
         "--window-size=900,800",
@@ -318,82 +359,67 @@ async def _render(
                         break
                 await asyncio.sleep(0.25)
         if not ws_url:
-            out.notes.append("the browser did not start; the page was not rendered")
+            yield None
             return
-        errors: list[str] = []
-        async with websockets.connect(ws_url, max_size=2**24) as ws:
-            ids = iter(range(1, 10_000))
-
-            async def call(method: str, **params: object) -> dict:
-                n = next(ids)
-                await ws.send(json.dumps({"id": n, "method": method, "params": params}))
-                while True:
-                    msg = json.loads(await asyncio.wait_for(ws.recv(), 15))
-                    _collect(msg, errors)
-                    if msg.get("id") == n:
-                        return msg.get("result") or {}
-
-            await call("Runtime.enable")
-            await call("Log.enable")
-            await call("Page.enable")
-            await call("Page.navigate", url=url)
-            loop = asyncio.get_running_loop()
-            end = loop.time() + SETTLE_S
-            while (left := end - loop.time()) > 0:
-                with contextlib.suppress(TimeoutError):
-                    _collect(json.loads(await asyncio.wait_for(ws.recv(), left)), errors)
-            probe = await call("Runtime.evaluate", expression=PAGE_PROBE, returnByValue=True)
-            for viewport, width, height, mobile in VIEWPORTS:
-                await call(
-                    "Emulation.setDeviceMetricsOverride",
-                    width=width,
-                    height=height,
-                    deviceScaleFactor=1,
-                    mobile=mobile,
-                )
-                end = loop.time() + LAYOUT_SETTLE_S
-                while (left := end - loop.time()) > 0:
-                    with contextlib.suppress(TimeoutError):
-                        _collect(json.loads(await asyncio.wait_for(ws.recv(), left)), errors)
-                seen_at = await call(
-                    "Runtime.evaluate", expression=LAYOUT_PROBE, returnByValue=True
-                )
-                out.layout.update(
-                    layout_problems(
-                        viewport, json.loads((seen_at.get("result") or {}).get("value") or "{}")
-                    )
-                )
-                if shots_dir is not None:
-                    await _screenshot(call, shots_dir / f"{viewport}.png", width, out)
-            out.rendered = True
-        out.problems += [f"JavaScript error in the page: {e}" for e in dict.fromkeys(errors)][:5]
-        value = ((probe.get("result") or {}).get("value")) or "{}"
-        seen = json.loads(value)
-        canvases = seen.get("canvases") or []
-        for c in canvases:
-            if c.get("colours") == 1:
-                name = f"#{c['id']}" if c.get("id") else "a canvas"
-                out.problems.append(
-                    f"{name} ({c.get('width')}x{c.get('height')}) is one solid colour after "
-                    f"{SETTLE_S:.0f}s: nothing was drawn on it"
-                )
-        for c in canvases:
-            if cut := clipped_edges(c.get("edges") or {}):
-                name = f"#{c['id']}" if c.get("id") else "a canvas"
-                out.problems.append(
-                    f"{name}: the drawing touches the {' and '.join(cut)} edge(s) — something "
-                    "is cut off or drawn past the canvas"
-                )
-        if not canvases and not seen.get("text"):
-            out.problems.append("the page shows no text and no canvas")
-        known = layout_baseline or set()
-        out.problems += [text for key, text in out.layout.items() if key not in known]
-        if already := [text for key, text in out.layout.items() if key in known]:
-            out.notes.append(f"{len(already)} layout problem(s) the base already has")
-        out.notes.append(f"rendered in {Path(chrome).name}")
+        async with websockets.connect(ws_url, max_size=2**25) as ws:
+            page = BrowserPage(ws)
+            await page.call("Runtime.enable")
+            await page.call("Log.enable")
+            await page.call("Page.enable")
+            yield page
     finally:
         await _stop(proc)
         shutil.rmtree(profile, ignore_errors=True)
+
+
+async def _render(
+    chrome: str,
+    url: str,
+    out: SmokeResult,
+    *,
+    shots_dir: Path | None = None,
+    layout_baseline: set[str] | None = None,
+) -> None:
+    async with browser_page(chrome) as page:
+        if page is None:
+            out.notes.append("the browser did not start; the page was not rendered")
+            return
+        await page.call("Page.navigate", url=url)
+        await page.settle(SETTLE_S)
+        probe = await page.evaluate(PAGE_PROBE)
+        for viewport, width, height, mobile in VIEWPORTS:
+            await page.viewport(width, height, mobile)
+            await page.settle(LAYOUT_SETTLE_S)
+            seen_at = await page.evaluate(LAYOUT_PROBE)
+            out.layout.update(layout_problems(viewport, json.loads(seen_at or "{}")))
+            if shots_dir is not None:
+                await _screenshot(page.call, shots_dir / f"{viewport}.png", width, out)
+        out.rendered = True
+        errors = page.errors
+    out.problems += [f"JavaScript error in the page: {e}" for e in dict.fromkeys(errors)][:5]
+    seen = json.loads(probe or "{}")
+    canvases = seen.get("canvases") or []
+    for c in canvases:
+        if c.get("colours") == 1:
+            name = f"#{c['id']}" if c.get("id") else "a canvas"
+            out.problems.append(
+                f"{name} ({c.get('width')}x{c.get('height')}) is one solid colour after "
+                f"{SETTLE_S:.0f}s: nothing was drawn on it"
+            )
+    for c in canvases:
+        if cut := clipped_edges(c.get("edges") or {}):
+            name = f"#{c['id']}" if c.get("id") else "a canvas"
+            out.problems.append(
+                f"{name}: the drawing touches the {' and '.join(cut)} edge(s) — something "
+                "is cut off or drawn past the canvas"
+            )
+    if not canvases and not seen.get("text"):
+        out.problems.append("the page shows no text and no canvas")
+    known = layout_baseline or set()
+    out.problems += [text for key, text in out.layout.items() if key not in known]
+    if already := [text for key, text in out.layout.items() if key in known]:
+        out.notes.append(f"{len(already)} layout problem(s) the base already has")
+    out.notes.append(f"rendered in {Path(chrome).name}")
 
 
 async def _screenshot(call, path: Path, width: int, out: SmokeResult) -> None:  # type: ignore[no-untyped-def]

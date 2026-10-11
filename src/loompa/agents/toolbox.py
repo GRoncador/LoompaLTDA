@@ -10,6 +10,7 @@ role that hallucinates a call to a tool it was never offered is refused in code.
 | inspector                                      | repo  | nothing                             | yes        |
 | architect, product, product_owner, analyst,    | repo  | `.loompa/specs/`, plus `docs/` when | no         |
 | master                                         |       | running inside a story worktree     |            |
+| ux                                             | repo  | `.loompa/design/`                   | no         |
 | anyone else                                    | repo  | nothing                             | no         |
 
 Roles that browse the web (Analyst) also get the MCP tools of the servers configured for them.
@@ -64,6 +65,8 @@ BUSINESS_KINDS = tuple(dict.fromkeys((*PLAN_KINDS, *COMPANY_KINDS, "research")))
 RESTRICTED_KINDS = ("contract",)
 
 SPEC_DIRS = (".loompa/specs/",)  # story artifacts: spec, plan, tasks, research
+DESIGN_DIRS = (".loompa/design/",)  # the UX Loompa's screens, base and references (plan 15.1)
+DESIGN_KINDS = (*BUSINESS_KINDS, "design")
 WORKTREE_DOCS = ("docs/",)  # only writable inside a story worktree, never in the main checkout
 
 
@@ -111,6 +114,9 @@ PROFILES: dict[str, ToolProfile] = {
         for role, kinds in _MEMORY_KINDS.items()
     },
     # no repository tools: they answer from what they are given and what memory holds
+    "ux": ToolProfile(
+        "ux", _DOC_ROLE_TOOLS | {MEMORY_TOOL}, DESIGN_DIRS, memory_kinds=DESIGN_KINDS
+    ),
     **{
         role: ToolProfile(
             role, frozenset({MEMORY_TOOL}), (), memory_kinds=(*BUSINESS_KINDS, *RESTRICTED_KINDS)

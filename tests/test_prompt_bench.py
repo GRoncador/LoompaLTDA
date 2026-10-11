@@ -48,7 +48,9 @@ def test_checks_catch_what_reached_the_founder_in_sp009():
     assert "not_pt:summary" in checks.check(p, "one_shot", english, []).founder_errors
     good = json.dumps({"summary": "O sprint entregou as quatro histórias que tinha como meta."})
     assert checks.check(p, "one_shot", good, []).ok
-    bad_enum = json.dumps({"kind": "epic", "complexity": "SIMPLE", "children": [], "reason": "x"})
+    bad_enum = json.dumps(
+        {"kind": "epic", "complexity": "SIMPLE", "screen": False, "children": [], "reason": "x"}
+    )
     assert checks.check(registry.get("CLASSIFY"), "one_shot", bad_enum, []).contract_errors == [
         "enum:kind=epic"
     ]

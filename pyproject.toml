@@ -36,6 +36,8 @@ dependencies = [
     # organizational memory's embedder (plan 13.1): without it every factory fell back to hashed
     # n-grams, which match letters, not meaning
     "fastembed>=0.3",
+    # the design gate (plan 15.6): approved and built screens compared in code
+    "pillow>=10",
 ]
 
 [project.optional-dependencies]

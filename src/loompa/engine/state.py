@@ -47,6 +47,10 @@ class BlockedReason(StrEnum):
     INTEGRATION = "integration"
     COST_CAP = "cost_cap"  # spent its cap without finishing (finance/story_cap.py)
     STACK = "stack"  # re-planned and still writes code outside the product's language
+    # the design gate (ADR-0039): the visual base to choose, the front-end questions, the screens
+    DESIGN_BASE = "design_base"
+    DESIGN_QUESTIONS = "design_questions"
+    DESIGN = "design"
 
 
 class StoryKind(StrEnum):

@@ -192,6 +192,25 @@ class Message:
     tool_call_id: str | None = None
     name: str | None = None
     cache: bool = False  # stable prefix block: providers with explicit prompt caching mark it
+    # Pictures that go with a user message, as `data:image/...;base64,` URLs (plan 15.1: the UX
+    # looks at its own screens). Sent only to the models in `models.vision`, when there are any.
+    images: list[str] = field(default_factory=list)
+
+
+def has_images(messages: list[Message]) -> bool:
+    return any(m.images for m in messages)
+
+
+def image_data_url(data: bytes, media_type: str = "image/png") -> str:
+    import base64
+
+    return f"data:{media_type};base64,{base64.b64encode(data).decode()}"
+
+
+def _split_data_url(url: str) -> tuple[str, str]:
+    """`data:image/png;base64,AAAA` -> ("image/png", "AAAA")."""
+    head, _, data = url.partition(",")
+    return head.removeprefix("data:").split(";", 1)[0] or "image/png", data
 
 
 @dataclass
@@ -321,6 +340,16 @@ def _openai_messages(
                     "tool_calls": [
                         _openai_tool_call(tc, google=google, dummy_signature=dummy_signature)
                         for tc in m.tool_calls
+                    ],
+                }
+            )
+        elif m.images and m.role == "user":
+            out.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": m.content},
+                        *({"type": "image_url", "image_url": {"url": u}} for u in m.images),
                     ],
                 }
             )
@@ -929,6 +958,19 @@ class AnthropicProvider(LLMProvider):
                     for tc in m.tool_calls
                 ]
                 conv.append({"role": "assistant", "content": content})
+            elif m.images and m.role == "user":
+                blocks: list[dict[str, Any]] = []
+                for url in m.images:
+                    media, data = _split_data_url(url)
+                    blocks.append(
+                        {
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": media, "data": data},
+                        }
+                    )
+                conv.append(
+                    {"role": "user", "content": [*blocks, {"type": "text", "text": m.content}]}
+                )
             else:
                 conv.append({"role": m.role, "content": m.content})
         payload: dict[str, Any] = {

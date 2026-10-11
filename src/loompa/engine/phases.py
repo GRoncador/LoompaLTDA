@@ -77,10 +77,26 @@ def with_preflight(route: list[str]) -> list[str]:
     return [*route[:i], "preflight", *route[i:]]
 
 
+DESIGN_PHASES = ["design", "design_review"]
+
+
+def with_design(route: list[str]) -> list[str]:
+    """The design gate (ADR-0039) after the spec and its review, before the plan."""
+    if "design" in route or "plan" not in route:
+        return route
+    i = route.index("plan")
+    return [*route[:i], *DESIGN_PHASES, *route[i:]]
+
+
 def build_route(
-    kind: StoryKind | str, complexity: Complexity | str, autonomy: Autonomy | str | None = None
+    kind: StoryKind | str,
+    complexity: Complexity | str,
+    autonomy: Autonomy | str | None = None,
+    *,
+    design: bool = False,
 ) -> list[str]:
-    """Ordered phases for a story, from its kind, complexity and autonomy."""
+    """Ordered phases for a story, from its kind, complexity and autonomy; `design` puts the
+    screens before the plan (a story that changes what a person sees, ADR-0039)."""
     kind = StoryKind(kind)
     complexity = Complexity(complexity)
     if kind == StoryKind.RESEARCH:
@@ -94,7 +110,7 @@ def build_route(
         and complexity != Complexity.COMPLEX
     ):
         route.remove("spec_review")  # cheap stories: the Inspector gate is enough
-    return route
+    return with_design(route) if design else route
 
 
 # Legacy stories (persisted before routes existed) resume from their kanban stage.

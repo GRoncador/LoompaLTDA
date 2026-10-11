@@ -16,6 +16,7 @@ from loompa.config import (
     save_config,
 )
 from loompa.config.schema import slugify
+from loompa.design import GITIGNORE_LINES as DESIGN_GITIGNORE
 from loompa.factory_kind import parse_kind
 from loompa.onboarding import (
     BrownfieldScanner,
@@ -152,6 +153,7 @@ GITIGNORE_LINES = (
     ".loompa/.env",  # per-factory API keys: never committed
     ".loompa/engine.lock",
     ".loompa/company/contracts/",  # clients' personal data and clauses: never in the repo (LGPD)
+    *DESIGN_GITIGNORE,  # the design gate's rounds and proposals (plan 15.5)
 )
 
 

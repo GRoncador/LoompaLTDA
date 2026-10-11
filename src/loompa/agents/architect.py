@@ -11,6 +11,7 @@ from pathlib import Path
 from loompa.agents.base import EXPLORE_HINT, AgentResult, LoompaAgent, repo_outline
 from loompa.callers import callers_of_plan
 from loompa.dependencies import delivered_brief
+from loompa.design import approved_html
 from loompa.engine.state import Complexity, StoryKind, StoryState
 from loompa.hygiene import TEST_DIRS, is_test_path
 from loompa.prompt_ab import prompt_for
@@ -448,6 +449,7 @@ class ArchitectAgent(LoompaAgent):
         outline = self._repo_outline(at=at)
         user = (
             f"# Story {state.story_id}: {state.title}\n\n## Spec\n{fit_sections(spec, 16000, SPEC_FOR_REVIEW)}\n\n"
+            + approved_html(self.ctx.root, state.story_id, 10_000)
             + (
                 "## Guidance from the founder (follow it)\n"
                 + "\n".join(f"- {n}" for n in state.founder_notes)

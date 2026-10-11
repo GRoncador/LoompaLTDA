@@ -382,6 +382,11 @@ def still_waiting(rows: Mapping[str, Mapping[str, Any]], row: Mapping[str, Any])
         return False
     if note.get("unmerged"):
         return bool(merge_gate(rows, row["id"]))
+    if note.get("design_base"):
+        # parked in `design` while another story's visual base waits for the founder (ADR-0039)
+        from loompa.engine.design_gate import base_pending
+
+        return base_pending(dict(rows))
     return plan_gate(rows, row["id"]).gate == Gate.WAIT
 
 

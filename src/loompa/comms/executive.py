@@ -54,10 +54,22 @@ class Decision(BaseModel):
     chosen: str | None = None  # option key, once decided
 
 
+class Question(BaseModel):
+    """One question of a batch the founder answers in one go (plan 15.4: the front-end questions
+    before the screens are drawn). Each has its options, one recommended, and room for words."""
+
+    id: str
+    text: str
+    why: str = ""
+    options: list[Option] = Field(default_factory=list)
+
+
 class FounderAnswer(BaseModel):
     option_key: str | None = None
     text: str | None = None
     decisions: dict[str, str] = Field(default_factory=dict)  # decision id -> option key
+    # question id -> the chosen option's key, or the founder's own words (plan 15.4)
+    answers: dict[str, str] = Field(default_factory=dict)
     answered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -73,6 +85,9 @@ class FounderMessage(BaseModel):
     impact: str = ""  # business impact
     options: list[Option] = Field(default_factory=list)
     decisions: list[Decision] = Field(default_factory=list)  # independent side decisions
+    questions: list[Question] = Field(default_factory=list)  # answered together (plan 15.4)
+    # a design approval (ADR-0039): the screens to show, as paths under `.loompa/design/`
+    screens: list[dict] = Field(default_factory=list)
     allow_free_text: bool = True
     technical_ref: str | None = None  # pointer to the filtered technical log, never shown inline
     sprint_id: str | None = None  # a note about a sprint opens its report in the Sprints tab
@@ -97,6 +112,8 @@ class FounderMessage(BaseModel):
                 *(f"{o.label}\n{o.description}" for o in self.options),
                 *(f"{d.title}\n{d.context}" for d in self.decisions),
                 *(f"{o.label}\n{o.description}" for d in self.decisions for o in d.options),
+                *(f"{q.text}\n{q.why}" for q in self.questions),
+                *(f"{o.label}\n{o.description}" for q in self.questions for o in q.options),
             ]
         )
         return audit_executive_text(text)
