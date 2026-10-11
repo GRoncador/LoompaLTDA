@@ -229,3 +229,29 @@ async def test_a_green_base_closes_the_findings_filed_while_it_was_red(
     row = ctx.store.get_story(stale)
     assert row["stage"] == "CANCELLED" and row["state"]["extra"]["outcome"]["kind"] == "resolved"
     await ctx.aclose()
+
+
+async def test_a_card_still_failing_says_who_thought_it_was_over(factory: Factory):  # noqa: F811
+    """tamagotchi S-106 (11/10): the gate emptied its plan and the founder read "a história foi
+    encerrada como já resolvida", which nobody had asked for, about a card that stayed open."""
+    from loompa.engine import load_state
+    from loompa.engine.graph import RESOLVE_KEY, node_resolve
+
+    ctx = make_ctx(factory)
+    _land(factory.root, "test_a.py", "def test_a_fails_here():\n    assert False\n", "feat(s-1): a")
+    card = (await LineWatch(ctx).check())["card"]
+    seen = []
+    for founder in (True, False):
+        state = load_state(ctx, card)
+        state.extra[RESOLVE_KEY] = {"why": "x", "resume": "dev", "founder": founder}
+        state = await node_resolve(ctx, state)
+        assert state.stage == Stage.AWAITING_FOUNDER
+        msg = ctx.store.get_message(state.blocked_message_id)
+        assert "foi encerrada" not in msg.context and "continua aberta" in msg.context
+        assert msg.executive_audit() == []
+        seen.append(msg.context.split(",")[0])
+    assert seen == [
+        "Você pediu para encerrar esta história como já resolvida",
+        "A equipe concluiu que não havia mais nada a fazer nesta história",
+    ]
+    await ctx.aclose()

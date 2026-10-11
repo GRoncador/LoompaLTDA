@@ -186,3 +186,76 @@ def test_a_story_has_one_proposed_decision_rewritten_by_its_replan(factory: Fact
 
     assert "segunda" in Path(again).read_text() and "primeira" not in Path(again).read_text()
     assert len(list(factory.paths.decisions.glob("*.md"))) == 2
+
+
+# The tasks the gate refused in tamagotchi S-101 and S-106 (11/10), word for word: each names the
+# record only to say the copy leaves it out, the read is removed, or how the suite fails today.
+# The gate withdrew every one of them; S-101 closed as "resolved" over a red base.
+S101_S106_TASKS = [
+    "Hoje ele falha: o AC6 executa readFileSync de .loompa/specs/S-077/plan.md, inexistente na "
+    "árvore, e o sub-processo retorna status diferente de 0. Arquivo: tests/casca_body_scripts.test.js",
+    "Criar tests/remocao_ac6_casca_body_scripts.test.js (arquivo novo, só testes): um it() que "
+    "executa 'node --test tests/casca_body_scripts.test.js' como sub-processo via spawnSync — é o "
+    "reprodutor do bug: hoje o sub-processo falha porque o AC6 lança ENOENT em "
+    ".loompa/specs/S-077/plan.md, então este teste novo está VERMELHO no código atual.",
+    "(a) tests/casca_body_scripts_autossuficiencia.test.js — reprodutor do bug: copia a árvore do "
+    "repositório para um diretório temporário excluindo entradas ocultas (sem .loompa/), com "
+    "preâmbulos assertando que a cópia tem tests/casca_body_scripts.test.js e não tem .loompa/;",
+    "Em tests/casca_body_scripts.test.js remover o it do AC6 (que lia .loompa/specs/S-077/plan.md "
+    "e tasks.md), a função lerSpecS077 e a função normalizarEspacos (ficam sem uso);",
+    "Reescrever o AC6 em tests/casca_body_scripts.test.js: remover lerSpecS077, normalizarEspacos "
+    "e todo readFileSync de .loompa/specs/S-077 (plan.md/tasks.md) e o comentário de cabeçalho "
+    "que descreve o reprodutor antigo;",
+    "Verificação final da suíte: rodar `npm test` e confirmar exit 0; confirmar por busca que "
+    "nenhum arquivo de tests/ lê caminho sob .loompa/ (só restam as strings de afirmação de "
+    "ausência em tests/decisoes_s077_autossuficiencia.test.js) e que nada em tests/ escreve em "
+    ".loompa/ (critério 6);",
+    "(c) atualizar o cabeçalho de comentários de tests/casca_body_scripts.test.js para descrever "
+    "os testes atuais sem citar a leitura de .loompa/specs/S-077/plan.md e tasks.md;",
+]
+
+
+def test_a_task_that_takes_a_records_read_out_of_a_test_is_not_one_that_reads_it():
+    from loompa.plan_check import factory_records_in_tasks
+
+    assert factory_records_in_tasks(S101_S106_TASKS) == []
+    # what the gate is for still counts (S-077: a new test asserting what a decision says)
+    found = factory_records_in_tasks(
+        [
+            "test: cria o arquivo novo tests/decisoes_s077.test.js, cobrindo CA1 (o texto de "
+            f"{RECORD} contém 'S-015')"
+        ]
+    )
+    assert [p.split(":")[0] for p in found] == [f"task 1 has a test read {RECORD}"]
+
+
+async def test_a_plan_left_without_tasks_asks_the_founder_instead_of_closing(
+    factory: Factory,  # noqa: F811
+):
+    """tamagotchi S-101: its plan's tasks were all withdrawn for the records, `resolve` found no
+    line failures to run and closed it as resolved; the base stayed red."""
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        if role_of(messages) == "architect" and "Founder's guidance" not in messages[-1].content:
+            plan = json.loads(dry_run_script(model, messages, tools))
+            plan["files"] = ["tests/"]
+            plan["tasks"] = [
+                f"Criar tests/decisoes.test.js que confere o texto de {RECORD}",
+                f"Ajustar tests/casca.test.js para comparar com {RECORD}",
+            ]
+            return json.dumps(plan)
+        return dry_run_script(model, messages, tools)
+
+    ctx = make_ctx(factory, script)
+    sid = seed_story(ctx, "Trocar o critério AC6 por teste de comportamento")
+    await Scheduler(ctx).run()
+    state = load_state(ctx, sid)
+    events = [e["type"] for e in ctx.store.events_since(0, limit=10_000) if e["story_id"] == sid]
+    assert "plan.records_withdrawn" in events and "story.resolved" not in events
+    assert state.stage == Stage.AWAITING_FOUNDER and state.blocked_reason == "question"
+    assert state.resume_phase == "plan"
+    msg = ctx.store.get_message(state.blocked_message_id)
+    assert msg.title.endswith("precisa de um plano novo")
+    assert "não foi encerrada" in msg.impact and msg.executive_audit() == []
+    assert [o.key for o in msg.options] == ["opt1", "skip", "drop"]
+    await ctx.aclose()

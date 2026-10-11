@@ -188,6 +188,21 @@ _FACTORY_PATH = re.compile(r"(?<![\w/.-])\.loompa/[\w./-]*")
 # (tamagotchi: specs/S-068/tasks.md, specs/S-070/tasks.md, five of them, a Worker task each)
 _STORY_SEGMENT = re.compile(r"(?:^|/)S-\d+[A-Z]?(?:/|$)")
 _RECORD_NAMES = ("spec.md", "plan.md", "tasks.md")
+# A clause that names a record without using it: the read being removed ("remover o it que lia
+# .loompa/specs/S-077/plan.md"), the copy that leaves it out ("cópia sem .loompa/", "excluindo
+# entradas ocultas"), the bug as it is today ("hoje falha com ENOENT em .loompa/…") or a check
+# that nothing touches it ("nenhum arquivo de tests/ lê .loompa/"). tamagotchi S-101 and S-106,
+# whose whole goal was to take a records read out of a test: every honest task named the path,
+# the gate withdrew them all, S-101 closed as "resolved" over a red base and S-106 asked the
+# founder three times. The diff scan (`hygiene.scan_diff`, `reads_records`) still refuses a test
+# that opens a record, so a miss here costs a hand-off later, never a red base.
+_NOT_USED = re.compile(
+    r"\b(?:remov\w*|apag\w*|elimin\w*|exclu\w*|retir\w*|tir(?:a|e|ar|ando)|delet\w*|strip\w*"
+    r"|drop\w*|ausen\w*|inexist\w*|enoent|missing|absent|hoje|today|currently|falh\w*|fail\w*"
+    r"|lan[çc]a|throws|lia|liam|used to read|nenhum\w*|nada|zero|none|nothing|no longer|pul(?:a|ando))\b",
+    re.I,
+)
+_NONE = re.compile(r"\b(?:nenhum\w*|nada|none|nothing|no longer)\b", re.I)
 
 
 def factory_records_in_tasks(tasks: list[str]) -> list[str]:
@@ -198,10 +213,14 @@ def factory_records_in_tasks(tasks: list[str]) -> list[str]:
     them, a red base), and a copy of the records in the product is work nobody uses."""
     out = []
     for i, task in enumerate(tasks, 1):
-        refs = list(dict.fromkeys(_FACTORY_PATH.findall(task)))
         names_test = any(is_test_path(p) for p in PATH_REF.findall(task))
+        refs: list[str] = []
         for clause in re.split(r"(?<=[.;])\s+|\n", task):
             if LEAVE_ALONE.search(clause):
+                continue
+            if not _NOT_USED.search(clause):
+                refs.extend(_FACTORY_PATH.findall(clause))
+            if _NONE.search(clause):
                 continue
             writes = _ADD.search(clause) or _EDIT.search(clause)
             # "create tests/x.test.js covering what .loompa/… says": the test is written, the

@@ -746,11 +746,11 @@ async def node_plan_review(ctx: EngineContext, state: StoryState) -> StoryState:
         )
         ctx.emit("plan.records_withdrawn", story_id=state.story_id, tasks=records)
         if _open_task(ctx, state) is None and not state.commits:
-            state.extra[RESOLVE_KEY] = {
-                "why": "o plano só tinha passos sobre registros internos da fábrica",
-                "resume": "plan",
-            }
-            return goto(state, "resolve")
+            # an empty plan is a plan that went wrong, not a goal that holds: the spec already
+            # passed its own records check, so the story still asks for something. tamagotchi
+            # S-101 (11/10) closed here as "resolved" over a red base, its whole plan withdrawn
+            # by a gate that read "remove the test that read .loompa/…" as reading it.
+            return await _ask_about_empty_plan(ctx, state, why)
     elif report.problems:
         # the second plan still carries them: the Architect and the Worker see them as the story's
         # last failure instead of the founder hearing about paths and criterion numbers
@@ -1733,6 +1733,38 @@ def close_resolved(
     return state
 
 
+async def _ask_about_empty_plan(
+    ctx: EngineContext, state: StoryState, why: list[str]
+) -> StoryState:
+    """Every task of the plan was withdrawn for touching the factory's records and nothing was
+    built: the founder decides, with the re-plan first (ADR-0037 §5, as amended on 11/10)."""
+    msg = compose_blocked_message(
+        factory=ctx.slug,
+        story_id=state.story_id,
+        story_title=state.title,
+        reason=(
+            "O plano desta história ficou sem nenhum passo: os passos que a equipe escreveu "
+            "mexiam nos registros internos da fábrica, que não fazem parte do produto, e foram "
+            "retirados. Nada foi feito ainda."
+        ),
+        impact=(
+            "A história continua aberta e não foi encerrada. As demais entregas seguem normalmente."
+        ),
+        options=executable_options(["Refazer o plano, cuidando só do produto e dos testes"]),
+    )
+    msg.sender = MasterAgent.display
+    msg.title = f"“{state.title}” precisa de um plano novo"
+    state.plan_ready = False
+    return await block(
+        ctx,
+        state,
+        BlockedReason.QUESTION,
+        "every plan task withdrawn for touching the factory's records: " + "; ".join(why[:6]),
+        resume="plan",
+        message=msg,
+    )
+
+
 async def node_resolve(ctx: EngineContext, state: StoryState) -> StoryState:
     """Close a story whose goal already holds (ADR-0037 §1): the founder chose "already resolved",
     or the line watch saw the failures a line card was opened for leave the base. What can be
@@ -1747,13 +1779,21 @@ async def node_resolve(ctx: EngineContext, state: StoryState) -> StoryState:
         if still:
             state.extra.pop(RESOLVE_KEY, None)
             n = len(still)
+            # who thought it was over: the founder's answer, or the team (an amendment, the
+            # line). Nothing was closed either way, and the message says so: S-106 read "a
+            # história foi encerrada" about a plan the gate had emptied
+            who = (
+                "Você pediu para encerrar esta história como já resolvida"
+                if ask.get("founder")
+                else "A equipe concluiu que não havia mais nada a fazer nesta história"
+            )
             msg = compose_blocked_message(
                 factory=ctx.slug,
                 story_id=state.story_id,
                 story_title=state.title,
                 reason=(
-                    f"A história foi encerrada como já resolvida, mas {n} verificação(ões) "
-                    "automática(s) que a motivaram ainda falham na versão principal do produto."
+                    f"{who}, mas {n} verificação(ões) automática(s) que a motivaram ainda "
+                    "falham na versão principal do produto. Por isso ela continua aberta."
                 ),
                 impact="Nada foi encerrado. As demais entregas seguem normalmente.",
                 options=executable_options(["Seguir com o conserto dessas verificações"]),
@@ -2075,7 +2115,7 @@ def apply_founder_answer(
         apply_design_answer(ctx, state, msg, answer, key, guidance)
     elif action_of(key) == RESOLVED:  # QUESTION: "it is already resolved" (ADR-0037 §1)
         # checked and closed by `resolve`, which runs the failures the story was opened for
-        state.extra[RESOLVE_KEY] = {"why": guidance, "resume": resume or "dev"}
+        state.extra[RESOLVE_KEY] = {"why": guidance, "resume": resume or "dev", "founder": True}
         goto(state, "resolve")
     elif action_of(key) == RESPEC:  # QUESTION: "rewrite the requirements first"
         if guidance:
