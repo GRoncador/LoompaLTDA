@@ -25,9 +25,9 @@ PAUSED = {Stage.AWAITING_FOUNDER}
 KANBAN_COLUMNS = [
     ("BACKLOG", "Backlog"),
     ("SPEC", "Especificação"),
-    ("DEV", "Em Desenvolvimento"),
-    ("TEST", "Em Testes"),
-    ("AWAITING_FOUNDER", "Aguardando Decisão"),
+    ("DEV", "Desenvolvimento"),
+    ("TEST", "Teste"),
+    ("AWAITING_FOUNDER", "Decisão"),
     ("DONE", "Concluído"),
 ]
 
