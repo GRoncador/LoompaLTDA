@@ -866,7 +866,7 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
   `Conversations.proposal_ready` posts an INFO note from the Product Owner with
   `conversation_id` ("🗓 Abrir a reunião" in the inbox) and emits `meeting.proposal_ready`, which
   shows a banner with the same button. With the meeting open, no note.
-- Commits `b470286`, `c7c86e7`, and the one after `02cabf7`; tests in
+- Commits `b470286`, `c7c86e7`, `0a03617`; tests in
   `tests/test_backlog_doors.py` and `tests/test_sprint_meeting.py`.
 
 ## Known gaps / next steps
