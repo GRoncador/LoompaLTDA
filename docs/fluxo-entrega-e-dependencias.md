@@ -118,7 +118,7 @@ esteja na base. É isso que mantém o seu aceite valendo: sem esse portão, o me
 uma entrega que você não aceitou.
 
 Enquanto espera em qualquer um dos dois portões, **nada vai para a sua caixa**: esperar é tempo,
-não decisão. No painel ela aparece em "Aguardando Você" quando está pronta e só o seu aceite da
+não decisão. No painel ela aparece em "Aguardando Decisão" quando está pronta e só o seu aceite da
 anterior a segura.
 
 ## 7. A cadeia A → B → C, passo a passo

@@ -1661,7 +1661,7 @@ def _queue_place(queue: list[str], story_id: str) -> dict[str, int] | None:
 
 def board_column(row: dict[str, Any]) -> str:
     """The kanban column of a story. A story that is finished and green, held only because a
-    delivery before it in the chain waits for the founder, is shown under "Aguardando Você":
+    delivery before it in the chain waits for the founder, is shown under "Aguardando Decisão":
     nothing else is holding it, and that is where the founder looks for what their answer
     unblocks (11.5). The engine's stage stays `REVIEW`."""
     if parked_before_review(row):

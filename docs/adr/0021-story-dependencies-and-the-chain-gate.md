@@ -135,7 +135,7 @@ on A's branch and parks before `review`; C then builds on *B's* branch, because 
 of a dependency is "is it built and green?" (`ready_to_merge`), not "did it already ask the founder
 something?". So the line keeps moving to the end of the chain and the founder is asked **once**,
 about A; B and C are finished, waiting only for their turn to merge. Each acceptance merges one and
-releases the next delivery. In the panel they sit under "Aguardando Você" (`board_column`), because
+releases the next delivery. In the panel they sit under "Aguardando Decisão" (`board_column`), because
 that is where the founder looks for what their answer unblocks, while the engine's stage stays
 `REVIEW`.
 
