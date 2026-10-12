@@ -38,7 +38,7 @@ export default function FactoryModal({ slug, onClose, onOpenSprint, onOpenStory 
   const sprints = [...new Set(scans.filter((s) => s.factory === slug && s.sprint_id).map((s) => s.sprint_id as string))].sort();
 
   return (
-    <Modal wide title="🏭 Fábrica — o que o Loompa achou sobre si mesmo" onClose={onClose}>
+    <Modal wide title="Loompa LTDA — o que o Loompa achou sobre si mesmo" onClose={onClose}>
       <p className="text-xs text-slate-400">
         Problemas da própria fábrica (não do produto), medidos em código a cada sprint: cortes, repetições, esperas, integração, custo.
         Não viram cards no backlog: leve-os a uma sessão de desenvolvimento do Loompa (<code>loompa factory-health --export</code>).

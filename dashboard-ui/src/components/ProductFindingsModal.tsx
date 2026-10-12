@@ -6,7 +6,7 @@ import { Modal } from "./Modal";
 const KIND: Record<string, string> = { bug: "defeito", tech_debt: "débito técnico", opportunity: "oportunidade", risk: "risco", resolution: "solução registrada" };
 
 /** What the Kaizen loop caught in the product today, once each (8.4). The factory's own
- *  problems are elsewhere: the 🏭 Fábrica tab. */
+ *  problems are elsewhere: the Loompa logo in the header. */
 export default function ProductFindingsModal({ slug, onClose, onOpenStory }: { slug: string; onClose: () => void; onOpenStory: (id: string) => void }) {
   const [rows, setRows] = useState<ProductFinding[] | null>(null);
   const [err, setErr] = useState<string | null>(null);

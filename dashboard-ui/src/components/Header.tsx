@@ -10,32 +10,37 @@ export default function Header(props: {
   const fin = overview?.finance;
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-line bg-panel px-4 py-2">
-      <div className="flex items-center gap-2">
+      {/* the logo opens what the Loompa found about itself: it is the Loompa's, not a factory's */}
+      <button className="flex items-center gap-2 rounded-md px-1 hover:bg-line disabled:hover:bg-transparent" disabled={!slug} title="O que o Loompa achou sobre si mesmo: ajustes e correções do próprio Loompa" onClick={props.onFactory}>
         <img src={logo} alt="" className="h-7 w-7" />
         <span className="font-pixel text-[11px] tracking-wider text-brand">LOOMPA LTDA</span>
-      </div>
+      </button>
       <label className="flex items-center gap-2 text-sm">
         <span className="hidden text-slate-400 2xl:inline">Empresa ativa</span>
-        <select className="rounded-md border border-line bg-ink px-2 py-1 text-sm" value={slug ?? ""} onChange={(e) => props.onSwitch(e.target.value)}>
+        {/* the last option opens the new-factory wizard instead of switching to it */}
+        <select className="rounded-md border border-line bg-ink px-2 py-1 text-sm" value={slug ?? ""} onChange={(e) => (e.target.value === NEW ? props.onNewFactory() : props.onSwitch(e.target.value))}>
           {factories.length === 0 && <option value="">(nenhuma)</option>}
           {factories.map((f) => <option key={f.slug} value={f.slug} disabled={!f.exists}>{f.name}{f.engine ? " ●" : ""}</option>)}
+          <option value={NEW}>+ Nova fábrica…</option>
         </select>
       </label>
-      <button className="btn-ghost" onClick={props.onNewFactory}>+ Nova Fábrica</button>
       <div className="mx-auto" />
       {overview && (
         <>
-          <span className="chip bg-slate-800 text-slate-300">{overview.factory.mode}</span>
           {overview.factory.dry_run && <span className="chip bg-amber-900/60 text-amber-200">simulação</span>}
           {fin && (
-            <button className={`rounded-md px-1.5 py-0.5 text-sm hover:bg-line ${fin.warn ? "text-amber-300" : "text-slate-300"}`} title="Custos por dia, papel e modelo" onClick={props.onFinance}>
-              💰 US$ {fin.today_usd.toFixed(2)} hoje · {fin.period_usd.toFixed(2)}/{fin.cap_usd.toFixed(2)} {fin.period === "weekly" ? "na semana" : "no mês"}
+            <button
+              className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm hover:bg-line ${fin.warn ? "text-amber-300" : "text-slate-300"}`}
+              title={`Gasto de hoje: US$ ${fin.today_usd.toFixed(2)}\n${fin.period === "weekly" ? "Na semana" : "No mês"}: US$ ${fin.period_usd.toFixed(2)} de US$ ${fin.cap_usd.toFixed(2)}\nClique para ver custos por dia, papel e modelo`}
+              onClick={props.onFinance}
+            >
+              💰 ${fin.today_usd.toFixed(2)}
+              <BudgetRing used={fin.cap_usd > 0 ? fin.period_usd / fin.cap_usd : 0} warn={fin.warn} />
             </button>
           )}
           <button className="btn-ghost" title="Histórico de sprints: andamento, custo, tempo e relatórios" onClick={props.onSprints}>🏁 Sprints</button>
           <button className="btn-ghost" title="Telas para aprovar, base visual e referências" onClick={props.onDesign}>🎨 Design{props.designPending > 0 ? ` (${props.designPending})` : ""}</button>
           {props.onGrowth && <button className="btn-ghost" title="Plano de marketing, textos, e-mails, posts e anúncios para você revisar" onClick={props.onGrowth}>📣 Growth</button>}
-          <button className="btn-ghost" title="O que a fábrica achou sobre si mesma: problemas do Loompa, não do produto" onClick={props.onFactory}>🏭 Fábrica</button>
           <span className="text-sm" title="Decisões aguardando você">📬 {pending}</span>
           <EngineButtons state={overview.factory.engine_state ?? (overview.factory.engine ? "running" : "stopped")} inFlight={overview.factory.in_flight ?? []} onEngine={props.onEngine} />
           <button className="btn-ghost" title="Provedores, modelos, chaves e orçamento" onClick={props.onSettings}>⚙ Configurações</button>
@@ -43,6 +48,26 @@ export default function Header(props: {
       )}
       <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-400" : "bg-red-500"}`} title={connected ? "tempo real conectado" : "reconectando…"} />
     </header>
+  );
+}
+
+const NEW = "__new__";
+
+/** How much of the period's budget is spent, as a small ring with the percentage beside it:
+ *  the exact amounts are in the tooltip and in the costs panel. */
+function BudgetRing({ used, warn }: { used: number; warn: boolean }) {
+  const pct = Math.round(Math.min(Math.max(used, 0), 1) * 100);
+  const r = 6;
+  const c = 2 * Math.PI * r;
+  const color = warn || pct >= 80 ? "#fbbf24" : "#34d399";
+  return (
+    <span className="flex items-center gap-1 text-xs text-slate-400" aria-label={`${pct}% do orçamento usado`}>
+      <svg viewBox="0 0 16 16" className="h-4 w-4 -rotate-90">
+        <circle cx="8" cy="8" r={r} fill="none" stroke="#334155" strokeWidth="2.5" />
+        <circle cx="8" cy="8" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeDasharray={`${(c * pct) / 100} ${c}`} strokeLinecap="round" />
+      </svg>
+      {pct}%
+    </span>
   );
 }
 
