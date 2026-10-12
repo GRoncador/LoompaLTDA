@@ -10,7 +10,7 @@ const BAR = "#f59e0b";
 const GRID = "#1f2937";
 const BURN = [
   { key: "done", label: "Concluídas", color: "#3987e5" },
-  { key: "waiting", label: "Aguardando você", color: "#d95926" },
+  { key: "waiting", label: "Aguardando decisão", color: "#d95926" },
   { key: "working", label: "Em andamento", color: "#199e70" },
 ] as const;
 
@@ -24,11 +24,11 @@ const RESULT: Record<string, { label: string; cls: string }> = {
   delivered: { label: "entregue", cls: "text-emerald-300" },
   cancelled: { label: "cancelada", cls: "text-red-300" },
   withdrawn: { label: "devolvida ao backlog", cls: "text-slate-400" },
-  waiting: { label: "aguardando você", cls: "text-amber-300" },
+  waiting: { label: "aguardando decisão", cls: "text-amber-300" },
   working: { label: "em andamento", cls: "text-sky-300" },
 };
 const STAGE: Record<string, string> = {
-  BACKLOG: "Backlog", SPEC: "Especificação", PLAN: "Planejamento", DEV: "Desenvolvimento", TEST: "Testes", REVIEW: "Revisão", AWAITING_FOUNDER: "Aguardando você", DONE: "Concluída", CANCELLED: "Cancelada",
+  BACKLOG: "Backlog", SPEC: "Especificação", PLAN: "Planejamento", DEV: "Desenvolvimento", TEST: "Testes", REVIEW: "Revisão", AWAITING_FOUNDER: "Aguardando decisão", DONE: "Concluída", CANCELLED: "Cancelada",
 };
 const NOT_MEASURED = "não medido";
 
@@ -237,7 +237,7 @@ function BurnUp({ report }: { report: SprintReport }) {
     <div>
       <Legend items={BURN.map((b) => ({ label: b.label, color: b.color }))} />
       <div className="relative">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Andamento do sprint: histórias concluídas, aguardando você e em andamento ao longo do tempo"
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Andamento do sprint: histórias concluídas, aguardando decisão e em andamento ao longo do tempo"
           onMouseLeave={() => setHover(null)}
           onMouseMove={(e) => {
             const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
@@ -274,7 +274,7 @@ function BurnTable({ report }: { report: SprintReport }) {
   const pts = burnSeries(report).filter((_, i, a) => i % 6 === 0 || i === a.length - 1);
   return (
     <table className="w-full text-left text-xs">
-      <thead className="text-slate-500"><tr><th className="py-1">Quando</th><th>Concluídas</th><th>Aguardando você</th><th>Em andamento</th><th>Não começadas</th></tr></thead>
+      <thead className="text-slate-500"><tr><th className="py-1">Quando</th><th>Concluídas</th><th>Aguardando decisão</th><th>Em andamento</th><th>Não começadas</th></tr></thead>
       <tbody className="text-slate-300">{pts.map((p) => <tr key={p.at} className="border-t border-line"><td className="py-1">{day(p.at)}</td><td>{p.done}</td><td>{p.waiting}</td><td>{p.working}</td><td>{p.todo}</td></tr>)}</tbody>
     </table>
   );

@@ -377,7 +377,7 @@ def sprint_status(factory: str | None = typer.Option(None, "--factory", "-f")) -
         counts = board.progress(sp)
         console.print(
             f"[bold]{sp.id}[/bold] · {label[sp.status.value]} · {counts['done']}/{counts['total']} concluídas"
-            + (f" · {counts['waiting']} aguardando você" if counts["waiting"] else "")
+            + (f" · {counts['waiting']} aguardando decisão" if counts["waiting"] else "")
             + (f" · meta: {sp.goal}" if sp.goal else "")
         )
         if sp.status in (SprintStatus.CLOSED, SprintStatus.CANCELLED):

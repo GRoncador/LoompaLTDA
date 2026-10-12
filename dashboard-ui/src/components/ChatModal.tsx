@@ -28,7 +28,7 @@ const COPY: Record<ConversationKind, { title: React.ReactNode; hint: string; pla
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
 const STAGE_LABEL: Record<string, string> = {
   BACKLOG: "backlog", SPEC: "especificação", PLAN: "plano", DEV: "desenvolvimento", TEST: "testes", REVIEW: "revisão",
-  AWAITING_FOUNDER: "aguardando você", DONE: "concluída", CANCELLED: "cancelada",
+  AWAITING_FOUNDER: "aguardando decisão", DONE: "concluída", CANCELLED: "cancelada",
 };
 
 // api.ts throws `${status} ${body}`; the body is FastAPI's {"detail": "..."}.

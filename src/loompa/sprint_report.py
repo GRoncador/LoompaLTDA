@@ -41,7 +41,7 @@ STAGE_LABEL = {
     "DEV": "Desenvolvimento",
     "TEST": "Testes",
     "REVIEW": "Revisão",
-    "AWAITING_FOUNDER": "Aguardando você",
+    "AWAITING_FOUNDER": "Aguardando decisão",
     "DONE": "Concluída",
     "CANCELLED": "Cancelada",
 }
@@ -52,7 +52,7 @@ RESULT_LABEL = {
     "resolved": "encerrada como já resolvida",
     "withdrawn": "devolvida ao backlog",
     "retired": "aposentada (coberta por outra entrega ou sem sentido)",
-    "waiting": "aguardando você",
+    "waiting": "aguardando decisão",
     "working": "em andamento",
 }
 ORIGIN_STORY = {
@@ -585,7 +585,7 @@ def render_markdown(report: dict[str, Any], summary: str = "") -> str:
         + (f", {t['cancelled']} canceladas" if t["cancelled"] else "")
         + (f", {t['withdrawn']} devolvidas ao backlog" if t["withdrawn"] else "")
         + (f", {t['retired']} aposentadas" if t.get("retired") else "")
-        + (f", {t['waiting']} aguardando você" if t["waiting"] else "")
+        + (f", {t['waiting']} aguardando decisão" if t["waiting"] else "")
         + (f", {t['working']} em andamento" if t["working"] else "")
         + "."
         + compare

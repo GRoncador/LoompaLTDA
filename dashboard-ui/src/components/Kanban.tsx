@@ -101,7 +101,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
           {sprint && (
             <button className="chip bg-sky-900/50 text-sky-200 hover:bg-sky-800/60" title={`${sprint.goal ? `${sprint.goal} · ` : ""}abrir na aba Sprints`} onClick={() => onOpenSprint(sprint.id)}>
               {sprint.id} · {sprint.status === "open" ? "em planejamento" : "rodando"} · {sprint.progress.done}/{sprint.progress.total}
-              {sprint.progress.waiting > 0 ? ` · ${sprint.progress.waiting} aguardando você` : ""}
+              {sprint.progress.waiting > 0 ? ` · ${sprint.progress.waiting} aguardando decisão` : ""}
             </button>
           )}
           {/* one sprint runs at a time; the next one can be assembled and waits (ADR-0018) */}
@@ -121,68 +121,68 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
             <input value={title} disabled={reading} onChange={(e) => setTitle(e.target.value)} placeholder={reading ? "O Product Owner está lendo…" : "Nova história rápida…"} className="w-64 rounded-md border border-line bg-ink px-2 py-1 text-xs disabled:opacity-60" />
             <button className="btn-ghost text-xs" type="submit" disabled={reading || !title.trim()} title="O Product Owner lê o pedido, classifica e grava, ou explica por que não">{reading ? "lendo…" : "+ Backlog"}</button>
           </form>
-            {/* a sprint starts only from a meeting, after the Product Owner's proposal (ADR-0017) */}
-            <button className={`${kickoff ? "btn-ghost opacity-50" : "btn-primary"} text-xs`} disabled={kickoff}
-              title={kickoff ? "Comece pelo brainstorm de abertura: ele decide a visão, a primeira versão e a stack" : "O Master abre com o estado do projeto; o Product Owner propõe o sprint"}
-              onClick={() => onChat("meeting")}><Icon name="calendar" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Reunião de Sprint</button>
-            {Object.keys(epics).length > 0 && !kickoff ? (
-              <div className="flex items-center">
-                <button className="btn-ghost rounded-r-none border-r-0 text-xs"
-                  title="Discutir uma ideia livre com a fábrica"
-                  onClick={() => onChat("brainstorm")}><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm</button>
-                <details className="relative">
-                  <summary className="btn-ghost rounded-l-none px-1.5 text-xs cursor-pointer list-none" title="Brainstorm para um épico ativo">▾</summary>
-                  <ul className="card absolute right-0 z-30 mt-1 w-64 space-y-1 p-2 text-xs">
-                    <li className="px-2 py-0.5 text-[10px] uppercase font-semibold text-slate-400">Brainstorm para um épico:</li>
-                    {Object.entries(epics).map(([id, name]) => (
-                      <li key={id}>
-                        <button
-                          className="w-full rounded px-2 py-1 text-left hover:bg-line text-slate-100"
-                          onClick={(e) => {
-                            (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
-                            const prompt = `Quero fazer um brainstorm focado no épico ativo '${name}' (${id}). Analise o que já temos no produto e no backlog, e proponha a direção e as ideias/funcionalidades que ainda faltam para que este épico seja concluído com sucesso.`;
-                            onChat("brainstorm", undefined, prompt);
-                          }}
-                        >
-                          <span className="text-slate-500">{id}</span> · {name}
-                        </button>
-                      </li>
-                    ))}
-                    <li className="border-t border-line/60 pt-1 mt-1">
+          {conversations.length > 0 && (
+            <details className="relative">
+              <summary className="btn-ghost cursor-pointer list-none text-xs" title="Conversas em aberto"><Icon name="message" className="mr-1 inline h-3 w-3 align-[-1px]" />{conversations.length}</summary>
+              <ul className="card absolute right-0 z-30 mt-1 w-72 space-y-1 p-2 text-xs">
+                {conversations.map((c) => (
+                  <li key={c.id}>
+                    <button className="w-full rounded px-2 py-1 text-left hover:bg-line" onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; onChat(c.kind, c.id); }}>
+                      <span className="text-slate-500">{c.id} · {c.kind === "meeting" ? "reunião" : c.kind === "review" ? "revisão do PO" : "brainstorm"}</span>
+                      <div className="truncate text-slate-100">{c.title || "(sem título)"}</div>
+                      <div className="text-[10px] text-slate-500">{c.kind === "review" ? "pedido aguardando decisão" : `${c.cards} cards`} · {c.turns} mensagens</div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {Object.keys(epics).length > 0 && !kickoff ? (
+            <div className="flex items-center">
+              <button className="btn-ghost rounded-r-none border-r-0 text-xs"
+                title="Discutir uma ideia livre com a fábrica"
+                onClick={() => onChat("brainstorm")}><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm</button>
+              <details className="relative">
+                <summary className="btn-ghost rounded-l-none px-1.5 text-xs cursor-pointer list-none" title="Brainstorm para um épico ativo">▾</summary>
+                <ul className="card absolute right-0 z-30 mt-1 w-64 space-y-1 p-2 text-xs">
+                  <li className="px-2 py-0.5 text-[10px] uppercase font-semibold text-slate-400">Brainstorm para um épico:</li>
+                  {Object.entries(epics).map(([id, name]) => (
+                    <li key={id}>
                       <button
-                        className="w-full rounded px-2 py-1 text-left hover:bg-line text-slate-400 text-[11px]"
+                        className="w-full rounded px-2 py-1 text-left hover:bg-line text-slate-100"
                         onClick={(e) => {
                           (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
-                          onChat("brainstorm");
+                          const prompt = `Quero fazer um brainstorm focado no épico ativo '${name}' (${id}). Analise o que já temos no produto e no backlog, e proponha a direção e as ideias/funcionalidades que ainda faltam para que este épico seja concluído com sucesso.`;
+                          onChat("brainstorm", undefined, prompt);
                         }}
                       >
-                        <Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm livre (sem épico)
-                      </button>
-                    </li>
-                  </ul>
-                </details>
-              </div>
-            ) : (
-              <button className={`${kickoff ? "btn-primary" : "btn-ghost"} text-xs`}
-                title={kickoff ? "Abertura da fábrica: visão, primeira versão e stack" : "Discutir uma ideia com a fábrica"}
-                onClick={() => onChat("brainstorm")}>{kickoff ? <><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm de abertura</> : <><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm</>}</button>
-            )}
-            {conversations.length > 0 && (
-              <details className="relative">
-                <summary className="btn-ghost cursor-pointer list-none text-xs" title="Conversas em aberto"><Icon name="message" className="mr-1 inline h-3 w-3 align-[-1px]" />{conversations.length}</summary>
-                <ul className="card absolute right-0 z-30 mt-1 w-72 space-y-1 p-2 text-xs">
-                  {conversations.map((c) => (
-                    <li key={c.id}>
-                      <button className="w-full rounded px-2 py-1 text-left hover:bg-line" onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; onChat(c.kind, c.id); }}>
-                        <span className="text-slate-500">{c.id} · {c.kind === "meeting" ? "reunião" : c.kind === "review" ? "revisão do PO" : "brainstorm"}</span>
-                        <div className="truncate text-slate-100">{c.title || "(sem título)"}</div>
-                        <div className="text-[10px] text-slate-500">{c.kind === "review" ? "pedido aguardando você" : `${c.cards} cards`} · {c.turns} mensagens</div>
+                        <span className="text-slate-500">{id}</span> · {name}
                       </button>
                     </li>
                   ))}
+                  <li className="border-t border-line/60 pt-1 mt-1">
+                    <button
+                      className="w-full rounded px-2 py-1 text-left hover:bg-line text-slate-400 text-[11px]"
+                      onClick={(e) => {
+                        (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
+                        onChat("brainstorm");
+                      }}
+                    >
+                      <Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm livre (sem épico)
+                    </button>
+                  </li>
                 </ul>
               </details>
-            )}
+            </div>
+          ) : (
+            <button className={`${kickoff ? "btn-primary" : "btn-ghost"} text-xs`}
+              title={kickoff ? "Abertura da fábrica: visão, primeira versão e stack" : "Discutir uma ideia com a fábrica"}
+              onClick={() => onChat("brainstorm")}>{kickoff ? <><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm de abertura</> : <><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm</>}</button>
+          )}
+          {/* a sprint starts only from a meeting, after the Product Owner's proposal (ADR-0017) */}
+          <button className={`${kickoff ? "btn-ghost opacity-50" : "btn-primary"} text-xs`} disabled={kickoff}
+            title={kickoff ? "Comece pelo brainstorm de abertura: ele decide a visão, a primeira versão e a stack" : "O Master abre com o estado do projeto; o Product Owner propõe o sprint"}
+            onClick={() => onChat("meeting")}><Icon name="calendar" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Reunião de Sprint</button>
         </div>
       </div>
       <div className="scroll-thin grid flex-1 grid-cols-6 gap-2 overflow-x-auto p-3">

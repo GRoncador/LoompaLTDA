@@ -25,7 +25,8 @@ def test_meeting_run_inbox_dry_run(git_repo: Path, hub, monkeypatch):
     assert "2 histórias processadas" in r.stdout
     r = runner.invoke(app, ["sprint", "status"])
     assert r.exit_code == 0 and "SP-001" in r.stdout and "rodando" in r.stdout
-    assert "aguardando você" in r.stdout and "Primeira entrega" in r.stdout
+    out = " ".join(r.stdout.split())
+    assert "aguardando decisão" in out and "Primeira entrega" in out
     r = runner.invoke(app, ["inbox", "list"])
     assert r.exit_code == 0 and "DELIVERY" in r.stdout and "S-001" in r.stdout
     msg_id = r.stdout.split("DELIVERY · ")[1].split(" ")[0]
