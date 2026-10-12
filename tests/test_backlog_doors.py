@@ -436,7 +436,7 @@ async def test_the_briefing_calls_no_model(factory: Factory):
     chats = Conversations(ctx)
     conv = chats.open(ConversationKind.MEETING)
     text = await chats.brief(conv.id)
-    assert "Primeiros da fila: S-001 “Relatório”" in text
+    assert "Primeiros da fila:\n• S-001 · Relatório" in text
     assert "peça a proposta do Product Owner" in text
     await ctx.aclose()
 

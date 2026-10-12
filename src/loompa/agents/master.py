@@ -679,7 +679,7 @@ class MasterAgent(LoompaAgent):
         """Open a Sprint Meeting with where the project stands and a suggested next step (plan
         10.2). Counted and worded in code: the facts are all known, so no model is called."""
         facts = project_facts(self.ctx)
-        text = f"{facts_text(facts)} {meeting_question(self.ctx)}".strip()
+        text = "\n\n".join(t for t in (facts_text(facts), meeting_question(self.ctx)) if t)
         conv.turns.append(Turn(who="agent", name=self.name, text=text))
         self.ctx.emit("meeting.briefed", agent=self.name, conversation_id=conv.id)
         return text
@@ -1301,51 +1301,56 @@ def render_facts(f: dict[str, Any]) -> str:
 
 
 def facts_text(f: dict[str, Any]) -> str:
-    """The briefing without a model: the same facts, in plain pt-BR."""
-    said: list[str] = []
+    """The briefing without a model: the same facts, in plain pt-BR, one block per subject
+    (sprint, work, backlog, last week, next step) so the founder can scan it."""
+    blocks: list[str] = []
     for sp in f["sprints"]:
-        said.append(
-            f"O {sp['id']} está com {sp['done']} de {sp['total']} histórias concluídas"
-            + (f" e {sp['waiting']} esperando você" if sp["waiting"] else "")
+        blocks.append(
+            f"Sprint {sp['id']}: {sp['done']} de {sp['total']} histórias concluídas"
+            + (f", {sp['waiting']} esperando você" if sp["waiting"] else "")
             + "."
         )
+    work: list[str] = []
     if f["moving"]:
-        said.append(
-            f"{_count(len(f['moving']), 'história em andamento', 'histórias em andamento')}."
+        work.append(
+            f"• {_count(len(f['moving']), 'história em andamento', 'histórias em andamento')}."
         )
     if f["deliveries"]:
         sid, day, _ = f["deliveries"][0]
-        said.append(
-            f"{_count(len(f['deliveries']), 'entrega pronta', 'entregas prontas')} esperando sua "
+        work.append(
+            f"• {_count(len(f['deliveries']), 'entrega pronta', 'entregas prontas')} esperando sua "
             f"revisão; a mais antiga é a {sid}, desde {day[8:10]}/{day[5:7]}."
         )
     if f["stuck"]:
-        said.append(
-            f"{_count(len(f['stuck']), 'história parada', 'histórias paradas')} esperando uma "
+        work.append(
+            f"• {_count(len(f['stuck']), 'história parada', 'histórias paradas')} esperando uma "
             f"resposta sua: {', '.join(sid for sid, _, _ in f['stuck'][:3])}."
         )
-    said.append(
+    if work:
+        blocks.append("\n".join(work))
+    backlog = (
         f"No backlog: {_count(f['backlog'], 'card', 'cards')}"
         + (f", {f['findings']} achados pela própria fábrica" if f["findings"] else "")
         + "."
     )
     if f["next"] and not f["sprints"]:
-        said.append(
-            "Primeiros da fila: " + "; ".join(f"{sid} “{title}”" for sid, title in f["next"]) + "."
+        backlog += "\nPrimeiros da fila:\n" + "\n".join(
+            f"• {sid} · {title}" for sid, title in f["next"]
         )
+    blocks.append(backlog)
     if f["done_week"]:
-        said.append(f"Nos últimos 7 dias: {_count(f['done_week'], 'entrega', 'entregas')}.")
+        blocks.append(f"Nos últimos 7 dias: {_count(f['done_week'], 'entrega', 'entregas')}.")
     if f["sprints"]:
         pass  # the meeting's own question follows (`meeting_question`)
     elif f["deliveries"]:
-        said.append("Sugestão: revise as entregas prontas antes de abrir mais trabalho.")
+        blocks.append("Sugestão: revise as entregas prontas antes de abrir mais trabalho.")
     elif f["stuck"]:
-        said.append("Sugestão: responda às histórias paradas; elas destravam o sprint.")
+        blocks.append("Sugestão: responda às histórias paradas; elas destravam o sprint.")
     elif f["backlog"]:
-        said.append("Sugestão: peça a proposta do Product Owner para o próximo sprint.")
+        blocks.append("Sugestão: peça a proposta do Product Owner para o próximo sprint.")
     else:
-        said.append("Conte o que você quer construir e eu monto o rascunho.")
-    return " ".join(said)
+        blocks.append("Conte o que você quer construir e eu monto o rascunho.")
+    return "\n\n".join(blocks)
 
 
 def meeting_question(ctx: Any) -> str:
