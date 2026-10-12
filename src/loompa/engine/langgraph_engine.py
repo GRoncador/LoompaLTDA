@@ -244,7 +244,17 @@ class GraphRuntime:
         if snapshot.values and snapshot.next:
             result = await graph.ainvoke(None, config)  # resume after crash / founder answer
         elif snapshot.values:
-            return StoryState.model_validate(snapshot.values)  # already paused or finished
+            if not self.is_runnable(state.stage):
+                return StoryState.model_validate(snapshot.values)  # already paused or finished
+            # The thread ended but the story is still runnable: its last node ran and projected
+            # its state, then its edge was lost (a write that failed validation, S-090). Without
+            # this the Scheduler re-dispatched it every tick. Re-enter the route from the read
+            # model, the way a founder answer does.
+            log.warning(
+                "thread for %s ended at %s; re-entering its route", state.story_id, state.phase
+            )
+            await graph.aupdate_state(config, state.model_dump(), as_node="await_founder")
+            result = await graph.ainvoke(None, config)
         else:
             result = await graph.ainvoke(state, config)
         return StoryState.model_validate(result)

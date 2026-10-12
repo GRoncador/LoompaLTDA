@@ -1691,6 +1691,28 @@ async def test_resume_from_checkpoint_after_interruption(factory: Factory):
     await ctx2.aclose()
 
 
+async def test_thread_that_ended_on_a_runnable_stage_is_re_entered(factory: Factory):
+    """A node's edge lost after it ran (S-090: its write failed validation) left the thread at END
+    with the story still runnable; the Scheduler re-dispatched it every tick and nothing ran."""
+    from loompa.engine.langgraph_engine import thread_config
+    from loompa.engine.scheduler import runtime_for
+
+    ctx = make_ctx(factory, dry_run=True)
+    sid = seed_story(ctx, "Aresta perdida")
+    rt = runtime_for(ctx)
+    state = await rt.run_until(load_state(ctx, sid), stop_after=["spec_review"])
+    assert state.stage == Stage.PLAN
+    graph = await rt.graph()
+    ended = state.model_copy(update={"stage": Stage.AWAITING_FOUNDER})  # route → END
+    await graph.aupdate_state(thread_config(sid), ended.model_dump(), as_node="await_founder")
+    assert not (await graph.aget_state(thread_config(sid))).next  # ended, yet runnable
+    await Scheduler(ctx).run(max_cycles=20)
+    state = load_state(ctx, sid)
+    assert state.stage == Stage.AWAITING_FOUNDER
+    assert "node_plan" in [c["node"] for c in ctx.store.checkpoints(sid)]
+    await ctx.aclose()
+
+
 def test_end_of_day_report_is_executive(factory: Factory):
     ctx = make_ctx(factory, dry_run=True)
     ProductOwnerAgent(ctx).add_item("A")  # still waiting in the backlog
