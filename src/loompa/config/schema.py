@@ -584,9 +584,15 @@ class McpServerConfig(ToolProviderConfig):
     headers: dict[str, str] = Field(default_factory=dict)  # static and never secret
     roles: list[str] = Field(default_factory=lambda: ["analyst"])  # who may call its tools
     allow: list[str] = Field(default_factory=list)  # tool-name globs; empty = every tool
+    # Narrows `allow` for one role (intersection): the Worker reads a URL but does not search.
+    role_allow: dict[str, list[str]] = Field(default_factory=dict)
     timeout_s: float = Field(60.0, gt=0)
 
 
+# Roles that read the web: the Analyst researches, the Architect weighs technologies, the Worker
+# only reads a documentation URL. Everyone else asks the Analyst or works from what it handed over.
+TAVILY_ROLES = ["analyst", "architect", "worker"]
+TAVILY_ROLE_ALLOW = {"worker": ["tavily_extract"]}
 TAVILY_MCP_URL = "https://mcp.tavily.com/mcp/"
 # Search and extract answer a research question; crawl/map/research burn credits on their own.
 # Exact names, not globs: `*search*` also matched `tavily_research`, and a glob silently admits
@@ -605,6 +611,8 @@ def _tavily_default() -> McpServerConfig:
         console_url="https://app.tavily.com",
         url=TAVILY_MCP_URL,
         allow=list(TAVILY_MCP_ALLOW),
+        roles=list(TAVILY_ROLES),
+        role_allow={r: list(a) for r, a in TAVILY_ROLE_ALLOW.items()},
         headers={"DEFAULT_PARAMETERS": TAVILY_DEFAULT_PARAMETERS},
     )
 
@@ -636,6 +644,10 @@ class ToolsConfig(BaseModel):
             # `tavily_research`. Nobody chose it deliberately — it was the default — so it is
             # corrected on load instead of leaving those factories with the expensive tool.
             self.tavily.allow = list(TAVILY_MCP_ALLOW)
+        if self.tavily.roles == ["analyst"]:
+            # the old default, from when only the Analyst browsed (ADR-0009)
+            self.tavily.roles = list(TAVILY_ROLES)
+            self.tavily.role_allow = {r: list(a) for r, a in TAVILY_ROLE_ALLOW.items()}
         return self
 
     def servers(self) -> dict[str, McpServerConfig]:

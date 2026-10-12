@@ -98,7 +98,9 @@ def test_tavily_is_the_first_mcp_server_and_old_configs_still_load():
         "https://mcp.tavily.com/mcp/",
         "bearer",
     )
-    assert tavily.roles == ["analyst"] and tavily.allow == ["tavily_search", "tavily_extract"]
+    assert tavily.roles == ["analyst", "architect", "worker"]
+    assert tavily.role_allow == {"worker": ["tavily_extract"]}
+    assert tavily.allow == ["tavily_search", "tavily_extract"]
     assert cfg.tools.servers() == {"tavily": tavily}
     legacy = ToolsConfig.model_validate(  # what a config.yaml written before Fase 4 carries
         {
@@ -153,12 +155,16 @@ async def test_session_lists_only_allowed_tools_with_safe_names():
 
 async def test_only_the_configured_roles_get_web_tools():
     hub = hub_with(fake_tavily())
-    for role in ("worker", "architect", "master"):
+    for role in ("master", "product_owner", "compliance", "product_manager", "inspector"):
         async with hub.session(role) as web:
             assert not web.available and not web.unavailable, role
-    hub.config.tools.tavily.roles = ["analyst", "architect"]
     async with hub.session("architect") as web:
-        assert web.available
+        assert set(web.tools) == {"tavily_search", "tavily_extract"}
+    async with hub.session("worker") as web:  # reads a documentation URL, does not search
+        assert set(web.tools) == {"tavily_extract"}
+    hub.config.tools.tavily.roles = ["analyst"]
+    async with hub.session("architect") as web:
+        assert not web.available and not web.unavailable
     hub.config.tools.tavily.enabled = False
     async with hub.session("analyst") as web:
         assert not web.available

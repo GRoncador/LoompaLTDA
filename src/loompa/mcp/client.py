@@ -185,9 +185,14 @@ class McpHub:
                 stack.push_async_callback(child.aclose)
                 sess._clients[name] = client
                 sess._timeouts[name] = spec.timeout_s
+                narrow = spec.role_allow.get(role or "") if only is None else None
                 for tool in remote:
                     if spec.allow and not any(
                         fnmatch.fnmatchcase(tool.name.lower(), pat.lower()) for pat in spec.allow
+                    ):
+                        continue
+                    if narrow is not None and not any(
+                        fnmatch.fnmatchcase(tool.name.lower(), pat.lower()) for pat in narrow
                     ):
                         continue
                     exposed = _unique_name(tool.name, name, used)

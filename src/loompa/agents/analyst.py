@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +25,6 @@ from loompa.agents.base import AgentResult, LoompaAgent
 from loompa.agents.toolbox import EXPLORE_TOOLS, normalize_url
 from loompa.decider import RELATION, Answer, build_decider, claim_state, keeps, nearest_section
 from loompa.engine.state import StoryState
-from loompa.mcp import McpSession
 from loompa.speckit import render_research, story_dir
 from loompa.speckit.artifacts import RESEARCH_FOR_REDOING, RESEARCH_ROOM, fit_sections
 
@@ -105,27 +102,6 @@ CLAIM_CHECKS = 12  # sentence-source pairs checked per report
 class AnalystAgent(LoompaAgent):
     role = "analyst"
     display = "Analyst Loompa"
-
-    @asynccontextmanager
-    async def _web(self) -> AsyncIterator[McpSession]:
-        """Web tools for this run. A simulation (`--dry-run`) never touches the network."""
-        if self.ctx.dry_run:
-            sess = McpSession()
-            sess.unavailable["web"] = "modo de simulação"
-            yield sess
-            return
-        async with self.ctx.mcp.session(self.role) as sess:
-            if sess.unavailable and not self.ctx.dry_run:
-                # The founder only ever reads `web_limitation`, which says the search could not be
-                # opened without saying why. The technical reason is kept here: a whole factory
-                # ran without web search because the install was missing `mcp`, and the sentence
-                # looked the same as a network blip. Redacted by the hub before it gets here.
-                self.ctx.emit(
-                    "web.unavailable",
-                    agent=self.name,
-                    reasons=dict(sess.unavailable),
-                )
-            yield sess
 
     @staticmethod
     def only_seen_urls(text: str, seen: set[str]) -> str:
