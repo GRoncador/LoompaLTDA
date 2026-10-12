@@ -24,10 +24,9 @@ export default function Header(props: {
           <option value={NEW}>+ Nova fábrica…</option>
         </select>
       </label>
-      <div className="mx-auto" />
       {overview && (
         <>
-          {overview.factory.dry_run && <span className="chip bg-amber-900/60 text-amber-200">simulação</span>}
+          <button className="btn-ghost" title="Provedores, modelos, chaves e orçamento" onClick={props.onSettings}>⚙ Configurações</button>
           {fin && (
             <button
               className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm hover:bg-line ${fin.warn ? "text-amber-300" : "text-slate-300"}`}
@@ -38,14 +37,21 @@ export default function Header(props: {
               <BudgetRing used={fin.cap_usd > 0 ? fin.period_usd / fin.cap_usd : 0} warn={fin.warn} />
             </button>
           )}
-          <button className="btn-ghost" title="Histórico de sprints: andamento, custo, tempo e relatórios" onClick={props.onSprints}>🏁 Sprints</button>
-          <button className="btn-ghost" title="Telas para aprovar, base visual e referências" onClick={props.onDesign}>🎨 Design{props.designPending > 0 ? ` (${props.designPending})` : ""}</button>
-          {props.onGrowth && <button className="btn-ghost" title="Plano de marketing, textos, e-mails, posts e anúncios para você revisar" onClick={props.onGrowth}>📣 Growth</button>}
-          <EngineButtons state={overview.factory.engine_state ?? (overview.factory.engine ? "running" : "stopped")} inFlight={overview.factory.in_flight ?? []} onEngine={props.onEngine} />
-          <button className="btn-ghost" title="Provedores, modelos, chaves e orçamento" onClick={props.onSettings}>⚙ Configurações</button>
+          {overview.factory.dry_run && <span className="chip bg-amber-900/60 text-amber-200">simulação</span>}
         </>
       )}
-      <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-400" : "bg-red-500"}`} title={connected ? "tempo real conectado" : "reconectando…"} />
+      {/* the right side: sprints and design, then stop, then play/pause at the far edge */}
+      <div className="ml-auto flex items-center gap-3">
+        {overview && (
+          <>
+            <button className="btn-ghost" title="Histórico de sprints: andamento, custo, tempo e relatórios" onClick={props.onSprints}>🏁 Sprints</button>
+            <button className="btn-ghost" title="Telas para aprovar, base visual e referências" onClick={props.onDesign}>🎨 Design{props.designPending > 0 ? ` (${props.designPending})` : ""}</button>
+            {props.onGrowth && <button className="btn-ghost" title="Plano de marketing, textos, e-mails, posts e anúncios para você revisar" onClick={props.onGrowth}>📣 Growth</button>}
+            <EngineButtons state={overview.factory.engine_state ?? (overview.factory.engine ? "running" : "stopped")} inFlight={overview.factory.in_flight ?? []} onEngine={props.onEngine} />
+          </>
+        )}
+        <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-400" : "bg-red-500"}`} title={connected ? "tempo real conectado" : "reconectando…"} />
+      </div>
     </header>
   );
 }
