@@ -93,7 +93,7 @@ function References({ slug, refs, onChange, story }: { slug: string; refs: Desig
   };
   return (
     <div className="space-y-3">
-      <div className="space-y-2 rounded-md border border-line bg-panel/40 p-2 text-xs">
+      <div className="space-y-2 rounded-md border border-line/60 bg-raised/60 p-2 text-xs">
         <div className="flex flex-wrap gap-1">
           {(["image", "link", "figma", "text"] as const).map((k) => (
             <button key={k} type="button" className={kind === k ? "btn-primary" : "btn-ghost"} onClick={() => setKind(k)}>{KIND_LABEL[k]}</button>

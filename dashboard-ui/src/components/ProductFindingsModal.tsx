@@ -20,7 +20,7 @@ export default function ProductFindingsModal({ slug, onClose, onOpenStory }: { s
         {rows === null && <li className="text-xs text-slate-500">carregando…</li>}
         {rows?.length === 0 && <li className="text-xs text-slate-500">Nada novo hoje.</li>}
         {rows?.map((r, i) => (
-          <li key={i} className="rounded-md border border-line bg-panel p-2 text-xs">
+          <li key={i} className="rounded-md border border-line/60 bg-raised p-2 text-xs">
             <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
               <span className="chip bg-lime-900/50 text-lime-200">{KIND[r.kind] ?? r.kind}</span>
               {r.story_id && <span>notado em <button className="text-sky-300 hover:underline" onClick={() => onOpenStory(r.story_id as string)}>{r.story_id}</button></span>}

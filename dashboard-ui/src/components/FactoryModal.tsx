@@ -77,7 +77,7 @@ function FindingCard({ f, slug, onChanged, onOpenSprint, onOpenStory }: {
   const vanished = f.status === "vanished";
   const here = f.factories.includes(slug);
   return (
-    <li className={`rounded-md border border-line bg-panel p-2 text-xs ${resolved || vanished ? "opacity-70" : ""}`}>
+    <li className={`rounded-md border border-line/60 bg-raised p-2 text-xs ${resolved || vanished ? "opacity-70" : ""}`}>
       <button className="w-full text-left" onClick={() => setOpen(!open)}>
         <div className="flex flex-wrap items-center gap-1 text-[10px]">
           <span className={`chip ${sev.cls}`}>{sev.label}</span>

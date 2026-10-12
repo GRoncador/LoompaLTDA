@@ -325,7 +325,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   // card under the mouse, or a story someone's sprint tag / blocker chip is pointing at
   const pointed = !!hl.sprint && hl.sprint === s.sprint_id ? "sprint" : hl.ids?.includes(s.id) ? "block" : "";
   return (
-    <div className={`group relative rounded-md border p-2 text-xs transition-transform duration-200 ease-out hover:scale-[1.03] ${pointed ? "scale-[1.03]" : ""} ${running ? "border-brand bg-brand/[0.07] ring-1 ring-brand running-glow" : "border-line bg-panel hover:border-slate-500"}`}>
+    <div className={`group relative rounded-md border p-2 text-xs transition-transform duration-200 ease-out hover:scale-[1.03] ${pointed ? "scale-[1.03]" : ""} ${running ? "border-brand bg-brand/[0.07] ring-1 ring-brand running-glow" : "border-transparent bg-raised hover:border-slate-500 hover:bg-raised-hover"}`}>
       <div className="flex items-center gap-1 text-[10px] text-slate-500">
         <span className="text-[12px] leading-none" title={kind.label}><Icon name={kind.icon} className="h-3.5 w-3.5" /></span>
         <button className="hover:text-slate-300" onClick={() => onOpen(s.id)}>{s.id}</button>

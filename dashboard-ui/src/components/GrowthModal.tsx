@@ -27,7 +27,7 @@ export default function GrowthModal({ slug, onClose }: { slug: string; onClose: 
     <Modal title={<><Icon name="megaphone" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Growth · peças para você revisar</>} onClose={onClose} className="w-[96vw] max-w-5xl">
       <div className="space-y-3 text-sm">
         <p className="text-xs text-slate-400">A fábrica escreve e desenha; você revisa e publica. Nada é enviado, publicado ou pago por aqui.</p>
-        <div className="space-y-2 rounded-md border border-line bg-panel/40 p-2">
+        <div className="space-y-2 rounded-md border border-line/60 bg-raised/60 p-2">
           <div className="flex flex-wrap gap-1">
             {Object.entries(KIND_LABEL).map(([k, label]) => (
               <button key={k} className={kind === k ? "btn-primary" : "btn-ghost"} onClick={() => setKind(k)}>{label}</button>

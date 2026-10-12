@@ -95,7 +95,7 @@ function PhaseForm({ slug, phase, busy, run }: { slug: string; phase: ProductPha
   const [facts, setFacts] = useState(phase.facts);
   const field = "mt-1 w-full rounded-md border border-line bg-ink px-2 py-1 text-sm";
   return (
-    <div className="space-y-2 rounded-md border border-line bg-panel/40 p-2">
+    <div className="space-y-2 rounded-md border border-line/60 bg-raised/60 p-2">
       <label className="block text-xs text-slate-400">Objetivo da fase {phase.name}
         <input className={field} value={goal} onChange={(e) => setGoal(e.target.value)} />
       </label>

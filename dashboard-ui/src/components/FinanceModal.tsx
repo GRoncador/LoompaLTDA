@@ -14,7 +14,7 @@ type Finance = {
 };
 
 const BAR = "#f59e0b"; // brand amber: one series, one hue
-const GRID = "#1f2937"; // `line`, one step off the panel surface
+const GRID = "#272d38"; // `line`, one step off the panel surface
 
 const usd = (v: number) => (v >= 1 ? `US$ ${v.toFixed(2)}` : `US$ ${v.toFixed(4)}`);
 

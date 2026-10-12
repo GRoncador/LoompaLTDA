@@ -445,7 +445,7 @@ const ROLE_LABEL: Record<string, string> = { analyst: ROLE_NAME.analyst, archite
  *  (the v1 features): the vision, what stays out of v1 and the stack the founder picks. */
 function KickoffBox({ k, editable, onEdit }: { k: Kickoff; editable: boolean; onEdit: (ops: Record<string, unknown>[]) => void }) {
   return (
-    <div className="space-y-1.5 rounded-md border border-brand/50 bg-panel p-2">
+    <div className="space-y-1.5 rounded-md border border-brand/50 bg-raised p-2">
       <div className="text-[10px] uppercase tracking-wide text-brand">Abertura da fábrica</div>
       <div><span className="text-slate-500">Visão: </span>{k.vision || <span className="text-slate-500">ainda não definida</span>}</div>
       {k.out_of_v1.length > 0 && <div><span className="text-slate-500">Fora da v1: </span>{k.out_of_v1.join("; ")}</div>}
@@ -511,7 +511,7 @@ function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, o
           </>
         ) : (
           <>
-            <div className={`rounded-md border p-2 ${draft?.ready ? "border-emerald-700/70 bg-emerald-950/30" : "border-line bg-panel"}`}>
+            <div className={`rounded-md border p-2 ${draft?.ready ? "border-emerald-700/70 bg-emerald-950/30" : "border-line/60 bg-raised"}`}>
               <div className="text-[10px] uppercase tracking-wide text-slate-500">Rumo{draft?.ready ? " · o Diretor acha que está claro" : ""}</div>
               <div className="mt-0.5 whitespace-pre-wrap text-slate-100">{draft?.direction || <span className="text-slate-500">Ainda sem rumo. Conte a ideia na conversa.</span>}</div>
             </div>
@@ -567,7 +567,7 @@ function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, o
 function OpinionCard({ o, editable, onEdit }: { o: Opinion; editable: boolean; onEdit: (ops: Record<string, unknown>[]) => void }) {
   const [openDetails, setOpenDetails] = useState(false);
   return (
-    <div className={`rounded-md border border-line bg-panel p-2 ${o.dismissed || o.failed ? "opacity-60" : ""}`}>
+    <div className={`rounded-md border border-line/60 bg-raised p-2 ${o.dismissed || o.failed ? "opacity-60" : ""}`}>
       <div className="flex items-start gap-2">
         <button className="min-w-0 flex-1 text-left" onClick={() => setOpenDetails(!openDetails)}>
           <div className="text-[10px] text-slate-500">{o.key} · {o.name}{o.asked_by === "founder" ? " · pedido por você" : ""}{o.dismissed ? " · deixado de lado" : ""}{o.failed ? " · não respondeu" : ""}</div>
@@ -595,7 +595,7 @@ function OpinionCard({ o, editable, onEdit }: { o: Opinion; editable: boolean; o
 
 function SplitCard({ item, editable, onEdit }: { item: DraftItem; editable: boolean; onEdit: (ops: Record<string, unknown>[]) => void }) {
   return (
-    <li className="rounded-md border border-line bg-panel p-2">
+    <li className="rounded-md border border-line/60 bg-raised p-2">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
@@ -634,7 +634,7 @@ function ReviewPanel({ conv, review, busy, open, founderTurns, onForce, onBrains
       <div className="border-b border-line px-3 py-2"><h4 className="text-sm font-semibold">O card como o Product Owner gravaria</h4></div>
       <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3 text-xs">
         {item ? (
-          <div className="rounded-md border border-line bg-panel p-2">
+          <div className="rounded-md border border-line/60 bg-raised p-2">
             <div className="flex flex-wrap gap-1 text-[10px]">
               {review?.kind && <span className="chip bg-fuchsia-900/50 text-fuchsia-200">{KIND_LABEL[review.kind] ?? review.kind}</span>}
               {item.epic && <span className="chip bg-slate-800 text-slate-400">{item.epic}</span>}
@@ -666,7 +666,7 @@ function Bubble({ who, name, text, changes }: { who: "founder" | "agent"; name: 
   const mine = who === "founder";
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[85%] rounded-lg px-3 py-2 ${mine ? "bg-brand/20 text-amber-50" : "bg-slate-800 text-slate-100"}`}>
+      <div className={`max-w-[85%] rounded-lg px-3 py-2 ${mine ? "bg-brand/20 text-amber-50" : "bg-raised text-slate-100"}`}>
         {!mine && <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{name}</div>}
         <div className="whitespace-pre-wrap">{text}</div>
         {changes.length > 0 && <ul className="mt-1 space-y-0.5 border-t border-white/10 pt-1 text-[11px] text-emerald-300">{changes.map((c, i) => <li key={i}>• {c}</li>)}</ul>}
@@ -679,7 +679,7 @@ function Item({ item, sprint, member = false, editable, onEdit }: { item: DraftI
   // a card of the running sprint: unchecking takes it out (back to the backlog); ↺ starts it over
   const leaving = member && !item.in_sprint;
   return (
-    <li className={`rounded-md border bg-panel p-2 text-xs ${leaving ? "border-red-900/70 opacity-70" : item.restart ? "border-amber-700/70" : "border-line"}`}>
+    <li className={`rounded-md border bg-raised p-2 text-xs ${leaving ? "border-red-900/70 opacity-70" : item.restart ? "border-amber-700/70" : "border-line"}`}>
       <div className="flex items-start gap-2">
         {sprint && <input type="checkbox" className="mt-1" title={member ? "No sprint (desmarque para tirar e devolver ao backlog)" : "No sprint"} checked={item.in_sprint} disabled={!editable} onChange={(e) => onEdit([{ op: "update", ref: item.key, in_sprint: e.target.checked }])} />}
         <div className="min-w-0 flex-1">

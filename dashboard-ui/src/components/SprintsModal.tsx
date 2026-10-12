@@ -5,9 +5,9 @@ import type { SprintListItem, SprintReport, SprintStoryReport, SprintTotals } fr
 import { Icon } from "./Icon";
 
 // One series, one hue (as in Custos); the burn-up's three series take the validated dark
-// categorical slots 1-3 in fixed order (blue, orange, aqua: all checks pass on #111827).
+// categorical slots 1-3 in fixed order (blue, orange, aqua: all checks pass on #13171e).
 const BAR = "#f59e0b";
-const GRID = "#1f2937";
+const GRID = "#272d38";
 const BURN = [
   { key: "done", label: "Concluídas", color: "#3987e5" },
   { key: "waiting", label: "Aguardando decisão", color: "#d95926" },
@@ -250,7 +250,7 @@ function BurnUp({ report }: { report: SprintReport }) {
               <text x={left - 6} y={y(t) + 3} textAnchor="end" className="fill-slate-500 text-[10px]">{t}</text>
             </g>
           ))}
-          {layers.map((l) => <path key={l.key} d={l.path} fill={l.color} fillOpacity={0.85} stroke="#111827" strokeWidth={2} strokeLinejoin="round" />)}
+          {layers.map((l) => <path key={l.key} d={l.path} fill={l.color} fillOpacity={0.85} stroke="#13171e" strokeWidth={2} strokeLinejoin="round" />)}
           {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={top} y2={top + plotH} stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" />}
           {[0, Math.floor((pts.length - 1) / 2), pts.length - 1].map((i) => (
             <text key={i} x={x(i)} y={H - 6} textAnchor={i === 0 ? "start" : i === pts.length - 1 ? "end" : "middle"} className="fill-slate-500 text-[10px]">{day(pts[i].at)}</text>

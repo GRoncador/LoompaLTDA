@@ -15,7 +15,7 @@ export function DesignScreens({ slug, screens, notes, onNote }: {
       {screens.map((s, i) => {
         const key = `${s.alt ? `Alternativa ${s.alt} · ` : ""}${s.title}${s.state ? ` (${STATE_LABEL[s.state] ?? s.state})` : ""}`;
         return (
-          <div key={`${s.html ?? s.title}-${i}`} className="rounded-md border border-line/70 bg-panel/40 p-2">
+          <div key={`${s.html ?? s.title}-${i}`} className="rounded-md border border-line/60 bg-raised/60 p-2">
             <div className="mb-1 flex items-center gap-2 text-xs">
               <span className="font-medium text-slate-200">{key}</span>
               {s.route && <code className="text-[10px] text-slate-500">{s.route}</code>}

@@ -1819,7 +1819,7 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
       {!data ? <p className="text-xs text-slate-400">carregando…</p> : data.entries === 0 ? (
         <p className="text-xs text-slate-400">Ainda não há dados: use “Atualizar benchmark”.</p>
       ) : shown.map((prof) => (
-        <div key={prof.profile} className="space-y-2 rounded-lg border border-line bg-panel p-3">
+        <div key={prof.profile} className="space-y-2 rounded-lg border border-line/60 bg-raised p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div className="flex items-center gap-1.5 font-semibold text-slate-100">{PROFILE_ICON[prof.profile] && <Icon name={PROFILE_ICON[prof.profile]} className="h-3.5 w-3.5" />} {prof.label}</div>
             <div className="text-[11px] text-slate-500">piso do tier 2: {prof.floor} · {prof.partial} modelos de fora por falta de benchmark</div>
@@ -1833,7 +1833,7 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
           ))}
         </div>
       ))}
-      <div className="space-y-2 rounded-lg border border-line bg-panel p-3">
+      <div className="space-y-2 rounded-lg border border-line/60 bg-raised p-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="flex items-center gap-1.5 font-semibold text-slate-100"><Icon name="image" className="h-4 w-4" />Imagem (Designer)</div>
           <button className="btn-ghost whitespace-nowrap text-xs" disabled={imgBusy} onClick={refreshImg}

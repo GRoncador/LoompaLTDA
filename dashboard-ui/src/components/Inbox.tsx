@@ -123,7 +123,7 @@ export function MessageCard({ m, unread = false, onOpen, onClose, onReply, onArc
     } finally { setBusy(false); }
   };
   return (
-    <article className={`rounded-md border p-3 ${unread ? "border-line bg-ink/90" : "border-line bg-ink/40"}`}>
+    <article className={`rounded-md border p-3 ${unread ? "border-transparent bg-raised" : "border-transparent bg-raised/50"}`}>
       <div className="flex items-start gap-2">
         {unread && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand" title="Não lida" />}
         <span className={`chip ${k.cls} ${unread ? "" : "opacity-70"}`}>{k.label}</span>
