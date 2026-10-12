@@ -158,7 +158,7 @@ Decided 2026-09-29:
   are unreadable by any tool. `loompa/mcp/` is the MCP client on the official SDK: streamable
   HTTP or stdio, key in a header / URL parameter / child env (never in config.yaml), tools filtered
   by role and `allow` globs, an unreachable server becomes a declared limitation. `tools.tavily`
-  is now an `McpServerConfig` (old configs still load); `loompa providers test tavily` and the
+  is now an `McpServerConfig` (old configs still load); `loompa providers test tavily` `2ecb720`;
   settings screen test the same MCP path. `AnalystAgent` + route `intake → research →
   research_review → founder → done` for `kind=research` (no worktree, no merge): cited URLs must
   have been returned by a web tool in that run, the "no web search" limitation is added by code,
@@ -428,7 +428,7 @@ Decided 2026-09-29:
   side.
 
 - **2026-09-30 (afternoon) — `contas` Sprint 1 finished.** With the Mac on power (`caffeinate -i`)
-  S-007 and S-031 were delivered, reviewed by hand and merged; SP-001 and SP-002 are closed and the
+  S-007 and S-031 were delivered, reviewed by hand and merged; SP-001 and SP-002 are closed `2ecb720`;
   factory's main has 115 tests green and a clean lint. US$ 1.58 over 861 calls since the morning restart
   (S-002 0.07 · S-030 0.18 · S-007 0.53 · S-031 0.81). **Fixed on the way:** a conflicted file over
   20k characters was skipped by the resolver without a word, the merge aborted and S-007 kept being
@@ -437,7 +437,7 @@ Decided 2026-09-29:
   model through diff3 (S-007's merge, 17 model minutes and a failure before, settled at once); a run
   stopped inside `dev` resumed with no task done and replayed the founder's amend (tasks marked `[x]`
   now count, an amend is applied once, a model's own "T8:" numbering is stripped). **Verified live:** the
-  reproducer went red before the fix (S-031); the founder's guidance reached the self-check and the
+  reproducer went red before the fix (S-031); the founder's guidance reached the self-check `2ecb720`;
   judge (S-007's "para", S-031's Brazilian-format note became card S-040); diff hygiene reverted a
   whitespace-only change; the call timeout cut a model hung for 600 s.
   **Main cost now is speed, not correctness:** S-031 was a 4-line fix plus tests and took ~2.5 h —
@@ -885,8 +885,7 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
   report: the dashboard starts it, the engine's pass also tries it, a pass that died is retried
   after 15 min, a pause waits for the play. If it never runs, only the order is lost. The window
   closes on the OK as before, now without the wait.
-- Commits `b470286`, `c7c86e7`, `0a03617`, `af3d0b2`, `2917ea4`, and the
-  pause/discard/OK commit listed in the plan; tests in
+- Commits `b470286`, `c7c86e7`, `0a03617`, `af3d0b2`, `2917ea4`, `2ecb720`; tests in
   `tests/test_backlog_doors.py` and `tests/test_sprint_meeting.py`.
 
 ## Known gaps / next steps
