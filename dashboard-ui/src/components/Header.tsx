@@ -2,11 +2,11 @@ import type { EngineState, FactoryRef, InFlight, Overview } from "../types";
 import logo from "../assets/loompa-logo.png";
 
 export default function Header(props: {
-  factories: FactoryRef[]; slug: string | null; overview: Overview | null; connected: boolean; pending: number;
+  factories: FactoryRef[]; slug: string | null; overview: Overview | null; connected: boolean;
   onSwitch: (slug: string) => void; onNewFactory: () => void; onEngine: (action: "start" | "pause" | "stop") => void; onSettings: () => void; onFinance: () => void; onSprints: () => void; onFactory: () => void;
   onDesign: () => void; designPending: number; onGrowth?: () => void;
 }) {
-  const { factories, slug, overview, connected, pending } = props;
+  const { factories, slug, overview, connected } = props;
   const fin = overview?.finance;
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-line bg-panel px-4 py-2">
@@ -41,7 +41,6 @@ export default function Header(props: {
           <button className="btn-ghost" title="Histórico de sprints: andamento, custo, tempo e relatórios" onClick={props.onSprints}>🏁 Sprints</button>
           <button className="btn-ghost" title="Telas para aprovar, base visual e referências" onClick={props.onDesign}>🎨 Design{props.designPending > 0 ? ` (${props.designPending})` : ""}</button>
           {props.onGrowth && <button className="btn-ghost" title="Plano de marketing, textos, e-mails, posts e anúncios para você revisar" onClick={props.onGrowth}>📣 Growth</button>}
-          <span className="text-sm" title="Decisões aguardando você">📬 {pending}</span>
           <EngineButtons state={overview.factory.engine_state ?? (overview.factory.engine ? "running" : "stopped")} inFlight={overview.factory.in_flight ?? []} onEngine={props.onEngine} />
           <button className="btn-ghost" title="Provedores, modelos, chaves e orçamento" onClick={props.onSettings}>⚙ Configurações</button>
         </>

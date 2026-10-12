@@ -29,10 +29,11 @@ export default function Inbox(props: {
   });
   // newest first, every note closed: the tag and the title, bold until opened
   const sorted = [...messages].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const unread = messages.filter((m) => !read.has(m.id)).length;
   return (
     <>
       <div className="border-b border-line px-3 py-2">
-        <h2 className="text-sm font-semibold">📬 Caixa de Entrada</h2>
+        <h2 className="text-sm font-semibold">📬 Caixa de Entrada{unread > 0 && ` (${unread})`}</h2>
       </div>
       <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3">
         {messages.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nada pendente. Aproveite o dia. 🎉</p>}

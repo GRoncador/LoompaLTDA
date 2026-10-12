@@ -109,12 +109,11 @@ export default function App() {
     setChat({ kind, resumeId: id });
   }, [overview]);
 
-  const pendingCount = useMemo(() => overview?.inbox.filter((m) => m.kind === "decision" || m.kind === "blocked" || m.kind === "delivery").length ?? 0, [overview]);
 
   return (
     <div className="flex h-screen flex-col">
       <Header
-        factories={factories} slug={slug} overview={overview} connected={connected} pending={pendingCount}
+        factories={factories} slug={slug} overview={overview} connected={connected}
         onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onEngine={engineAction} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")} onFactory={() => setFactoryOpen(true)} onDesign={() => setDesign({})} onGrowth={overview?.factory.kind === "commercial" ? () => setGrowthOpen(true) : undefined}
         designPending={(overview?.inbox ?? []).filter((m) => (m.screens?.length ?? 0) > 0 || (m.questions?.length ?? 0) > 0).length}
       />
