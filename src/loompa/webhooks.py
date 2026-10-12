@@ -22,7 +22,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from loompa.comms import FounderMessage, MessageKind, MessageStatus
+from loompa.comms import FounderMessage, MessageKind, MessageStatus, with_subject
 from loompa.engine.context import EngineContext
 from loompa.engine.state import Stage
 
@@ -148,9 +148,12 @@ async def handle_github_event(
             story_id=story_id,
             kind=MessageKind.INFO,
             sender="Deployer Loompa",
-            title=f"A revisão automática pediu ajustes em “{state.title}”",
-            context="O revisor automático encontrou pontos a corrigir no código desta entrega. "
-            "Devolvi para a equipe ajustar antes de você revisar.",
+            title="A revisão automática pediu ajustes",
+            context=with_subject(
+                state.title,
+                "O revisor automático encontrou pontos a corrigir no código desta entrega. "
+                "Devolvi para a equipe ajustar antes de você revisar.",
+            ),
             impact="Nenhuma ação necessária agora; a entrega volta para sua revisão quando "
             "estiver corrigida.",
             allow_free_text=False,

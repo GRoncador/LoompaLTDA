@@ -78,7 +78,11 @@ Respond with JSON only:
 {{"reply": str, "direction": str, "ops": [op, ...], "consult": [{{"role": str, "question": str}}],
   "questions": [str], "ready": bool}}
 `reply` is what the founder reads: plain {language}, at most five short sentences, no file names,
-code, stack traces or error names. `direction` is the whole direction as it stands now (repeat it
+code, stack traces or error names.
+Lay `reply` out for a quick read: two or more items (cards, options, points) go one per
+line, each starting with "• ", and a question to the founder goes last, after a blank line.
+No Markdown (#, **, tables): the reply is shown as plain text and the marks would show.
+`direction` is the whole direction as it stands now (repeat it
 when it did not change; "" only before there is one). Operations on the ideas:
 - {{"op": "add", "title": str, "description": str, "priority": 1-5}}
 - {{"op": "update", "ref": "D1", "title"?: str, "description"?: str, "priority"?: 1-5}}
@@ -250,15 +254,8 @@ ROLE_ALIASES: dict[str, str] = {
 }
 
 
-
 def normalize_role(raw: str) -> str:
-    cleaned = (
-        raw.strip()
-        .lower()
-        .removesuffix(" loompa")
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
+    cleaned = raw.strip().lower().removesuffix(" loompa").replace("-", "_").replace(" ", "_")
     return ROLE_ALIASES.get(cleaned, cleaned)
 
 
@@ -278,7 +275,6 @@ def consult_requests(raw: Any) -> list[tuple[str, str]]:
         if role in CONSULTANTS and question and role not in asks:
             asks[role] = question[:600]
     return list(asks.items())[:MAX_CONSULTS_PER_TURN]
-
 
 
 _URL = re.compile(r"https?://[^\s<>\"')\]]+")
@@ -303,19 +299,30 @@ def opinion_text(o: Opinion) -> str:
         return (
             f"Não consegui ouvir o {o.name} agora ({o.key}). Peça o parecer de novo em instantes."
         )
-    lines = [f"Parecer preliminar ({o.key}): {o.summary}".strip()]
+    # One block per part, the lists one item per line: a paragraph with the points joined by
+    # ";" was a wall of text in the chat (the founder, 12/10).
+    blocks = [f"Parecer preliminar ({o.key})\n{o.summary}".strip()]
     if o.attention:
-        lines.append("Pontos de atenção: " + "; ".join(o.attention))
-    if o.cost:
-        lines.append(f"Custo: {o.cost}")
-    if o.benefit:
-        lines.append(f"Benefício: {o.benefit}")
+        blocks.append(_bullets("Pontos de atenção", o.attention))
+    if o.cost or o.benefit:
+        blocks.append(
+            "\n".join(
+                [
+                    *([f"Custo: {o.cost}"] if o.cost else []),
+                    *([f"Benefício: {o.benefit}"] if o.benefit else []),
+                ]
+            )
+        )
     if o.counterpoints:
-        lines.append("Contrapontos: " + "; ".join(o.counterpoints))
+        blocks.append(_bullets("Contrapontos", o.counterpoints))
     urls = [s for s in o.sources if s.lower().startswith(("http:", "https:"))]
     if urls:
-        lines.append("Fontes: " + " ".join(urls[:6]))
-    return founder_text("\n".join(lines), OPINION_CHARS)
+        blocks.append(_bullets("Fontes", urls[:6]))
+    return founder_text("\n\n".join(blocks), OPINION_CHARS)
+
+
+def _bullets(heading: str, items: list[str]) -> str:
+    return heading + "\n" + "\n".join(f"• {' '.join(i.split()).rstrip(';')}" for i in items)
 
 
 def _texts(data: dict[str, Any], key: str, limit: int = 5) -> list[str]:

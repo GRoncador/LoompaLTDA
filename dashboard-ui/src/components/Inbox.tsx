@@ -91,6 +91,10 @@ export function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint, 
         <button className="flex-1 text-left text-sm font-semibold leading-snug" onClick={() => setOpen((o) => !o)}>{m.title}</button>
         {m.story_id && <button className="text-xs text-brand hover:underline" onClick={() => onOpenStory(m.story_id!)}>{m.story_id}</button>}
       </div>
+      {/* closed, a one-line preview of the body tells notes with the same short title apart */}
+      {!open && m.context.trim() && (
+        <button className="mt-1 block w-full truncate text-left text-xs text-slate-500" onClick={() => setOpen(true)}>{m.context.trim().split("\n")[0]}</button>
+      )}
       {open && (
         <>
           <p className="mt-2 whitespace-pre-line text-sm text-slate-300">{m.context}</p>

@@ -16,6 +16,7 @@ from loompa.comms.executive import (
     compose_research_message,
     plain_words,
     sanitize_for_founder,
+    with_subject,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "compose_research_message",
     "plain_words",
     "sanitize_for_founder",
+    "with_subject",
 ]

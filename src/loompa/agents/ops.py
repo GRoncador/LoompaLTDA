@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import httpx
 
 from loompa.agents.base import TIER_LIFT_KEY, LoompaAgent
-from loompa.comms import FounderMessage, MessageKind
+from loompa.comms import FounderMessage, MessageKind, with_subject
 from loompa.engine.state import StoryState
 from loompa.llm import LLMError
 
@@ -171,9 +171,12 @@ class OpsAgent(LoompaAgent):
             story_id=state.story_id,
             kind=MessageKind.INFO,
             sender=self.name,
-            title=f"Resolvi um contratempo em “{state.title}”",
-            context=f"{cause[0].upper()}{cause[1:]}. Aguardei e retomei o trabalho sozinho "
-            f"({n} tentativa{'s' if n > 1 else ''}).",
+            title="Resolvi um contratempo sozinho",
+            context=with_subject(
+                state.title,
+                f"{cause[0].upper()}{cause[1:]}. Aguardei e retomei o trabalho sozinho "
+                f"({n} tentativa{'s' if n > 1 else ''}).",
+            ),
             impact="Nenhuma ação necessária da sua parte; a entrega segue normalmente.",
             allow_free_text=False,
         )

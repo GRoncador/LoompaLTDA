@@ -18,7 +18,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class MessageKind(StrEnum):
@@ -28,6 +28,45 @@ class MessageKind(StrEnum):
     INFO = "info"  # FYI, no action required
     FINANCE = "finance"  # budget alerts and daily cost summary
     KAIZEN = "kaizen"  # discoveries / improvements catalogued
+
+
+# An inbox title is read in a list next to the story's id: a few words that say what kind of
+# note it is. The story's name, the question and the explanation go in the body, opened on a
+# click (the founder, 12/10: titles of 100-185 characters with the story's name inside).
+TITLE_MAX = 60
+KIND_TITLES = {
+    "decision": "Uma decisão sua",
+    "blocked": "Precisamos da sua orientação",
+    "delivery": "Entrega pronta para revisão",
+    "info": "Aviso da fábrica",
+    "finance": "Aviso de custos",
+    "kaizen": "Melhoria encontrada",
+}
+
+
+def short_title(title: str, kind: str) -> tuple[str, str]:
+    """(title, the words that did not fit): a long title keeps its first clause when that one
+    is short enough on its own, otherwise the kind's own title; the full sentence goes to the
+    body, so nothing the writer said is lost."""
+    title = " ".join((title or "").split())
+    if len(title) <= TITLE_MAX:
+        return title, ""
+    # Only where the first part is a headline on its own: before ", mas" it would say the
+    # work is ready and leave out the problem.
+    for sep in (": ", " — ", " – ", "; "):
+        head = title.split(sep, 1)[0].strip(" ,.;:")
+        quoted = head.count("“") != head.count("”") or head.count('"') % 2
+        if 12 <= len(head) <= TITLE_MAX and head != title and not quoted:
+            return head, title
+    return KIND_TITLES.get(str(kind), KIND_TITLES["info"]), title
+
+
+def with_subject(subject: str, text: str, *, label: str = "História") -> str:
+    """The body of a note about one thing: its name on top, then what happened."""
+    subject = " ".join((subject or "").split())
+    if not subject:
+        return text
+    return f"{label}: “{subject}”\n\n{text}" if text else f"{label}: “{subject}”"
 
 
 class MessageStatus(StrEnum):
@@ -97,6 +136,19 @@ class FounderMessage(BaseModel):
     images: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     answer: FounderAnswer | None = None
+
+    @model_validator(mode="after")
+    def _short_title(self) -> FounderMessage:
+        self.tidy_title()
+        return self
+
+    def tidy_title(self) -> None:
+        """Keep the title short (`TITLE_MAX`); a longer one opens the body instead. Also run
+        after a writer sets `title` on a built message (`EngineContext.inbox`)."""
+        title, rest = short_title(self.title, self.kind)
+        if rest and rest not in self.context:
+            self.context = f"{rest}\n\n{self.context}" if self.context else rest
+        self.title = title
 
     @property
     def requires_action(self) -> bool:
@@ -343,8 +395,8 @@ def compose_blocked_message(
         factory=factory,
         story_id=story_id,
         kind=MessageKind.BLOCKED,
-        title=f"Precisamos da sua orientação em “{story_title}”",
-        context=sanitize_for_founder(reason),
+        title="Precisamos da sua orientação",
+        context=with_subject(story_title, sanitize_for_founder(reason)),
         impact=sanitize_for_founder(
             impact or "Enquanto isso, as demais entregas seguem normalmente."
         ),
@@ -366,7 +418,7 @@ def compose_decision_message(
         factory=factory,
         story_id=story_id,
         kind=MessageKind.DECISION,
-        title=sanitize_for_founder(question, max_chars=160),
+        title=sanitize_for_founder(question, max_chars=160),  # a long one opens the body
         context=sanitize_for_founder(context),
         impact=sanitize_for_founder(impact),
         options=options,
@@ -419,8 +471,8 @@ def compose_delivery_message(
         factory=factory,
         story_id=story_id,
         kind=MessageKind.DELIVERY,
-        title=f"Entrega pronta para revisão: “{story_title}”",
-        context=sanitize_for_founder(summary),
+        title="Entrega pronta para revisão",
+        context=with_subject(story_title, sanitize_for_founder(summary)),
         impact=f"{where} Custo desta entrega: US$ {cost_usd:.2f}.",
         options=[
             Option(key="approve", label="Aprovar e liberar", recommended=True),
@@ -458,8 +510,8 @@ def compose_research_message(
         story_id=story_id,
         kind=MessageKind.DELIVERY,
         sender="Analyst Loompa",
-        title=f"Pesquisa pronta: “{story_title}”",
-        context="\n\n".join(p for p in parts if p),
+        title="Pesquisa pronta",
+        context=with_subject(story_title, "\n\n".join(p for p in parts if p), label="Pesquisa"),
         impact=(
             "Nada foi alterado no produto. O relatório completo, com as fontes, está na história "
             f"no painel. {cited}Custo desta pesquisa: US$ {cost_usd:.2f}."

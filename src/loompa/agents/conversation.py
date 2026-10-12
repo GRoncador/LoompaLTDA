@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from loompa.agents.base import LoompaAgent
 from loompa.backlog import Triage
 from loompa.comms import audit_executive_text, sanitize_for_founder
+from loompa.comms.executive import clip
 from loompa.conversations import (
     Conversation,
     ConversationBoard,
@@ -63,7 +64,11 @@ TURN_CONTRACT = """
 Respond with JSON only:
 {{"reply": str, "ops": [op, ...], "questions": [str]}}
 `reply` is what the founder reads: plain {language}, at most five short sentences, no file names,
-code, stack traces or error names. `ops` edit the DRAFT of the backlog and of the sprint; they are
+code, stack traces or error names.
+Lay `reply` out for a quick read: two or more items (cards, options, points) go one per
+line, each starting with "• ", and a question to the founder goes last, after a blank line.
+No Markdown (#, **, tables): the reply is shown as plain text and the marks would show.
+`ops` edit the DRAFT of the backlog and of the sprint; they are
 proposals the founder can still change, and nothing reaches the backlog until the founder commits.
 Never say a card was created or a sprint started. Operations:
 - {{"op": "add", "title": str, "description": str, "epic": str, "priority": 1-5, "in_sprint": bool}}
@@ -101,7 +106,7 @@ class TurnResult:
 
 def founder_text(text: str, limit: int = MAX_REPLY_CHARS) -> str:
     """A chat reply is founder-facing: hold it to the executive-language rule."""
-    text = (text or "").strip()[:limit]
+    text = clip(text, limit)  # at a word, with "…": a cut mid-word read as a typo
     return sanitize_for_founder(text, max_chars=limit) if audit_executive_text(text) else text
 
 
@@ -727,17 +732,13 @@ class Conversations:
     def conversation_ready(self, conversation_id: str, *, failed: bool = False) -> None:
         """An agent finished working in a conversation the founder closed or left: an inbox note
         that reopens the conversation directly, so the work is never lost."""
-        from loompa.comms.executive import FounderMessage, MessageKind
+        from loompa.comms.executive import FounderMessage, MessageKind, with_subject
 
         conv = self.board.require(conversation_id, open_only=False)
         reply = next((t.text for t in reversed(conv.turns) if t.who == "agent"), "")
         if conv.kind == ConversationKind.BRAINSTORM:
             sender = "Master Loompa"
-            title = (
-                "O Master Loompa não conseguiu concluir o brainstorm"
-                if failed
-                else f"O brainstorm sobre “{conv.title or 'ideias'}” está pronto"
-            )
+            title = "O brainstorm não foi concluído" if failed else "Brainstorm pronto"
             impact = (
                 "Abra o brainstorm e tente novamente."
                 if failed
@@ -749,7 +750,7 @@ class Conversations:
                     kind=MessageKind.INFO,
                     sender=sender,
                     title=title,
-                    context="" if failed else reply,
+                    context=with_subject(conv.title, "" if failed else reply, label="Tema"),
                     impact=impact,
                     allow_free_text=False,
                     conversation_id=conv.id,
@@ -764,9 +765,9 @@ class Conversations:
                     factory=self.ctx.slug,
                     kind=MessageKind.INFO,
                     sender="Product Owner Loompa",
-                    title="O Product Owner não conseguiu montar a sugestão do próximo sprint"
+                    title="A sugestão do Product Owner não saiu"
                     if failed
-                    else "A sugestão do Product Owner para o próximo sprint está pronta",
+                    else "A sugestão do Product Owner está pronta",
                     context="" if failed else reply,
                     impact="Abra a reunião e peça de novo."
                     if failed
@@ -789,10 +790,14 @@ def _plural(n: int, one: str, many: str) -> str:
 
 def _current_intro(sprint_id: str) -> str:
     return (
-        f"Certo: vamos olhar o {sprint_id}. Os cards dele estão no rascunho como estão agora. "
-        "Posso tirar um card do sprint (ele volta ao backlog), incluir outro (o Product Owner "
-        "avalia antes), recomeçar uma história do zero ou cancelar o sprint; também podemos "
-        "discutir alternativas, dependências e bloqueios. Nada muda até você aplicar."
+        f"Certo: vamos olhar o {sprint_id}. Os cards dele estão no rascunho como estão agora.\n\n"
+        "O que dá para fazer:\n"
+        "• tirar um card do sprint (ele volta ao backlog)\n"
+        "• incluir outro (o Product Owner avalia antes)\n"
+        "• recomeçar uma história do zero\n"
+        "• cancelar o sprint\n"
+        "• discutir alternativas, dependências e bloqueios\n\n"
+        "Nada muda até você aplicar."
     )
 
 
@@ -814,7 +819,7 @@ def _changes_summary(result: CommitResult, conv: Conversation) -> str:
         parts.append(f"saíram do backlog (cancelados): {', '.join(result.retired)}")
     if not parts:
         return f"Nada mudou no {conv.draft.sprint_id}."
-    return f"Pronto, {conv.draft.sprint_id} ajustado: " + "; ".join(parts) + "."
+    return f"Pronto, {conv.draft.sprint_id} ajustado:\n" + "\n".join(f"• {p}" for p in parts)
 
 
 def _meeting_summary(result: CommitResult, started: bool, planned: bool = False) -> str:

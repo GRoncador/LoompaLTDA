@@ -346,7 +346,7 @@ class LineWatch:
                 story_id=card,
                 kind=MessageKind.INFO,
                 sender=SENDER,
-                title="A versão principal do produto ficou com verificações falhando",
+                title="A versão principal ficou com verificações falhando",
                 context=(
                     (f"Depois da entrada de {', '.join(by)}, " if by else "")
                     + f"{n} verificação(ões) automática(s) do produto passaram a falhar na versão "

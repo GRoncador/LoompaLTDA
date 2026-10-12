@@ -203,11 +203,9 @@ class CostTracker:
             factory=self.factory,
             kind=MessageKind.FINANCE,
             sender="Finance Loompa",
-            title=(
-                f"Já usamos {pct}% do orçamento de IA d{this} {label} "
-                f"(US$ {st.period_cost_usd:.2f} de US$ {st.cap_usd:.2f})"
-            ),
+            title=f"{pct}% do orçamento de IA d{this} {label} usado",
             context=(
+                f"US$ {st.period_cost_usd:.2f} de US$ {st.cap_usd:.2f}.\n\n"
                 f"O consumo de IA está acima do ritmo previsto para {this} {label}. "
                 + (
                     "A esteira será pausada automaticamente ao atingir o teto."

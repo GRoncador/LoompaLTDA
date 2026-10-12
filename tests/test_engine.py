@@ -2107,7 +2107,7 @@ async def test_a_task_that_writes_the_factorys_records_never_becomes_a_founder_q
     events = [e["type"] for e in ctx.store.events_since(0, limit=10_000) if e["story_id"] == sid]
     assert events.count("plan.records_task") == 1 and any("under .loompa/" in a for a in amends)
     (msg,) = [m for m in ctx.store.list_messages(factory.slug) if m.story_id == sid]
-    assert "não pode ser liberado" in msg.title
+    assert "não posso liberar" in msg.title
     assert [o.key for o in msg.options] == ["skip", "drop", "retry"]
     assert not any("Liberar" in o.label for o in msg.options)
     assert state.blocked_reason == "question"

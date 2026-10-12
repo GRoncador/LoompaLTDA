@@ -222,8 +222,8 @@ def _ask(ctx: EngineContext, manifest: dict[str, Any], context: str) -> FounderM
         factory=ctx.slug,
         kind=MessageKind.DECISION,
         sender="Storyteller Loompa",
-        title=f"Rascunho para revisar: {label} ({manifest['id']}, rodada {manifest['round']})",
-        context=context
+        title=f"Rascunho para revisar: {label}",
+        context=f"{manifest['id']}, rodada {manifest['round']}.\n\n{context}"
         + (
             f"\n\nObservações: {'; '.join(manifest.get('notes') or [])}"
             if manifest.get("notes")

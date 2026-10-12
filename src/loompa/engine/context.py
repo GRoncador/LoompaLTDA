@@ -293,6 +293,7 @@ class EngineContext:
             ]:
                 o.label = sanitize_for_founder(o.label, max_chars=160)
                 o.description = sanitize_for_founder(o.description, max_chars=400)
+        msg.tidy_title()  # a title set after the message was built is kept short too
         msg.factory = self.slug
         self.store.put_message(msg)
         self.emit(

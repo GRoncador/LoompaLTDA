@@ -51,6 +51,7 @@ from loompa.comms import (
     compose_blocked_message,
     compose_research_message,
     sanitize_for_founder,
+    with_subject,
 )
 from loompa.comms.answers import RESOLVED, RESPEC, action_of, executable_options
 from loompa.dependencies import (
@@ -155,8 +156,11 @@ async def block(
             story_id=state.story_id,
             kind=MessageKind.BLOCKED,
             sender=master.name,
-            title=f"“{state.title}” conflita com mudanças recentes na versão principal",
-            context="Outra entrega alterou as mesmas partes do produto. Preciso de uma orientação para integrar com segurança.",
+            title="Conflito com a versão principal",
+            context=with_subject(
+                state.title,
+                "Outra entrega alterou as mesmas partes do produto. Preciso de uma orientação para integrar com segurança.",
+            ),
             impact="A entrega está pronta, apenas aguardando integração. As demais frentes seguem normalmente.",
             options=[
                 Option(key="retry", label="Refazer a integração automaticamente", recommended=True),
@@ -222,11 +226,12 @@ async def gate_plan(ctx: EngineContext, state: StoryState) -> StoryState | None:
         story_id=state.story_id,
         kind=MessageKind.BLOCKED,
         sender=MasterAgent.display,
-        title=f"“{state.title}” dependia de {'uma história que saiu' if one else 'histórias que saíram'} do sprint",
-        context=(
+        title="Uma base desta história saiu do sprint",
+        context=with_subject(
+            state.title,
             f"Esta história foi pensada em cima de {', '.join(titles)}, que "
             f"{'foi cancelada ou voltou' if one else 'foram canceladas ou voltaram'} ao backlog. "
-            "A especificação dela já está pronta; o plano ainda não foi feito."
+            "A especificação dela já está pronta; o plano ainda não foi feito.",
         ),
         impact="Nada foi construído em cima disso ainda. As demais entregas seguem normalmente.",
         options=[
@@ -329,11 +334,12 @@ def _park_stalled(ctx: EngineContext, state: StoryState, count: int, ref: str) -
             story_id=state.story_id,
             kind=MessageKind.INFO,
             sender=MasterAgent.display,
-            title=f"“{state.title}” voltou ao backlog",
-            context=(
+            title="História voltou ao backlog",
+            context=with_subject(
+                state.title,
                 "A equipe parou três vezes seguidas no mesmo ponto desta história, mesmo com as "
                 "suas respostas, sem conseguir avançar. Para não tomar mais o seu tempo, ela "
-                "voltou ao backlog com tudo o que já foi feito e respondido."
+                "voltou ao backlog com tudo o que já foi feito e respondido.",
             ),
             impact=(
                 "As demais entregas seguem normalmente. Ela pode voltar a um sprint pela reunião "
@@ -386,7 +392,7 @@ def _repeated_block_message(
         ],
     )
     msg.sender = master.name
-    msg.title = f"O mesmo problema voltou em “{state.title}”"
+    msg.title = "O mesmo problema voltou"
     return msg
 
 
@@ -414,7 +420,7 @@ def _records_block_message(ctx: EngineContext, state: StoryState) -> FounderMess
         ],
     )
     msg.sender = MasterAgent.display
-    msg.title = f"Um passo de “{state.title}” pede algo que não pode ser liberado"
+    msg.title = "Um passo pede algo que não posso liberar"
     return msg
 
 
@@ -467,11 +473,12 @@ async def _integrate_dependencies(
             story_id=state.story_id,
             kind=MessageKind.BLOCKED,
             sender=MasterAgent.display,
-            title=f"“{state.title}” depende de duas entregas que se desencontram",
-            context=(
+            title="Duas bases desta história se desencontram",
+            context=with_subject(
+                state.title,
                 f"Esta história é feita em cima de {' e '.join(titles)}, e as duas mexeram no "
                 "mesmo lugar do produto. Juntar as duas sem você ter aceito nenhuma seria decidir "
-                "no seu lugar qual das duas vale."
+                "no seu lugar qual das duas vale.",
             ),
             impact="A entrega está pausada; as demais seguem normalmente.",
             options=[
@@ -657,11 +664,12 @@ async def node_plan(ctx: EngineContext, state: StoryState) -> StoryState:
                 story_id=state.story_id,
                 kind=MessageKind.BLOCKED,
                 sender="Architect Loompa",
-                title=f"“{state.title}” foi planejada em outra linguagem",
-                context=(
+                title="Plano em outra linguagem",
+                context=with_subject(
+                    state.title,
                     f"O produto é feito em {', '.join(languages)}, mas o plano desta entrega "
                     f"escreve código em {names}, mesmo depois de eu pedir um novo plano. Isso "
-                    "costuma gerar uma segunda versão de algo que já existe."
+                    "costuma gerar uma segunda versão de algo que já existe.",
                 ),
                 impact="A entrega está pausada; as demais seguem normalmente.",
                 options=[
@@ -833,11 +841,12 @@ async def cost_cap_block(ctx: EngineContext, state: StoryState, spent: float) ->
             story_id=state.story_id,
             kind=MessageKind.BLOCKED,
             sender="Finance Loompa",
-            title=f"“{state.title}” já custou US$ {spent:.2f} sem terminar",
-            context=(
+            title=f"Custo passou do teto: US$ {spent:.2f}",
+            context=with_subject(
+                state.title,
                 f"Esta entrega passou do teto de US$ {cap:.2f} por história. Quando isso "
                 "acontece, em geral a abordagem não está funcionando, e seguir pode gastar mais "
-                "sem resultado."
+                "sem resultado.",
             ),
             impact="A entrega está pausada; as demais seguem normalmente.",
             options=[
@@ -1230,8 +1239,11 @@ async def node_test(ctx: EngineContext, state: StoryState) -> StoryState:
             story_id=state.story_id,
             kind=MessageKind.DECISION,
             sender="Inspector Loompa",
-            title=f"“{state.title}” passou nos testes, mas o Inspector viu um risco sério",
-            context=f"O código funciona e os testes estão verdes, porém a revisão de qualidade apontou: {detail}.",
+            title="Testes passaram, mas há um risco sério",
+            context=with_subject(
+                state.title,
+                f"O código funciona e os testes estão verdes, porém a revisão de qualidade apontou: {detail}.",
+            ),
             impact="Posso aceitar o risco e entregar assim, ou devolver para a equipe corrigir antes de seguir.",
             options=[
                 Option(key="fix", label="Corrigir antes de entregar", recommended=True),
@@ -1594,10 +1606,11 @@ async def node_review(ctx: EngineContext, state: StoryState) -> StoryState:
                 story_id=state.story_id,
                 kind=MessageKind.BLOCKED,
                 sender=MasterAgent.display,
-                title=f"“{state.title}” foi construída em cima de “{title}”, que saiu do sprint",
-                context=(
-                    "O trabalho desta história está pronto, mas ele foi escrito em cima da outra: "
-                    "entregá-lo agora levaria junto o código que você decidiu não usar."
+                title="A base desta história saiu do sprint",
+                context=with_subject(
+                    state.title,
+                    f"O trabalho desta história está pronto, mas ele foi escrito em cima de “{title}”: "
+                    "entregá-lo agora levaria junto o código que você decidiu não usar.",
                 ),
                 impact="Nada foi integrado ao produto. As demais frentes seguem normalmente.",
                 options=[
@@ -1762,7 +1775,7 @@ async def _ask_about_empty_plan(
         options=executable_options(["Refazer o plano, cuidando só do produto e dos testes"]),
     )
     msg.sender = MasterAgent.display
-    msg.title = f"“{state.title}” precisa de um plano novo"
+    msg.title = "A história precisa de um plano novo"
     state.plan_ready = False
     return await block(
         ctx,
@@ -1808,7 +1821,7 @@ async def node_resolve(ctx: EngineContext, state: StoryState) -> StoryState:
                 options=executable_options(["Seguir com o conserto dessas verificações"]),
             )
             msg.sender = MasterAgent.display
-            msg.title = f"“{state.title}” ainda não está resolvida"
+            msg.title = "A história ainda não está resolvida"
             return await block(
                 ctx,
                 state,

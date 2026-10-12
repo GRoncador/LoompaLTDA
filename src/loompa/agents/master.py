@@ -29,7 +29,7 @@ from loompa.comms import (
     sanitize_for_founder,
 )
 from loompa.comms.answers import DROP, GUIDE, RESOLVED, RESPEC, SKIP, executable_options
-from loompa.comms.executive import MAX_FOUNDER_CHARS, clip
+from loompa.comms.executive import MAX_FOUNDER_CHARS, clip, with_subject
 from loompa.conversations import (
     CommitResult,
     Conversation,
@@ -175,7 +175,9 @@ plain words, keeping its meaning and its place in the list. Never ask the founde
 or edit a file themselves; say what the team will do with that choice instead.
 Respond with JSON only: {{"title": str, "context": str, "impact": str,
 "options": [{{"label": str, "action": str}}]}}
-- title: one sentence;
+- title: a short headline, at most 8 words (under 60 characters), that says what the founder is
+  asked to decide. Leave the story's name out: the inbox shows it next to the title, and a long
+  title is cut. Everything else goes in context;
 - context: 2-3 plain sentences: what we were doing and what happened;
 - impact: what it means for the product, and what keeps going normally only when the material
   says so;
@@ -319,8 +321,13 @@ class MasterAgent(LoompaAgent):
                 story_id=parent.story_id,
                 kind=MessageKind.INFO,
                 sender=self.name,
-                title=f"“{parent.title}” virou um épico com {len(ids)} histórias",
-                context="O pedido era grande demais para uma entrega só. Dividi em partes independentes que a equipe constrói e revisa separadamente.",
+                title=f"Pedido dividido em {len(ids)} histórias",
+                context=with_subject(
+                    parent.title,
+                    "O pedido era grande demais para uma entrega só. Dividi em partes independentes "
+                    "que a equipe constrói e revisa separadamente.",
+                    label="Pedido",
+                ),
                 impact="Cada parte chega para sua aprovação assim que ficar pronta.",
                 allow_free_text=False,
             )
@@ -1056,8 +1063,9 @@ class MasterAgent(LoompaAgent):
                     factory=self.ctx.slug,
                     kind=MessageKind.DECISION,
                     sender=self.name,
-                    title=sanitize_for_founder(q, max_chars=160),
-                    context="Surgiu ao planejar as metas de hoje. Enquanto isso, as outras histórias seguem.",
+                    title="Uma pergunta sobre as metas de hoje",
+                    context=sanitize_for_founder(q, max_chars=600)
+                    + "\n\nSurgiu ao planejar as metas de hoje. Enquanto isso, as outras histórias seguem.",
                     options=[Option(key="answer", label="Responder abaixo", recommended=True)],
                 )
             )
@@ -1155,7 +1163,8 @@ class MasterAgent(LoompaAgent):
                         options=opts or None,
                         technical_ref=technical_ref,
                     )
-                    msg.title = title[:200]
+                    msg.title = title
+                    msg.tidy_title()  # over the limit, the sentence opens the body
                     return msg
             except Exception:  # noqa: BLE001 - fall through to deterministic composer
                 pass
@@ -1182,34 +1191,46 @@ class MasterAgent(LoompaAgent):
             if m.requires_action
         ]
         finance = self.ctx.tracker.executive_daily_summary()
-        lines = [
-            f"Entregas prontas para sua revisão: {by_stage.get('AWAITING_FOUNDER', 0)}.",
-            f"Concluídas: {by_stage.get('DONE', 0)} · Em andamento: {sum(v for k, v in by_stage.items() if k in ('SPEC', 'PLAN', 'DEV', 'TEST', 'REVIEW'))} · No backlog: {by_stage.get('BACKLOG', 0)}.",
-            f"Decisões aguardando você: {len(pending)}.",
-            finance,
+        moving = sum(
+            v for k, v in by_stage.items() if k in ("SPEC", "PLAN", "DEV", "TEST", "REVIEW")
+        )
+        # One block per subject, one fact per line (the founder, 12/10: a run-on summary is not
+        # read); the same counts as before.
+        blocks = [
+            "Histórias\n"
+            f"• Entregas prontas para sua revisão: {by_stage.get('AWAITING_FOUNDER', 0)}\n"
+            f"• Decisões aguardando você: {len(pending)}\n"
+            f"• Concluídas: {by_stage.get('DONE', 0)} · Em andamento: {moving} · "
+            f"No backlog: {by_stage.get('BACKLOG', 0)}",
         ]
+        tips = [
+            f"• Dica: {sanitize_for_founder(tip, max_chars=200)}"
+            for tip in self.ctx.tracker.suggestions()[:2]
+        ]
+        blocks.append(
+            "\n".join(["Custos", *(f"• {ln}" for ln in finance.splitlines() if ln.strip()), *tips])
+        )
         if learnings:
-            lines.append(
-                f"Melhorias e problemas catalogados hoje (Loop Kaizen): {len(learnings)} — "
-                + "; ".join(
-                    sanitize_for_founder(item["title"], max_chars=80) for item in learnings[:3]
+            blocks.append(
+                f"Melhorias e problemas catalogados hoje (Loop Kaizen): {len(learnings)}\n"
+                + "\n".join(
+                    f"• {sanitize_for_founder(item['title'], max_chars=80)}"
+                    for item in learnings[:3]
                 )
-                + "."
             )
         findings = [r for r in stories if r["origin"] == "kaizen" and r["stage"] == Stage.BACKLOG]
         if findings:
-            lines.append(
+            blocks.append(
                 f"Achados aguardando um sprint no backlog: {len(findings)}. "
                 "Eles entram num sprint pela reunião de sprint."
             )
-        for tip in self.ctx.tracker.suggestions()[:2]:
-            lines.append(f"Dica de custo: {sanitize_for_founder(tip, max_chars=200)}")
+        today = datetime.now(UTC).date()
         msg = FounderMessage(
             factory=self.ctx.slug,
             kind=MessageKind.INFO,
             sender=self.name,
-            title=f"Resumo do dia {datetime.now(UTC).date().isoformat()}",
-            context="\n".join(lines),
+            title=f"Resumo do dia {today:%d/%m}",
+            context="\n\n".join(blocks),
             impact="",
             options=[],
             allow_free_text=False,
@@ -1360,9 +1381,10 @@ def meeting_question(ctx: Any) -> str:
     running, planned = board.running(), board.open_sprint()
     if running is not None:
         return (
-            f"O {running.id} está rodando. Quer ajustar este sprint (tirar ou incluir cards, "
-            "recomeçar uma história, cancelar, discutir bloqueios e alternativas) ou já pré-montar "
-            "o próximo? Pré-montar não é o recomendado: o que este sprint ensinar ainda não entrou."
+            f"O {running.id} está rodando. O que você quer fazer?\n"
+            "• ajustar este sprint: tirar ou incluir cards, recomeçar uma história, cancelar, "
+            "discutir bloqueios e alternativas\n"
+            "• pré-montar o próximo (não recomendado: o que este sprint ensinar ainda não entrou)"
         )
     if planned is not None and planned.story_ids:
         n = len(planned.story_ids)

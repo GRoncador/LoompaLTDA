@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from loompa.agents.ux import UXAgent
-from loompa.comms import FounderAnswer, FounderMessage, MessageKind, Option, Question
+from loompa.comms import FounderAnswer, FounderMessage, MessageKind, Option, Question, with_subject
 from loompa.dependencies import WAIT_KEY
 from loompa.design import (
     DesignPaths,
@@ -383,10 +383,15 @@ def _questions_message(
         story_id=state.story_id,
         kind=MessageKind.DECISION,
         sender=SENDER,
-        title=f"Antes de desenhar “{state.title}”: {len(questions)} pergunta(s) rápida(s)",
-        context=(
+        title=(
+            "1 pergunta antes das telas"
+            if len(questions) == 1
+            else f"{len(questions)} perguntas antes das telas"
+        ),
+        context=with_subject(
+            state.title,
             "Responda tudo de uma vez: marquei a opção que eu escolheria, e você pode escrever "
-            "outra resposta em qualquer uma. Com as respostas, desenho as telas."
+            "outra resposta em qualquer uma. Com as respostas, desenho as telas.",
         ),
         impact="Só esta história espera; as demais seguem normalmente.",
         options=[
@@ -488,8 +493,8 @@ async def node_design_review(ctx: EngineContext, state: StoryState) -> StoryStat
         story_id=state.story_id,
         kind=MessageKind.DECISION,
         sender=SENDER,
-        title=f"Telas de “{state.title}” para aprovar",
-        context="\n\n".join(parts),
+        title="Telas para aprovar",
+        context=with_subject(state.title, "\n\n".join(parts)),
         impact="O código desta história começa depois da sua aprovação; as demais seguem.",
         options=options,
         screens=screens,

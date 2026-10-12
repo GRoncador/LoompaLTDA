@@ -183,3 +183,46 @@ def test_names_side_by_side_read_as_plain_portuguese():
     }
     for raw, plain in cases.items():
         assert sanitize_for_founder(raw) == plain, raw
+
+
+def test_an_inbox_title_stays_short_and_the_rest_opens_the_body():
+    """The founder reads titles in a list next to the story's id (12/10): the story's name and the
+    explanation go in the body, and a long title someone still writes loses nothing."""
+    from loompa.comms.executive import TITLE_MAX
+
+    msg = compose_delivery_message(
+        factory="f", story_id="S-001", story_title="Mostrar o resumo da ausência", summary="Feito."
+    )
+    assert msg.title == "Entrega pronta para revisão"
+    assert msg.context.startswith("História: “Mostrar o resumo da ausência”\n\n")
+    long = (
+        "A correção da tela de início está pronta e testada, mas a rodada completa de testes "
+        "ainda acusa 2 falhas vindas de outra história"
+    )
+    msg = FounderMessage(kind=MessageKind.BLOCKED, title=long, context="Detalhes.")
+    assert len(msg.title) <= TITLE_MAX and msg.title == "Precisamos da sua orientação"
+    assert msg.context == f"{long}\n\nDetalhes."
+    msg.title = "A correção da tela de início está pronta: falta a sua escolha entre dois caminhos"
+    msg.tidy_title()  # a title set after the message was built (the Master's rewrite)
+    assert msg.title == "A correção da tela de início está pronta"
+    again = FounderMessage.model_validate_json(msg.model_dump_json())
+    assert (again.title, again.context) == (msg.title, msg.context)  # nothing moves twice
+
+
+def test_a_brainstorm_opinion_reads_in_blocks_with_one_point_per_line():
+    from loompa.agents.brainstorm import Opinion, opinion_text
+
+    text = opinion_text(
+        Opinion(
+            key="O1",
+            role="product_owner",
+            name="Product Owner Loompa",
+            question="?",
+            summary="A carta já existe.",
+            attention=["O nome não aparece no backlog.", "O conteúdo está indefinido;"],
+        )
+    )
+    assert text == (
+        "Parecer preliminar (O1)\nA carta já existe.\n\nPontos de atenção\n"
+        "• O nome não aparece no backlog.\n• O conteúdo está indefinido"
+    )

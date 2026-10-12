@@ -249,7 +249,7 @@ async def test_a_card_still_failing_says_who_thought_it_was_over(factory: Factor
         msg = ctx.store.get_message(state.blocked_message_id)
         assert "foi encerrada" not in msg.context and "continua aberta" in msg.context
         assert msg.executive_audit() == []
-        seen.append(msg.context.split(",")[0])
+        seen.append(msg.context.split("\n\n")[-1].split(",")[0])
     assert seen == [
         "Você pediu para encerrar esta história como já resolvida",
         "A equipe concluiu que não havia mais nada a fazer nesta história",
