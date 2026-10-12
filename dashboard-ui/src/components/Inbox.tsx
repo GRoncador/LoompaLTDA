@@ -35,8 +35,8 @@ export default function Inbox(props: {
   const isUnread = (m: Message) => m.status !== "answered" && !read.has(m.id);
   const unread = messages.filter(isUnread).length;
   // the "unread only" filter, always at hand: with nothing new the list is simply empty. The notes
-  // unread when it was turned on stay listed after the founder opens them, so a card does not
-  // vanish under the cursor.
+  // unread when it was turned on stay listed while open, so a card does not vanish under the cursor;
+  // they leave the list when the founder minimizes them (or answers them), once they are read.
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [kept, setKept] = useState<Set<string>>(new Set());
   const toggleUnread = () => {
@@ -60,7 +60,7 @@ export default function Inbox(props: {
       </div>
       <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3">
         {shown.length === 0 && <p className="py-8 text-center text-sm text-slate-500">{onlyUnread && messages.length > 0 ? "Nenhuma nota não lida." : "Nada pendente. Aproveite o dia."}</p>}
-        {shown.map((m) => <MessageCard key={m.id} m={m} unread={isUnread(m)} onOpen={() => markRead(m.id)} {...props} />)}
+        {shown.map((m) => <MessageCard key={m.id} m={m} unread={isUnread(m)} onOpen={() => markRead(m.id)} onClose={() => setKept((k) => { const next = new Set(k); next.delete(m.id); return next; })} {...props} />)}
       </div>
     </>
   );
@@ -91,11 +91,13 @@ function Shots({ m }: { m: Message }) {
   );
 }
 
-export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onOpenStory, onOpenSprint, onOpenMeeting }: { m: Message; unread?: boolean; onOpen?: () => void } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint" | "onOpenMeeting">) {
+export function MessageCard({ m, unread = false, onOpen, onClose, onReply, onArchive, onOpenStory, onOpenSprint, onOpenMeeting }: { m: Message; unread?: boolean; onOpen?: () => void; onClose?: () => void } &Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint" | "onOpenMeeting">) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
-  const toggle = () => { if (!open) onOpen?.(); setOpen((o) => !o); };
+  // minimizing a note is what closes it for the "unread only" list: it is read by then and leaves the list
+  const collapse = () => { setOpen(false); onClose?.(); };
+  const toggle = () => { if (open) collapse(); else { onOpen?.(); setOpen(true); } };
   // answered or withdrawn: the note stays as history, but no button works any more
   const closed = m.status !== "pending";
   const when = (iso: string) => new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -117,7 +119,7 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
       await onReply(m, opt, (m.screens?.length ? adjustText() : text) || null, Object.fromEntries(open_decisions.map((d) => [d.id, choice(d)])), qa);
       // answered: the note is read and folds back to its title, kept in the list as history
       onOpen?.();
-      setOpen(false);
+      collapse();
     } finally { setBusy(false); }
   };
   return (
