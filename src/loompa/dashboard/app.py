@@ -172,6 +172,7 @@ class FactoryRuntime:
     chat_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     # meetings the founder closed while the Product Owner was still proposing: told via the inbox
     detached: set[str] = field(default_factory=set)
+    proposing: set[str] = field(default_factory=set)  # a Product Owner proposal is running
 
     def chat_lock(self, conversation_id: str) -> asyncio.Lock:
         """One turn or commit at a time per conversation (two tabs, or a double click)."""
@@ -928,9 +929,15 @@ def create_app(
 
     @app.get("/api/factories/{slug}/conversations/{conversation_id}")
     def get_conversation(slug: str, conversation_id: str) -> dict[str, Any]:
-        _, chats = _chat(slug)
+        """Reading a meeting means its window is open again: a proposal still running ends in
+        that window, not in a note (`proposing` tells it to wait and read again)."""
+        rt, chats = _chat(slug)
+        rt.detached.discard(conversation_id)
         with _chat_errors():
-            return _payload(chats.board.require(conversation_id, open_only=False))
+            return _payload(
+                chats.board.require(conversation_id, open_only=False),
+                proposing=conversation_id in rt.proposing,
+            )
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/messages")
     async def say(slug: str, conversation_id: str, body: ChatSayBody) -> dict[str, Any]:
@@ -955,6 +962,7 @@ def create_app(
         rt, chats = _chat(slug)
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
+                rt.proposing.add(conversation_id)
                 try:
                     turn = await chats.propose(conversation_id)
                 except Exception:
@@ -962,6 +970,8 @@ def create_app(
                         rt.detached.discard(conversation_id)
                         chats.proposal_ready(conversation_id, failed=True)
                     raise
+                finally:
+                    rt.proposing.discard(conversation_id)
                 if conversation_id in rt.detached:  # closed while it worked: say it is done
                     rt.detached.discard(conversation_id)
                     chats.proposal_ready(conversation_id, failed=turn.failed)

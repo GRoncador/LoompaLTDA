@@ -221,6 +221,7 @@ export interface ConversationSummary { id: string; kind: ConversationKind; mode?
 export interface ChatReply {
   conversation: Conversation;
   sprints?: SprintContext;
+  proposing?: boolean; // a Product Owner proposal is still running (a reopened meeting waits)
   turn?: { reply: string; changes: string[]; ignored: string[]; questions: string[]; failed: boolean } | null;
   report?: { changes: string[]; ignored: string[] };
   result?: CommitResult;

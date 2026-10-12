@@ -338,3 +338,9 @@ def test_a_proposal_finished_after_the_founder_left_reaches_the_inbox(client):
     assert not note.executive_audit()
     client.post(f"{BASE}/conversations/{cid}/propose")  # told once per departure
     assert len(notes()) == 1
+    # closed and reopened while it worked: the open window shows it, no note
+    client.post(f"{BASE}/conversations/{cid}/detach")
+    body = client.get(f"{BASE}/conversations/{cid}").json()
+    assert body["proposing"] is False
+    client.post(f"{BASE}/conversations/{cid}/propose")
+    assert len(notes()) == 1

@@ -865,7 +865,10 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
   `POST /conversations/{id}/detach` instead, and when the proposal ends (or fails)
   `Conversations.proposal_ready` posts an INFO note from the Product Owner with
   `conversation_id` ("🗓 Abrir a reunião" in the inbox) and emits `meeting.proposal_ready`, which
-  shows a banner with the same button. With the meeting open, no note.
+  shows a banner with the same button. With the meeting open, no note — also when the founder
+  closed and reopened it while the Product Owner worked: reading the meeting (`GET`) clears the
+  departure, and the reply's `proposing` flag makes the reopened window show "montando a proposta"
+  and read again every 3 s until the proposal lands there.
 - Commits `b470286`, `c7c86e7`, `0a03617`; tests in
   `tests/test_backlog_doors.py` and `tests/test_sprint_meeting.py`.
 

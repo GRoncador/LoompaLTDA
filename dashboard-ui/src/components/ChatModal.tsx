@@ -84,7 +84,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
 
   useEffect(() => {
     if (resumeId) {
-      api.conversation(slug, resumeId).then((r) => { setConv(r.conversation); if (r.sprints) setSprints(r.sprints); if (r.consultants) setConsultants(r.consultants); }).catch((e) => setErr(detail(e)));
+      api.conversation(slug, resumeId).then((r) => { setConv(r.conversation); setRemote(!!r.proposing); if (r.sprints) setSprints(r.sprints); if (r.consultants) setConsultants(r.consultants); }).catch((e) => setErr(detail(e)));
     } else if (kind === "meeting" && !opening.current) {
       // the Master opens the meeting with where the project stands (plan 10.2)
       opening.current = true;
@@ -126,6 +126,15 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   };
   // closed while the Product Owner works: it goes on, and the inbox tells when it is done
   const proposing = useRef(false);
+  // reopened while a proposal started earlier still runs: wait for it here, no note
+  const [remote, setRemote] = useState(false);
+  useEffect(() => {
+    if (!remote || !conv) return;
+    const t = setInterval(() => {
+      api.conversation(slug, conv.id).then((r) => { if (!r.proposing) { apply(r); setRemote(false); } }).catch(() => {});
+    }, 3000);
+    return () => clearInterval(t);
+  }, [remote, slug, conv?.id]);
   const propose = async () => {
     if (!conv) return;
     proposing.current = true;
@@ -139,7 +148,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   };
   // a meeting opened and left before the founder said anything is not worth keeping
   const close = () => {
-    if (conv && proposing.current) api.detach(slug, conv.id).catch(() => {});
+    if (conv && (proposing.current || remote)) api.detach(slug, conv.id).catch(() => {});
     else if (conv && (conv.kind === "meeting" || conv.draft.kickoff) && conv.status === "open" && founderTurns === 0 && !proposal) api.discard(slug, conv.id).catch(() => {});
     onClose();
   };
@@ -206,6 +215,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
             {conv?.turns.map((t, i) => <Bubble key={i} who={t.who} name={t.name || copy.agent} text={t.text} changes={t.changes} />)}
             {pending && <Bubble who="founder" name="" text={pending} changes={[]} />}
             {busy && waitingFor && <p className="text-xs text-slate-500">{waitingFor}…</p>}
+            {remote && !busy && <p className="text-xs text-slate-500">O Product Owner está montando a proposta…</p>}
             <div ref={endRef} />
           </div>
           {notes.length > 0 && <div className="border-t border-line px-3 py-1 text-[11px] text-amber-300">{notes.map((n, i) => <div key={i}>! {n}</div>)}</div>}
@@ -213,7 +223,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
             <div className="border-t border-line p-2">
               {/* always at hand: the Product Owner's proposal reads the conversation so far */}
               {isMeeting && conv?.mode === "next" && (
-                <button className="btn-primary mb-2 w-full text-left" disabled={busy} title="O Product Owner propõe o que entra no próximo sprint, a partir do backlog, do rascunho e do que já foi dito nesta conversa" onClick={propose}>
+                <button className="btn-primary mb-2 w-full text-left" disabled={busy || remote} title="O Product Owner propõe o que entra no próximo sprint, a partir do backlog, do rascunho e do que já foi dito nesta conversa" onClick={propose}>
                   📋 {reviewingPlanned && planned && !proposal ? `Revisar o ${planned.id} com o Product Owner` : proposal ? "Pedir nova sugestão ao Product Owner (considera a conversa)" : "Pedir a sugestão do Product Owner para o próximo sprint"}
                 </button>
               )}
