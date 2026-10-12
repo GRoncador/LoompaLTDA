@@ -25,7 +25,7 @@ export default function App() {
   const [slug, setSlug] = useState<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [events, setEvents] = useState<LoompaEvent[]>([]);
-  const [ready, setReady] = useState<{ id: string; failed: boolean } | null>(null);
+  const [ready, setReady] = useState<{ id: string; kind?: ConversationKind; failed: boolean } | null>(null);
   const [chat, setChat] = useState<{ kind: ConversationKind; resumeId?: string; text?: string } | null>(null);
   const [newFactoryOpen, setNewFactoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -72,11 +72,12 @@ export default function App() {
       setLive((prev) => ({ ...prev, [sid]: advance(prev[sid] ?? snapshot(overviewRef.current, sid), e) }));
       setNow(Date.now());
     }
-    if (e.type === "meeting.proposal_ready" && e.payload?.conversation_id) {
+    if ((e.type === "meeting.proposal_ready" || e.type === "conversation.ready") && e.payload?.conversation_id) {
       const id = String(e.payload.conversation_id);
-      setReady({ id, failed: !!e.payload.failed });
+      const kind = (e.payload.kind as ConversationKind) ?? "meeting";
+      setReady({ id, kind, failed: !!e.payload.failed });
     }
-    if (["meeting.proposal_ready", "story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "engine.pausing", "engine.paused", "engine.resumed", "story.paused", "scheduler.dispatch", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "sprint.report", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "sprint.planned", "sprint.adjusted", "sprint.cancelled", "meeting.mode", "story.withdrawn", "story.restarted", "story.stalled"].includes(e.type)) {
+    if (["meeting.proposal_ready", "conversation.ready", "story.stage", "story.created", "inbox.new", "inbox.answered", "agent.state", "llm.call", "story.merged", "engine.started", "engine.stopped", "engine.pausing", "engine.paused", "engine.resumed", "story.paused", "scheduler.dispatch", "kaizen.learning", "story.promoted", "scheduler.paused", "settings.updated", "sprint.started", "sprint.done", "sprint.report", "finding.decided", "inbox.decided", "conversation.opened", "conversation.turn", "conversation.committed", "conversation.discarded", "backlog.status", "backlog.priority", "backlog.pinned", "backlog.reranked", "sprint.proposed", "sprint.planned", "sprint.adjusted", "sprint.cancelled", "meeting.mode", "story.withdrawn", "story.restarted", "story.stalled"].includes(e.type)) {
       refresh();
     }
   }, [refresh]);
@@ -104,6 +105,12 @@ export default function App() {
     } catch (e) { setError(String(e)); return null; } finally { refresh(); }
   };
 
+  const resumeConversation = useCallback((id: string) => {
+    const found = overview?.conversations.find((c) => c.id === id);
+    const kind = found?.kind ?? "meeting";
+    setChat({ kind, resumeId: id });
+  }, [overview]);
+
   const pendingCount = useMemo(() => overview?.inbox.filter((m) => m.kind === "decision" || m.kind === "blocked" || m.kind === "delivery").length ?? 0, [overview]);
 
   return (
@@ -115,8 +122,14 @@ export default function App() {
       />
       {ready && (
         <div className="flex items-center gap-3 bg-sky-900/60 px-4 py-2 text-sm text-sky-100">
-          <span>{ready.failed ? "O Product Owner não conseguiu montar a sugestão do próximo sprint." : "A sugestão do Product Owner para o próximo sprint está pronta."}</span>
-          <button className="btn-primary px-2 py-0.5 text-xs" onClick={() => { setChat({ kind: "meeting", resumeId: ready.id }); setReady(null); }}>🗓 Abrir a reunião</button>
+          <span>
+            {ready.kind === "brainstorm"
+              ? (ready.failed ? "O Master Loompa não conseguiu concluir a reflexão do brainstorm." : "O brainstorm está pronto para conferir ideias e pareceres.")
+              : (ready.failed ? "O Product Owner não conseguiu montar a sugestão do próximo sprint." : "A sugestão do Product Owner para o próximo sprint está pronta.")}
+          </span>
+          <button className="btn-primary px-2 py-0.5 text-xs" onClick={() => { resumeConversation(ready.id); setReady(null); }}>
+            {ready.kind === "brainstorm" ? "💡 Abrir o brainstorm" : "🗓 Abrir a reunião"}
+          </button>
           <button className="ml-auto text-xs text-sky-300 hover:text-white" onClick={() => setReady(null)}>✕</button>
         </div>
       )}
@@ -130,7 +143,7 @@ export default function App() {
           <Office agents={overview?.agents ?? []} onSelect={setAgentName} />
         </section>
         <section className="card flex min-h-[320px] flex-col overflow-hidden">
-          <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onProductFindings={() => setProductOpen(true)} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} onOpenSprint={setSprintsAt} onOpenMeeting={(id) => setChat({ kind: "meeting", resumeId: id })} />
+          <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onProductFindings={() => setProductOpen(true)} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} onOpenSprint={setSprintsAt} onOpenMeeting={resumeConversation} />
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
           <Kanban
@@ -138,7 +151,7 @@ export default function App() {
             columns={overview?.columns ?? []} agents={overview?.factory.engine ? overview.agents : []} sprint={overview?.sprint ?? null} nextSprint={overview?.next_sprint ?? null} conversations={overview?.conversations ?? []} live={live} now={now} storyCap={overview?.finance.story_cap_usd ?? 0} engine={!!overview?.factory.engine}
             kickoff={!!overview?.factory.kickoff}
             epics={overview?.epics ?? {}} phase={overview?.phase ?? null} onProduct={() => setProductOpen2(true)}
-            onChat={(kind, resumeId) => setChat({ kind, resumeId })} onOpen={setStoryId}
+            onChat={(kind, resumeId, text) => setChat({ kind, resumeId, text })} onOpen={setStoryId}
             onCreate={createStory}
             onReorder={async (ids, dragged) => { if (slug) { try { await api.reorderBacklog(slug, ids, dragged); } catch (e) { setError(String(e)); } refresh(); } }}
             onUnpin={async (id) => { if (slug) { try { await api.unpin(slug, id); } catch (e) { setError(String(e)); } refresh(); } }}
@@ -150,7 +163,7 @@ export default function App() {
       {financeOpen && slug && <FinanceModal slug={slug} onClose={() => setFinanceOpen(false)} />}
       {factoryOpen && slug && <FactoryModal slug={slug} onClose={() => setFactoryOpen(false)} onOpenSprint={(id) => { setFactoryOpen(false); setSprintsAt(id); }} onOpenStory={setStoryId} />}
       {growthOpen && slug && <GrowthModal slug={slug} onClose={() => { setGrowthOpen(false); refresh(); }} />}
-      {productOpen2 && slug && <ProductModal slug={slug} onClose={() => { setProductOpen2(false); refresh(); }} />}
+      {productOpen2 && slug && <ProductModal slug={slug} onBrainstorm={(text) => { setProductOpen2(false); setChat({ kind: "brainstorm", text }); }} onClose={() => { setProductOpen2(false); refresh(); }} />}
       {design && slug && <DesignModal slug={slug} story={design.story} onReply={reply} onOpenStory={setStoryId} onClose={() => { setDesign(null); refresh(); }} />}
       {productOpen && slug && <ProductFindingsModal slug={slug} onClose={() => setProductOpen(false)} onOpenStory={setStoryId} />}
       {sprintsAt !== null && slug && <SprintsModal slug={slug} initial={sprintsAt || null} onClose={() => setSprintsAt(null)} onOpenStory={setStoryId} />}

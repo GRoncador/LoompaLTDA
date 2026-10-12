@@ -972,3 +972,50 @@ async def test_the_product_owner_reviews_old_cards_against_the_code_and_drafts_r
     chats.edit(conv.id, [{"op": "unretire", "ref": "S-001"}])  # the founder keeps it after all
     assert chats.board.require(conv.id).draft.retire == {}
     await ctx.aclose()
+
+
+@pytest.mark.asyncio
+async def test_brainstorm_conversation_ready(factory):  # noqa: F811
+    ctx = make_ctx(
+        factory,
+        turn_script(
+            {
+                "reply": "Direção pensada para o resumo de ausência.",
+                "direction": "Resumo de ausência",
+                "ops": [add("Módulo de resumo")],
+                "consult": [],
+                "ready": True,
+            }
+        ),
+    )
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.BRAINSTORM)
+    await chats.say(conv.id, "Pensar nas features do épico")
+    chats.conversation_ready(conv.id)
+    inbox = ctx.store.list_messages(ctx.slug)
+    assert len(inbox) == 1
+    assert inbox[0].conversation_id == conv.id
+    assert inbox[0].sender == "Master Loompa"
+    assert "brainstorm" in inbox[0].title.lower()
+    assert events(ctx, "conversation.ready")[0]["payload"]["conversation_id"] == conv.id
+    await ctx.aclose()
+
+
+def test_brainstorm_consult_requests_aliases():
+    from loompa.agents.brainstorm import consult_requests, normalize_role
+
+    assert normalize_role("PM") == "product_manager"
+    assert normalize_role("PO Loompa") == "product_owner"
+    assert normalize_role("Product Owner") == "product_owner"
+
+    raw = [
+        {"role": "pm", "question": "Qual o impacto no roadmap?"},
+        {"role": "po", "question": "Como divide no backlog?"},
+    ]
+    res = consult_requests(raw)
+    assert len(res) == 2
+    assert res[0][0] == "product_manager"
+    assert res[1][0] == "product_owner"
+
+
+

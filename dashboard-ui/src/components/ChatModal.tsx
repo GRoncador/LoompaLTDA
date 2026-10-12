@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { ChatReply, Consultant, Conversation, ConversationKind, DraftItem, Kickoff, MeetingMode, Opinion, SprintContext } from "../types";
+import type { ChatReply, Consultant, Conversation, ConversationKind, DraftItem, Kickoff, MeetingMode, Opinion, ProductEpic, SprintContext } from "../types";
 import { Modal } from "./Modal";
 
 const COPY: Record<ConversationKind, { title: string; hint: string; placeholder: string; agent: string }> = {
@@ -51,6 +51,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   const [notes, setNotes] = useState<string[]>([]);
   const [goal, setGoal] = useState("");
   const [consultants, setConsultants] = useState<Consultant[]>([]);
+  const [activeEpics, setActiveEpics] = useState<ProductEpic[]>([]);
   const [recording, setRecording] = useState(false);
   const rec = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
@@ -83,6 +84,14 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   const review = conv?.draft.review ?? null;
 
   useEffect(() => {
+    if (kind === "brainstorm") {
+      api.product(slug).then((v) => {
+        setActiveEpics(v.epics.filter((e) => e.status === "active"));
+      }).catch(() => {});
+    }
+  }, [slug, kind]);
+
+  useEffect(() => {
     if (resumeId) {
       api.conversation(slug, resumeId).then((r) => { setConv(r.conversation); setRemote(!!r.proposing); if (r.sprints) setSprints(r.sprints); if (r.consultants) setConsultants(r.consultants); }).catch((e) => setErr(detail(e)));
     } else if (kind === "meeting" && !opening.current) {
@@ -90,10 +99,18 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
       opening.current = true;
       setBusy(true); setWaitingFor("Abrindo a reunião");
       api.openConversation(slug, "meeting", "").then((r) => { setConv(r.conversation); setRemote(!!r.proposing); if (r.sprints) setSprints(r.sprints); }).catch((e) => setErr(detail(e))).finally(() => { setBusy(false); setWaitingFor(null); });
-    } else if (kind === "brainstorm" && kickoff && !initialText && !opening.current) {
-      // a new factory's opening (plan 10.10): the fixed first question is waiting in the session
-      opening.current = true;
-      api.openConversation(slug, "brainstorm", "").then((r) => { setConv(r.conversation); if (r.consultants) setConsultants(r.consultants); }).catch((e) => setErr(detail(e)));
+    } else if (kind === "brainstorm" && !opening.current) {
+      if (initialText && initialText.trim()) {
+        opening.current = true;
+        setPending(initialText.trim());
+        run(() => api.openConversation(slug, "brainstorm", initialText.trim()), "Master Loompa está pensando").then(() => {
+          setPending(null);
+        });
+      } else if (kickoff) {
+        // a new factory's opening (plan 10.10): the fixed first question is waiting in the session
+        opening.current = true;
+        api.openConversation(slug, "brainstorm", "").then((r) => { setConv(r.conversation); if (r.consultants) setConsultants(r.consultants); }).catch((e) => setErr(detail(e)));
+      }
     }
   }, [slug, resumeId, kind, kickoff, initialText]);
   useEffect(() => { setGoal(conv?.draft.goal ?? ""); }, [conv?.draft.goal]);
@@ -110,13 +127,17 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
     try { apply(await fn()); return true; } catch (e) { setErr(detail(e)); return false; } finally { setBusy(false); setWaitingFor(null); }
   };
 
-  const send = async () => {
-    const t = text.trim();
+  const sendText = async (customText: string) => {
+    const t = customText.trim();
     if (!t || busy) return;
     setText(""); setPending(t);
     const ok = await run(() => (conv ? api.say(slug, conv.id, t) : api.openConversation(slug, kind, t)), `${copy.agent} está pensando`);
     setPending(null);
     if (!ok) setText(t);
+  };
+
+  const send = async () => {
+    await sendText(text);
   };
   const edit = (ops: Record<string, unknown>[]) => conv && run(() => api.editDraft(slug, conv.id, ops));
   // Saved quietly (no `busy`): a blur must not disable the button the founder is about to click.
@@ -124,7 +145,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
     if (!open || !conv || goal === conv.draft.goal) return;
     api.editDraft(slug, conv.id, [{ op: "goal", text: goal }]).then(apply).catch((e) => setErr(detail(e)));
   };
-  // closed while the Product Owner works: it goes on, and the inbox tells when it is done
+  // closed while an agent or Product Owner works: it goes on, and the inbox tells when it is done
   const proposing = useRef(false);
   // reopened while a proposal started earlier still runs: wait for it here, no note
   const [remote, setRemote] = useState(false);
@@ -147,10 +168,21 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
     // not through `run`: it must work while the Product Owner is still proposing (it cancels it)
     try { await api.discard(slug, conv.id); proposing.current = false; onClose(); } catch (e) { setErr(detail(e)); }
   };
-  // a meeting opened and left before the founder said anything is not worth keeping
+  // a conversation closed while an agent thinks continues in the background; empty unused ones are discarded
   const close = () => {
-    if (conv && (proposing.current || remote)) api.detach(slug, conv.id).catch(() => {});
-    else if (conv && (conv.kind === "meeting" || conv.draft.kickoff) && conv.status === "open" && founderTurns === 0 && !proposal) api.discard(slug, conv.id).catch(() => {});
+    if (conv && (busy || pending || proposing.current || remote)) {
+      api.detach(slug, conv.id).catch(() => {});
+    } else if (
+      conv &&
+      !busy &&
+      !pending &&
+      (conv.kind === "meeting" || conv.draft.kickoff) &&
+      conv.status === "open" &&
+      founderTurns === 0 &&
+      !proposal
+    ) {
+      api.discard(slug, conv.id).catch(() => {});
+    }
     onClose();
   };
   // a brainstorm (ADR-0020): the founder asks a role directly, with the text box as the question
@@ -212,7 +244,35 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
       <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <section className="flex h-[52vh] flex-col rounded-md border border-line bg-ink/40">
           <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3 text-sm">
-            {!conv && !pending && !busy && <p className="text-slate-500">{copy.placeholder}</p>}
+            {!conv && !pending && !busy && (
+              <div className="space-y-3">
+                <p className="text-slate-500">{copy.placeholder}</p>
+                {current === "brainstorm" && activeEpics.length > 0 && (
+                  <div className="rounded-md border border-brand/40 bg-brand/10 p-2.5 text-xs">
+                    <div className="font-semibold text-brand">💡 Brainstorm focado em um Épico ativo</div>
+                    <p className="mt-0.5 text-slate-300">
+                      Selecione um épico para iniciar o brainstorm com o Master Loompa propondo a direção e as ideias que faltam para concluí-lo:
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {activeEpics.map((ep) => (
+                        <button
+                          key={ep.id}
+                          disabled={busy}
+                          className="chip border border-brand/50 bg-ink hover:border-brand hover:text-white text-left transition-colors"
+                          onClick={() => {
+                            const p = `Quero fazer um brainstorm focado no épico ativo '${ep.name}' (${ep.id})${ep.goal ? ` · Meta: ${ep.goal}` : ""}${ep.metric ? ` · Métrica: ${ep.metric}` : ""}. Analise o que já temos no produto e no backlog, e proponha a direção e as ideias/funcionalidades que ainda faltam para que este épico seja concluído com sucesso.`;
+                            sendText(p);
+                          }}
+                        >
+                          <span className="font-medium text-amber-200">{ep.name}</span>
+                          <span className="text-[10px] text-slate-400">({ep.done}/{ep.cards} cards)</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {conv?.turns.map((t, i) => <Bubble key={i} who={t.who} name={t.name || copy.agent} text={t.text} changes={t.changes} />)}
             {pending && <Bubble who="founder" name="" text={pending} changes={[]} />}
             {busy && waitingFor && <p className="text-xs text-slate-500">{waitingFor}…</p>}

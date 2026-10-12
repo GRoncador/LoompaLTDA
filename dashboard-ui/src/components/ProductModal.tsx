@@ -5,7 +5,7 @@ import { Modal } from "./Modal";
 
 /** The product's life cycle (plan 16): the phases with their goal, exit criterion and facts; the
  *  product epics with their progress; the PM's proposals. Moving to a phase is the founder's call. */
-export default function ProductModal({ slug, onClose }: { slug: string; onClose: () => void }) {
+export default function ProductModal({ slug, onClose, onBrainstorm }: { slug: string; onClose: () => void; onBrainstorm?: (text: string) => void }) {
   const [view, setView] = useState<ProductView | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,7 +61,19 @@ export default function ProductModal({ slug, onClose }: { slug: string; onClose:
                 </div>
                 {e.goal && <p className="mt-1 text-slate-300">{e.goal}</p>}
                 {e.metric && <p className="text-slate-400">Métrica: {e.metric}</p>}
-                <div className="mt-1 flex gap-2">
+                <div className="mt-2 flex items-center gap-2">
+                  {e.status === "active" && onBrainstorm && (
+                    <button
+                      className="btn-ghost px-2 py-0.5 text-[11px] text-amber-300 hover:text-amber-200"
+                      title="Abrir brainstorm focado em funcionalidades para concluir este épico"
+                      onClick={() => {
+                        const prompt = `Quero fazer um brainstorm focado no épico ativo '${e.name}' (${e.id})${e.goal ? ` · Meta: ${e.goal}` : ""}${e.metric ? ` · Métrica: ${e.metric}` : ""}. Analise o que já temos no produto e no backlog, e proponha a direção e as ideias/funcionalidades que ainda faltam para que este épico seja concluído com sucesso.`;
+                        onBrainstorm(prompt);
+                      }}
+                    >
+                      💡 brainstorm
+                    </button>
+                  )}
                   {e.status !== "done" && <button className="text-emerald-300 hover:underline" onClick={() => run(async () => { await api.setEpic(slug, e.id, "done"); })}>concluir</button>}
                   {e.status === "active" && <button className="text-slate-400 hover:underline" onClick={() => run(async () => { await api.setEpic(slug, e.id, "dropped"); })}>abandonar</button>}
                   {e.status !== "active" && <button className="text-slate-400 hover:underline" onClick={() => run(async () => { await api.setEpic(slug, e.id, "active"); })}>reativar</button>}

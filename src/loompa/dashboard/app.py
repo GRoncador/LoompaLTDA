@@ -349,13 +349,20 @@ def _conversation_summary(conv: Conversation) -> dict[str, Any]:
     }
 
 
-def _is_listed(conv: Conversation, proposing: set[str] = frozenset()) -> bool:
+def _is_listed(
+    conv: Conversation,
+    proposing: set[str] = frozenset(),
+    detached: set[str] = frozenset(),
+) -> bool:
     """A meeting opened and left before the founder said anything is not worth resuming, unless
-    the Product Owner proposed in it, or is proposing now."""
+    the Product Owner proposed in it, is proposing now, or the conversation was detached while
+    working in the background."""
     return (
         any(t.who == "founder" for t in conv.turns)
         or conv.draft.proposal is not None
         or conv.id in proposing
+        or conv.id in detached
+        or bool(conv.draft.items)
     )
 
 
@@ -569,7 +576,7 @@ def create_app(
             "conversations": [
                 _conversation_summary(c)
                 for c in _board(ctx).list(ConversationStatus.OPEN)
-                if _is_listed(c, rt.proposing)
+                if _is_listed(c, rt.proposing, rt.detached)
             ][:10],
             "last_event_id": _last_event_id(ctx),
         }
@@ -941,12 +948,23 @@ def create_app(
         with _chat_errors():
             conv = chats.open(body.kind)
         turn = None
+        failed = False
         async with rt.chat_lock(conv.id):
             with _chat_errors():
-                if conv.kind == ConversationKind.MEETING:
-                    await chats.brief(conv.id)  # the Master opens with where things stand
-                if body.text.strip():
-                    turn = await chats.say(conv.id, body.text)
+                try:
+                    if conv.kind == ConversationKind.MEETING:
+                        await chats.brief(conv.id)  # the Master opens with where things stand
+                    if body.text.strip():
+                        turn = await chats.say(conv.id, body.text)
+                except Exception:
+                    failed = True
+                    if conv.id in rt.detached:
+                        rt.detached.discard(conv.id)
+                        chats.conversation_ready(conv.id, failed=True)
+                    raise
+        if conv.id in rt.detached:
+            rt.detached.discard(conv.id)
+            chats.conversation_ready(conv.id, failed=failed or (turn.failed if turn else False))
         conv = chats.board.require(conv.id, open_only=False)
         return _payload(conv, turn=turn and asdict(turn))
 
@@ -965,11 +983,23 @@ def create_app(
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/messages")
     async def say(slug: str, conversation_id: str, body: ChatSayBody) -> dict[str, Any]:
         rt, chats = _chat(slug)
+        turn = None
+        failed = False
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
-                turn = await chats.say(conversation_id, body.text)
-                conv = chats.board.require(conversation_id, open_only=False)
-                return _payload(conv, turn=asdict(turn))
+                try:
+                    turn = await chats.say(conversation_id, body.text)
+                except Exception:
+                    failed = True
+                    if conversation_id in rt.detached:
+                        rt.detached.discard(conversation_id)
+                        chats.conversation_ready(conversation_id, failed=True)
+                    raise
+        if conversation_id in rt.detached:
+            rt.detached.discard(conversation_id)
+            chats.conversation_ready(conversation_id, failed=failed or turn.failed)
+        conv = chats.board.require(conversation_id, open_only=False)
+        return _payload(conv, turn=asdict(turn))
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/mode")
     async def meeting_mode(slug: str, conversation_id: str, body: ModeBody) -> dict[str, Any]:
@@ -997,20 +1027,20 @@ def create_app(
                 except Exception:
                     if conversation_id in rt.detached:  # closed while it worked: say it failed
                         rt.detached.discard(conversation_id)
-                        chats.proposal_ready(conversation_id, failed=True)
+                        chats.conversation_ready(conversation_id, failed=True)
                     raise
                 finally:
                     rt.proposing.discard(conversation_id)
                     rt.proposals.pop(conversation_id, None)
                 if conversation_id in rt.detached:  # closed while it worked: say it is done
                     rt.detached.discard(conversation_id)
-                    chats.proposal_ready(conversation_id, failed=turn.failed)
+                    chats.conversation_ready(conversation_id, failed=turn.failed)
                 return _payload(chats.board.require(conversation_id), turn=asdict(turn))
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/detach")
     async def detach_conversation(slug: str, conversation_id: str) -> dict[str, Any]:
-        """The founder closed the meeting while the Product Owner proposes: no lock (the
-        proposal holds it); when it ends, an inbox note says so and reopens the meeting."""
+        """The founder closed the meeting or brainstorm while an agent works: no lock;
+        when it ends, an inbox note says so and reopens the conversation."""
         rt = hub.get(slug)
         rt.detached.add(conversation_id)
         return {"ok": True}
@@ -1019,28 +1049,64 @@ def create_app(
     async def consult_role(slug: str, conversation_id: str, body: ConsultBody) -> dict[str, Any]:
         """A brainstorm: the founder asks a role for its preliminary opinion (ADR-0020)."""
         rt, chats = _chat(slug)
+        turn = None
+        failed = False
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
-                turn = await chats.consult(conversation_id, body.role, body.question)
-                return _payload(chats.board.require(conversation_id), turn=asdict(turn))
+                try:
+                    turn = await chats.consult(conversation_id, body.role, body.question)
+                except Exception:
+                    failed = True
+                    if conversation_id in rt.detached:
+                        rt.detached.discard(conversation_id)
+                        chats.conversation_ready(conversation_id, failed=True)
+                    raise
+        if conversation_id in rt.detached:
+            rt.detached.discard(conversation_id)
+            chats.conversation_ready(conversation_id, failed=failed or turn.failed)
+        return _payload(chats.board.require(conversation_id), turn=asdict(turn))
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/discover")
     async def discover_product(slug: str, conversation_id: str) -> dict[str, Any]:
         """A commercial product's discovery in the brainstorm (plan 16.2)."""
         rt, chats = _chat(slug)
+        turn = None
+        failed = False
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
-                turn = await chats.discover(conversation_id)
-                return _payload(chats.board.require(conversation_id), turn=asdict(turn))
+                try:
+                    turn = await chats.discover(conversation_id)
+                except Exception:
+                    failed = True
+                    if conversation_id in rt.detached:
+                        rt.detached.discard(conversation_id)
+                        chats.conversation_ready(conversation_id, failed=True)
+                    raise
+        if conversation_id in rt.detached:
+            rt.detached.discard(conversation_id)
+            chats.conversation_ready(conversation_id, failed=failed or turn.failed)
+        return _payload(chats.board.require(conversation_id), turn=asdict(turn))
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/approve")
     async def approve_direction(slug: str, conversation_id: str) -> dict[str, Any]:
         """A brainstorm's first OK: the Product Owner proposes the cards (ADR-0020)."""
         rt, chats = _chat(slug)
+        turn = None
+        failed = False
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
-                turn = await chats.approve(conversation_id)
-                return _payload(chats.board.require(conversation_id), turn=asdict(turn))
+                try:
+                    turn = await chats.approve(conversation_id)
+                except Exception:
+                    failed = True
+                    if conversation_id in rt.detached:
+                        rt.detached.discard(conversation_id)
+                        chats.conversation_ready(conversation_id, failed=True)
+                    raise
+        if conversation_id in rt.detached:
+            rt.detached.discard(conversation_id)
+            chats.conversation_ready(conversation_id, failed=failed or turn.failed)
+        return _payload(chats.board.require(conversation_id), turn=asdict(turn))
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/reopen")
     async def reopen_direction(slug: str, conversation_id: str) -> dict[str, Any]:

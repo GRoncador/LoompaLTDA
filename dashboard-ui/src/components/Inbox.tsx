@@ -120,7 +120,11 @@ export function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint, 
               })}
             </div>
           )}
-          {m.conversation_id && onOpenMeeting && <button className="btn-primary mt-2 mr-2 text-xs" onClick={() => onOpenMeeting(m.conversation_id!)}>🗓 Abrir a reunião</button>}
+          {m.conversation_id && onOpenMeeting && (
+            <button className="btn-primary mt-2 mr-2 text-xs" onClick={() => onOpenMeeting(m.conversation_id!)}>
+              {m.title.toLowerCase().includes("brainstorm") ? "💡 Abrir o brainstorm" : "🗓 Abrir a reunião"}
+            </button>
+          )}
           {m.sprint_id && <button className="btn-ghost mt-2 text-xs" onClick={() => onOpenSprint(m.sprint_id!)}>📊 Ver o relatório do {m.sprint_id}</button>}
           {m.decisions.length > 0 && (
             <div className="mt-3 space-y-2 rounded-md border border-line bg-panel/60 p-2">

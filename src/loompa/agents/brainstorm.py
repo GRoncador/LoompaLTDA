@@ -244,6 +244,24 @@ CONSULTANTS: dict[str, Consultant] = {
 }
 
 
+ROLE_ALIASES: dict[str, str] = {
+    "pm": "product_manager",
+    "po": "product_owner",
+}
+
+
+
+def normalize_role(raw: str) -> str:
+    cleaned = (
+        raw.strip()
+        .lower()
+        .removesuffix(" loompa")
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    return ROLE_ALIASES.get(cleaned, cleaned)
+
+
 def render_consultants() -> str:
     """The roster as the Master reads it."""
     return "\n".join(f"- {c.role}: {c.lens}" for c in CONSULTANTS.values())
@@ -255,11 +273,12 @@ def consult_requests(raw: Any) -> list[tuple[str, str]]:
     for item in raw if isinstance(raw, list) else []:
         if not isinstance(item, dict):
             continue
-        role = str(item.get("role") or "").strip().lower().removesuffix(" loompa")
+        role = normalize_role(str(item.get("role") or ""))
         question = str(item.get("question") or "").strip()
         if role in CONSULTANTS and question and role not in asks:
             asks[role] = question[:600]
     return list(asks.items())[:MAX_CONSULTS_PER_TURN]
+
 
 
 _URL = re.compile(r"https?://[^\s<>\"')\]]+")
@@ -321,9 +340,12 @@ async def consult(
     that cannot be asked leaves a failed opinion, never an invented one."""
     from loompa.agents.analyst import web_limitation
 
-    who = CONSULTANTS.get(role)
+    norm = normalize_role(role)
+    who = CONSULTANTS.get(norm)
     if who is None:
         raise ConversationError(f"não há um papel “{role}” para consultar")
+    role = who.role
+
     question = question.strip()
     if not question:
         raise ConversationError("diga o que perguntar")
