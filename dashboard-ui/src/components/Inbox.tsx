@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Message, Overview } from "../types";
+import type { Message } from "../types";
 import { DesignScreens } from "./DesignScreens";
 
 const KIND: Record<Message["kind"], { label: string; cls: string }> = {
@@ -12,35 +12,40 @@ const KIND: Record<Message["kind"], { label: string; cls: string }> = {
 };
 
 export default function Inbox(props: {
-  messages: Message[]; finance: Overview["finance"] | null; kaizen: number; onProductFindings: () => void;
+  messages: Message[];
   onReply: (m: Message, option: string | null, text: string | null, decisions?: Record<string, string>, answers?: Record<string, string>) => Promise<void>;
   onArchive: (m: Message) => Promise<void>;
   onOpenStory: (id: string) => void;
   onOpenSprint: (id: string) => void;
   onOpenMeeting?: (id: string) => void;
 }) {
-  const { messages, finance, kaizen } = props;
-  const actionable = messages.filter((m) => m.options.length > 0 || m.kind === "decision" || m.kind === "blocked");
-  const info = messages.filter((m) => !actionable.includes(m));
+  const { messages } = props;
+  const [read, setRead] = useState(loadRead);
+  const markRead = (id: string) => setRead((r) => {
+    if (r.has(id)) return r;
+    const next = new Set(r).add(id);
+    try { localStorage.setItem(READ_KEY, JSON.stringify([...next].slice(-500))); } catch { /* private window */ }
+    return next;
+  });
+  // newest first, every note closed: the tag and the title, bold until opened
+  const sorted = [...messages].sort((a, b) => b.created_at.localeCompare(a.created_at));
   return (
     <>
-      <div className="flex items-center justify-between border-b border-line px-3 py-2">
-        <h2 className="text-sm font-semibold">📬 Caixa de Entrada do Founder</h2>
-        <span className="text-xs text-slate-400">linguagem executiva · responda em lote</span>
+      <div className="border-b border-line px-3 py-2">
+        <h2 className="text-sm font-semibold">📬 Caixa de Entrada</h2>
       </div>
       <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3">
-        {finance && (
-          <div className="flex items-center justify-between rounded-md border border-line bg-ink/60 px-3 py-2 text-xs">
-            <span>💰 Gasto hoje: <b>US$ {finance.today_usd.toFixed(2)}</b> · {finance.period === "weekly" ? "semana" : "mês"}: US$ {finance.period_usd.toFixed(2)} de {finance.cap_usd.toFixed(2)}</span>
-            <button className="hover:underline" title="O que o Kaizen achou no produto hoje, sem repetidos" onClick={props.onProductFindings}>💡 {kaizen} {kaizen === 1 ? "achado" : "achados"} no produto hoje</button>
-          </div>
-        )}
         {messages.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nada pendente. Aproveite o dia. 🎉</p>}
-        {actionable.map((m) => <MessageCard key={m.id} m={m} {...props} />)}
-        {info.map((m) => <MessageCard key={m.id} m={m} {...props} />)}
+        {sorted.map((m) => <MessageCard key={m.id} m={m} unread={!read.has(m.id)} onOpen={() => markRead(m.id)} {...props} />)}
       </div>
     </>
   );
+}
+
+/** Which notes the founder has opened, kept in this browser only. */
+const READ_KEY = "loompa.inbox.read";
+function loadRead(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) ?? "[]")); } catch { return new Set(); }
 }
 
 const SHOT_LABEL: Record<string, string> = { "desktop.png": "Computador", "mobile.png": "Celular (390 px)" };
@@ -62,10 +67,11 @@ function Shots({ m }: { m: Message }) {
   );
 }
 
-export function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint, onOpenMeeting }: { m: Message } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint" | "onOpenMeeting">) {
+export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onOpenStory, onOpenSprint, onOpenMeeting }: { m: Message; unread?: boolean; onOpen?: () => void } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint" | "onOpenMeeting">) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState(m.kind !== "info");
+  const [open, setOpen] = useState(false);
+  const toggle = () => { if (!open) onOpen?.(); setOpen((o) => !o); };
   // side decisions (suggested cards): the recommended option unless the founder picks another
   const open_decisions = m.decisions.filter((d) => !d.chosen);
   const [picked, setPicked] = useState<Record<string, string>>({});
@@ -85,16 +91,13 @@ export function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint, 
     } finally { setBusy(false); }
   };
   return (
-    <article className="rounded-md border border-line bg-ink/70 p-3">
+    <article className={`rounded-md border p-3 ${unread ? "border-l-4 border-brand bg-ink/90" : "border-line bg-ink/40"}`}>
       <div className="flex items-start gap-2">
-        <span className={`chip ${k.cls}`}>{k.label}</span>
-        <button className="flex-1 text-left text-sm font-semibold leading-snug" onClick={() => setOpen((o) => !o)}>{m.title}</button>
+        {unread && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand" title="Não lida" />}
+        <span className={`chip ${k.cls} ${unread ? "" : "opacity-70"}`}>{k.label}</span>
+        <button className={`flex-1 text-left text-sm leading-snug ${unread ? "font-bold text-slate-50" : "font-normal text-slate-400"}`} onClick={toggle}>{m.title}</button>
         {m.story_id && <button className="text-xs text-brand hover:underline" onClick={() => onOpenStory(m.story_id!)}>{m.story_id}</button>}
       </div>
-      {/* closed, a one-line preview of the body tells notes with the same short title apart */}
-      {!open && m.context.trim() && (
-        <button className="mt-1 block w-full truncate text-left text-xs text-slate-500" onClick={() => setOpen(true)}>{m.context.trim().split("\n")[0]}</button>
-      )}
       {open && (
         <>
           <p className="mt-2 whitespace-pre-line text-sm text-slate-300">{m.context}</p>

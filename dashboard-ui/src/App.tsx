@@ -15,7 +15,6 @@ import SettingsModal from "./components/SettingsModal";
 import FinanceModal from "./components/FinanceModal";
 import SprintsModal from "./components/SprintsModal";
 import FactoryModal from "./components/FactoryModal";
-import ProductFindingsModal from "./components/ProductFindingsModal";
 import DesignModal from "./components/DesignModal";
 import ProductModal from "./components/ProductModal";
 import GrowthModal from "./components/GrowthModal";
@@ -31,7 +30,6 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [financeOpen, setFinanceOpen] = useState(false);
   const [factoryOpen, setFactoryOpen] = useState(false); // the factory's self-diagnosis (8.4)
-  const [productOpen, setProductOpen] = useState(false); // today's Kaizen findings in the product
   const [design, setDesign] = useState<{ story?: string | null } | null>(null); // the design gate (ADR-0039)
   const [productOpen2, setProductOpen2] = useState(false); // phases and epics (plan 16)
   const [growthOpen, setGrowthOpen] = useState(false); // marketing drafts (plan 17)
@@ -143,7 +141,7 @@ export default function App() {
           <Office agents={overview?.agents ?? []} onSelect={setAgentName} />
         </section>
         <section className="card flex min-h-[320px] flex-col overflow-hidden">
-          <Inbox messages={overview?.inbox ?? []} finance={overview?.finance ?? null} kaizen={overview?.kaizen_today ?? 0} onProductFindings={() => setProductOpen(true)} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} onOpenSprint={setSprintsAt} onOpenMeeting={resumeConversation} />
+          <Inbox messages={overview?.inbox ?? []} onReply={reply} onArchive={async (m) => { if (slug) { await api.archive(slug, m.id); refresh(); } }} onOpenStory={setStoryId} onOpenSprint={setSprintsAt} onOpenMeeting={resumeConversation} />
         </section>
         <section className="card flex min-h-[260px] flex-col overflow-hidden lg:col-span-2">
           <Kanban
@@ -165,7 +163,6 @@ export default function App() {
       {growthOpen && slug && <GrowthModal slug={slug} onClose={() => { setGrowthOpen(false); refresh(); }} />}
       {productOpen2 && slug && <ProductModal slug={slug} onBrainstorm={(text) => { setProductOpen2(false); setChat({ kind: "brainstorm", text }); }} onClose={() => { setProductOpen2(false); refresh(); }} />}
       {design && slug && <DesignModal slug={slug} story={design.story} onReply={reply} onOpenStory={setStoryId} onClose={() => { setDesign(null); refresh(); }} />}
-      {productOpen && slug && <ProductFindingsModal slug={slug} onClose={() => setProductOpen(false)} onOpenStory={setStoryId} />}
       {sprintsAt !== null && slug && <SprintsModal slug={slug} initial={sprintsAt || null} onClose={() => setSprintsAt(null)} onOpenStory={setStoryId} />}
       {settingsOpen && slug && <SettingsModal slug={slug} onClose={() => { setSettingsOpen(false); refresh(); }} />}
       {newFactoryOpen && <NewFactoryModal onClose={async (created) => { setNewFactoryOpen(false); await loadFactories(); if (created) setSlug(created); }} />}
