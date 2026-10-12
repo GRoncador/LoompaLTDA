@@ -121,8 +121,8 @@ function Table({ rows, head, valueHead = "Custo", fmt = usd }: { rows: { k: stri
   );
 }
 
-// spec and research are one Analista with two roles; costs keep them apart (ADR-0045)
-const ROLE_LABEL: Record<string, string> = { ...ROLE_NAME, product: "Analista (spec)", analyst: "Analista (pesquisa)" };
+// spec and research are one Analista de Negócio with two roles; costs keep them apart (ADR-0045)
+const ROLE_LABEL: Record<string, string> = { ...ROLE_NAME, product: "Analista de Negócio (spec)", analyst: "Analista de Negócio (pesquisa)" };
 
 export default function FinanceModal({ slug, onClose }: { slug: string; onClose: () => void }) {
   const [data, setData] = useState<Finance | null>(null);

@@ -14,7 +14,7 @@ const COPY: Record<ConversationKind, { title: React.ReactNode; hint: string; pla
   },
   brainstorm: {
     title: <><Icon name="lightbulb" /> Brainstorm com o Diretor</>,
-    hint: "Pense em voz alta. O Diretor chama o Analista ou o Arquiteto quando a ideia pede, e os pareceres voltam preliminares. Aprove o rumo (1º OK), o Product Owner propõe os cards e você grava (2º OK).",
+    hint: "Pense em voz alta. O Diretor chama o Analista de Negócio ou o Arquiteto quando a ideia pede, e os pareceres voltam preliminares. Aprove o rumo (1º OK), o Product Owner propõe os cards e você grava (2º OK).",
     placeholder: "Ex.: Como podemos tornar o primeiro acesso dos clientes mais simples?",
     agent: "Master Loompa",
   },
@@ -201,7 +201,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   const approve = () => conv && run(() => api.approve(slug, conv.id), "O Product Owner está dividindo o rumo em cards");
   const reopen = () => conv && run(() => api.reopen(slug, conv.id));
   // plan 16.2: the Analyst's cited competitors, then the PM's Lean Canvas and hypotheses
-  const discover = () => conv && run(() => api.discover(slug, conv.id) as never, "O Analista pesquisa concorrentes e o Gerente de Produto escreve a descoberta");
+  const discover = () => conv && run(() => api.discover(slug, conv.id) as never, "O Analista de Negócio pesquisa concorrentes e o Gerente de Produto escreve a descoberta");
   const editSplit = (ops: Record<string, unknown>[]) => conv && run(() => api.editDraft(slug, conv.id, ops, true));
   const toBrainstorm = async () => {
     if (!conv) return;

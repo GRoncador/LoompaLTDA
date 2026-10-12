@@ -4,8 +4,8 @@
 
 export const ROLE_NAME: Record<string, string> = {
   master: "Diretor",
-  product: "Analista", // the Analyst writing a spec (ADR-0045)
-  analyst: "Analista",
+  product: "Analista de Negócio", // the Analyst writing a spec (ADR-0045)
+  analyst: "Analista de Negócio",
   product_owner: "Product Owner",
   product_manager: "Gerente de Produto",
   architect: "Arquiteto",

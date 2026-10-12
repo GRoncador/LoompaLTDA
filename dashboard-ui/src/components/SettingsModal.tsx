@@ -408,10 +408,10 @@ const PROVIDER_NOTE: Record<string, string> = {
 const ROLE_DISPLAY: Record<string, string> = {
   master: "Diretor (COO)",
   architect: "Arquiteto (Tech Lead)",
-  product: "Analista (Spec)",
+  product: "Analista de Negócio (Spec)",
   product_owner: "Product Owner (PO)",
   product_manager: "Gerente de Produto",
-  analyst: "Analista (Pesquisa)",
+  analyst: "Analista de Negócio (Pesquisa)",
   worker: "Programador (Engenharia)",
   inspector: "Revisor (QA)",
   deployer: "Deployer (Entrega)",
@@ -430,7 +430,7 @@ const CLUSTERS_CONFIG = [
     key: "strategy",
     label: "Estratégia & Produto",
     icon: "landmark",
-    roles: ["Diretor", "Arquiteto", "Product Owner", "Analista"],
+    roles: ["Diretor", "Arquiteto", "Product Owner", "Analista de Negócio"],
     weights: [
       { label: "INTEL", pct: "50%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
       { label: "CODE", pct: "30%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
