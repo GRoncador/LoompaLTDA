@@ -170,6 +170,8 @@ class FactoryRuntime:
     scheduler: Scheduler | None = None  # the engine's, for pause/resume and what is in flight
     listeners: set[asyncio.Queue] = field(default_factory=set)
     chat_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    # meetings the founder closed while the Product Owner was still proposing: told via the inbox
+    detached: set[str] = field(default_factory=set)
 
     def chat_lock(self, conversation_id: str) -> asyncio.Lock:
         """One turn or commit at a time per conversation (two tabs, or a double click)."""
@@ -953,8 +955,25 @@ def create_app(
         rt, chats = _chat(slug)
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
-                turn = await chats.propose(conversation_id)
+                try:
+                    turn = await chats.propose(conversation_id)
+                except Exception:
+                    if conversation_id in rt.detached:  # closed while it worked: say it failed
+                        rt.detached.discard(conversation_id)
+                        chats.proposal_ready(conversation_id, failed=True)
+                    raise
+                if conversation_id in rt.detached:  # closed while it worked: say it is done
+                    rt.detached.discard(conversation_id)
+                    chats.proposal_ready(conversation_id, failed=turn.failed)
                 return _payload(chats.board.require(conversation_id), turn=asdict(turn))
+
+    @app.post("/api/factories/{slug}/conversations/{conversation_id}/detach")
+    async def detach_conversation(slug: str, conversation_id: str) -> dict[str, Any]:
+        """The founder closed the meeting while the Product Owner proposes: no lock (the
+        proposal holds it); when it ends, an inbox note says so and reopens the meeting."""
+        rt = hub.get(slug)
+        rt.detached.add(conversation_id)
+        return {"ok": True}
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/consult")
     async def consult_role(slug: str, conversation_id: str, body: ConsultBody) -> dict[str, Any]:

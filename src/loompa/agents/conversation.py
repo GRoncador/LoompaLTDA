@@ -706,6 +706,31 @@ class Conversations:
         )
         return result
 
+    def proposal_ready(self, conversation_id: str, *, failed: bool = False) -> None:
+        """The Product Owner finished a proposal the founder left the meeting during: an inbox
+        note that reopens the meeting, so the paid proposal is never lost from sight."""
+        from loompa.comms.executive import FounderMessage, MessageKind
+
+        conv = self.board.require(conversation_id, open_only=False)
+        reply = next((t.text for t in reversed(conv.turns) if t.who == "agent"), "")
+        self.ctx.inbox(
+            FounderMessage(
+                factory=self.ctx.slug,
+                kind=MessageKind.INFO,
+                sender="Product Owner Loompa",
+                title="O Product Owner não conseguiu montar a sugestão do próximo sprint"
+                if failed
+                else "A sugestão do Product Owner para o próximo sprint está pronta",
+                context="" if failed else reply,
+                impact="Abra a reunião e peça de novo."
+                if failed
+                else "Abra a reunião para revisar a sugestão e começar o sprint.",
+                allow_free_text=False,
+                conversation_id=conv.id,
+            )
+        )
+        self.ctx.emit("meeting.proposal_ready", conversation_id=conv.id, failed=failed)
+
     def discard(self, conversation_id: str) -> Conversation:
         conv = self.board.discard(conversation_id)
         self.ctx.emit("conversation.discarded", conversation_id=conv.id)

@@ -318,3 +318,23 @@ def test_the_terminal_meeting_asks_too(git_repo, hub, monkeypatch):
     assert "voltaram ao backlog: S-002" in out
     r = runner.invoke(app, ["sprint", "status"])
     assert "S-001" in r.stdout and "S-002" not in r.stdout
+
+
+def test_a_proposal_finished_after_the_founder_left_reaches_the_inbox(client):
+    ctx = client.app.state.hub.get("demo-hq").ctx
+    ProductOwnerAgent(ctx).add_item("Relatório")
+    cid = client.post(f"{BASE}/conversations", json={"kind": "meeting"}).json()["conversation"][
+        "id"
+    ]
+    notes = lambda: [  # noqa: E731
+        m for m in ctx.store.list_messages(ctx.slug) if m.conversation_id == cid
+    ]
+    client.post(f"{BASE}/conversations/{cid}/propose")  # the meeting was open: no note
+    assert notes() == []
+    assert client.post(f"{BASE}/conversations/{cid}/detach").json() == {"ok": True}
+    assert client.post(f"{BASE}/conversations/{cid}/propose").status_code == 200
+    (note,) = notes()
+    assert "sugestão do Product Owner" in note.title and note.sender == "Product Owner Loompa"
+    assert not note.executive_audit()
+    client.post(f"{BASE}/conversations/{cid}/propose")  # told once per departure
+    assert len(notes()) == 1

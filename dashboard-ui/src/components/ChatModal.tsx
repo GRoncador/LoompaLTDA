@@ -124,7 +124,13 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
     if (!open || !conv || goal === conv.draft.goal) return;
     api.editDraft(slug, conv.id, [{ op: "goal", text: goal }]).then(apply).catch((e) => setErr(detail(e)));
   };
-  const propose = () => conv && run(() => api.propose(slug, conv.id), "O Product Owner está montando a proposta");
+  // closed while the Product Owner works: it goes on, and the inbox tells when it is done
+  const proposing = useRef(false);
+  const propose = async () => {
+    if (!conv) return;
+    proposing.current = true;
+    try { await run(() => api.propose(slug, conv.id), "O Product Owner está montando a proposta"); } finally { proposing.current = false; }
+  };
   const commit = (start: boolean, force = false, planNext = false) => conv && run(() => api.commit(slug, conv.id, { start_sprint: start, plan_next: planNext, goal, run: true, force }), start ? "Começando o sprint" : isCurrent ? "Aplicando as mudanças no sprint" : null);
   const choose = (mode: MeetingMode) => conv && run(() => api.chooseMode(slug, conv.id, mode));
   const discard = async () => {
@@ -133,7 +139,8 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   };
   // a meeting opened and left before the founder said anything is not worth keeping
   const close = () => {
-    if (conv && (conv.kind === "meeting" || conv.draft.kickoff) && conv.status === "open" && founderTurns === 0) api.discard(slug, conv.id).catch(() => {});
+    if (conv && proposing.current) api.detach(slug, conv.id).catch(() => {});
+    else if (conv && (conv.kind === "meeting" || conv.draft.kickoff) && conv.status === "open" && founderTurns === 0 && !proposal) api.discard(slug, conv.id).catch(() => {});
     onClose();
   };
   // a brainstorm (ADR-0020): the founder asks a role directly, with the text box as the question

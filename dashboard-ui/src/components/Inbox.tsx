@@ -17,6 +17,7 @@ export default function Inbox(props: {
   onArchive: (m: Message) => Promise<void>;
   onOpenStory: (id: string) => void;
   onOpenSprint: (id: string) => void;
+  onOpenMeeting?: (id: string) => void;
 }) {
   const { messages, finance, kaizen } = props;
   const actionable = messages.filter((m) => m.options.length > 0 || m.kind === "decision" || m.kind === "blocked");
@@ -61,7 +62,7 @@ function Shots({ m }: { m: Message }) {
   );
 }
 
-export function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }: { m: Message } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint">) {
+export function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint, onOpenMeeting }: { m: Message } & Pick<Parameters<typeof Inbox>[0], "onReply" | "onArchive" | "onOpenStory" | "onOpenSprint" | "onOpenMeeting">) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(m.kind !== "info");
@@ -119,6 +120,7 @@ export function MessageCard({ m, onReply, onArchive, onOpenStory, onOpenSprint }
               })}
             </div>
           )}
+          {m.conversation_id && onOpenMeeting && <button className="btn-primary mt-2 mr-2 text-xs" onClick={() => onOpenMeeting(m.conversation_id!)}>🗓 Abrir a reunião</button>}
           {m.sprint_id && <button className="btn-ghost mt-2 text-xs" onClick={() => onOpenSprint(m.sprint_id!)}>📊 Ver o relatório do {m.sprint_id}</button>}
           {m.decisions.length > 0 && (
             <div className="mt-3 space-y-2 rounded-md border border-line bg-panel/60 p-2">

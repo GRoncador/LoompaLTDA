@@ -67,6 +67,7 @@ export const api = {
     req<ChatReply>(`/api/factories/${slug}/conversations/${id}/mode`, { method: "POST", body: JSON.stringify({ mode }) }),
   /** The Product Owner's sprint proposal: "Começar Sprint" waits for one (ADR-0017). */
   propose: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/propose`, { method: "POST" }),
+  detach: (slug: string, id: string) => req<{ ok: boolean }>(`/api/factories/${slug}/conversations/${id}/detach`, { method: "POST" }),
   discard: (slug: string, id: string) => req<ChatReply>(`/api/factories/${slug}/conversations/${id}/discard`, { method: "POST" }),
   story: (slug: string, id: string) => req<any>(`/api/factories/${slug}/stories/${id}`),
   /** The factory's self-diagnosis (8.3/8.4): findings live in the hub, for every factory. */

@@ -860,7 +860,14 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
 - **Panel:** in a planning meeting the "Pedir a sugestão do Product Owner" button sits fixed above
   the chat box from the opening on (after a proposal: "Pedir nova sugestão", which reads the
   conversation so far). Writing instead talks to the Master as before.
-- Commits `b470286`, `c7c86e7`; tests in `tests/test_backlog_doors.py`.
+- **Closing while the Product Owner works:** the proposal goes on in the server. The panel no
+  longer discards a meeting on close once it has a proposal or one is running; it calls
+  `POST /conversations/{id}/detach` instead, and when the proposal ends (or fails)
+  `Conversations.proposal_ready` posts an INFO note from the Product Owner with
+  `conversation_id` ("🗓 Abrir a reunião" in the inbox) and emits `meeting.proposal_ready`, which
+  shows a banner with the same button. With the meeting open, no note.
+- Commits `b470286`, `c7c86e7`, and the one after `02cabf7`; tests in
+  `tests/test_backlog_doors.py` and `tests/test_sprint_meeting.py`.
 
 ## Known gaps / next steps
 

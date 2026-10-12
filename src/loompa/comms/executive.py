@@ -91,6 +91,7 @@ class FounderMessage(BaseModel):
     allow_free_text: bool = True
     technical_ref: str | None = None  # pointer to the filtered technical log, never shown inline
     sprint_id: str | None = None  # a note about a sprint opens its report in the Sprints tab
+    conversation_id: str | None = None  # a note about a meeting reopens it
     # screenshots of the page that go with a delivery (`desktop.png`, `mobile.png`), served by
     # the dashboard from the story's shots folder under the hub (ADR-0030)
     images: list[str] = Field(default_factory=list)

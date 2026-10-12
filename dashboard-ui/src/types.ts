@@ -97,6 +97,7 @@ export interface Message {
   created_at: string;
   answer?: { option_key: string | null; text: string | null; answered_at: string } | null;
   sprint_id?: string | null; // a note about a sprint opens its report (8.2)
+  conversation_id?: string | null; // a note about a meeting reopens it
   images?: string[]; // screenshots of the page with a delivery (ADR-0030)
   questions?: Question[]; // answered together (plan 15.4)
   screens?: DesignScreen[]; // a design approval (ADR-0039): paths under .loompa/design/
