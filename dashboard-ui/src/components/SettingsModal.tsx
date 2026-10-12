@@ -79,7 +79,7 @@ function FactoryPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =
       <fieldset className="space-y-1">
         <legend className="mb-1">Telas antes do código</legend>
         {GATE_OPTIONS.map((o) => (
-          <label key={o.key} className={`flex cursor-pointer gap-2 rounded-md border p-2 text-xs transition-colors ${gate === o.key ? "border-brand/60 bg-brand/10" : "border-line/60 hover:border-line"}`}>
+          <label key={o.key} className={`flex cursor-pointer gap-2 rounded-md border p-2 text-xs transition-colors ${gate === o.key ? "border-brand/60 bg-brand/10" : "border-line/60 bg-raised hover:border-line hover:bg-raised-hover"}`}>
             <input type="radio" name="design_gate" className="mt-0.5" checked={gate === o.key} onChange={() => setGate(o.key)} />
             <span><span className="font-medium text-slate-200">{o.title}</span><span className="mt-0.5 block text-slate-400">{o.note}</span></span>
           </label>
@@ -149,7 +149,7 @@ function ImageClusterCard({ slug, slots, setSlots, ceiling, setCeiling }: {
     write(slot, first ? [clean, ...rest] : [...rest, clean]);
   };
   return (
-    <div className="space-y-2.5 rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs">
+    <div className="space-y-2.5 rounded-lg border border-line/60 bg-raised p-2.5 text-xs">
       <div className="space-y-1 border-b border-line/40 pb-2">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-100">
           <Icon name="image" className="h-4 w-4" />Imagem
@@ -161,7 +161,7 @@ function ImageClusterCard({ slug, slots, setSlots, ceiling, setCeiling }: {
         const list = slots[slot.key];
         const picks = sug?.[slot.key] ?? [];
         return (
-          <div key={slot.key} className="space-y-1.5 rounded-md border border-slate-700/60 bg-slate-900/60 p-2">
+          <div key={slot.key} className="space-y-1.5 rounded-md border border-line/60 bg-raised-hover p-2">
             <div className="flex items-center justify-between">
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className={`rounded border px-1.5 text-[10px] font-semibold ${slot.badgeColor}`}>{slot.label}</span>
@@ -177,7 +177,7 @@ function ImageClusterCard({ slug, slots, setSlots, ceiling, setCeiling }: {
             {list.map((id, i) => {
               const info = known[id];
               return (
-                <div key={id} className="flex min-w-0 items-center gap-1.5 rounded border border-line/60 bg-slate-950/70 p-1.5">
+                <div key={id} className="flex min-w-0 items-center gap-1.5 rounded border border-line/60 bg-panel p-1.5">
                   <span className="w-3 flex-shrink-0 font-mono text-[10px] text-slate-500">{i + 1}</span>
                   <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-cyan-300" title={id}>{info?.name ?? id}</span>
                   {info && <span className="flex-shrink-0 font-mono text-[10px] text-slate-400">US$ {info.price.toFixed(3)} · ELO {Math.round(info.elo)}</span>}
@@ -200,7 +200,7 @@ function ImageClusterCard({ slug, slots, setSlots, ceiling, setCeiling }: {
               </div>
             )}
             {open === slot.key && (
-              <div className="space-y-1 rounded border border-brand/40 bg-slate-950/80 p-1.5">
+              <div className="space-y-1 rounded border border-brand/40 bg-panel p-1.5">
                 <div className="text-[10px] text-slate-400">Sugestão · {slot.rankedBy}{slot.key === "final" ? ` (US$ ${ceiling.toFixed(2)})` : ""}</div>
                 {sug?.note && <p className="text-[10px] text-amber-300">{sug.note}</p>}
                 <ImagePicksTable picks={picks.slice(0, 5)} onUse={(p) => { add(slot.key, p.id, true); setOpen(null); }} />
@@ -339,7 +339,7 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
         </label>
       </div>
 
-      <div className="rounded-lg border border-line bg-slate-900/40 px-3 pb-2">
+      <div className="rounded-lg border border-line/60 bg-raised px-3 pb-2">
         {providers.map((p) =>
           row({
             name: p.name,
@@ -565,7 +565,7 @@ function ProviderSelect({
         <span className="text-[8px] text-slate-500">▾</span>
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 min-w-[190px] rounded-md border border-line bg-ink p-1 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="absolute left-0 top-full z-30 mt-1 min-w-[190px] rounded-md border border-line bg-raised p-1 shadow-xl" onClick={(e) => e.stopPropagation()}>
           {providers.length === 0 ? (
             <p className="p-1.5 text-[10px] text-slate-400">Nenhum provedor com chave configurada.</p>
           ) : (
@@ -573,7 +573,7 @@ function ProviderSelect({
               <button
                 key={p.name}
                 type="button"
-                className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] transition-colors ${p.name === value ? "bg-brand/15 text-brand" : "text-slate-200 hover:bg-slate-800"}`}
+                className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] transition-colors ${p.name === value ? "bg-brand/15 text-brand" : "text-slate-200 hover:bg-raised-hover"}`}
                 onClick={() => { onChange(p.name); setOpen(false); }}
               >
                 <ProviderBadge provider={p.name} className="h-3.5 w-3.5" />
@@ -711,7 +711,7 @@ function ModelRow({
       className={`flex items-center justify-between gap-2 rounded-md border p-2 text-xs transition-colors ${
         overCeiling
           ? "border-amber-900/50 bg-amber-950/20 hover:border-amber-700/60"
-          : "border-line/70 bg-slate-800/40 hover:border-brand/60 hover:bg-slate-800/80"
+          : "border-line/60 bg-raised hover:border-brand/60 hover:bg-raised-hover"
       }`}
     >
       <div className="flex min-w-0 items-center gap-2">
@@ -815,7 +815,7 @@ function ModelPickerModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
-      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col rounded-xl border border-brand/50 bg-ink p-4 shadow-2xl">
+      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col rounded-xl border border-brand/50 bg-panel p-4 shadow-2xl">
         <div className="mb-3 flex items-start justify-between gap-2 border-b border-line pb-2">
           <div className="min-w-0">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
@@ -835,7 +835,7 @@ function ModelPickerModal({
         <div className="mb-3 space-y-2">
           <input
             type="text"
-            className="w-full rounded-md border border-line bg-slate-900 px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-brand focus:outline-none"
+            className="w-full rounded-md border border-line bg-ink px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-brand focus:outline-none"
             placeholder="Buscar por fabricante, nome ou id (ex.: grok, glm, gemini, qwen)…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -1131,7 +1131,7 @@ function ModelsPanel({
     <div className="space-y-4">
       {aa && aaAt && <SuggestPopup data={aa} cluster={aaAt.cluster} tier={aaAt.tier} onUse={useAA} onClose={() => setAAAt(null)} />}
       {/* ------------------------------------------------------------ actions */}
-      <div className="space-y-3 rounded-lg border border-line bg-slate-900/60 p-3">
+      <div className="space-y-3 rounded-lg border border-line/60 bg-raised p-3">
         <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
           <div>
             <div className="font-semibold text-slate-100">Matriz de modelos</div>
@@ -1227,7 +1227,7 @@ function ModelsPanel({
 
       {/* ------------------------------------------------------------ suggestion */}
       {proposal && (
-        <div className="space-y-3 rounded-lg border border-brand/60 bg-slate-900/95 p-3.5 shadow-xl">
+        <div className="space-y-3 rounded-lg border border-brand/60 bg-raised p-3.5 shadow-xl">
           <div className="flex flex-col items-start justify-between gap-2 border-b border-line pb-2.5 sm:flex-row sm:items-center">
             <div>
               <span className="flex items-center gap-1.5 text-sm font-semibold text-brand">
@@ -1245,7 +1245,7 @@ function ModelsPanel({
               <button className="btn-ghost px-2 py-1 text-xs text-slate-400 hover:text-white" onClick={() => setProposal(null)}><Icon name="x" className="h-3 w-3" /></button>
             </div>
           </div>
-          <div className="space-y-1 rounded border border-line bg-ink/50 p-2.5 text-xs">
+          <div className="space-y-1 rounded border border-line/60 bg-panel p-2.5 text-xs">
             {proposal.added.length > 0 && <div><span className="font-semibold text-emerald-400">Entram:</span> {proposal.added.join(", ")}</div>}
             {proposal.removed.length > 0 && <div><span className="font-semibold text-rose-400">Saem:</span> {proposal.removed.join(", ")}</div>}
             {proposal.repriced.length > 0 && <div><span className="font-semibold text-amber-400">Preços atualizados:</span> {proposal.repriced.join(", ")}</div>}
@@ -1258,7 +1258,7 @@ function ModelsPanel({
       {/* ------------------------------------------------------------ the matrix */}
       <div className={`grid grid-cols-1 gap-3 ${clustersEnabled ? "lg:grid-cols-2 2xl:grid-cols-4" : "lg:grid-cols-2"}`}>
         {activeClusters.map((col) => (
-          <div key={col.key} className="space-y-2.5 rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs">
+          <div key={col.key} className="space-y-2.5 rounded-lg border border-line/60 bg-raised p-2.5 text-xs">
             <div className="space-y-1 border-b border-line/40 pb-2">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-100">
                 <Icon name={col.icon} className="h-3.5 w-3.5 text-slate-300" />
@@ -1279,7 +1279,7 @@ function ModelsPanel({
               {TIERS_CONFIG.map((t) => {
                 const candidates = cell(col.key, t.key);
                 return (
-                  <div key={t.key} className="space-y-1.5 rounded-md border border-slate-700/60 bg-slate-900/60 p-2">
+                  <div key={t.key} className="space-y-1.5 rounded-md border border-line/60 bg-raised-hover p-2">
                     <div className="flex items-center justify-between">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <span className={`rounded border px-1.5 text-[10px] font-semibold ${t.badgeColor}`}>{t.label}</span>
@@ -1320,7 +1320,7 @@ function ModelsPanel({
                           const probeKey = `${col.key}:${t.key}:${i}`;
                           const probe = probes[probeKey];
                           return (
-                            <div key={i} className="space-y-1 rounded border border-line/60 bg-slate-950/70 p-1.5">
+                            <div key={i} className="space-y-1 rounded border border-line/60 bg-panel p-1.5">
                               <div className="flex min-w-0 items-center gap-1.5">
                                 <span className="w-3 flex-shrink-0 font-mono text-[10px] text-slate-500">{i + 1}</span>
                                 <ProviderSelect
@@ -1520,7 +1520,7 @@ function RolesPanel({
     .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
 
   return (
-    <div className="rounded-md border border-line bg-slate-900/30 p-2.5">
+    <div className="rounded-md border border-line/60 bg-raised p-2.5">
       <div className="mb-2 text-xs font-semibold text-slate-200">
         Loompa → Tier padrão{" "}
         <span className="font-normal text-slate-400">
@@ -1531,7 +1531,7 @@ function RolesPanel({
         {listed.map(({ role, tier, label }) => {
           const mine = tasks.filter((t) => t.role === role);
           return (
-            <div key={role} className="space-y-1.5 rounded border border-line/40 bg-slate-900/60 p-1.5 text-xs">
+            <div key={role} className="space-y-1.5 rounded border border-line/60 bg-raised-hover p-1.5 text-xs">
               <label className="flex items-center justify-between gap-2">
                 <span className="truncate font-medium text-slate-200">{label}</span>
                 <select className={select} value={tier} onChange={(e) => setRoles({ ...roles, [role]: e.target.value })}>
@@ -1576,7 +1576,7 @@ function BudgetPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =>
 
   return (
     <div className="max-w-3xl space-y-4">
-      <div className="space-y-3 rounded-lg border border-line bg-slate-900/40 p-3">
+      <div className="space-y-3 rounded-lg border border-line/60 bg-raised p-3">
         <div className="font-semibold text-slate-100">Teto de gastos</div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block text-xs text-slate-400">
@@ -1609,13 +1609,13 @@ function BudgetPanel({ s, onSave }: { s: Settings; onSave: (p: SettingsPatch) =>
         </label>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-line bg-slate-900/40 p-3">
+      <div className="space-y-2 rounded-lg border border-line/60 bg-raised p-3">
         <div className="font-semibold text-slate-100">Se o teto estourar</div>
         {([
           { key: "pause", title: `Pausar a esteira até ${b.period === "weekly" ? "a próxima semana" : "o próximo mês"}`, note: "Nada em andamento é perdido: as histórias guardam o estado e voltam de onde pararam." },
           { key: "tier3", title: "Passar todos os Loompas para o Tier 3 (gratuito)", note: "A fábrica continua entregando, com modelos mais simples, sem custo adicional." },
         ] as const).map((o) => (
-          <label key={o.key} className={`flex cursor-pointer gap-2 rounded-md border p-2 text-xs transition-colors ${b.on_exceed === o.key ? "border-brand/60 bg-brand/10" : "border-line/60 hover:border-line"}`}>
+          <label key={o.key} className={`flex cursor-pointer gap-2 rounded-md border p-2 text-xs transition-colors ${b.on_exceed === o.key ? "border-brand/60 bg-brand/10" : "border-line/60 bg-raised-hover hover:border-line"}`}>
             <input type="radio" name="on_exceed" className="mt-0.5" checked={b.on_exceed === o.key} onChange={() => setB({ ...b, on_exceed: o.key })} />
             <span>
               <span className="font-medium text-slate-200">{o.title}</span>
@@ -1738,7 +1738,7 @@ function SuggestPopup({ data, cluster, tier, onUse, onClose }: {
   const picks: AAPick[] = prof ? ((prof as unknown as Record<string, AAPick[]>)[tier] ?? []).slice(0, 5) : [];
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-4xl space-y-2 rounded-lg border border-line bg-slate-900 p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-4xl space-y-2 rounded-lg border border-line bg-panel p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="flex items-center gap-1.5 font-semibold text-slate-100"><Icon name="lightbulb" className="h-3.5 w-3.5" />{PROFILE_ICON[cluster] && <Icon name={PROFILE_ICON[cluster]} className="h-3.5 w-3.5" />} {prof?.label ?? cluster} · {TIER_TITLE[tier] ?? tier}</div>
@@ -1786,7 +1786,7 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
   const imgCeiling = s.design?.images?.final_ceiling_usd ?? 0.15;
   return (
     <div className="space-y-4">
-      <div className="space-y-2 rounded-lg border border-line bg-slate-900/60 p-3">
+      <div className="space-y-2 rounded-lg border border-line/60 bg-raised p-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1 text-xs text-slate-400">
             <div className="text-sm font-semibold text-slate-100">Benchmark de modelos (Artificial Analysis)</div>

@@ -11,7 +11,7 @@ export function KindPicker({ value, onChange }: { value: FactoryKind; onChange: 
     <fieldset className="space-y-1">
       <legend className="mb-1">Tipo do produto</legend>
       {KIND_OPTIONS.map((o) => (
-        <label key={o.key} className={`flex cursor-pointer gap-2 rounded-md border p-2 text-xs transition-colors ${value === o.key ? "border-brand/60 bg-brand/10" : "border-line/60 hover:border-line"}`}>
+        <label key={o.key} className={`flex cursor-pointer gap-2 rounded-md border p-2 text-xs transition-colors ${value === o.key ? "border-brand/60 bg-brand/10" : "border-line/60 bg-raised hover:border-line hover:bg-raised-hover"}`}>
           <input type="radio" name="factory_kind" className="mt-0.5" checked={value === o.key} onChange={() => onChange(o.key)} />
           <span>
             <span className="font-medium text-slate-200">{o.title}</span>
