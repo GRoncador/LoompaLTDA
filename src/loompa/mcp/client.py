@@ -103,10 +103,18 @@ class McpSession:
             self.calls_ok += 1
         else:
             self.calls_failed += 1
-        body = (
-            f'<external_data source="{tool.server}/{tool.remote_name}">\n{text}\n</external_data>'
-        )
-        return ToolResult(ok, body[:MAX_RESULT_CHARS])
+        return ToolResult(ok, wrap_external(f"{tool.server}/{tool.remote_name}", text))
+
+
+_TAG = re.compile(r"<(/?)\s*external_data", re.I)
+
+
+def wrap_external(source: str, text: str) -> str:
+    """`text` from outside the factory between `<external_data>` tags. A page that writes the
+    closing tag itself would otherwise end the block early and make what follows look like the
+    factory's own words, so any tag inside the text is defused first."""
+    body = _TAG.sub(lambda m: f"<{m.group(1)}external-data", text)[: MAX_RESULT_CHARS - 200]
+    return f'<external_data source="{source}">\n{body}\n</external_data>'
 
 
 class McpHub:

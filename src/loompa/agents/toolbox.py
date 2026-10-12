@@ -34,6 +34,7 @@ from loompa.llm import Message
 
 if TYPE_CHECKING:
     from loompa.engine.context import EngineContext
+    from loompa.engine.state import StoryState
     from loompa.mcp import McpSession
 
 PRUNED = "[pruned]"
@@ -56,6 +57,8 @@ WRITE_TOOLS = frozenset(
 RUN_TOOLS = frozenset({"run_tests", "run_lint"})
 SIGNAL_TOOLS = frozenset({"done", "blocked", "note_learning"})
 
+ASK_TOOL = "ask_analyst"  # a short web-backed answer from the Analyst, for roles without the web
+ASKERS = ("product_owner", "master", "ux")
 MEMORY_TOOL = "search_memory"  # organizational memory (plan 13.4), not an ACI tool
 
 # What each role may find in organizational memory. The founder's company documents and answers
@@ -109,7 +112,7 @@ PROFILES: dict[str, ToolProfile] = {
     **{
         role: ToolProfile(
             role,
-            _DOC_ROLE_TOOLS | {MEMORY_TOOL},
+            _DOC_ROLE_TOOLS | {MEMORY_TOOL} | ({ASK_TOOL} if role in ASKERS else set()),
             SPEC_DIRS,
             WORKTREE_DOCS,
             memory_kinds=kinds,
@@ -118,7 +121,7 @@ PROFILES: dict[str, ToolProfile] = {
     },
     # no repository tools: they answer from what they are given and what memory holds
     "ux": ToolProfile(
-        "ux", _DOC_ROLE_TOOLS | {MEMORY_TOOL}, DESIGN_DIRS, memory_kinds=DESIGN_KINDS
+        "ux", _DOC_ROLE_TOOLS | {MEMORY_TOOL, ASK_TOOL}, DESIGN_DIRS, memory_kinds=DESIGN_KINDS
     ),
     # the only role that makes pictures (plan 15.12): `generate_image` is checked when it is used
     "designer": ToolProfile(
@@ -134,7 +137,10 @@ PROFILES: dict[str, ToolProfile] = {
         for role in ("compliance", "product_manager")
     },
 }
-EXPLORE_TOOLS = READ_TOOLS | {MEMORY_TOOL}  # what a role that reads before answering is offered
+EXPLORE_TOOLS = READ_TOOLS | {
+    MEMORY_TOOL,
+    ASK_TOOL,
+}  # what a role that reads before answering is offered
 READ_ONLY = ToolProfile("readonly", READ_TOOLS, ())
 
 
@@ -168,6 +174,7 @@ class Toolbox:
         mcp: McpSession | None = None,
         diagnosis: bool = False,
         memory: Any = None,
+        ctx: EngineContext | None = None,
     ):
         self.aci = aci
         self.profile = profile
@@ -176,6 +183,10 @@ class Toolbox:
         self.allowed = profile.tools & wanted  # the profile is the ceiling, `offered` narrows it
         if memory is None or not profile.memory_kinds:
             self.allowed -= {MEMORY_TOOL}
+        self.ctx = ctx
+        if ctx is None:
+            self.allowed -= {ASK_TOOL}
+        self.story: StoryState | None = None  # set by the tool loop: `ask_analyst` counts per story
         self.mcp = mcp
         self.seen_urls: set[str] = set()  # URLs that came back from web tools (source check)
         # what a web tool returned around each URL: whether it supports a sentence (13.6)
@@ -209,6 +220,7 @@ class Toolbox:
             offered=offered,
             mcp=mcp,
             memory=ctx.memory,
+            ctx=ctx,
         )
 
     # -------------------------------------------------------------------- using
@@ -216,6 +228,8 @@ class Toolbox:
         specs = [t for t in TOOL_SPECS if t["name"] in self.allowed]
         if MEMORY_TOOL in self.allowed:
             specs.append(memory_spec(self.profile.memory_kinds))
+        if ASK_TOOL in self.allowed:
+            specs.append(ASK_SPEC)
         if self.diagnosis_required:
             specs = [_with_reason(t) if t["name"] in WRITE_TOOLS else t for t in specs]
         if self.mcp is not None:
@@ -231,6 +245,8 @@ class Toolbox:
 
     async def call(self, name: str, args: dict[str, Any]) -> ToolResult:
         if self.mcp is not None and self.mcp.owns(name):
+            if leak := self.leaky(args):
+                return ToolResult(False, QUERY_LEAK.format(what=leak))
             result = await self.mcp.call(name, args)
             if result.ok:
                 urls = extract_urls(result.output)
@@ -245,6 +261,8 @@ class Toolbox:
             )
         if name == MEMORY_TOOL:
             return self.search_memory(args)
+        if name == ASK_TOOL:
+            return await self.ask_analyst(args)
         if name in WRITE_TOOLS:
             args = dict(args)
             reason = str(args.pop("reason", "") or "").strip()
@@ -253,6 +271,35 @@ class Toolbox:
                     return ToolResult(False, DIAGNOSIS_MISSING)
                 self.diagnosis = reason
         return await self.aci.call(name, args)
+
+    def leaky(self, args: dict[str, Any]) -> str:
+        """What in a web tool's arguments must not leave the machine, or "" when nothing does.
+        The prompt already asks for generic queries; this is the check that does not depend on
+        the model obeying it."""
+        for value in _strings(args):
+            if _SECRET.search(value):
+                return "something that looks like a key or token"
+            if _STORY_ID.search(value):
+                return "a story or sprint id"
+            for token in _PATHISH.findall(value):
+                if "://" in value and token in value.split("://", 1)[1]:
+                    continue  # part of a URL, not a repository path
+                try:
+                    if (self.aci.root / token.strip("/")).exists():
+                        return f"a repository path ({token})"
+                except OSError:
+                    continue
+        return ""
+
+    async def ask_analyst(self, args: dict[str, Any]) -> ToolResult:
+        question = str(args.get("question") or "").strip()
+        if not question:
+            return ToolResult(False, "error: `question` is required")
+        if self.ctx is None:
+            return ToolResult(False, "error: the Analyst cannot be consulted here")
+        from loompa.agents.analyst import answer_question
+
+        return await answer_question(self.ctx, self.profile.role, question, self.story, id(self))
 
     def search_memory(self, args: dict[str, Any]) -> ToolResult:
         """Organizational memory, only the kinds this role's profile reads (plan 13.4)."""
@@ -286,6 +333,46 @@ class Toolbox:
 # ---------------------------------------------------------------------------- helpers
 
 SOURCE_CHARS = 6000
+
+ASK_SPEC: dict[str, Any] = {
+    "name": ASK_TOOL,
+    "description": (
+        "Ask the Analyst one factual question about the world outside the repository (a current "
+        "version, an API, a standard, a market fact, a common interface pattern) when it decides "
+        "your answer and the repository and memory do not have it. The Analyst searches the web "
+        "and returns a short answer with its sources. Costly and slow: at most two per story, so "
+        "ask only what matters, and write the question generically (no code, secrets, customer "
+        "data or internal names)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"question": {"type": "string", "description": "One factual question."}},
+        "required": ["question"],
+    },
+}
+QUERY_LEAK = (
+    "error: not sent: the arguments contain {what}, and a web query leaves the machine. "
+    "Rephrase it generically, with the public names of the technologies only."
+)
+_SECRET = re.compile(
+    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}"
+    r"|xox[abpr]-[A-Za-z0-9-]{10,}|(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{40,})"
+)
+_STORY_ID = re.compile(r"\b(?:S|SP)-\d{3,}[A-Z]?\b")
+_PATHISH = re.compile(r"(?<![\w.])\.?[\w-]+(?:/[\w.-]+)+/?")
+
+
+def _strings(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list | tuple):
+        for v in value:
+            yield from _strings(v)
+
+
 MEMORY_HITS = 5
 MEMORY_CHARS = 900
 

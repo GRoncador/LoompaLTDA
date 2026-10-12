@@ -8,6 +8,7 @@ from loompa.mcp.client import (
     default_connector,
     probe_server,
     render_result,
+    wrap_external,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "default_connector",
     "probe_server",
     "render_result",
+    "wrap_external",
 ]

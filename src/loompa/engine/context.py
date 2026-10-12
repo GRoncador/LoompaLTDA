@@ -44,6 +44,8 @@ class EngineContext:
     closed: bool = False
     woke_at: float | None = None  # time.monotonic() when the engine last saw the machine wake
     _mcp: McpHub | None = field(default=None, repr=False)
+    # `ask_analyst` calls per story (or per tool loop outside a story): two at most
+    analyst_asks: dict[str, int] = field(default_factory=dict, repr=False)
 
     @property
     def mcp(self) -> McpHub:

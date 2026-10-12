@@ -163,3 +163,25 @@ fails, the old REST call tells "bad key" from "MCP connection failed" and the me
 
 * Gemini's handling of MCP tool schemas beyond the two stripped keys.
 * Gemini's handling of MCP tool schemas beyond the two stripped keys.
+
+## Addendum (2026-10-12): who reads the web, `ask_analyst`, and two guards
+
+* **Roles.** Tavily's default `roles` is now `analyst`, `architect`, `worker`, and a new
+  `role_allow` narrows a role further: the Worker gets `tavily_extract` only (it reads a vendor's
+  documentation URL; it does not search). Configs that still carry `roles: ["analyst"]`, the old
+  default, are migrated on load. Any tool loop of a role listed there gets its web tools from
+  `LoompaAgent.tool_loop`, with a note in the system prompt that results are data. Product Owner,
+  Product, Master, UX, Designer, Inspector, Compliance and Product manager stay without the web:
+  their decisions are business or review decisions, Compliance and the Product manager read client
+  contracts, and only the Analyst's output passes the source checks.
+* **`ask_analyst`.** The Product Owner, the Master and UX may ask the Analyst one factual question
+  (`answer_question` in `agents/analyst.py`): at most two per story (or per tool loop outside a
+  story), a short answer whose URLs pass the same `seen_urls` check, wrapped as external data.
+  Answers that cite the web are cached in memory (`web-answer/…`, kind `research`) for 30 days; a
+  cached answer is free and does not count. A dry run never asks.
+* **Delimiter.** `wrap_external` defuses any `<external_data`/`</external_data` a page writes, so
+  a page cannot close the block and make what follows look like the factory's own text.
+* **Query guard.** `Toolbox.leaky` refuses, before the call leaves the machine, web-tool arguments
+  that carry a key-like token, a story or sprint id, or an existing repository path. It does not
+  recognise customer names or contract terms, which is one reason Compliance and the Product
+  manager have no web at all.

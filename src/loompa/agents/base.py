@@ -352,6 +352,7 @@ class LoompaAgent:
         (`tools.*.roles`) gets its web tools here, so every loop of that role has them."""
         story = kw.get("story")
         key = f"{story.story_id if story else '-'}:{self.name}:{uuid.uuid4().hex[:12]}"
+        toolbox.story = story
         browses = (
             toolbox.mcp is None
             and not self.ctx.dry_run
