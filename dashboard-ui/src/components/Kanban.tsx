@@ -67,6 +67,17 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
     if (ids && ids.join() !== backlog.map((s) => s.id).join()) await onReorder(ids, moved);
     setPreview(null);
   };
+  // one button is lit, the founder's next step: what they are typing goes to the backlog; an
+  // empty backlog asks for a brainstorm (a meeting has nothing to plan); with no sprint running
+  // and no meeting open, it is time for a Sprint Meeting; otherwise none of them is lit
+  const meetingOpen = conversations.some((c) => c.kind === "meeting");
+  const backlogEmpty = backlog.length === 0;
+  const next: "backlog" | "brainstorm" | "meeting" | null =
+    title.trim() && !reading ? "backlog"
+    : kickoff || backlogEmpty ? "brainstorm"
+    : !meetingOpen && sprint?.status !== "running" ? "meeting"
+    : null;
+  const tone = (step: typeof next) => (next === step ? "btn-primary" : "btn-ghost");
   // the founder's quick story goes to the Product Owner first: filed as it reads, or a review chat
   const create = async () => {
     const t = title.trim();
@@ -119,7 +130,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
               </button>
             )}
             <input value={title} disabled={reading} onChange={(e) => setTitle(e.target.value)} placeholder={reading ? "O Product Owner está lendo…" : "Nova história rápida…"} className="w-64 rounded-md border border-line bg-ink px-2 py-1 text-xs disabled:opacity-60" />
-            <button className="btn-ghost text-xs" type="submit" disabled={reading || !title.trim()} title="O Product Owner lê o pedido, classifica e grava, ou explica por que não">{reading ? "lendo…" : "+ Backlog"}</button>
+            <button className={`${tone("backlog")} text-xs`} type="submit" disabled={reading || !title.trim()} title="O Product Owner lê o pedido, classifica e grava, ou explica por que não">{reading ? "lendo…" : "+ Backlog"}</button>
           </form>
           {conversations.length > 0 && (
             <details className="relative">
@@ -137,12 +148,14 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
               </ul>
             </details>
           )}
-          <button className={`${kickoff ? "btn-primary" : "btn-ghost"} text-xs`}
+          <button className={`${tone("brainstorm")} text-xs`}
             title={kickoff ? "Abertura da fábrica: visão, primeira versão e stack" : "Discutir uma ideia com a fábrica"}
             onClick={() => onChat("brainstorm")}>{kickoff ? <><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm de abertura</> : <><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm</>}</button>
           {/* a sprint starts only from a meeting, after the Product Owner's proposal (ADR-0017) */}
-          <button className={`${kickoff ? "btn-ghost opacity-50" : "btn-primary"} text-xs`} disabled={kickoff}
-            title={kickoff ? "Comece pelo brainstorm de abertura: ele decide a visão, a primeira versão e a stack" : "O Master abre com o estado do projeto; o Product Owner propõe o sprint"}
+          <button className={`${tone("meeting")} text-xs`} disabled={kickoff || backlogEmpty}
+            title={kickoff ? "Comece pelo brainstorm de abertura: ele decide a visão, a primeira versão e a stack"
+              : backlogEmpty ? "O Backlog está vazio: comece por um brainstorm ou uma história rápida"
+              : "O Master abre com o estado do projeto; o Product Owner propõe o sprint"}
             onClick={() => onChat("meeting")}><Icon name="calendar" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Reunião de Sprint</button>
         </div>
       </div>
