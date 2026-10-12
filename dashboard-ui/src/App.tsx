@@ -98,7 +98,8 @@ export default function App() {
   };
   const reply = async (m: Message, option_key: string | null, text: string | null, decisions: Record<string, string> = {}, answers: Record<string, string> = {}) => {
     if (!slug) return;
-    await api.reply(slug, m.id, { option_key, text, decisions, answers });
+    // a note answered elsewhere meanwhile (another tab, the CLI) comes back 409: the refresh shows it closed
+    try { await api.reply(slug, m.id, { option_key, text, decisions, answers }); } catch (e) { if (!String(e).startsWith("409")) fail(e); }
     refresh();
   };
   // the quick story: the Product Owner files it, or opens a review chat explaining why not
@@ -130,7 +131,7 @@ export default function App() {
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected}
         onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onEngine={engineAction} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")} onFactory={() => setFactoryOpen(true)} onDesign={() => setDesign({})} onGrowth={overview?.factory.kind === "commercial" ? () => setGrowthOpen(true) : undefined}
-        designPending={(overview?.inbox ?? []).filter((m) => (m.screens?.length ?? 0) > 0 || (m.questions?.length ?? 0) > 0).length}
+        designPending={(overview?.inbox ?? []).filter((m) => m.status === "pending" && ((m.screens?.length ?? 0) > 0 || (m.questions?.length ?? 0) > 0)).length}
       />
       {ready && (
         <div className="flex items-center gap-3 bg-sky-900/60 px-4 py-2 text-sm text-sky-100">

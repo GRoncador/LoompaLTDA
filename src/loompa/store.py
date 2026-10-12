@@ -600,7 +600,11 @@ class Store:
         return FounderMessage.model_validate_json(rows[0]["message_json"]) if rows else None
 
     def list_messages(
-        self, factory: str | None = None, status: str | None = None, limit: int = 200
+        self,
+        factory: str | None = None,
+        status: str | None = None,
+        limit: int = 200,
+        exclude: str | None = None,
     ) -> list[FounderMessage]:
         sql, params, clauses = "SELECT message_json FROM inbox", [], []
         if factory:
@@ -609,6 +613,9 @@ class Store:
         if status:
             clauses.append("status = ?")
             params.append(status)
+        if exclude:
+            clauses.append("status != ?")
+            params.append(exclude)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY created_at DESC LIMIT ?"
@@ -626,6 +633,14 @@ class Store:
         msg.status = MessageStatus.ANSWERED
         self.put_message(msg)
         return msg
+
+    def withdraw_message(self, message_id: str) -> None:
+        """The factory no longer needs the answer: the note stays in the inbox as history, with
+        its buttons gone. An answered or archived note keeps its status."""
+        msg = self.get_message(message_id)
+        if msg and msg.status == MessageStatus.PENDING:
+            msg.status = MessageStatus.WITHDRAWN
+            self.put_message(msg)
 
     def archive_message(self, message_id: str) -> None:
         msg = self.get_message(message_id)

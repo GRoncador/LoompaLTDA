@@ -147,6 +147,20 @@ def test_meeting_run_inbox_flow(client: TestClient):
         f"/api/factories/demo-hq/inbox/{msg['id']}/reply", json={"option_key": "approve"}
     )
     assert r.json()["stage"] == "DONE"
+    # the answered note stays in the inbox as history, and its buttons no longer work
+    kept = next(
+        m
+        for m in client.get("/api/factories/demo-hq/overview").json()["inbox"]
+        if m["id"] == msg["id"]
+    )
+    assert kept["status"] == "answered" and kept["answer"]["option_key"] == "approve"
+    again = client.post(
+        f"/api/factories/demo-hq/inbox/{msg['id']}/reply", json={"option_key": "approve"}
+    )
+    assert again.status_code == 409
+    client.post(f"/api/factories/demo-hq/inbox/{msg['id']}/archive")
+    ov = client.get("/api/factories/demo-hq/overview").json()
+    assert msg["id"] not in {m["id"] for m in ov["inbox"]}
     merged = client.get("/api/factories/demo-hq/stories/S-001/diff").json()
     assert merged["source"] == "merged" and merged["diff"] == diff["diff"]
     assert client.get("/api/factories/demo-hq/stories/S-404/diff").status_code == 404

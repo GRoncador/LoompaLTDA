@@ -87,7 +87,7 @@ export interface Message {
   factory: string;
   story_id: string | null;
   kind: "decision" | "blocked" | "delivery" | "info" | "finance" | "kaizen";
-  status: "pending" | "answered" | "archived";
+  status: "pending" | "answered" | "withdrawn" | "archived";
   sender: string;
   title: string;
   context: string;
@@ -96,7 +96,7 @@ export interface Message {
   decisions: Decision[];
   allow_free_text: boolean;
   created_at: string;
-  answer?: { option_key: string | null; text: string | null; answered_at: string } | null;
+  answer?: { option_key: string | null; text: string | null; answers?: Record<string, string>; answered_at: string } | null;
   sprint_id?: string | null; // a note about a sprint opens its report (8.2)
   conversation_id?: string | null; // a note about a meeting reopens it
   images?: string[]; // screenshots of the page with a delivery (ADR-0030)

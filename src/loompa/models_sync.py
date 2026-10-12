@@ -100,7 +100,7 @@ class ModelSync:
             return None
         for old in self.ctx.store.list_messages(self.ctx.slug, status="pending"):
             if self.ctx.store.get(PREFIX + old.id):
-                self.ctx.store.archive_message(old.id)
+                self.ctx.store.withdraw_message(old.id)
         msg = self.ctx.inbox(self._message(proposal))
         self.ctx.store.set(PREFIX + msg.id, json.dumps(asdict(proposal)))
         return msg

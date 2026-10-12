@@ -186,8 +186,14 @@ def test_story_activity_carries_what_the_loompa_says_it_is_doing():
     """The card prefers the Loompa's own sentence to the event type's generic word (11.2)."""
     s = Store(":memory:")
     s.upsert_story({"id": "S-001", "factory": "f", "title": "x", "stage": "TEST"})
-    s.emit("f", "agent.state", story_id="S-001", agent="Inspector Loompa",
-           state="TESTING", detail="abrindo o produto no navegador")
+    s.emit(
+        "f",
+        "agent.state",
+        story_id="S-001",
+        agent="Inspector Loompa",
+        state="TESTING",
+        detail="abrindo o produto no navegador",
+    )
     s.emit("f", "llm.call", story_id="S-001", agent="Inspector Loompa")
     assert s.story_activity("S-001")["detail"] == "abrindo o produto no navegador"
     # the Loompa stopped: the sentence goes with it
@@ -202,3 +208,15 @@ def test_story_activity_names_the_model_the_last_call_used():
     s.emit("f", "llm.call", story_id="S-001", agent="Worker Loompa", model="xiaomi/mimo-2.6-pro")
     s.emit("f", "tool.call", story_id="S-001", agent="Worker Loompa", tool="edit_file")
     assert s.story_activity("S-001")["model"] == "xiaomi/mimo-2.6-pro"
+
+
+def test_withdrawn_message_stays_listed_but_not_pending():
+    store = Store(":memory:")
+    msg = FounderMessage(factory="f", title="Aprovar?", context="ctx")
+    store.put_message(msg)
+    store.withdraw_message(msg.id)
+    assert store.get_message(msg.id).status == MessageStatus.WITHDRAWN
+    assert store.list_messages("f", status="pending") == []
+    assert [m.id for m in store.list_messages("f", exclude="archived")] == [msg.id]
+    store.archive_message(msg.id)
+    assert store.list_messages("f", exclude="archived") == []

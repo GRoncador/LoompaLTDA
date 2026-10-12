@@ -354,7 +354,7 @@ async def test_a_new_proposal_withdraws_the_one_still_waiting(factory: Factory):
     sync = ModelSync(ctx)
     first, second = sync.propose(proposal), sync.propose(proposal)
     assert first is not None and second is not None
-    assert ctx.store.get_message(first.id).status == MessageStatus.ARCHIVED
+    assert ctx.store.get_message(first.id).status == MessageStatus.WITHDRAWN
     assert [m.id for m in ctx.store.list_messages(factory.slug, status="pending")] == [second.id]
 
 

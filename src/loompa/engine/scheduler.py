@@ -29,7 +29,13 @@ from typing import Any
 
 from loompa.agents.deployer import DeployerAgent
 from loompa.agents.ops import INCIDENT_KEY, OpsAgent, StoryStalled, triage
-from loompa.comms import FounderAnswer, FounderMessage, MessageKind
+from loompa.comms import (
+    FounderAnswer,
+    FounderMessage,
+    MessageClosed,
+    MessageKind,
+    MessageStatus,
+)
 from loompa.company import ensure_templates
 from loompa.dependencies import WAIT_KEY, in_chain, spec_passed, still_waiting
 from loompa.engine.awake import Awake
@@ -572,6 +578,9 @@ class Scheduler:
         msg = self.ctx.store.get_message(message_id)
         if msg is None:
             raise KeyError(message_id)
+        if msg.status != MessageStatus.PENDING:
+            # a button on a note already answered or withdrawn: the decision was taken
+            raise MessageClosed(message_id)
         if answer.decisions:
             self._decide_cards(msg, answer)
             self.ctx.store.put_message(msg)
@@ -614,7 +623,7 @@ class Scheduler:
         if state.stage != Stage.AWAITING_FOUNDER or state.blocked_reason != BlockedReason.DELIVERY:
             return None
         if state.blocked_message_id:
-            self.ctx.store.archive_message(state.blocked_message_id)
+            self.ctx.store.withdraw_message(state.blocked_message_id)
         state.failure_history.append(reason)
         state.tasks_done = []
         state.blocked_reason = None
@@ -650,7 +659,7 @@ class Scheduler:
         if old.stage in TERMINAL:
             raise ValueError(f"{story_id} já está encerrada")
         if old.blocked_message_id:
-            self.ctx.store.archive_message(old.blocked_message_id)
+            self.ctx.store.withdraw_message(old.blocked_message_id)
         if self.has_run(story_id):
             # the worktree goes (the copy gets its own); the branch stays for analysis
             self.ctx.worktrees.as_role("deployer").remove(story_id, delete_branch=False)
@@ -753,7 +762,7 @@ class Scheduler:
         if state.stage in TERMINAL:
             raise ValueError(f"{story_id} já está encerrada")
         if state.blocked_message_id:
-            self.ctx.store.archive_message(state.blocked_message_id)
+            self.ctx.store.withdraw_message(state.blocked_message_id)
         back_to_backlog(self.ctx, state, leave_sprint=leave_sprint)
         save_state(self.ctx, state, "withdrawn")
         await runtime_for(self.ctx).inject_founder_answer(state)

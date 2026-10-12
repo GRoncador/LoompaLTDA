@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { Message } from "../types";
 import { DesignScreens } from "./DesignScreens";
 import { Icon } from "./Icon";
@@ -30,36 +30,36 @@ export default function Inbox(props: {
   });
   // newest first, every note closed: the tag and the title, bold until opened
   const sorted = [...messages].sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const unread = messages.filter((m) => !read.has(m.id)).length;
-  // the "unread only" filter: available only while something is unread. The notes unread when it
-  // was turned on stay listed after the founder opens them, so a card does not vanish under the cursor.
+  // a note the founder answered is read, whatever this browser remembers
+  const isUnread = (m: Message) => m.status !== "answered" && !read.has(m.id);
+  const unread = messages.filter(isUnread).length;
+  // the "unread only" filter, always at hand: with nothing new the list is simply empty. The notes
+  // unread when it was turned on stay listed after the founder opens them, so a card does not
+  // vanish under the cursor.
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [kept, setKept] = useState<Set<string>>(new Set());
-  useEffect(() => { if (unread === 0) setOnlyUnread(false); }, [unread]);
-  const filtering = onlyUnread && unread > 0;
   const toggleUnread = () => {
-    if (!filtering) setKept(new Set(sorted.filter((m) => !read.has(m.id)).map((m) => m.id)));
-    setOnlyUnread(!filtering);
+    if (!onlyUnread) setKept(new Set(sorted.filter(isUnread).map((m) => m.id)));
+    setOnlyUnread(!onlyUnread);
   };
-  const shown = filtering ? sorted.filter((m) => !read.has(m.id) || kept.has(m.id)) : sorted;
+  const shown = onlyUnread ? sorted.filter((m) => isUnread(m) || kept.has(m.id)) : sorted;
   return (
     <>
       <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Icon name="inbox" className="h-4 w-4 text-slate-400" />Caixa de Entrada{unread > 0 && ` (${unread})`}</h2>
         <button
           type="button"
-          aria-pressed={filtering}
-          disabled={unread === 0}
+          aria-pressed={onlyUnread}
           onClick={toggleUnread}
-          title={unread === 0 ? "Não há notas não lidas" : filtering ? "Mostrar todas as notas" : "Mostrar só as notas não lidas"}
-          className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${filtering ? "border-brand bg-brand/20 text-slate-50" : "border-line text-slate-400 hover:text-slate-200"}`}
+          title={onlyUnread ? "Mostrar todas as notas" : "Mostrar só as notas não lidas"}
+          className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${onlyUnread ? "border-brand bg-brand/20 text-slate-50" : "border-line text-slate-400 hover:text-slate-200"}`}
         >
           Só não lidas
         </button>
       </div>
       <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3">
-        {messages.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nada pendente. Aproveite o dia.</p>}
-        {shown.map((m) => <MessageCard key={m.id} m={m} unread={!read.has(m.id)} onOpen={() => markRead(m.id)} {...props} />)}
+        {shown.length === 0 && <p className="py-8 text-center text-sm text-slate-500">{onlyUnread && messages.length > 0 ? "Nenhuma nota não lida." : "Nada pendente. Aproveite o dia."}</p>}
+        {shown.map((m) => <MessageCard key={m.id} m={m} unread={isUnread(m)} onOpen={() => markRead(m.id)} {...props} />)}
       </div>
     </>
   );
@@ -95,6 +95,9 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const toggle = () => { if (!open) onOpen?.(); setOpen((o) => !o); };
+  // answered or withdrawn: the note stays as history, but no button works any more
+  const closed = m.status !== "pending";
+  const when = (iso: string) => new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   // side decisions (suggested cards): the recommended option unless the founder picks another
   const open_decisions = m.decisions.filter((d) => !d.chosen);
   const [picked, setPicked] = useState<Record<string, string>>({});
@@ -119,7 +122,9 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
         {unread && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand" title="Não lida" />}
         <span className={`chip ${k.cls} ${unread ? "" : "opacity-70"}`}>{k.label}</span>
         <button className={`flex-1 text-left text-sm leading-snug ${unread ? "font-bold text-slate-50" : "font-normal text-slate-400"}`} onClick={toggle}>{m.title}</button>
-        <time dateTime={m.created_at} className="shrink-0 whitespace-nowrap pt-0.5 text-[11px] text-slate-500" title="Data e hora em que chegou">{new Date(m.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time>
+        {m.status === "answered" && <span title="Respondida"><Icon name="check" className="mt-0.5 h-3.5 w-3.5 text-emerald-400" /></span>}
+        {m.status === "withdrawn" && <span title="Não vale mais"><Icon name="ban" className="mt-0.5 h-3.5 w-3.5 text-slate-500" /></span>}
+        <time dateTime={m.created_at} className="shrink-0 whitespace-nowrap pt-0.5 text-[11px] text-slate-500" title="Data e hora em que chegou">{when(m.created_at)}</time>
       </div>
       {open && (
         <>
@@ -137,6 +142,9 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
                   <div key={q.id} className="text-xs">
                     <div className="text-sm text-slate-100">{q.text}</div>
                     {q.why && <div className="text-slate-400">{q.why}</div>}
+                    {closed ? (
+                      <div className="mt-1 text-lime-300">{answeredWith(q, m)}</div>
+                    ) : (<>
                     <div className="mt-1 flex flex-wrap gap-1">
                       {q.options.map((o) => (
                         <button key={o.key} type="button" onClick={() => setAnswers((a) => ({ ...a, [q.id]: o.key }))} className={`rounded border px-2 py-0.5 ${answerOf(q) === o.key ? "border-brand bg-brand/20 text-slate-50" : "border-line text-slate-400 hover:text-slate-200"}`}>
@@ -145,6 +153,7 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
                       ))}
                     </div>
                     <input value={typed ? answerOf(q) : ""} onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))} placeholder="…ou escreva outra resposta" className="mt-1 w-full rounded-md border border-line bg-ink px-2 py-0.5" />
+                    </>)}
                   </div>
                 );
               })}
@@ -165,6 +174,8 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
                   {d.context && <div className="text-slate-400">{d.context}</div>}
                   {d.chosen ? (
                     <div className="mt-1 text-lime-300">decidido: {d.options.find((o) => o.key === d.chosen)?.label ?? d.chosen}</div>
+                  ) : closed ? (
+                    <div className="mt-1 text-slate-400">ficou no backlog, sem decisão</div>
                   ) : (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {d.options.map((o) => (
@@ -178,7 +189,8 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
               ))}
             </div>
           )}
-          {m.options.length > 0 && (
+          {closed && <Closed m={m} when={when} />}
+          {!closed && m.options.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {m.options.map((o) => (
                 <button key={o.key} disabled={busy} title={o.description} onClick={() => send(o.key)} className={o.recommended ? "btn-primary" : "btn-ghost"}>
@@ -188,14 +200,14 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
             </div>
           )}
           {/* what an option makes the factory do, readable without hovering (ADR-0037 §1) */}
-          {m.options.some((o) => o.description) && (
+          {!closed && m.options.some((o) => o.description) && (
             <ul className="mt-1 space-y-0.5 text-[11px] text-slate-400">
               {m.options.filter((o) => o.description).map((o) => (
                 <li key={o.key}><span className="text-slate-300">{o.label}:</span> {o.description}</li>
               ))}
             </ul>
           )}
-          {m.allow_free_text && (
+          {!closed && m.allow_free_text && (
             <div className="mt-2 flex gap-2">
               <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Orientação livre (opcional)…" className="flex-1 rounded-md border border-line bg-panel px-2 py-1 text-sm" />
               {m.options.length === 0 && <button className="btn-primary" disabled={busy || !text} onClick={() => send(null)}>Enviar</button>}
@@ -208,5 +220,28 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
         </>
       )}
     </article>
+  );
+}
+
+/** What the founder chose for a batch question, by its label when it was one of the options. */
+function answeredWith(q: NonNullable<Message["questions"]>[number], m: Message) {
+  const given = m.answer?.answers?.[q.id];
+  if (!given) return "sem resposta";
+  return q.options.find((o) => o.key === given)?.label ?? given;
+}
+
+/** The decision already taken (or no longer needed), in place of the buttons. */
+function Closed({ m, when }: { m: Message; when: (iso: string) => string }) {
+  if (m.status === "withdrawn") {
+    return <p className="mt-2 rounded-md border border-line bg-panel/60 px-2 py-1 text-xs text-slate-400"><Icon name="ban" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Esta pergunta não vale mais: a fábrica seguiu sem ela.</p>;
+  }
+  const a = m.answer;
+  const label = a?.option_key ? m.options.find((o) => o.key === a.option_key)?.label ?? a.option_key : null;
+  return (
+    <div className="mt-2 rounded-md border border-emerald-900/60 bg-emerald-950/30 px-2 py-1 text-xs text-slate-300">
+      <Icon name="check" className="mr-1 inline h-3.5 w-3.5 align-[-2px] text-emerald-400" />
+      Respondida{a && <> em {when(a.answered_at)}</>}{label && <>: <span className="font-semibold text-slate-100">{label}</span></>}
+      {a?.text && <p className="mt-1 whitespace-pre-line text-slate-400">“{a.text}”</p>}
+    </div>
   );
 }

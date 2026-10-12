@@ -237,7 +237,7 @@ class LineWatch:
         if row["stage"] in (Stage.BACKLOG, Stage.AWAITING_FOUNDER):
             state = StoryState.from_row(row)
             if state.blocked_message_id:
-                self.ctx.store.archive_message(state.blocked_message_id)
+                self.ctx.store.withdraw_message(state.blocked_message_id)
             close_resolved(self.ctx, state, why, by=by)
             if row["stage"] == Stage.AWAITING_FOUNDER:
                 # its graph waits at the pause: told the way an answer is, it ends there

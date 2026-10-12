@@ -72,7 +72,14 @@ def with_subject(subject: str, text: str, *, label: str = "História") -> str:
 class MessageStatus(StrEnum):
     PENDING = "pending"
     ANSWERED = "answered"
-    ARCHIVED = "archived"
+    # the factory took the question back (story restarted, withdrawn, superseded): it stays in
+    # the inbox as history, but it cannot be answered any more
+    WITHDRAWN = "withdrawn"
+    ARCHIVED = "archived"  # the founder put it away: out of the inbox
+
+
+class MessageClosed(Exception):
+    """An answer to a message that was already answered or withdrawn."""
 
 
 class Option(BaseModel):

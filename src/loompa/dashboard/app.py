@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from loompa import __version__, sprint_report
-from loompa.comms import FounderAnswer
+from loompa.comms import FounderAnswer, MessageClosed
 from loompa.config import ConfigStore
 from loompa.config.settings import SettingsPatch
 from loompa.conversations import (
@@ -542,7 +542,9 @@ def create_app(
         for a in agents.values():
             a["room"] = OFFICE_ROOMS.get(a["role"], "lounge")
             a["cost_usd"] = _agent_cost(ctx, a["name"])
-        pending = ctx.store.list_messages(slug, status="pending")
+        # the inbox keeps what was answered or withdrawn, as history; only "arquivar" takes a
+        # note out of it
+        inbox = ctx.store.list_messages(slug, exclude="archived", limit=150)
         budget = ctx.tracker.status()
         return {
             "factory": {
@@ -561,7 +563,7 @@ def create_app(
                 {"key": k, "label": label, "stories": columns[k]} for k, label in KANBAN_COLUMNS
             ],
             "agents": sorted(agents.values(), key=lambda a: a["name"]),
-            "inbox": [m.model_dump(mode="json") for m in pending],
+            "inbox": [m.model_dump(mode="json") for m in inbox],
             "finance": {
                 "today_usd": budget.today_cost_usd,
                 "period": budget.period,
@@ -767,6 +769,8 @@ def create_app(
             )
         except KeyError:
             raise HTTPException(404, message_id) from None
+        except MessageClosed:
+            raise HTTPException(409, "Esta nota já foi respondida.") from None
         return {
             "message_id": message_id,
             "story_id": state.story_id if state else None,
