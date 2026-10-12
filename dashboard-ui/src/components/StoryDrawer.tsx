@@ -8,17 +8,17 @@ import { Icon } from "./Icon";
 import { released } from "./Kanban";
 import type { StoryCard } from "../types";
 
-type Tab = "spec" | "plan" | "tasks" | "research" | "diff" | "log" | "agent";
+type Tab = "details" | "spec" | "plan" | "tasks" | "research" | "diff" | "log" | "agent";
 type Diff = { source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string };
 
 export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDesign, onOpenStory, stories }: { slug: string; id: string; onClose: () => void; onOpenSprint: (id: string) => void; onOpenDesign: (id: string) => void; onOpenStory?: (id: string) => void; stories?: Map<string, StoryCard> }) {
   const [data, setData] = useState<any>(null);
-  // the order Spec Kit writes them in: what, then how, then the steps (plan 11.2)
-  const [tab, setTab] = useState<Tab>("spec");
+  // the card's details first, then the order Spec Kit writes them in: what, how, the steps (plan 11.2)
+  const [tab, setTab] = useState<Tab>("details");
   const [diff, setDiff] = useState<Diff | null>(null);
   useEffect(() => {
     api.story(slug, id)
-      .then((d) => { setData(d); if (d?.state?.kind === "research") setTab("research"); })
+      .then(setData)
       .catch(() => setData(null));
   }, [slug, id]);
   useEffect(() => {
@@ -27,7 +27,7 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
   if (!data) return <Drawer title={id} onClose={onClose}><p className="text-sm text-slate-400">carregando…</p></Drawer>;
   const s = data.story, st = data.state;
   // a research story ends in a report, not in code: no spec/plan/tasks to browse
-  const tabs: Tab[] = st.kind === "research" ? ["research", "log", "agent"] : ["spec", "plan", "tasks", "diff", "log", "agent"];
+  const tabs: Tab[] = st.kind === "research" ? ["details", "research", "log", "agent"] : ["details", "spec", "plan", "tasks", "diff", "log", "agent"];
   // how the Product Owner read the request that became this card (ADR-0017)
   const triage = st.extra?.po_triage ?? null;
   const act = data.activity ?? null;
@@ -41,75 +41,82 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
   const original: string = triage?.original ?? "";
   return (
     <Drawer title={`${s.id} · ${s.title}`} onClose={onClose} fill>
-      {/* header, details and tabs stay put; only the active tab's content scrolls */}
-      <div className="scroll-thin max-h-[40vh] shrink-0 space-y-2 overflow-y-auto text-sm">
-        <Row k="Etapa" v={
-          <span className="flex flex-wrap items-center gap-1">
-            <span className="chip bg-slate-800 text-slate-200">{s.stage}</span>
-            {act?.stage_since && <span className="text-slate-400">há {ago(act.stage_since)}</span>}
-            {act?.detail && <span className="text-slate-400">· {act.detail}</span>}
-          </span>
-        } />
-        <Row k="Classificação" v={`${KIND_LABEL[st.kind] ?? st.kind} · ${COMPLEXITY_LABEL[st.complexity] ?? st.complexity ?? "padrão"}${s.epic ? ` · ${s.epic}` : ""}`} />
-        {st.extra?.design && <Row k="Telas" v={
-          <button className="chip bg-fuchsia-900/50 text-fuchsia-200 hover:bg-fuchsia-800/60" onClick={() => onOpenDesign(id)}>
-            <Icon name="palette" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" /> {st.extra.design.approved ? `aprovadas (rodada ${st.extra.design.approved})` : `em desenho · modo ${st.extra.design.mode === "full" ? "completo" : "leve"}`}
-          </button>
-        } />}
-        {s.tasks_total > 0 && <Row k="Tarefas do plano" v={
-          <span className="flex items-center gap-2">
-            <span className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
-              <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, (100 * s.tasks_done) / s.tasks_total)}%` }} />
-            </span>
-            <span className="tabular-nums text-slate-300">{s.tasks_done}/{s.tasks_total} concluídas</span>
-          </span>
-        } />}
-        {data.sprints?.length > 0 && <Row k="Sprints" v={<span className="flex flex-wrap gap-1">{data.sprints.map((sp: string) => <button key={sp} className="chip bg-sky-900/50 text-sky-200 hover:bg-sky-800/60" title="abrir na aba Sprints" onClick={() => onOpenSprint(sp)}>{sp}</button>)}</span>} />}
-        <Row k="Custo" v={
-          <span className={overCap ? "text-amber-400" : ""}>
-            US$ {Number(data.usage?.cost_usd ?? 0).toFixed(4)} · {data.usage?.calls ?? 0} consultas
-            {cap > 0 ? ` · teto por história US$ ${cap.toFixed(2)}${overCap ? " (atingido)" : ""}` : ""}
-          </span>
-        } />
-        <Row k="Tentativas" v={`${s.attempts.tier2 + s.attempts.tier1 + 1}ª · tier 2: ${s.attempts.tier2} · tier 1: ${s.attempts.tier1} · agora no ${s.current_tier === "tier1" ? "tier 1 (modelos mais fortes)" : s.current_tier === "tier3" ? "tier 3 (gratuitos)" : "tier 2"}`} />
-        {act?.model && <Row k="Modelo atual" v={<code className="text-xs">{act.model}</code>} />}
-        {(s.depends_on ?? []).length > 0 && <Row k={blockers.length ? "Bloqueada por" : "Depende de"} v={<span className="flex flex-wrap items-center gap-1.5">{(s.depends_on ?? []).map((d: string) => {
-          const held = blockers.includes(d);
-          return (
-            <button key={d} type="button" className={`chip hover:underline ${held ? "bg-red-900/70 text-red-200" : "border border-red-400/70 bg-transparent font-normal text-red-300"}`}
-              title={held ? `${d} ainda não está concluída nem com teste aprovado. Abrir ${d}` : `${d} já está liberada para desenvolvimento. Abrir ${d}`}
-              onClick={() => onOpenStory?.(d)}>
-              <Icon name={held ? "lock" : "unlock"} className="mr-1 inline h-3 w-3 align-[-1px]" />{d}
-            </button>
-          );
-        })}{blockers.length && s.waiting?.label ? <span className="text-red-300">· {s.waiting.label}</span> : null}</span>} />}
-        {s.blocked_reason && <Row k="Esperando você" v={<span className="text-amber-200">{BLOCKED_LABEL[s.blocked_reason] ?? s.blocked_reason}</span>} />}
-        {st.qa_verdict && <Row k="Veredito do Inspector" v={
-          <span className={st.qa_verdict === "FAIL" ? "text-red-300" : st.qa_verdict === "CONCERNS" ? "text-orange-200" : "text-slate-200"}>
-            {QA_LABEL[st.qa_verdict] ?? st.qa_verdict}
-            {(st.qa_findings ?? []).length > 0 && (
-              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-slate-400">
-                {(st.qa_findings ?? []).map((f: any, i: number) => <li key={i}>{f.id ? `${f.id} · ` : ""}{f.severity ? `${f.severity}: ` : ""}{f.text}</li>)}
-              </ul>
-            )}
-          </span>
-        } />}
-        {s.branch && <Row k="Branch" v={<code className="text-xs">{s.branch}</code>} />}
-        {s.pr_url && <Row k="Pull request" v={<a className="text-brand hover:underline" href={s.pr_url} target="_blank" rel="noreferrer">{s.pr_url}</a>} />}
-        {s.priority_pinned && s.stage === "BACKLOG" && <Row k="Prioridade" v={<><Icon name="pin" className="mr-1 inline h-3 w-3 align-[-1px]" /> fixada por você: o Product Owner não move este card</>} />}
-        {notes.length > 0 && <Row k="Suas orientações" v={<ul className="list-disc pl-4">{notes.map((n: string, i: number) => <li key={i} className="whitespace-pre-wrap">{n}</li>)}</ul>} />}
-        {triage?.rewritten && original && !notes.includes(original) && <Row k="Texto original" v={<span className="whitespace-pre-wrap text-slate-400">{original}</span>} />}
-        {triage?.forced && <Row k="Objeção do PO" v={<span className="text-amber-200">Gravado por decisão sua. {triage.objection}</span>} />}
-        {triage && !triage.forced && triage.reason && <Row k="Nota do PO" v={<span className="text-slate-400">{triage.reason}</span>} />}
-        {st.delivery_summary && <Row k="Entrega" v={st.delivery_summary} />}
+      {/* one line of status and the tabs stay put; the active tab gets the whole column */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 text-xs text-slate-400">
+        <span className="chip bg-slate-800 text-slate-200">{s.stage}</span>
+        {act?.stage_since && <span>há {ago(act.stage_since)}</span>}
+        {s.tasks_total > 0 && <span className="tabular-nums">· {s.tasks_done}/{s.tasks_total} tarefas</span>}
+        {s.blocked_reason && <span className="text-amber-200">· esperando você</span>}
       </div>
-      <div className="mt-4 flex shrink-0 gap-1 border-b border-line text-xs">
+      <div className="mt-3 flex shrink-0 gap-1 border-b border-line text-xs">
         {tabs.map((t) => (
-          <button key={t} onClick={() => setTab(t)} title={TAB_HINT[t]} className={`px-3 py-1.5 ${tab === t ? "border-b-2 border-brand text-brand" : "text-slate-400"}`}>{t === "log" ? "histórico" : t === "diff" ? "mudanças" : t === "agent" ? "bastidores" : t + ".md"}</button>
+          <button key={t} onClick={() => setTab(t)} title={TAB_HINT[t]} className={`px-3 py-1.5 ${tab === t ? "border-b-2 border-brand text-brand" : "text-slate-400"}`}>{TAB_LABEL[t] ?? t + ".md"}</button>
         ))}
       </div>
       <div className="scroll-always mt-3 min-h-0 flex-1 pr-1">
-        {tab === "diff" ? (
+        {tab === "details" ? (
+          <div className="space-y-2 text-sm">
+            <Row k="Etapa" v={
+              <span className="flex flex-wrap items-center gap-1">
+                <span className="chip bg-slate-800 text-slate-200">{s.stage}</span>
+                {act?.stage_since && <span className="text-slate-400">há {ago(act.stage_since)}</span>}
+                {act?.detail && <span className="text-slate-400">· {act.detail}</span>}
+              </span>
+            } />
+            <Row k="Classificação" v={`${KIND_LABEL[st.kind] ?? st.kind} · ${COMPLEXITY_LABEL[st.complexity] ?? st.complexity ?? "padrão"}${s.epic ? ` · ${s.epic}` : ""}`} />
+            {st.extra?.design && <Row k="Telas" v={
+              <button className="chip bg-fuchsia-900/50 text-fuchsia-200 hover:bg-fuchsia-800/60" onClick={() => onOpenDesign(id)}>
+                <Icon name="palette" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" /> {st.extra.design.approved ? `aprovadas (rodada ${st.extra.design.approved})` : `em desenho · modo ${st.extra.design.mode === "full" ? "completo" : "leve"}`}
+              </button>
+            } />}
+            {s.tasks_total > 0 && <Row k="Tarefas do plano" v={
+              <span className="flex items-center gap-2">
+                <span className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
+                  <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, (100 * s.tasks_done) / s.tasks_total)}%` }} />
+                </span>
+                <span className="tabular-nums text-slate-300">{s.tasks_done}/{s.tasks_total} concluídas</span>
+              </span>
+            } />}
+            {data.sprints?.length > 0 && <Row k="Sprints" v={<span className="flex flex-wrap gap-1">{data.sprints.map((sp: string) => <button key={sp} className="chip bg-sky-900/50 text-sky-200 hover:bg-sky-800/60" title="abrir na aba Sprints" onClick={() => onOpenSprint(sp)}>{sp}</button>)}</span>} />}
+            <Row k="Custo" v={
+              <span className={overCap ? "text-amber-400" : ""}>
+                US$ {Number(data.usage?.cost_usd ?? 0).toFixed(4)} · {data.usage?.calls ?? 0} consultas
+                {cap > 0 ? ` · teto por história US$ ${cap.toFixed(2)}${overCap ? " (atingido)" : ""}` : ""}
+              </span>
+            } />
+            <Row k="Tentativas" v={`${s.attempts.tier2 + s.attempts.tier1 + 1}ª · tier 2: ${s.attempts.tier2} · tier 1: ${s.attempts.tier1} · agora no ${s.current_tier === "tier1" ? "tier 1 (modelos mais fortes)" : s.current_tier === "tier3" ? "tier 3 (gratuitos)" : "tier 2"}`} />
+            {act?.model && <Row k="Modelo atual" v={<code className="text-xs">{act.model}</code>} />}
+            {(s.depends_on ?? []).length > 0 && <Row k={blockers.length ? "Bloqueada por" : "Depende de"} v={<span className="flex flex-wrap items-center gap-1.5">{(s.depends_on ?? []).map((d: string) => {
+              const held = blockers.includes(d);
+              return (
+                <button key={d} type="button" className={`chip hover:underline ${held ? "bg-red-900/70 text-red-200" : "border border-red-400/70 bg-transparent font-normal text-red-300"}`}
+                  title={held ? `${d} ainda não está concluída nem com teste aprovado. Abrir ${d}` : `${d} já está liberada para desenvolvimento. Abrir ${d}`}
+                  onClick={() => onOpenStory?.(d)}>
+                  <Icon name={held ? "lock" : "unlock"} className="mr-1 inline h-3 w-3 align-[-1px]" />{d}
+                </button>
+              );
+            })}{blockers.length && s.waiting?.label ? <span className="text-red-300">· {s.waiting.label}</span> : null}</span>} />}
+            {s.blocked_reason && <Row k="Esperando você" v={<span className="text-amber-200">{BLOCKED_LABEL[s.blocked_reason] ?? s.blocked_reason}</span>} />}
+            {st.qa_verdict && <Row k="Veredito do Inspector" v={
+              <span className={st.qa_verdict === "FAIL" ? "text-red-300" : st.qa_verdict === "CONCERNS" ? "text-orange-200" : "text-slate-200"}>
+                {QA_LABEL[st.qa_verdict] ?? st.qa_verdict}
+                {(st.qa_findings ?? []).length > 0 && (
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-slate-400">
+                    {(st.qa_findings ?? []).map((f: any, i: number) => <li key={i}>{f.id ? `${f.id} · ` : ""}{f.severity ? `${f.severity}: ` : ""}{f.text}</li>)}
+                  </ul>
+                )}
+              </span>
+            } />}
+            {s.branch && <Row k="Branch" v={<code className="text-xs">{s.branch}</code>} />}
+            {s.pr_url && <Row k="Pull request" v={<a className="text-brand hover:underline" href={s.pr_url} target="_blank" rel="noreferrer">{s.pr_url}</a>} />}
+            {s.priority_pinned && s.stage === "BACKLOG" && <Row k="Prioridade" v={<><Icon name="pin" className="mr-1 inline h-3 w-3 align-[-1px]" /> fixada por você: o Product Owner não move este card</>} />}
+            {notes.length > 0 && <Row k="Suas orientações" v={<ul className="list-disc pl-4">{notes.map((n: string, i: number) => <li key={i} className="whitespace-pre-wrap">{n}</li>)}</ul>} />}
+            {triage?.rewritten && original && !notes.includes(original) && <Row k="Texto original" v={<span className="whitespace-pre-wrap text-slate-400">{original}</span>} />}
+            {triage?.forced && <Row k="Objeção do PO" v={<span className="text-amber-200">Gravado por decisão sua. {triage.objection}</span>} />}
+            {triage && !triage.forced && triage.reason && <Row k="Nota do PO" v={<span className="text-slate-400">{triage.reason}</span>} />}
+            {st.delivery_summary && <Row k="Entrega" v={st.delivery_summary} />}
+          </div>
+        ) : tab === "diff" ? (
           <DiffView diff={diff} />
         ) : tab === "log" ? (
           <History history={data.history ?? []} commits={data.commits ?? []} />
@@ -123,7 +130,10 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
   );
 }
 
+const TAB_LABEL: Record<string, string> = { details: "detalhes", diff: "mudanças", log: "histórico", agent: "bastidores" };
+
 const TAB_HINT: Record<string, string> = {
+  details: "Etapa, custo, tentativas, dependências e as notas do Product Owner",
   spec: "O que a história precisa entregar", plan: "Como o Architect decidiu fazer",
   tasks: "A lista de tarefas e o que já foi feito", research: "O relatório da pesquisa",
   diff: "O código que esta história mudou", log: "O que aconteceu em cada etapa",
