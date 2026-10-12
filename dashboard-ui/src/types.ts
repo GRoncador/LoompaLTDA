@@ -19,6 +19,7 @@ export interface StoryCard {
   epic_id?: string; // the product epic (plan 16.5)
   stage: string;
   column: string;
+  archived?: boolean; // finished before the sprint that started last: Concluído hides it unless asked
   priority: number;
   priority_pinned: boolean; // the founder dragged it there: the Product Owner's ranking leaves it
   origin: string;

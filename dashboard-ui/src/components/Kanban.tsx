@@ -41,6 +41,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
   // titles are plain otherwise, so the board has one weight and the pointer does the pointing
   const [hl, setHl] = useState<{ sprint?: string; ids?: string[] }>({});
   const [epicFilter, setEpicFilter] = useState(""); // only one product epic's cards (16.7)
+  const [showArchived, setShowArchived] = useState(false); // Concluído: the cards a later sprint archived
   const dropped = useRef(false); // dragend fires after drop: only a cancelled drag resets
   const backlog = columns.find((c) => c.key === "BACKLOG")?.stories ?? [];
   const ordered = (c: Column) => {
@@ -50,8 +51,8 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
       return preview.map((id) => byId.get(id)).filter((s): s is StoryCard => !!s);
     }
     // a card a Loompa is working on right now goes to the top of its column: the first cards
-    // are the ones running, then the ones next in line (11.2)
-    return [...c.stories].sort((a, b) => Number(working(b, live, now, engine)) - Number(working(a, live, now, engine)));
+    // are the ones running, then the ones next in line (11.2). Archived cards go last (Concluído)
+    return [...c.stories].sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || Number(working(b, live, now, engine)) - Number(working(a, live, now, engine)));
   };
   const dragOver = (overId: string) => {
     if (!dragId || dragId === overId) return;
@@ -186,10 +187,10 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
         {columns.map((c) => (
           <div key={c.key} className={`flex min-w-[150px] flex-col rounded-md border-t-4 bg-ink/50 ${TONE[c.key] ?? ""}`}>
             <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold text-slate-300">
-              <span>{c.label}</span><span className="text-slate-500">{c.stories.length}</span>
+              <span>{c.label}</span><span className="text-slate-500">{c.stories.filter((s) => showArchived || !s.archived).length}</span>
             </div>
             <div className="scroll-thin flex-1 space-y-1.5 overflow-y-auto px-2 pb-2 pt-1">
-              {ordered(c).filter((s) => !epicFilter || s.epic_id === epicFilter).map((s) =>
+              {ordered(c).filter((s) => (!epicFilter || s.epic_id === epicFilter) && (showArchived || !s.archived)).map((s) =>
                 c.key === "BACKLOG" ? (
                   <div
                     key={s.id}
@@ -204,8 +205,17 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                     <Card s={s} deps={byId} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} deps={byId} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now, engine)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  <div key={s.id} className={s.archived ? "opacity-60" : undefined}>
+                    <Card s={s} deps={byId} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now, engine)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  </div>
                 ),
+              )}
+              {/* the archived cards of Concluído: a line at the end of the column, at its top when
+                  no card is shown yet */}
+              {c.key === "DONE" && c.stories.some((s) => s.archived) && (
+                <button className="w-full rounded px-1 py-1 text-left text-[11px] text-slate-500 hover:text-slate-300" onClick={() => setShowArchived((v) => !v)}>
+                  {showArchived ? "ocultar arquivadas" : `${c.stories.filter((s) => s.archived).length} arquivadas · mostrar`}
+                </button>
               )}
             </div>
           </div>

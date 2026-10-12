@@ -68,6 +68,12 @@ class SprintBoard:
         running = self.sprints(SprintStatus.RUNNING)
         return running[-1] if running else None
 
+    def latest_started(self) -> Sprint | None:
+        """The sprint that started last, running or already closed. The Kanban's Concluído column
+        keeps the cards of this one; a sprint's start archives every card finished before it."""
+        started = [s for s in self.sprints() if s.started_at]
+        return max(started, key=lambda s: s.started_at or "") if started else None
+
     def sprint_of(self, story_id: str) -> Sprint | None:
         """The open or running sprint a story belongs to."""
         for sprint in self.sprints():

@@ -494,6 +494,11 @@ def create_app(
         stories = ctx.store.list_stories(slug)
         columns: dict[str, list[dict[str, Any]]] = {k: [] for k, _ in KANBAN_COLUMNS}
         sprint_of = sprint_report.current_sprints(ctx.store, slug)  # read, never stored (10.8)
+        # a finished card is archived once a later sprint has started: only the cards of the sprint
+        # that started last stay in Concluído. Derived here, never stored; before any sprint
+        # starts nothing is archived (kept is None)
+        latest = SprintBoard(ctx.store, slug).latest_started()
+        kept = set(latest.story_ids) if latest else None
         rows = {s["id"]: s for s in stories}
         queue = merge_queue(rows)
         for s in stories:
@@ -511,7 +516,9 @@ def create_app(
                 card["waiting"] = merge_parked_note(
                     note.get("unmerged") or [], str(note.get("label") or "")
                 ) | {"ready": True}
-            columns[board_column(s)].append(card)
+            column = board_column(s)
+            card["archived"] = column == Stage.DONE.value and kept is not None and s["id"] not in kept
+            columns[column].append(card)
         backend_services = {"ops", "finance", "kaizen"}
         agents = {
             a["name"]: a
