@@ -236,6 +236,11 @@ class Store:
         ),
     }
 
+    # Agent names that became another Loompa: the spec writer is the Analyst since ADR-0045. Its
+    # old row in `agents` would put a second figure in the office, and its spending would stay
+    # under a name nobody sees; the `role` column keeps the spec and the research apart.
+    RENAMED_AGENTS = {"Spec Loompa": "Analyst Loompa", "Product Loompa": "Analyst Loompa"}
+
     def _migrate(self) -> None:
         for table, columns in self.ADDED_COLUMNS.items():
             have = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -244,6 +249,14 @@ class Store:
             for name, decl in columns:
                 if name not in have:
                     self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+        tables = {
+            r[0] for r in self._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        for old, new in self.RENAMED_AGENTS.items():
+            if "agents" in tables:
+                self._conn.execute("DELETE FROM agents WHERE name = ?", (old,))
+            if "usage" in tables:
+                self._conn.execute("UPDATE usage SET agent = ? WHERE agent = ?", (new, old))
 
     def close(self) -> None:
         self._conn.close()

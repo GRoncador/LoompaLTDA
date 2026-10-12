@@ -19,7 +19,7 @@ const ROOMS: Record<string, { x: number; y: number; w: number; h: number; label:
 };
 
 const ROLE_COLORS: Record<string, number> = {
-  master: 0xf59e0b, product: 0xa78bfa, architect: 0x60a5fa, worker: 0x34d399, inspector: 0x38bdf8,
+  master: 0xf59e0b, product: 0x2dd4bf, analyst: 0x2dd4bf, product_owner: 0xa78bfa, architect: 0x60a5fa, worker: 0x34d399, inspector: 0x38bdf8,
   deployer: 0xf472b6, storyteller: 0xfb7185, metrics: 0x94a3b8, compliance: 0xc084fc,
 };
 

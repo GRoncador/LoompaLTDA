@@ -77,6 +77,9 @@ def test_factories_and_overview(client: TestClient):
     assert len(ov["agents"]) >= 9 and all(
         a["room"] in ("dev", "meeting", "qa", "lounge") for a in ov["agents"]
     )
+    # one Analyst writes specs and researches; no second "Product" or "Spec" figure (ADR-0045)
+    names = {a["name"] for a in ov["agents"]}
+    assert "Analyst Loompa" in names and not names & {"Product Loompa", "Spec Loompa"}
     assert ov["finance"]["cap_usd"] == 5.0 and ov["finance"]["period"] == "weekly"
     assert ov["inbox"] == []
     assert client.get("/api/factories/nope/overview").status_code == 404

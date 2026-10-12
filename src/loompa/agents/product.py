@@ -1,4 +1,11 @@
-"""Spec Loompa: writes spec.md with BDD acceptance criteria."""
+"""Spec writing: spec.md with BDD acceptance criteria, one of the Analyst's two tasks (ADR-0045).
+
+The founder sees one Analyst Loompa; the role stays `product` so this task keeps its own tool
+profile (no web: a spec comes from the request, the constitution and earlier specs), its model
+tier and its prompt bench, apart from the research the `analyst` role does. The prompt keeps
+calling the model the Spec Loompa: it is the measured text (14.3), and the model needs the task,
+not the persona.
+"""
 
 from __future__ import annotations
 
@@ -65,7 +72,7 @@ Write the text values in {language}.
 
 class ProductAgent(LoompaAgent):
     role = "product"
-    display = "Spec Loompa"
+    display = "Analyst Loompa"  # one persona with the research role (ADR-0045)
 
     def _builds_on(self, state: StoryState) -> str:
         """The stories this one depends on (ADR-0021), with their specs when written. Without

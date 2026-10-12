@@ -220,3 +220,28 @@ def test_withdrawn_message_stays_listed_but_not_pending():
     assert [m.id for m in store.list_messages("f", exclude="archived")] == [msg.id]
     store.archive_message(msg.id)
     assert store.list_messages("f", exclude="archived") == []
+
+
+def test_the_spec_writer_is_the_analyst_in_an_older_database(tmp_path):
+    """ADR-0045: a factory from before kept a "Spec Loompa" row, a second figure in the office
+    beside the Analyst; on open it is gone and its spending is the Analyst's, the role apart."""
+    path = tmp_path / "state.db"
+    old = Store(path)
+    old.set_agent("Spec Loompa", "product", "IDLE")
+    old.set_agent("Analyst Loompa", "analyst", "IDLE")
+    for agent, role in (("Spec Loompa", "product"), ("Analyst Loompa", "analyst")):
+        old.record_usage(
+            factory="f",
+            agent=agent,
+            role=role,
+            provider="p",
+            model="m",
+            tier="tier2",
+            cost_usd=0.01,
+        )
+    old.close()
+
+    s = Store(path)
+    assert [a["name"] for a in s.list_agents()] == ["Analyst Loompa"]
+    assert [r["key"] for r in s.usage_by("agent", "f")] == ["Analyst Loompa"]
+    assert sorted(r["key"] for r in s.usage_by("role", "f")) == ["analyst", "product"]

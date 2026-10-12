@@ -56,7 +56,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 OFFICE_ROOMS = {
     "master": "meeting",
-    "product": "meeting",
+    "product": "meeting",  # the Analyst writing a spec (ADR-0045)
     "product_owner": "meeting",
     "analyst": "meeting",
     "architect": "meeting",
@@ -69,8 +69,8 @@ OFFICE_ROOMS = {
 }
 DEFAULT_AGENTS = [
     ("Master Loompa", "master"),
-    ("Product Loompa", "product"),
     ("Product Owner Loompa", "product_owner"),
+    ("Analyst Loompa", "analyst"),
     ("Architect Loompa", "architect"),
     ("Worker Loompa", "worker"),
     ("Inspector Loompa", "inspector"),

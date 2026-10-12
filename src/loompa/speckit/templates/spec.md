@@ -1,6 +1,6 @@
 # Spec — {story_id}: {title}
 
-**Status:** draft · **Autor:** Product Loompa · **Data:** {date}
+**Status:** draft · **Autor:** Analyst Loompa · **Data:** {date}
 
 ## Objetivo de negócio
 {goal}

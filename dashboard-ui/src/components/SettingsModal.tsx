@@ -408,7 +408,7 @@ const PROVIDER_NOTE: Record<string, string> = {
 const ROLE_DISPLAY: Record<string, string> = {
   master: "Master (COO)",
   architect: "Architect (Tech Lead)",
-  product: "Spec Loompa (BDD)",
+  product: "Analyst (Spec)",
   product_owner: "Product Owner (PO)",
   analyst: "Analyst (Pesquisa)",
   worker: "Worker (Engenharia)",
@@ -427,7 +427,7 @@ const CLUSTERS_CONFIG = [
     key: "strategy",
     label: "Estratégia & Produto",
     icon: "landmark",
-    roles: ["Master", "Architect", "Spec Loompa", "Product Owner", "Analyst"],
+    roles: ["Master", "Architect", "Product Owner", "Analyst"],
     weights: [
       { label: "INTEL", pct: "50%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
       { label: "CODE", pct: "30%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },

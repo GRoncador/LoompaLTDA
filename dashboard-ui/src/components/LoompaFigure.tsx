@@ -2,12 +2,12 @@ import { Icon } from "./Icon";
 // The same colours the office gives each role, so a figure on a card or in a history is the
 // Loompa you see in the office.
 export const ROLE_COLOR: Record<string, string> = {
-  master: "#f59e0b", product: "#a78bfa", product_owner: "#a78bfa", architect: "#60a5fa", worker: "#34d399", inspector: "#38bdf8",
+  master: "#f59e0b", product: "#2dd4bf", product_owner: "#a78bfa", architect: "#60a5fa", worker: "#34d399", inspector: "#38bdf8",
   deployer: "#f472b6", storyteller: "#fb7185", metrics: "#94a3b8", compliance: "#c084fc", analyst: "#2dd4bf",
 };
 
 export const ROLE_NAME: Record<string, string> = {
-  master: "Master", product: "Product", product_owner: "Product Owner", architect: "Architect", worker: "Worker",
+  master: "Master", product: "Analyst", product_owner: "Product Owner", architect: "Architect", worker: "Worker",
   inspector: "Inspector", deployer: "Deployer", analyst: "Analyst", founder: "Você", factory: "Fábrica",
 };
 

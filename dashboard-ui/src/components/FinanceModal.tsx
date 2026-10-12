@@ -121,8 +121,8 @@ function Table({ rows, head, valueHead = "Custo", fmt = usd }: { rows: { k: stri
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  master: "Master", product: "Spec", product_owner: "Product Owner", architect: "Architect", worker: "Worker",
-  inspector: "Inspector", deployer: "Deployer", analyst: "Analyst", kaizen: "Kaizen", ops: "Ops",
+  master: "Master", product: "Analyst (spec)", product_owner: "Product Owner", architect: "Architect", worker: "Worker",
+  inspector: "Inspector", deployer: "Deployer", analyst: "Analyst (pesquisa)", kaizen: "Kaizen", ops: "Ops",
 };
 
 export default function FinanceModal({ slug, onClose }: { slug: string; onClose: () => void }) {

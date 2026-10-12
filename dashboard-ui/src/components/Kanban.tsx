@@ -448,7 +448,7 @@ const HAPPENING: Record<string, string> = {
 
 // Who holds a card in each stage when nothing more specific is known.
 const STAGE_OWNER: Record<string, { name: string; role: string }> = {
-  SPEC: { name: "Spec Loompa", role: "product" }, PLAN: { name: "Architect Loompa", role: "architect" },
+  SPEC: { name: "Analyst Loompa", role: "product" }, PLAN: { name: "Architect Loompa", role: "architect" },
   DEV: { name: "Worker Loompa", role: "worker" }, TEST: { name: "Inspector Loompa", role: "inspector" },
   REVIEW: { name: "Deployer Loompa", role: "deployer" },
 };
