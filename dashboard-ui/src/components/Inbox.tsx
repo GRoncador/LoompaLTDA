@@ -115,6 +115,9 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
     try {
       const qa = Object.fromEntries((m.questions ?? []).map((q) => [q.id, answerOf(q)]));
       await onReply(m, opt, (m.screens?.length ? adjustText() : text) || null, Object.fromEntries(open_decisions.map((d) => [d.id, choice(d)])), qa);
+      // answered: the note is read and folds back to its title, kept in the list as history
+      onOpen?.();
+      setOpen(false);
     } finally { setBusy(false); }
   };
   return (
