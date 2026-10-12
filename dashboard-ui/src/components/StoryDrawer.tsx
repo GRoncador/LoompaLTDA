@@ -5,11 +5,13 @@ import LoompaFigure, { ROLE_NAME } from "./LoompaFigure";
 import Markdown from "./Markdown";
 import AgentTrace from "./AgentTrace";
 import { Icon } from "./Icon";
+import { released } from "./Kanban";
+import type { StoryCard } from "../types";
 
 type Tab = "spec" | "plan" | "tasks" | "research" | "diff" | "log" | "agent";
 type Diff = { source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string };
 
-export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDesign }: { slug: string; id: string; onClose: () => void; onOpenSprint: (id: string) => void; onOpenDesign: (id: string) => void }) {
+export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDesign, onOpenStory, stories }: { slug: string; id: string; onClose: () => void; onOpenSprint: (id: string) => void; onOpenDesign: (id: string) => void; onOpenStory?: (id: string) => void; stories?: Map<string, StoryCard> }) {
   const [data, setData] = useState<any>(null);
   // the order Spec Kit writes them in: what, then how, then the steps (plan 11.2)
   const [tab, setTab] = useState<Tab>("spec");
@@ -31,7 +33,10 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
   const act = data.activity ?? null;
   const cap = Number(data.story_cap_usd ?? 0);
   const overCap = cap > 0 && Number(data.usage?.cost_usd ?? 0) >= cap;
-  const blockers: string[] = s.waiting ? [...new Set([...(s.waiting.gone ?? []), ...(s.waiting.pending ?? []), ...(s.waiting.chain ?? [])])] : (s.depends_on ?? []);
+  // same rule as the card: what holds it is anything not delivered or test-approved, plus what the gate reports
+  const open = !["DONE", "CANCELLED"].includes(s.stage);
+  const unreleased = open ? (s.depends_on ?? []).filter((d: string) => !released(stories?.get(d))) : [];
+  const blockers: string[] = open ? [...new Set([...(s.waiting?.gone ?? []), ...(s.waiting?.pending ?? []), ...(s.waiting?.chain ?? []), ...unreleased])] : [];
   const notes: string[] = st.founder_notes ?? [];
   const original: string = triage?.original ?? "";
   return (
@@ -68,7 +73,16 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
         } />
         <Row k="Tentativas" v={`${s.attempts.tier2 + s.attempts.tier1 + 1}ª · tier 2: ${s.attempts.tier2} · tier 1: ${s.attempts.tier1} · agora no ${s.current_tier === "tier1" ? "tier 1 (modelos mais fortes)" : s.current_tier === "tier3" ? "tier 3 (gratuitos)" : "tier 2"}`} />
         {act?.model && <Row k="Modelo atual" v={<code className="text-xs">{act.model}</code>} />}
-        {blockers.length > 0 && <Row k="Bloqueada por" v={<span className="text-red-300"><Icon name="lock" className="mr-1 inline h-3 w-3 align-[-1px]" />{blockers.join(", ")}{s.waiting?.label ? ` · ${s.waiting.label}` : ""}</span>} />}
+        {(s.depends_on ?? []).length > 0 && <Row k={blockers.length ? "Bloqueada por" : "Depende de"} v={<span className="flex flex-wrap items-center gap-1.5">{(s.depends_on ?? []).map((d: string) => {
+          const held = blockers.includes(d);
+          return (
+            <button key={d} type="button" className={`chip hover:underline ${held ? "bg-red-900/70 text-red-200" : "border border-red-400/70 bg-transparent font-normal text-red-300"}`}
+              title={held ? `${d} ainda não está concluída nem com teste aprovado. Abrir ${d}` : `${d} já está liberada para desenvolvimento. Abrir ${d}`}
+              onClick={() => onOpenStory?.(d)}>
+              <Icon name={held ? "lock" : "unlock"} className="mr-1 inline h-3 w-3 align-[-1px]" />{d}
+            </button>
+          );
+        })}{blockers.length && s.waiting?.label ? <span className="text-red-300">· {s.waiting.label}</span> : null}</span>} />}
         {s.blocked_reason && <Row k="Esperando você" v={<span className="text-amber-200">{BLOCKED_LABEL[s.blocked_reason] ?? s.blocked_reason}</span>} />}
         {st.qa_verdict && <Row k="Veredito do Inspector" v={
           <span className={st.qa_verdict === "FAIL" ? "text-red-300" : st.qa_verdict === "CONCERNS" ? "text-orange-200" : "text-slate-200"}>

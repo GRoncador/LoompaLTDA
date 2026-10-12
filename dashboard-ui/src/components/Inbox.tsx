@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Message } from "../types";
 import { DesignScreens } from "./DesignScreens";
 import { Icon } from "./Icon";
@@ -31,14 +31,35 @@ export default function Inbox(props: {
   // newest first, every note closed: the tag and the title, bold until opened
   const sorted = [...messages].sort((a, b) => b.created_at.localeCompare(a.created_at));
   const unread = messages.filter((m) => !read.has(m.id)).length;
+  // the "unread only" filter: available only while something is unread. The notes unread when it
+  // was turned on stay listed after the founder opens them, so a card does not vanish under the cursor.
+  const [onlyUnread, setOnlyUnread] = useState(false);
+  const [kept, setKept] = useState<Set<string>>(new Set());
+  useEffect(() => { if (unread === 0) setOnlyUnread(false); }, [unread]);
+  const filtering = onlyUnread && unread > 0;
+  const toggleUnread = () => {
+    if (!filtering) setKept(new Set(sorted.filter((m) => !read.has(m.id)).map((m) => m.id)));
+    setOnlyUnread(!filtering);
+  };
+  const shown = filtering ? sorted.filter((m) => !read.has(m.id) || kept.has(m.id)) : sorted;
   return (
     <>
-      <div className="border-b border-line px-3 py-2">
+      <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Icon name="inbox" className="h-4 w-4 text-slate-400" />Caixa de Entrada{unread > 0 && ` (${unread})`}</h2>
+        <button
+          type="button"
+          aria-pressed={filtering}
+          disabled={unread === 0}
+          onClick={toggleUnread}
+          title={unread === 0 ? "Não há notas não lidas" : filtering ? "Mostrar todas as notas" : "Mostrar só as notas não lidas"}
+          className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${filtering ? "border-brand bg-brand/20 text-slate-50" : "border-line text-slate-400 hover:text-slate-200"}`}
+        >
+          Só não lidas
+        </button>
       </div>
       <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3">
         {messages.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nada pendente. Aproveite o dia.</p>}
-        {sorted.map((m) => <MessageCard key={m.id} m={m} unread={!read.has(m.id)} onOpen={() => markRead(m.id)} {...props} />)}
+        {shown.map((m) => <MessageCard key={m.id} m={m} unread={!read.has(m.id)} onOpen={() => markRead(m.id)} {...props} />)}
       </div>
     </>
   );
@@ -98,7 +119,7 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
         {unread && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand" title="Não lida" />}
         <span className={`chip ${k.cls} ${unread ? "" : "opacity-70"}`}>{k.label}</span>
         <button className={`flex-1 text-left text-sm leading-snug ${unread ? "font-bold text-slate-50" : "font-normal text-slate-400"}`} onClick={toggle}>{m.title}</button>
-        {m.story_id && <button className="text-xs text-brand hover:underline" onClick={() => onOpenStory(m.story_id!)}>{m.story_id}</button>}
+        <time dateTime={m.created_at} className="shrink-0 whitespace-nowrap pt-0.5 text-[11px] text-slate-500" title="Data e hora em que chegou">{new Date(m.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time>
       </div>
       {open && (
         <>
@@ -181,7 +202,7 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
             </div>
           )}
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-            <span>{m.sender} · {new Date(m.created_at).toLocaleString("pt-BR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}</span>
+            <span>{m.sender}{m.story_id && <> · <button className="text-sky-300 hover:underline" onClick={() => onOpenStory(m.story_id!)}>{m.story_id}</button></>}</span>
             <button className="hover:text-slate-300" onClick={() => onArchive(m)}>arquivar</button>
           </div>
         </>

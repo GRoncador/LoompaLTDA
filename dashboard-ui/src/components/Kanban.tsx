@@ -7,6 +7,15 @@ const TONE: Record<string, string> = {
   BACKLOG: "border-slate-600", SPEC: "border-violet-500", DEV: "border-emerald-500", TEST: "border-sky-500", AWAITING_FOUNDER: "border-amber-500", DONE: "border-slate-500",
 };
 
+// a dependency releases the card for work once it is delivered, or once the Inspector passed its
+// tests and it waits only for the merge (the same condition the gate calls "unmerged")
+const TEST_PASSED_STAGES = new Set(["TEST", "REVIEW", "AWAITING_FOUNDER", "DONE"]);
+export function released(d: StoryCard | undefined): boolean {
+  if (!d) return false;
+  if (d.stage === "DONE") return true;
+  return TEST_PASSED_STAGES.has(d.stage) && (d.qa_verdict === "PASS" || d.qa_verdict === "CONCERNS");
+}
+
 const KIND_LABEL: Record<string, string> = { bugfix: "correção", research: "pesquisa", feature: "funcionalidade" };
 
 export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nextSprint, conversations, live, now, storyCap = 0, engine = false, kickoff = false, epics = {}, phase = null, onProduct, onChat, onOpen, onCreate, onReorder, onUnpin }: {
@@ -20,6 +29,8 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
   onChat: (kind: ConversationKind, resumeId?: string, text?: string) => void; onOpen: (id: string) => void;
   onCreate: (title: string) => Promise<QuickStoryResult | null>; onReorder: (ids: string[], dragged: string | null) => Promise<void>; onUnpin: (id: string) => Promise<void>;
 }) {
+  // every card by id, so a dependency tag can read what its dependency has reached
+  const byId = new Map(columns.flatMap((c) => c.stories).map((s) => [s.id, s] as const));
   const [title, setTitle] = useState("");
   const [reading, setReading] = useState(false); // the Product Owner is reading a quick story
   const [filed, setFiled] = useState<{ id: string; title: string; kind: string; rewritten: boolean } | null>(null);
@@ -190,10 +201,10 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                     onDrop={(e) => { e.preventDefault(); drop(); }}
                     onDragEnd={() => { if (!dropped.current) { setDragId(null); setPreview(null); } }}
                   >
-                    <Card s={s} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} onOpen={onOpen} onUnpin={onUnpin} />
+                    <Card s={s} deps={byId} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} onOpen={onOpen} onUnpin={onUnpin} />
                   </div>
                 ) : (
-                  <Card key={s.id} s={s} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now, engine)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
+                  <Card key={s.id} s={s} deps={byId} epicName={s.epic_id ? epics[s.epic_id] : undefined} cap={storyCap} hl={hl} onHl={setHl} running={working(s, live, now, engine)} agent={AT_WORK.has(s.stage) ? holder(agents, s, latest(s.activity, live[s.id])) : null} activity={AT_WORK.has(s.stage) ? latest(s.activity, live[s.id]) : null} now={now} onOpen={onOpen} />
                 ),
               )}
             </div>
@@ -238,7 +249,7 @@ const COMPLEXITY: Record<string, { text: string; cls: string; title: string }> =
   COMPLEX: { text: "complexa", cls: "bg-fuchsia-900/50 text-fuchsia-300", title: "História complexa: mais tarefas, mais revisão e mais custo" },
 };
 
-function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl, onOpen, onUnpin, epicName }: { epicName?: string; s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; cap?: number; hl?: { sprint?: string; ids?: string[] }; onHl?: (h: { sprint?: string; ids?: string[] }) => void; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
+function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl, onOpen, onUnpin, epicName, deps }: { deps?: Map<string, StoryCard>; epicName?: string; s: StoryCard; agent?: Agent | null; activity?: StoryActivity | null; now?: number; running?: boolean; cap?: number; hl?: { sprint?: string; ids?: string[] }; onHl?: (h: { sprint?: string; ids?: string[] }) => void; onOpen: (id: string) => void; onUnpin?: (id: string) => Promise<void> }) {
   const pinned = s.priority_pinned && s.stage === "BACKLOG";
   const kind = KIND_ICON[s.kind] ?? KIND_ICON.feature;
   const open = !["DONE", "CANCELLED"].includes(s.stage);
@@ -284,13 +295,17 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   // is free to work — it only carries the branch of a story whose delivery you have not accepted
   // yet, or its dependencies are already delivered (11.5).
   const gate = open ? s.waiting : null;
+  // the dependencies that still hold it: anything not delivered and not test-approved yet, plus
+  // what the backend says is missing (the gate runs only once the card reaches planning)
+  const dependsOn = open ? s.depends_on ?? [] : [];
+  const unreleased = dependsOn.filter((d) => !released(deps?.get(d)));
+  const held = gate ? [...new Set([...gate.gone, ...gate.pending, ...gate.chain, ...unreleased])] : [...new Set(unreleased)];
+  const linked = !open || held.length ? [] : dependsOn;
   // a card that waits is not being worked on: the stage tag goes quiet and no Loompa holds it,
   // the same condition `working()` uses for the amber ring (11.5). `waiting.ready` is the card
   // that is finished and green and only waits for your acceptance of the delivery before it;
   // the others wait for a dependency that is not in the base yet.
   const parked = open && (s.waiting?.gate === "wait" || behindInQueue(s));
-  const held = gate ? [...new Set([...gate.gone, ...gate.pending, ...gate.chain])] : [];
-  const linked = !open || held.length ? [] : gate?.unmerged?.length ? gate.unmerged : s.depends_on ?? [];
   const size = COMPLEXITY[s.complexity] ?? COMPLEXITY.STANDARD;
   // the pointer answers by lifting the card a little, never by changing a title's weight: this
   // card under the mouse, or a story someone's sprint tag / blocker chip is pointing at
@@ -330,7 +345,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             <span
               className={`chip ${held.length ? "bg-red-900/70 text-red-200" : "border border-red-400/70 bg-transparent font-normal text-red-300"}`}
               title={held.length
-                ? s.waiting?.label || "Esta história só segue depois que estas forem entregues"
+                ? s.waiting?.label || `Esta história só segue depois que ${held.join(", ")} estiver concluída ou com teste aprovado`
                 : s.waiting?.ready
                   ? `Pronta e verde: escrita sobre ${linked.join(", ")}. Só falta integrar, e isso espera o seu aceite daquela entrega.`
                   : `Livre para trabalhar: escrita sobre ${linked.join(", ")}. Só a integração espera o seu aceite daquela entrega.`}

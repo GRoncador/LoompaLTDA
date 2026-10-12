@@ -87,6 +87,8 @@ export default function App() {
     }
   }, [refresh]);
   const connected = useSocket(slug, onEvent);
+  // every card by id, for the story drawer to tell which dependencies are already released
+  const storiesById = useMemo(() => new Map((overview?.columns ?? []).flatMap((c) => c.stories).map((s) => [s.id, s] as const)), [overview]);
 
   const switchFactory = async (s: string) => { setSlug(s); await api.activate(s).catch(() => {}); };
   const engineAction = async (action: "start" | "pause" | "stop") => {
@@ -178,7 +180,7 @@ export default function App() {
       {settingsOpen && slug && <SettingsModal slug={slug} onClose={() => { setSettingsOpen(false); refresh(); }} />}
       {newFactoryOpen && <NewFactoryModal onClose={async (created) => { setNewFactoryOpen(false); await loadFactories(); if (created) setSlug(created); }} />}
       {agentName && slug && <AgentDrawer slug={slug} name={agentName} onClose={() => setAgentName(null)} onOpenStory={setStoryId} />}
-      {storyId && slug && <StoryDrawer slug={slug} id={storyId} onClose={() => setStoryId(null)} onOpenSprint={(id) => { setStoryId(null); setSprintsAt(id); }} onOpenDesign={(id) => { setStoryId(null); setDesign({ story: id }); }} />}
+      {storyId && slug && <StoryDrawer slug={slug} id={storyId} stories={storiesById} onOpenStory={setStoryId} onClose={() => setStoryId(null)} onOpenSprint={(id) => { setStoryId(null); setSprintsAt(id); }} onOpenDesign={(id) => { setStoryId(null); setDesign({ story: id }); }} />}
     </div>
   );
 }
