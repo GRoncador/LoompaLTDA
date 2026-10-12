@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import type { Agent } from "../types";
+import { loompaName } from "../names";
 
 /**
  * Pixel-art office: four rooms, desks, a sofa, a lab lamp, all rendered procedurally. Each
@@ -119,7 +120,7 @@ export class OfficeScene extends Phaser.Scene {
       sp.state = a.state;
       sp.badge.setText(a.state === "BLOCKED" ? "!" : a.state === "WORKING" ? "…" : a.state === "TESTING" ? "⚗" : "");
       sp.badge.setColor(a.state === "BLOCKED" ? "#f87171" : a.state === "TESTING" ? "#38bdf8" : "#e2e8f0");
-      sp.label.setText(a.name.replace(" Loompa", ""));
+      sp.label.setText(loompaName(a.name));
       this.tweens.add({ targets: sp.root, x: seat.x, y: seat.y, duration: 900, ease: "Sine.easeInOut" });
     });
     this.sprites.forEach((sp, name) => {

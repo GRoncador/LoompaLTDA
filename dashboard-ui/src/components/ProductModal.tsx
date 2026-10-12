@@ -102,7 +102,7 @@ function PhaseForm({ slug, phase, busy, run }: { slug: string; phase: ProductPha
       <label className="block text-xs text-slate-400">Critério de saída (ex.: “10 pessoas usando por 2 semanas”)
         <input className={field} value={exit} onChange={(e) => setExit(e.target.value)} />
       </label>
-      {phase.measure && <p className="text-xs text-slate-400">Como medir (Metrics Loompa): {phase.measure}</p>}
+      {phase.measure && <p className="text-xs text-slate-400">Como medir (Analista de Dados): {phase.measure}</p>}
       <label className="block text-xs text-slate-400">O que você sabe de fora da fábrica (usuários, conversão, receita)
         <textarea className={field} rows={2} value={facts} onChange={(e) => setFacts(e.target.value)} />
       </label>

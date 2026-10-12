@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { TraceDetail, TraceRun, TraceSpan } from "../types";
+import { loompaName } from "../names";
 
 export default function AgentTrace({ slug, id, live = false }: { slug: string; id: string; live?: boolean }) {
   const [data, setData] = useState<TraceRun | null>(null);
@@ -107,7 +108,7 @@ function summary(s: TraceSpan): string {
   if (s.kind === "llm") {
     const model = String(a.model ?? "?").split("/").pop();
     const parts = [
-      `${a.agent ?? ""} · ${model}${a.responded ? ` → ${a.responded}` : ""}`,
+      `${loompaName(String(a.agent ?? ""))} · ${model}${a.responded ? ` → ${a.responded}` : ""}`,
       `entrada ${k(a.input_tokens)}${a.cached_tokens ? ` (cache ${k(a.cached_tokens)})` : ""}`,
       `saída ${k(a.output_tokens)}${a.reasoning_tokens ? ` (raciocínio ${k(a.reasoning_tokens)})` : ""}`,
       a.cost_usd ? `US$ ${Number(a.cost_usd).toFixed(4)}` : "",

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Modal } from "./Modal";
 import { Icon } from "./Icon";
+import { loompaName, ROLE_NAME } from "../names";
 
 type Row = { key: string; cost_usd: number; calls: number; input_tokens?: number; output_tokens?: number };
 type Day = { day: string; cost_usd: number; calls: number };
@@ -120,10 +121,8 @@ function Table({ rows, head, valueHead = "Custo", fmt = usd }: { rows: { k: stri
   );
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  master: "Master", product: "Analyst (spec)", product_owner: "Product Owner", architect: "Architect", worker: "Worker",
-  inspector: "Inspector", deployer: "Deployer", analyst: "Analyst (pesquisa)", kaizen: "Kaizen", ops: "Ops",
-};
+// spec and research are one Analista with two roles; costs keep them apart (ADR-0045)
+const ROLE_LABEL: Record<string, string> = { ...ROLE_NAME, product: "Analista (spec)", analyst: "Analista (pesquisa)" };
 
 export default function FinanceModal({ slug, onClose }: { slug: string; onClose: () => void }) {
   const [data, setData] = useState<Finance | null>(null);
@@ -168,8 +167,8 @@ export default function FinanceModal({ slug, onClose }: { slug: string; onClose:
               <h4 className="mb-1 text-sm font-semibold text-slate-200">O que as ferramentas trouxeram para o contexto · {period}</h4>
               <p className="mb-2 text-[11px] text-slate-500">Tokens de leitura por Loompa e ferramenta; é daqui que vem a maior parte do custo de entrada.</p>
               {asTable
-                ? <Table head="Loompa · ferramenta" valueHead="Tokens" fmt={(v) => v.toLocaleString("pt-BR")} rows={data.by_tool.map((r) => ({ k: `${r.agent} · ${r.tool}`, cost: r.tokens, calls: r.calls }))} />
-                : <Bars rows={data.by_tool.map((r) => ({ key: `${r.agent} · ${r.tool}`, cost_usd: r.tokens, calls: r.calls }))} label={(k) => k.replace(" Loompa", "")} fmt={(v) => (v < 1000 ? `${v} tokens` : `${(v / 1000).toFixed(1)} mil tokens`)} />}
+                ? <Table head="Loompa · ferramenta" valueHead="Tokens" fmt={(v) => v.toLocaleString("pt-BR")} rows={data.by_tool.map((r) => ({ k: `${loompaName(r.agent)} · ${r.tool}`, cost: r.tokens, calls: r.calls }))} />
+                : <Bars rows={data.by_tool.map((r) => ({ key: `${loompaName(r.agent)} · ${r.tool}`, cost_usd: r.tokens, calls: r.calls }))} label={(k) => k} fmt={(v) => (v < 1000 ? `${v} tokens` : `${(v / 1000).toFixed(1)} mil tokens`)} />}
             </section>
           )}
           {data.suggestions.length > 0 && (

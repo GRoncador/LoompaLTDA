@@ -137,7 +137,7 @@ export default function App() {
         <div className="flex items-center gap-3 bg-sky-900/60 px-4 py-2 text-sm text-sky-100">
           <span>
             {ready.kind === "brainstorm"
-              ? (ready.failed ? "O Master Loompa não conseguiu concluir a reflexão do brainstorm." : "O brainstorm está pronto para conferir ideias e pareceres.")
+              ? (ready.failed ? "O Diretor não conseguiu concluir a reflexão do brainstorm." : "O brainstorm está pronto para conferir ideias e pareceres.")
               : (ready.failed ? "O Product Owner não conseguiu montar a sugestão do próximo sprint." : "A sugestão do Product Owner para o próximo sprint está pronta.")}
           </span>
           <button className="btn-primary px-2 py-0.5 text-xs" onClick={() => { resumeConversation(ready.id); setReady(null); }}>

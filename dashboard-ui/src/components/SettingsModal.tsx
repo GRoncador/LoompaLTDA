@@ -406,17 +406,20 @@ const PROVIDER_NOTE: Record<string, string> = {
 // ------------------------------------------------------------------- tiers + roles
 
 const ROLE_DISPLAY: Record<string, string> = {
-  master: "Master (COO)",
-  architect: "Architect (Tech Lead)",
-  product: "Analyst (Spec)",
+  master: "Diretor (COO)",
+  architect: "Arquiteto (Tech Lead)",
+  product: "Analista (Spec)",
   product_owner: "Product Owner (PO)",
-  analyst: "Analyst (Pesquisa)",
-  worker: "Worker (Engenharia)",
-  inspector: "Inspector (QA Judge)",
+  product_manager: "Gerente de Produto",
+  analyst: "Analista (Pesquisa)",
+  worker: "Programador (Engenharia)",
+  inspector: "Revisor (QA)",
   deployer: "Deployer (Entrega)",
   compliance: "Compliance",
-  metrics: "Metrics",
-  storyteller: "Storyteller",
+  metrics: "Analista de Dados",
+  storyteller: "Redator",
+  designer: "Designer",
+  ux: "UX",
 };
 
 // Deterministic backend engine services ($0 AI) excluded from AI LLM role mapping
@@ -427,7 +430,7 @@ const CLUSTERS_CONFIG = [
     key: "strategy",
     label: "Estratégia & Produto",
     icon: "landmark",
-    roles: ["Master", "Architect", "Product Owner", "Analyst"],
+    roles: ["Diretor", "Arquiteto", "Product Owner", "Analista"],
     weights: [
       { label: "INTEL", pct: "50%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
       { label: "CODE", pct: "30%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
@@ -438,7 +441,7 @@ const CLUSTERS_CONFIG = [
     key: "engineering",
     label: "Engenharia de Código",
     icon: "settings",
-    roles: ["Worker (Dev)", "Inspector (QA Judge)"],
+    roles: ["Programador", "Revisor"],
     weights: [
       { label: "CODE", pct: "60%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
       { label: "AGENTIC", pct: "30%", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
@@ -449,7 +452,7 @@ const CLUSTERS_CONFIG = [
     key: "routine",
     label: "Rotina & Suporte",
     icon: "clipboard",
-    roles: ["Deployer", "Storyteller", "Compliance", "Metrics"],
+    roles: ["Deployer", "Redator", "Compliance", "Analista de Dados"],
     weights: [
       { label: "AGENTIC", pct: "55%", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
       { label: "INTEL", pct: "30%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
@@ -1668,7 +1671,7 @@ function AATable({ picks, onUse }: { picks: AAPick[]; onUse?: (p: AAPick) => voi
             <th className="py-1 pr-2">#</th><th className="pr-2">modelo</th><th className="pr-2">esforço</th><th className="pr-2">nota</th>
             <th className="pr-2">US$/mi</th><th className="pr-2" title="Pontos de nota por dólar por milhão de tokens">pts/$</th>
             <th className="pr-2" title="Velocidade de saída medida pela Artificial Analysis (mediana, tokens por segundo); — quando ela não informa">tok/s</th>
-            <th className="pr-2">na casa (Worker)</th><th className="pr-2">rota OpenRouter</th>{onUse && <th />}
+            <th className="pr-2">na casa (Programador)</th><th className="pr-2">rota OpenRouter</th>{onUse && <th />}
           </tr>
         </thead>
         <tbody>

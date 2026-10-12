@@ -6,10 +6,7 @@ export const ROLE_COLOR: Record<string, string> = {
   deployer: "#f472b6", storyteller: "#fb7185", metrics: "#94a3b8", compliance: "#c084fc", analyst: "#2dd4bf",
 };
 
-export const ROLE_NAME: Record<string, string> = {
-  master: "Master", product: "Analyst", product_owner: "Product Owner", architect: "Architect", worker: "Worker",
-  inspector: "Inspector", deployer: "Deployer", analyst: "Analyst", founder: "Você", factory: "Fábrica",
-};
+export { ROLE_NAME } from "../names";
 
 /** A tiny Loompa (hair, face, body in the role's colour); `busy` adds the pulsing dot. `lg` is
  * the double size, for the card's corner, where the figure stands beside two lines of text. */

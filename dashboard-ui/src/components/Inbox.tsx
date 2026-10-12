@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Message } from "../types";
 import { DesignScreens } from "./DesignScreens";
 import { Icon } from "./Icon";
+import { loompaName } from "../names";
 
 const KIND: Record<Message["kind"], { label: string; cls: string }> = {
   decision: { label: "Decisão", cls: "bg-violet-900/60 text-violet-200" },
@@ -214,7 +215,7 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
             </div>
           )}
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-            <span>{m.sender}{m.story_id && <> · <button className="text-sky-300 hover:underline" onClick={() => onOpenStory(m.story_id!)}>{m.story_id}</button></>}</span>
+            <span>{loompaName(m.sender)}{m.story_id && <> · <button className="text-sky-300 hover:underline" onClick={() => onOpenStory(m.story_id!)}>{m.story_id}</button></>}</span>
             <button className="hover:text-slate-300" onClick={() => onArchive(m)}>arquivar</button>
           </div>
         </>

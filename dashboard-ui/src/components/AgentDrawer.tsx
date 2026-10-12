@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "./Icon";
 import { ProviderIcon, cleanModelId } from "./ProviderIcon";
+import { loompaName } from "../names";
 
 const CLUSTER_LABELS: Record<string, string> = {
   strategy: "Estratégia & Produto (50% INTEL · 30% CODE · 20% AGENTIC)",
@@ -14,7 +15,7 @@ export default function AgentDrawer({ slug, name, onClose, onOpenStory }: { slug
   const [saving, setSaving] = useState(false);
   useEffect(() => { api.agent(slug, name).then(setData).catch(() => setData(null)); const t = setInterval(() => api.agent(slug, name).then(setData).catch(() => {}), 5000); return () => clearInterval(t); }, [slug, name]);
   return (
-    <Drawer title={name} onClose={onClose}>
+    <Drawer title={loompaName(name)} onClose={onClose}>
       {!data ? <p className="text-sm text-slate-400">carregando…</p> : (
         <div className="space-y-3 text-sm">
           <Row k="Papel" v={data.role} />

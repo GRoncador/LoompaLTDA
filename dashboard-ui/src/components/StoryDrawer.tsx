@@ -97,7 +97,7 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
               );
             })}{blockers.length && s.waiting?.label ? <span className="text-red-300">· {s.waiting.label}</span> : null}</span>} />}
             {s.blocked_reason && <Row k="Esperando você" v={<span className="text-amber-200">{BLOCKED_LABEL[s.blocked_reason] ?? s.blocked_reason}</span>} />}
-            {st.qa_verdict && <Row k="Veredito do Inspector" v={
+            {st.qa_verdict && <Row k="Veredito do Revisor" v={
               <span className={st.qa_verdict === "FAIL" ? "text-red-300" : st.qa_verdict === "CONCERNS" ? "text-orange-200" : "text-slate-200"}>
                 {QA_LABEL[st.qa_verdict] ?? st.qa_verdict}
                 {(st.qa_findings ?? []).length > 0 && (
@@ -134,7 +134,7 @@ const TAB_LABEL: Record<string, string> = { details: "detalhes", diff: "mudança
 
 const TAB_HINT: Record<string, string> = {
   details: "Etapa, custo, tentativas, dependências e as notas do Product Owner",
-  spec: "O que a história precisa entregar", plan: "Como o Architect decidiu fazer",
+  spec: "O que a história precisa entregar", plan: "Como o Arquiteto decidiu fazer",
   tasks: "A lista de tarefas e o que já foi feito", research: "O relatório da pesquisa",
   diff: "O código que esta história mudou", log: "O que aconteceu em cada etapa",
   agent: "Bastidores: cada consulta ao modelo e cada ferramenta usada, com o que foi enviado e recebido",

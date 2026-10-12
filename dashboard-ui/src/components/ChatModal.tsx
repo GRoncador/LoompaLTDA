@@ -3,17 +3,18 @@ import { api } from "../api";
 import type { ChatReply, Consultant, Conversation, ConversationKind, DraftItem, Kickoff, MeetingMode, Opinion, ProductEpic, SprintContext } from "../types";
 import { Modal } from "./Modal";
 import { Icon } from "./Icon";
+import { loompaName, ROLE_NAME } from "../names";
 
 const COPY: Record<ConversationKind, { title: React.ReactNode; hint: string; placeholder: string; agent: string }> = {
   meeting: {
-    title: <><Icon name="calendar" /> Reunião de Sprint com o Master Loompa</>,
-    hint: "O Master abre com o estado do projeto. Conte o que você quer fazer; quando o rascunho estiver bom, o Product Owner propõe o sprint e você aprova ou ajusta antes de começar.",
+    title: <><Icon name="calendar" /> Reunião de Sprint com o Diretor</>,
+    hint: "O Diretor abre com o estado do projeto. Conte o que você quer fazer; quando o rascunho estiver bom, o Product Owner propõe o sprint e você aprova ou ajusta antes de começar.",
     placeholder: "Ex.: Hoje quero a recuperação de senha pronta; refatorar o webhook de cobrança; e um relatório mensal em CSV.",
     agent: "Master Loompa",
   },
   brainstorm: {
-    title: <><Icon name="lightbulb" /> Brainstorm com o Master Loompa</>,
-    hint: "Pense em voz alta. O Master chama o Analyst ou o Architect quando a ideia pede, e os pareceres voltam preliminares. Aprove o rumo (1º OK), o Product Owner propõe os cards e você grava (2º OK).",
+    title: <><Icon name="lightbulb" /> Brainstorm com o Diretor</>,
+    hint: "Pense em voz alta. O Diretor chama o Analista ou o Arquiteto quando a ideia pede, e os pareceres voltam preliminares. Aprove o rumo (1º OK), o Product Owner propõe os cards e você grava (2º OK).",
     placeholder: "Ex.: Como podemos tornar o primeiro acesso dos clientes mais simples?",
     agent: "Master Loompa",
   },
@@ -104,7 +105,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
       if (initialText && initialText.trim()) {
         opening.current = true;
         setPending(initialText.trim());
-        run(() => api.openConversation(slug, "brainstorm", initialText.trim()), "Master Loompa está pensando").then(() => {
+        run(() => api.openConversation(slug, "brainstorm", initialText.trim()), "O Diretor está pensando").then(() => {
           setPending(null);
         });
       } else if (kickoff) {
@@ -132,7 +133,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
     const t = customText.trim();
     if (!t || busy) return;
     setText(""); setPending(t);
-    const ok = await run(() => (conv ? api.say(slug, conv.id, t) : api.openConversation(slug, kind, t)), `${copy.agent} está pensando`);
+    const ok = await run(() => (conv ? api.say(slug, conv.id, t) : api.openConversation(slug, kind, t)), `${loompaName(copy.agent)} está pensando`);
     setPending(null);
     if (!ok) setText(t);
   };
@@ -200,7 +201,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   const approve = () => conv && run(() => api.approve(slug, conv.id), "O Product Owner está dividindo o rumo em cards");
   const reopen = () => conv && run(() => api.reopen(slug, conv.id));
   // plan 16.2: the Analyst's cited competitors, then the PM's Lean Canvas and hypotheses
-  const discover = () => conv && run(() => api.discover(slug, conv.id) as never, "O Analyst pesquisa concorrentes e o PM escreve a descoberta");
+  const discover = () => conv && run(() => api.discover(slug, conv.id) as never, "O Analista pesquisa concorrentes e o Gerente de Produto escreve a descoberta");
   const editSplit = (ops: Record<string, unknown>[]) => conv && run(() => api.editDraft(slug, conv.id, ops, true));
   const toBrainstorm = async () => {
     if (!conv) return;
@@ -252,7 +253,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                   <div className="rounded-md border border-brand/40 bg-brand/10 p-2.5 text-xs">
                     <div className="flex items-center gap-1.5 font-semibold text-brand"><Icon name="lightbulb" className="h-3.5 w-3.5" />Brainstorm focado em um Épico ativo</div>
                     <p className="mt-0.5 text-slate-300">
-                      Selecione um épico para iniciar o brainstorm com o Master Loompa propondo a direção e as ideias que faltam para concluí-lo:
+                      Selecione um épico para iniciar o brainstorm com o Diretor propondo a direção e as ideias que faltam para concluí-lo:
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {activeEpics.map((ep) => (
@@ -274,7 +275,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                 )}
               </div>
             )}
-            {conv?.turns.map((t, i) => <Bubble key={i} who={t.who} name={t.name || copy.agent} text={t.text} changes={t.changes} />)}
+            {conv?.turns.map((t, i) => <Bubble key={i} who={t.who} name={loompaName(t.name || copy.agent)} text={t.text} changes={t.changes} />)}
             {pending && <Bubble who="founder" name="" text={pending} changes={[]} />}
             {busy && waitingFor && <p className="text-xs text-slate-500">{waitingFor}…</p>}
             {remote && !busy && <p className="text-xs text-slate-500">O Product Owner está montando a proposta…</p>}
@@ -365,7 +366,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                         <span className="font-mono text-slate-400">{g.ref}</span>{" "}
                         {g.action === "merge" ? `junta-se a ${g.into}` : g.action === "split" ? `divide-se em ${g.parts.length} cards (${g.parts.map((p) => p.title).join("; ")})` : "sai do backlog"}
                         {g.reason ? ` · ${g.reason}` : ""}
-                        {g.held ? <span className="text-slate-500"> · o Master preferiu perguntar: {g.held}</span> : null}
+                        {g.held ? <span className="text-slate-500"> · o Diretor preferiu perguntar: {g.held}</span> : null}
                       </span>
                       <span className="flex flex-shrink-0 gap-1">
                         <button className="btn-primary px-1.5 py-0 text-[11px]" disabled={!open || busy} onClick={() => edit([{ op: "groom", ref: g.ref, accept: true }])}>aceitar</button>
@@ -438,7 +439,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   );
 }
 
-const ROLE_LABEL: Record<string, string> = { analyst: "Analyst", architect: "Architect" };
+const ROLE_LABEL: Record<string, string> = { analyst: ROLE_NAME.analyst, architect: ROLE_NAME.architect };
 
 /** Plan 10.10: what the opening of a new factory must settle besides the direction and the ideas
  *  (the v1 features): the vision, what stays out of v1 and the stack the founder picks. */
@@ -449,7 +450,7 @@ function KickoffBox({ k, editable, onEdit }: { k: Kickoff; editable: boolean; on
       <div><span className="text-slate-500">Visão: </span>{k.vision || <span className="text-slate-500">ainda não definida</span>}</div>
       {k.out_of_v1.length > 0 && <div><span className="text-slate-500">Fora da v1: </span>{k.out_of_v1.join("; ")}</div>}
       {k.stacks.length === 0 ? (
-        <div className="text-slate-500">Stack: o Architect propõe quando a visão e a primeira versão estiverem claras.</div>
+        <div className="text-slate-500">Stack: o Arquiteto propõe quando a visão e a primeira versão estiverem claras.</div>
       ) : (
         <div className="space-y-1">
           <div className="text-[10px] uppercase tracking-wide text-slate-500">Stack{k.applied ? " · gravada na fábrica" : ""}</div>
@@ -511,7 +512,7 @@ function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, o
         ) : (
           <>
             <div className={`rounded-md border p-2 ${draft?.ready ? "border-emerald-700/70 bg-emerald-950/30" : "border-line bg-panel"}`}>
-              <div className="text-[10px] uppercase tracking-wide text-slate-500">Rumo{draft?.ready ? " · o Master acha que está claro" : ""}</div>
+              <div className="text-[10px] uppercase tracking-wide text-slate-500">Rumo{draft?.ready ? " · o Diretor acha que está claro" : ""}</div>
               <div className="mt-0.5 whitespace-pre-wrap text-slate-100">{draft?.direction || <span className="text-slate-500">Ainda sem rumo. Conte a ideia na conversa.</span>}</div>
             </div>
             {draft?.kickoff && <KickoffBox k={draft.kickoff} editable={editable} onEdit={onEdit} />}
@@ -574,7 +575,7 @@ function OpinionCard({ o, editable, onEdit }: { o: Opinion; editable: boolean; o
         </button>
         {!o.failed && (
           <button className="text-[10px] text-slate-500 hover:text-amber-300 disabled:opacity-40" disabled={!editable}
-            title={o.dismissed ? "Trazer de volta à conversa" : "Deixar de lado: o Master para de considerar"}
+            title={o.dismissed ? "Trazer de volta à conversa" : "Deixar de lado: o Diretor para de considerar"}
             onClick={() => onEdit([{ op: o.dismissed ? "restore" : "dismiss", ref: o.key }])}>{o.dismissed ? "retomar" : "deixar de lado"}</button>
         )}
       </div>

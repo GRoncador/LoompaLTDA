@@ -1,6 +1,7 @@
 import LoompaFigure from "./LoompaFigure";
 import type { Agent, LoompaEvent } from "../types";
 import { Icon, type IconName } from "./Icon";
+import { loompaName } from "../names";
 
 const I = (name: IconName) => <Icon name={name} className="h-3 w-3" />;
 const LABEL: Record<string, React.ReactNode> = {
@@ -18,7 +19,7 @@ export default function EventTicker({ events, agents = [], factory = "" }: { eve
       {last.map((e, i) => (
         <span key={`${e.id ?? i}-${i}`} className="flex items-center gap-1 whitespace-nowrap">
           {e.agent && roleOf.has(e.agent) ? <LoompaFigure role={roleOf.get(e.agent)!} /> : <span>{LABEL[e.type] ?? "•"}</span>}
-          {e.agent ? e.agent.replace(/ Loompa$/, "") : ""}
+          {loompaName(e.agent)}
           {e.story_id && <b className="font-semibold text-slate-300">{e.story_id}</b>}
           <span>: {summarize(e, factory)}</span>
         </span>

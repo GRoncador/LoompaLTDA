@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import LoompaFigure from "./LoompaFigure";
 import type { Agent, Column, ConversationKind, ConversationSummary, QuickStoryResult, SprintSummary, StoryActivity, StoryCard } from "../types";
 import { Icon, type IconName } from "./Icon";
+import { loompaName } from "../names";
 
 const TONE: Record<string, string> = {
   BACKLOG: "border-slate-600", SPEC: "border-violet-500", DEV: "border-emerald-500", TEST: "border-sky-500", AWAITING_FOUNDER: "border-amber-500", DONE: "border-slate-500",
@@ -164,7 +165,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
           <button className={`${tone("meeting")} text-xs`} disabled={kickoff || backlogEmpty}
             title={kickoff ? "Comece pelo brainstorm de abertura: ele decide a visão, a primeira versão e a stack"
               : backlogEmpty ? "O Backlog está vazio: comece por um brainstorm ou uma história rápida"
-              : "O Master abre com o estado do projeto; o Product Owner propõe o sprint"}
+              : "O Diretor abre com o estado do projeto; o Product Owner propõe o sprint"}
             onClick={() => onChat("meeting")}><Icon name="calendar" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Reunião de Sprint</button>
         </div>
       </div>
@@ -297,7 +298,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
     alerts.push({
       text: kinds.length ? `ressalvas · ${kinds[0]}` : "ressalvas",
       cls: open ? "bg-orange-900/50 text-orange-200" : "bg-slate-800 text-slate-400",
-      title: `O Inspector aprovou com ressalvas${kinds.length ? ` (${kinds.map((k) => FINDING[k] ?? k).join(", ")})` : ""}: achados de severidade média ou baixa, que não impedem a entrega. Os médios viram oportunidades do Kaizen.`,
+      title: `O Revisor aprovou com ressalvas${kinds.length ? ` (${kinds.map((k) => FINDING[k] ?? k).join(", ")})` : ""}: achados de severidade média ou baixa, que não impedem a entrega. Os médios viram oportunidades do Kaizen.`,
     });
   }
   // past the per-story cap the card stops and waits for the founder: the number says so first
@@ -406,9 +407,9 @@ function Avatar({ agent, tier, model }: { agent: Agent; tier?: string; model?: s
   return (
     // two lines of text with the figure standing beside them, as tall as both
     <span className="flex min-w-0 shrink-0 items-end gap-1.5 text-[10px] text-slate-300"
-      title={`${agent.name} está com este card${tier ? ` · ${TIER_NAME[tier] ?? tier}` : ""}${model ? ` · ${model}` : ""}${agent.detail ? ` · ${agent.detail}` : ""}`}>
+      title={`${loompaName(agent.name)} está com este card${tier ? ` · ${TIER_NAME[tier] ?? tier}` : ""}${model ? ` · ${model}` : ""}${agent.detail ? ` · ${agent.detail}` : ""}`}>
       <span className="flex min-w-0 flex-col items-end">
-        <span className="whitespace-nowrap">{tier ? `(${TIER_SHORT[tier] ?? tier}) ` : ""}{agent.name.replace(/ Loompa$/, "")}</span>
+        <span className="whitespace-nowrap">{tier ? `(${TIER_SHORT[tier] ?? tier}) ` : ""}{loompaName(agent.name)}</span>
         {short && <span className="break-all text-right text-slate-500">{short}</span>}
       </span>
       <LoompaFigure role={agent.role} lg={!!short} />
@@ -497,7 +498,7 @@ const STAGE_TAG: Record<string, { text: string; cls: string; title: string }> = 
   SPEC: { text: "spec", cls: "bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/40", title: "Escrevendo a especificação" },
   PLAN: { text: "plano", cls: "bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-500/40", title: "Quebrando a história em tarefas" },
   DEV: { text: "dev", cls: "bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40", title: "Escrevendo o código" },
-  TEST: { text: "teste", cls: "bg-sky-500/20 text-sky-300 ring-1 ring-sky-500/40", title: "O Inspector está conferindo" },
+  TEST: { text: "teste", cls: "bg-sky-500/20 text-sky-300 ring-1 ring-sky-500/40", title: "O Revisor está conferindo" },
   REVIEW: { text: "entrega", cls: "bg-teal-500/20 text-teal-300 ring-1 ring-teal-500/40", title: "O Deployer está entregando" },
 };
 

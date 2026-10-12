@@ -381,7 +381,7 @@ function ColumnChart({ items, fmt, onPick }: { items: { key: string; value: numb
 function Unplanned({ report, onOpenStory }: { report: SprintReport; onOpenStory: (id: string) => void }) {
   const un = report.unplanned, later = report.later;
   const tasks = un.tasks_added;
-  const ORIGIN: Record<string, string> = { replan: "replanejamento", preflight: "pré-checagem de risco", founder: "ajuste pedido por você", inspector: "correção pedida pelo Inspector" };
+  const ORIGIN: Record<string, string> = { replan: "replanejamento", preflight: "pré-checagem de risco", founder: "ajuste pedido por você", inspector: "correção pedida pelo Revisor" };
   return (
     <div className="grid gap-5 md:grid-cols-2">
       <section>
@@ -390,7 +390,7 @@ function Unplanned({ report, onOpenStory }: { report: SprintReport; onOpenStory:
           {un.joined.map((j) => <li key={j.id}><button className="text-brand hover:underline" onClick={() => onOpenStory(j.id)}>{j.id}</button> · {j.title} entrou no meio do sprint ({j.how}).</li>)}
           {tasks == null ? <li className="text-slate-500">Tarefas acrescentadas depois do plano: {NOT_MEASURED}.</li>
             : Object.entries(tasks).map(([o, n]) => <li key={o}>{n} {n === 1 ? "tarefa acrescentada" : "tarefas acrescentadas"} depois do plano: {ORIGIN[o] ?? o}.</li>)}
-          {un.extra_review_rounds > 0 && <li>{un.extra_review_rounds} {un.extra_review_rounds === 1 ? "rodada extra" : "rodadas extras"} de revisão do Inspector.</li>}
+          {un.extra_review_rounds > 0 && <li>{un.extra_review_rounds} {un.extra_review_rounds === 1 ? "rodada extra" : "rodadas extras"} de revisão do Revisor.</li>}
           {un.spec_rejections > 0 && <li>{un.spec_rejections} {un.spec_rejections === 1 ? "especificação devolvida" : "especificações devolvidas"} pelo Product Owner.</li>}
           {un.replans > 0 && <li>{un.replans} {un.replans === 1 ? "replanejamento" : "replanejamentos"}.</li>}
           {un.restarts > 0 && <li>{un.restarts} {un.restarts === 1 ? "história recomeçada" : "histórias recomeçadas"} do zero.</li>}
