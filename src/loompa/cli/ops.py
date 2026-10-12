@@ -823,6 +823,9 @@ def dashboard(
     url = f"http://{ref_host}:{ref_port}"
     # a terminal link (OSC 8) where the terminal supports it: a click opens the browser
     console.print(Panel.fit(f"[bold]Loompa LTDA[/bold] → [link={url}]{url}[/link]"))
+    # the same address in plain text, outside the box: terminals that do not draw OSC 8 links
+    # (Terminal.app) still detect it, so Cmd+click works there
+    console.print(url, highlight=False)
     uvicorn.run(
         create_app(dry_run=dry_run, run_engine=not no_engine),
         host=ref_host,
