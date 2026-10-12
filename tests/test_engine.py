@@ -2113,3 +2113,13 @@ async def test_the_same_cause_twice_is_a_repeat_whatever_the_words(factory: Fact
     assert "mesmo problema voltou" in last.title.lower() or "mesmo problema" in last.context
     assert [o.key for o in last.options] == ["skip", "drop", "retry"]
     await ctx.aclose()
+
+
+def test_state_with_process_learning_reloads() -> None:
+    """A review-concern learning carries `process: True`; the saved state must load back (S-090)."""
+    from loompa.engine.state import StoryState
+
+    state = StoryState(story_id="S-1", title="t", stage=Stage.SPEC)
+    state.learnings.append({"kind": "opportunity", "title": "x", "process": True, "detail": "d"})
+    row = {"id": "S-1", "title": "t", "stage": "SPEC", "state": json.loads(state.model_dump_json())}
+    assert StoryState.from_row(row).learnings[0]["process"] is True

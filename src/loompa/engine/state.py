@@ -128,7 +128,7 @@ class StoryState(BaseModel):
     merged_sha: str | None = None
     delivery_summary: str = ""
 
-    learnings: list[dict[str, str]] = Field(default_factory=list)
+    learnings: list[dict[str, Any]] = Field(default_factory=list)  # {kind, title, detail, process?: bool}
     finding_cards: list[str] = Field(default_factory=list)  # backlog cards this story raised
     extra: dict[str, Any] = Field(default_factory=dict)
 
