@@ -4,6 +4,7 @@ import type { FactoryKind, Settings, SettingsPatch } from "../types";
 import { Modal } from "./Modal";
 import { KindPicker } from "./KindPicker";
 import { ProvidersPanel } from "./SettingsModal";
+import { Icon } from "./Icon";
 
 export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: string) => void }) {
   const [folder, setFolder] = useState("");
@@ -99,7 +100,7 @@ export default function NewFactoryModal({ onClose }: { onClose: (createdSlug?: s
         <div className="scroll-thin max-h-[70vh] space-y-3 overflow-y-auto text-sm">
           <p className="text-slate-400">Cole a chave dos provedores que quiser usar e teste a conexão. Sem chave, a fábrica roda em simulação.</p>
           {err && <p className="text-xs text-red-300">{err}</p>}
-          {notes.length > 0 && <p className="text-xs text-emerald-300">✔ {notes.join(" · ")}</p>}
+          {notes.length > 0 && <p className="flex items-center text-xs text-emerald-300"><Icon name="check" className="mr-1 h-3 w-3" />{notes.join(" · ")}</p>}
           {settings ? <ProvidersPanel slug={slug} s={settings} onSave={save} /> : <p className="text-slate-400">carregando…</p>}
           <div className="text-right"><button className="btn-primary" onClick={() => onClose(slug)}>Abrir fábrica</button></div>
         </div>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 
 type Row = { key: string; cost_usd: number; calls: number; input_tokens?: number; output_tokens?: number };
 type Day = { day: string; cost_usd: number; calls: number };
@@ -132,7 +133,7 @@ export default function FinanceModal({ slug, onClose }: { slug: string; onClose:
   const days = useMemo(() => lastDays(data?.by_day ?? []), [data]);
   const period = data?.period.name === "weekly" ? "nesta semana" : "neste mês";
   return (
-    <Modal title="💰 Custos" onClose={onClose} wide>
+    <Modal title={<><Icon name="wallet" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Custos</>} onClose={onClose} wide>
       {error && <p className="text-sm text-red-300">{error}</p>}
       {!data && !error && <p className="text-sm text-slate-400">carregando…</p>}
       {data && (

@@ -3,8 +3,16 @@ import type { TraceDetail, TraceOutline } from "./types";
 import type { DesignOverview, DesignReference, GrowthView, ImageSuggestion, ProductView, StoryDesign } from "./types";
 import type { ChatReply, SprintListItem, SprintReport, ConversationKind, FactoryRef, Message, ModelProposalDTO, Overview, ProbeResult, QuickStoryResult, Settings, SettingsPatch } from "./types";
 
+/** The backend did not answer at all (terminal closed, server stopped, network down). */
+export class BackendOfflineError extends Error {}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
+  let r: Response;
+  try {
+    r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
+  } catch {
+    throw new BackendOfflineError("sem resposta do servidor");
+  }
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return (await r.json()) as T;
 }

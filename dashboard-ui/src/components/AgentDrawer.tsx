@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { Icon } from "./Icon";
 import { ProviderIcon, cleanModelId } from "./ProviderIcon";
 
 const CLUSTER_LABELS: Record<string, string> = {
-  strategy: "🏛️ Estratégia & Produto (50% INTEL · 30% CODE · 20% AGENTIC)",
-  engineering: "⚙️ Engenharia de Código (60% CODE · 30% AGENTIC · 10% INTEL)",
-  routine: "📋 Rotina & Suporte (55% AGENTIC · 30% INTEL · 15% CODE)",
+  strategy: "Estratégia & Produto (50% INTEL · 30% CODE · 20% AGENTIC)",
+  engineering: "Engenharia de Código (60% CODE · 30% AGENTIC · 10% INTEL)",
+  routine: "Rotina & Suporte (55% AGENTIC · 30% INTEL · 15% CODE)",
 };
 
 export default function AgentDrawer({ slug, name, onClose, onOpenStory }: { slug: string; name: string; onClose: () => void; onOpenStory: (id: string) => void }) {
@@ -100,7 +101,7 @@ export function Drawer({ title, children, onClose, fill = false }: { title: stri
       <aside className={`h-full w-full border-l border-line bg-panel p-5 md:w-1/2 md:min-w-[40rem] ${fill ? "flex flex-col overflow-hidden" : "scroll-thin overflow-y-auto"}`} onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex shrink-0 items-center justify-between gap-3">
           <h3 className="text-base font-semibold">{title}</h3>
-          <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>
+          <button className="text-slate-400 hover:text-white" onClick={onClose}><Icon name="x" className="h-3.5 w-3.5" /></button>
         </div>
         {fill ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
       </aside>

@@ -2,22 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { ChatReply, Consultant, Conversation, ConversationKind, DraftItem, Kickoff, MeetingMode, Opinion, ProductEpic, SprintContext } from "../types";
 import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 
-const COPY: Record<ConversationKind, { title: string; hint: string; placeholder: string; agent: string }> = {
+const COPY: Record<ConversationKind, { title: React.ReactNode; hint: string; placeholder: string; agent: string }> = {
   meeting: {
-    title: "🗓 Reunião de Sprint com o Master Loompa",
+    title: <><Icon name="calendar" /> Reunião de Sprint com o Master Loompa</>,
     hint: "O Master abre com o estado do projeto. Conte o que você quer fazer; quando o rascunho estiver bom, o Product Owner propõe o sprint e você aprova ou ajusta antes de começar.",
     placeholder: "Ex.: Hoje quero a recuperação de senha pronta; refatorar o webhook de cobrança; e um relatório mensal em CSV.",
     agent: "Master Loompa",
   },
   brainstorm: {
-    title: "💡 Brainstorm com o Master Loompa",
+    title: <><Icon name="lightbulb" /> Brainstorm com o Master Loompa</>,
     hint: "Pense em voz alta. O Master chama o Analyst ou o Architect quando a ideia pede, e os pareceres voltam preliminares. Aprove o rumo (1º OK), o Product Owner propõe os cards e você grava (2º OK).",
     placeholder: "Ex.: Como podemos tornar o primeiro acesso dos clientes mais simples?",
     agent: "Master Loompa",
   },
   review: {
-    title: "📋 Revisão do pedido com o Product Owner",
+    title: <><Icon name="clipboard" /> Revisão do pedido com o Product Owner</>,
     hint: "O Product Owner não gravou o card. Esclareça ou corrija o pedido e ele revê; se mesmo assim quiser o card, a palavra final é sua.",
     placeholder: "Explique melhor o pedido…",
     agent: "Product Owner Loompa",
@@ -249,7 +250,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                 <p className="text-slate-500">{copy.placeholder}</p>
                 {current === "brainstorm" && activeEpics.length > 0 && (
                   <div className="rounded-md border border-brand/40 bg-brand/10 p-2.5 text-xs">
-                    <div className="font-semibold text-brand">💡 Brainstorm focado em um Épico ativo</div>
+                    <div className="flex items-center gap-1.5 font-semibold text-brand"><Icon name="lightbulb" className="h-3.5 w-3.5" />Brainstorm focado em um Épico ativo</div>
                     <p className="mt-0.5 text-slate-300">
                       Selecione um épico para iniciar o brainstorm com o Master Loompa propondo a direção e as ideias que faltam para concluí-lo:
                     </p>
@@ -285,7 +286,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
               {/* always at hand: the Product Owner's proposal reads the conversation so far */}
               {isMeeting && conv?.mode === "next" && (
                 <button className="btn-primary mb-2 w-full text-left" disabled={busy || remote} title="O Product Owner propõe o que entra no próximo sprint, a partir do backlog, do rascunho e do que já foi dito nesta conversa" onClick={propose}>
-                  📋 {reviewingPlanned && planned && !proposal ? `Revisar o ${planned.id} com o Product Owner` : proposal ? "Pedir nova sugestão ao Product Owner (considera a conversa)" : "Pedir a sugestão do Product Owner para o próximo sprint"}
+                  <Icon name="clipboard" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{reviewingPlanned && planned && !proposal ? `Revisar o ${planned.id} com o Product Owner` : proposal ? "Pedir nova sugestão ao Product Owner (considera a conversa)" : "Pedir a sugestão do Product Owner para o próximo sprint"}
                 </button>
               )}
               <textarea
@@ -296,7 +297,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                 className="w-full resize-none rounded-md border border-line bg-ink p-2 text-sm"
               />
               <div className="mt-1 flex items-center gap-2">
-                <button className={recording ? "btn bg-red-600 text-white" : "btn-ghost"} onClick={toggleRecord} disabled={busy}>{recording ? "⏹ Parar ditado" : "🎙 Ditar"}</button>
+                <button className={recording ? "btn bg-red-600 text-white" : "btn-ghost"} onClick={toggleRecord} disabled={busy}>{recording ? <><Icon name="stop" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Parar ditado</> : <><Icon name="mic" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Ditar</>}</button>
                 <div className="mx-auto" />
                 <button className="btn-primary" disabled={busy || !text.trim() || choosing} onClick={send}>Enviar</button>
               </div>
@@ -317,11 +318,11 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
           <section className="flex h-[52vh] flex-col justify-center gap-3 rounded-md border border-line bg-ink/40 p-4">
             <h4 className="text-sm font-semibold">Do que trata esta reunião?</h4>
             <button className="btn-primary text-left" disabled={busy} onClick={() => choose("current")}>
-              🔧 Ajustar o {running.id} em andamento
+              <Icon name="wrench" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Ajustar o {running.id} em andamento
               <span className="mt-0.5 block text-[11px] font-normal opacity-80">tirar ou incluir cards, recomeçar uma história, cancelar o sprint; discutir alternativas, dependências e bloqueios</span>
             </button>
             <button className="btn-ghost text-left" disabled={busy} onClick={() => choose("next")}>
-              🗓 Pré-montar o próximo sprint <span className="text-amber-300">(não recomendado)</span>
+              <Icon name="calendar" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Pré-montar o próximo sprint <span className="text-amber-300">(não recomendado)</span>
               <span className="mt-0.5 block text-[11px] font-normal text-slate-400">ele espera o {running.id} terminar e começa por uma nova reunião; o que este sprint ensinar ainda não entrou</span>
             </button>
             <button className="text-[11px] text-slate-500 hover:text-red-300" onClick={discard}>Descartar conversa</button>
@@ -390,7 +391,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
             {open && conv && isCurrent && (
               <div className="space-y-1 border-t border-line p-2">
                 <button className="btn-ghost w-full" disabled={busy || joining.length === 0 || !!conv.draft.cancel_sprint} title="O Product Owner avalia os cards que entrariam no sprint em andamento" onClick={propose}>
-                  📋 Pedir a avaliação do Product Owner{joining.length ? ` (${joining.length} entrando)` : ""}
+                  <Icon name="clipboard" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Pedir a avaliação do Product Owner{joining.length ? ` (${joining.length} entrando)` : ""}
                 </button>
                 <div className="flex gap-2">
                   <button className={conv.draft.cancel_sprint ? "btn-ghost flex-1" : "btn flex-1 border border-red-800 text-red-200 hover:bg-red-950"} disabled={busy}
@@ -407,7 +408,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
               <div className="space-y-1 border-t border-line p-2">
                 {isMeeting && (
                   <button className="btn-ghost w-full" disabled={busy} title="O Product Owner propõe o que entra no sprint, em que ordem e como os cards se relacionam" onClick={propose}>
-                    📋 {reviewingPlanned && planned ? `Revisar o ${planned.id} com o Product Owner` : proposal ? "Pedir nova proposta ao Product Owner" : "Pedir a proposta do Product Owner"}
+                    <Icon name="clipboard" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{reviewingPlanned && planned ? `Revisar o ${planned.id} com o Product Owner` : proposal ? "Pedir nova proposta ao Product Owner" : "Pedir a proposta do Product Owner"}
                   </button>
                 )}
                 <div className="flex gap-2">
@@ -417,7 +418,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                       {running ? (
                         <button className="btn-primary flex-1" disabled={busy || !canPlan} title={canPlan ? `Fica montado e espera o ${running.id} terminar` : startHint} onClick={async () => { if (await commit(false, false, true)) onClose(); }}>Salvar como próximo sprint</button>
                       ) : (
-                        <button className="btn-primary flex-1" disabled={busy || !canStart} title={startHint} onClick={async () => { if (await commit(true)) onClose(); }}>{reviewingPlanned && planned ? `Iniciar ${planned.id} ▶` : "Começar Sprint ▶"}</button>
+                        <button className="btn-primary flex-1" disabled={busy || !canStart} title={startHint} onClick={async () => { if (await commit(true)) onClose(); }}>{reviewingPlanned && planned ? <>Iniciar {planned.id} <Icon name="play" className="inline h-3 w-3 align-[-1px]" /></> : <>Começar Sprint <Icon name="play" className="inline h-3 w-3 align-[-1px]" /></>}</button>
                       )}
                     </>
                   ) : (
@@ -428,7 +429,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                 <button className="w-full text-[11px] text-slate-500 hover:text-red-300" title="Nada do rascunho é aplicado; a proposta em andamento é cancelada" onClick={discard}>{isMeeting ? "Descartar reunião e começar de novo" : "Descartar conversa"}</button>
               </div>
             )}
-            {done && conv?.result.created && !isCurrent && <p className="border-t border-line p-3 text-xs text-emerald-300">✔ {conv.result.created.length === 1 ? "1 nova história" : `${conv.result.created.length} novas histórias`}{conv.result.sprint_id ? ` · ${conv.result.sprint_id}` : ""}.</p>}
+            {done && conv?.result.created && !isCurrent && <p className="border-t border-line p-3 text-xs text-emerald-300"><Icon name="check" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{conv.result.created.length === 1 ? "1 nova história" : `${conv.result.created.length} novas histórias`}{conv.result.sprint_id ? ` · ${conv.result.sprint_id}` : ""}.</p>}
           </section>
         )}
       </div>
@@ -457,7 +458,7 @@ function KickoffBox({ k, editable, onEdit }: { k: Kickoff; editable: boolean; on
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium text-slate-100">{n === 0 ? "Recomendada" : "Alternativa"}: {opt.summary || [...opt.languages, ...opt.frameworks].join(", ")}</span>
                 {k.chosen === n + 1 ? (
-                  <span className="text-[11px] text-emerald-300">✔ escolhida</span>
+                  <span className="flex items-center text-[11px] text-emerald-300"><Icon name="check" className="mr-1 h-3 w-3" />escolhida</span>
                 ) : (
                   <button className="btn-ghost px-2 py-0 text-[11px]" disabled={!editable || k.applied} onClick={() => onEdit([{ op: "choose_stack", option: n + 1 }])}>Escolher</button>
                 )}
@@ -527,7 +528,7 @@ function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, o
           </>
         )}
         {done && conv?.result && (conv.result.created?.length || conv.result.amended?.length) ? (
-          <p className="text-emerald-300">✔ {[...(conv.result.created ?? []), ...(conv.result.amended ?? [])].join(", ")} no backlog.</p>
+          <p className="flex items-center text-emerald-300"><Icon name="check" className="mr-1 h-3.5 w-3.5" />{[...(conv.result.created ?? []), ...(conv.result.amended ?? [])].join(", ")} no backlog.</p>
         ) : null}
       </div>
       {open && (
@@ -545,15 +546,15 @@ function BrainstormPanel({ conv, consultants, busy, open, question, onConsult, o
           {split ? (
             <div className="flex gap-2">
               <button className="btn-ghost flex-1" disabled={busy} onClick={onReopen}>↩ Voltar à conversa</button>
-              <button className="btn-primary flex-1" disabled={busy || split.length === 0} title="2º OK: o Product Owner grava os cards no backlog" onClick={onCommit}>✅ Gravar no backlog</button>
+              <button className="btn-primary flex-1" disabled={busy || split.length === 0} title="2º OK: o Product Owner grava os cards no backlog" onClick={onCommit}><Icon name="check" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Gravar no backlog</button>
             </div>
           ) : (
             <button className={`w-full ${draft?.ready ? "btn-primary" : "btn-ghost"}`} disabled={busy || !conv || (ideas.length === 0 && !draft?.direction)}
-              title="1º OK: o rumo fica aprovado e o Product Owner propõe os cards" onClick={onApprove}>✅ Aprovar o rumo</button>
+              title="1º OK: o rumo fica aprovado e o Product Owner propõe os cards" onClick={onApprove}><Icon name="check" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Aprovar o rumo</button>
           )}
           {onDiscover && (
             <button className="btn-ghost w-full text-xs" disabled={busy || !conv || (ideas.length === 0 && !draft?.direction)}
-              title="Produto comercial: concorrentes com fontes, Lean Canvas e hipóteses, para você revisar na Caixa de Entrada" onClick={onDiscover}>🔎 Descoberta</button>
+              title="Produto comercial: concorrentes com fontes, Lean Canvas e hipóteses, para você revisar na Caixa de Entrada" onClick={onDiscover}><Icon name="search" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Descoberta</button>
           )}
           <button className="w-full text-[11px] text-slate-500 hover:text-red-300" disabled={busy || !conv} onClick={onDiscard}>Descartar conversa</button>
         </div>
@@ -613,7 +614,7 @@ function SplitCard({ item, editable, onEdit }: { item: DraftItem; editable: bool
         <select value={item.priority} disabled={!editable} title="Prioridade (1 = primeiro)" onChange={(e) => onEdit([{ op: "update", ref: item.key, priority: Number(e.target.value) }])} className="rounded border border-line bg-ink px-1 py-0.5 text-[11px]">
           {[1, 2, 3, 4, 5].map((p) => <option key={p} value={p}>P{p}</option>)}
         </select>
-        <button className="text-slate-500 hover:text-red-300 disabled:opacity-40" title="Tirar da proposta (as ideias dele continuam no brainstorm)" disabled={!editable} onClick={() => onEdit([{ op: "drop", ref: item.key }])}>✕</button>
+        <button className="text-slate-500 hover:text-red-300 disabled:opacity-40" title="Tirar da proposta (as ideias dele continuam no brainstorm)" disabled={!editable} onClick={() => onEdit([{ op: "drop", ref: item.key }])}><Icon name="x" className="h-3 w-3" /></button>
       </div>
     </li>
   );
@@ -642,12 +643,12 @@ function ReviewPanel({ conv, review, busy, open, founderTurns, onForce, onBrains
           </div>
         ) : <p className="text-slate-500">carregando…</p>}
         {review && !review.admit && open && <p className="rounded-md border border-amber-700/60 bg-amber-900/30 px-2 py-1 text-amber-100">{review.reason}</p>}
-        {filed && <p className="text-emerald-300">✔ {filed} no backlog.</p>}
+        {filed && <p className="flex items-center text-emerald-300"><Icon name="check" className="mr-1 h-3.5 w-3.5" />{filed} no backlog.</p>}
       </div>
       {open && conv && (
         <div className="space-y-1 border-t border-line p-2">
           {review?.reason_code === "too_big" && onBrainstorm && (
-            <button className="btn-ghost w-full" disabled={busy} onClick={onBrainstorm}>💡 Levar ao Brainstorm</button>
+            <button className="btn-ghost w-full" disabled={busy} onClick={onBrainstorm}><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Levar ao Brainstorm</button>
           )}
           <button className="btn-primary w-full" disabled={busy || founderTurns < 2 || !review || review.admit}
             title={founderTurns < 2 ? "Antes, diga ao Product Owner por que o card deve entrar" : "A objeção do Product Owner fica registrada no card"} onClick={onForce}>
@@ -691,9 +692,9 @@ function Item({ item, sprint, member = false, editable, onEdit }: { item: DraftI
             {!!item.depends_on?.length && (
               <button className="chip bg-indigo-900/50 text-indigo-200 hover:bg-indigo-800/60 disabled:opacity-60" disabled={!editable}
                 title="Depende destes cards: o plano espera eles serem entregues. Clique para tirar a dependência."
-                onClick={() => onEdit([{ op: "update", ref: item.key, depends_on: [] }])}>↳ depende de {item.depends_on.join(", ")} ✕</button>
+                onClick={() => onEdit([{ op: "update", ref: item.key, depends_on: [] }])}>↳ depende de {item.depends_on.join(", ")} <Icon name="x" className="inline h-3 w-3 align-[-1px]" /></button>
             )}
-            {item.unpin && <span className="chip bg-slate-800 text-slate-400" title="A posição fixada volta ao Product Owner ao salvar">solta o 📌</span>}
+            {item.unpin && <span className="chip bg-slate-800 text-slate-400" title="A posição fixada volta ao Product Owner ao salvar">solta a posição fixada</span>}
           </div>
           <div className="font-medium leading-snug text-slate-100">{item.title}</div>
           {item.description && !item.story_id && <div className="mt-0.5 line-clamp-2 text-slate-400">{item.description}</div>}
@@ -706,7 +707,7 @@ function Item({ item, sprint, member = false, editable, onEdit }: { item: DraftI
           <button className={`disabled:opacity-40 ${item.restart ? "text-amber-300" : "text-slate-500 hover:text-amber-300"}`} title={item.restart ? "Não recomeçar" : "Recomeçar do zero (descarta spec, plano e código)"} disabled={!editable || leaving}
             onClick={() => onEdit([{ op: "restart", ref: item.key, restart: !item.restart, reason: item.restart ? "" : "pedido do Founder na reunião" }])}>↺</button>
         ) : (
-          <button className="text-slate-500 hover:text-red-300 disabled:opacity-40" title="Tirar do rascunho" disabled={!editable} onClick={() => onEdit([{ op: "drop", ref: item.key }])}>✕</button>
+          <button className="text-slate-500 hover:text-red-300 disabled:opacity-40" title="Tirar do rascunho" disabled={!editable} onClick={() => onEdit([{ op: "drop", ref: item.key }])}><Icon name="x" className="h-3 w-3" /></button>
         )}
       </div>
     </li>

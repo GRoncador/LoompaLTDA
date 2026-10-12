@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import Phaser from "phaser";
 import { OfficeScene } from "../office/scene";
 import type { Agent } from "../types";
+import { Icon } from "./Icon";
 
 export default function Office({ agents, onSelect }: { agents: Agent[]; onSelect: (name: string) => void }) {
   const host = useRef<HTMLDivElement>(null);
@@ -40,7 +41,7 @@ export default function Office({ agents, onSelect }: { agents: Agent[]; onSelect
     <div className="relative flex-1 overflow-hidden bg-[#0b1220]">
       <div ref={host} className="h-full w-full" />
       <div className="pointer-events-none absolute bottom-2 left-2 flex gap-2 text-[10px] text-slate-400">
-        <span>… trabalhando</span><span className="text-sky-400">⚗ testando</span><span className="text-red-400">! bloqueado</span>
+        <span>… trabalhando</span><span className="flex items-center text-sky-400"><Icon name="flask" className="mr-1 h-3 w-3" />testando</span><span className="text-red-400">! bloqueado</span>
       </div>
     </div>
   );

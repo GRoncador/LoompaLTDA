@@ -4,6 +4,7 @@ import type { AAPick, AASuggestion, AvailableDTO, BudgetPeriod, Candidate, Clust
 import { KindPicker } from "./KindPicker";
 import { Modal } from "./Modal";
 import { PROVIDER_NAMES, ProviderBadge, ProviderIcon, cleanModelName, cleanModelId } from "./ProviderIcon";
+import { Icon, type IconName } from "./Icon";
 
 const input = "w-full rounded-md border border-line bg-ink px-2 py-1 text-sm";
 const select = "rounded-md border border-line bg-ink px-2 py-1 text-sm";
@@ -20,7 +21,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
     try { const r = await api.updateSettings(slug, patch); setS(r.settings); setNotes(r.changes); } catch (e) { setErr(String(e)); }
   };
   return (
-    <Modal title="⚙ Configurações da fábrica" onClose={onClose} className="w-[96vw] max-w-[1600px]">
+    <Modal title={<><Icon name="settings" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Configurações da fábrica</>} onClose={onClose} className="w-[96vw] max-w-[1600px]">
       {!s ? <p className="text-sm text-slate-400">{err ?? "carregando…"}</p> : (
         <div className="scroll-thin max-h-[82vh] space-y-4 overflow-y-auto pr-1 text-sm">
           <div className="flex gap-2 border-b border-line pb-2">
@@ -31,7 +32,7 @@ export default function SettingsModal({ slug, onClose }: { slug: string; onClose
             ))}
           </div>
           {err && <p className="text-xs text-red-300">{err}</p>}
-          {notes.length > 0 && <p className="text-xs text-emerald-300">✔ {notes.join(" · ")}</p>}
+          {notes.length > 0 && <p className="flex items-center gap-1 text-xs text-emerald-300"><Icon name="check" className="h-3.5 w-3.5" />{notes.join(" · ")}</p>}
           {tab === "factory" && <FactoryPanel s={s} onSave={save} />}
           {tab === "providers" && <ProvidersPanel slug={slug} s={s} onSave={save} />}
           {tab === "models" && <ModelsPanel slug={slug} s={s} onSave={save} onReload={load} />}
@@ -151,7 +152,7 @@ function ImageClusterCard({ slug, slots, setSlots, ceiling, setCeiling }: {
     <div className="space-y-2.5 rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs">
       <div className="space-y-1 border-b border-line/40 pb-2">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-100">
-          <span className="text-sm" aria-hidden="true">🖼</span>Imagem
+          <Icon name="image" className="h-4 w-4" />Imagem
         </div>
         <div className="text-[10px] text-slate-400">Loompas: Designer</div>
         <div className="text-[10px] text-slate-500">Modelos de imagem da OpenRouter, cobrados por imagem e ranqueados pelo ELO da arena de imagens. Ficam fora do cluster geral: um bom modelo de texto não desenha, e vice-versa.</div>
@@ -168,7 +169,7 @@ function ImageClusterCard({ slug, slots, setSlots, ceiling, setCeiling }: {
               </div>
               <div className="flex items-center gap-1.5">
                 <button type="button" className="btn-ghost px-1 py-0 text-[11px]" title={`Sugestões para a vaga ${slot.label.toLowerCase()} (${slot.rankedBy})`}
-                  onClick={() => setOpen(open === slot.key ? null : slot.key)}>💡</button>
+                  onClick={() => setOpen(open === slot.key ? null : slot.key)}><Icon name="lightbulb" className="h-3.5 w-3.5" /></button>
                 <span className="font-mono text-[9px] text-slate-500">{list.length}/{MAX_MODELS_PER_SLOT}</span>
               </div>
             </div>
@@ -185,7 +186,7 @@ function ImageClusterCard({ slug, slots, setSlots, ceiling, setCeiling }: {
                   )}
                   <button type="button" className="btn-ghost px-1 py-0 text-[10px] disabled:opacity-30" disabled={i === 0} title="Subir (prioridade maior)" onClick={() => move(slot.key, i, -1)}>↑</button>
                   <button type="button" className="btn-ghost px-1 py-0 text-[10px] disabled:opacity-30" disabled={i === list.length - 1} title="Descer (usado como reserva)" onClick={() => move(slot.key, i, 1)}>↓</button>
-                  <button type="button" className="btn-ghost px-1 py-0 text-[10px] text-rose-400 hover:text-rose-200" title="Remover" onClick={() => write(slot.key, list.filter((m) => m !== id))}>✕</button>
+                  <button type="button" className="btn-ghost px-1 py-0 text-[10px] text-rose-400 hover:text-rose-200" title="Remover" onClick={() => write(slot.key, list.filter((m) => m !== id))}><Icon name="x" className="h-3 w-3" /></button>
                 </div>
               );
             })}
@@ -303,7 +304,7 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
           {r === "…" && <div className="text-slate-400">testando…</div>}
           {r && r !== "…" && (
             <div className={r.ok ? "text-emerald-300" : "text-red-300"}>
-              {r.ok ? "✔" : "✘"} {r.detail}{r.latency_ms ? ` · ${r.latency_ms} ms` : ""}
+              <Icon name={r.ok ? "check" : "x"} className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{r.detail}{r.latency_ms ? ` · ${r.latency_ms} ms` : ""}
             </div>
           )}
         </div>
@@ -317,7 +318,7 @@ export function ProvidersPanel({ slug, s, onSave, onlyNeeded }: { slug: string; 
         <div className="flex items-center gap-1 md:justify-end">
           <button className="btn-ghost whitespace-nowrap text-xs" onClick={() => test(opts.name)} disabled={opts.needsKey && !opts.configured && !opts.value.trim()} title={opts.value.trim() ? "Guarda a chave digitada e testa a conexão" : undefined}>{opts.value.trim() ? "Guardar e testar" : "Testar"}</button>
           {opts.configured && opts.needsKey && opts.onClear && (
-            <button className="btn-ghost px-2 text-xs text-rose-300 hover:text-rose-200" title="remover chave" onClick={opts.onClear}>✕</button>
+            <button className="btn-ghost px-2 text-xs text-rose-300 hover:text-rose-200" title="remover chave" onClick={opts.onClear}><Icon name="x" className="h-3 w-3" /></button>
           )}
         </div>
       </div>
@@ -425,7 +426,7 @@ const CLUSTERS_CONFIG = [
   {
     key: "strategy",
     label: "Estratégia & Produto",
-    icon: "🏛️",
+    icon: "landmark",
     roles: ["Master", "Architect", "Spec Loompa", "Product Owner", "Analyst"],
     weights: [
       { label: "INTEL", pct: "50%", color: "text-purple-300 border-purple-800/50 bg-purple-950/40" },
@@ -436,7 +437,7 @@ const CLUSTERS_CONFIG = [
   {
     key: "engineering",
     label: "Engenharia de Código",
-    icon: "⚙️",
+    icon: "settings",
     roles: ["Worker (Dev)", "Inspector (QA Judge)"],
     weights: [
       { label: "CODE", pct: "60%", color: "text-blue-300 border-blue-800/50 bg-blue-950/40" },
@@ -447,7 +448,7 @@ const CLUSTERS_CONFIG = [
   {
     key: "routine",
     label: "Rotina & Suporte",
-    icon: "📋",
+    icon: "clipboard",
     roles: ["Deployer", "Storyteller", "Compliance", "Metrics"],
     weights: [
       { label: "AGENTIC", pct: "55%", color: "text-emerald-300 border-emerald-800/50 bg-emerald-950/40" },
@@ -462,7 +463,7 @@ const CLUSTERS_CONFIG = [
 const GENERAL_CONFIG = {
   key: "general",
   label: "Cluster geral",
-  icon: "🧩",
+  icon: "puzzle",
   roles: ["Todos os Loompas"],
   weights: [],
 } as const;
@@ -470,16 +471,16 @@ const GENERAL_CONFIG = {
 type ClusterConfig = {
   key: string;
   label: string;
-  icon: string;
+  icon: IconName;
   roles: readonly string[];
   weights: readonly { label: string; pct: string; color: string }[];
 };
 
-const CLUSTER_ICON: Record<string, string> = {
-  strategy: "🏛️",
-  engineering: "⚙️",
-  routine: "📋",
-  general: "🧩",
+const CLUSTER_ICON: Record<string, IconName> = {
+  strategy: "landmark",
+  engineering: "settings",
+  routine: "clipboard",
+  general: "puzzle",
 };
 
 const TIERS_CONFIG = [
@@ -511,7 +512,7 @@ type TierKey = "tier1" | "tier2" | "tier3";
 const MAX_MODELS_PER_TIER = 6;
 const NO_OPENROUTER_HINT =
   "A lista de modelos para escolher à mão vem da OpenRouter. Configure a chave da OpenRouter na aba " +
-  "“Provedores e chaves” para liberar o catálogo completo. A sugestão de modelos (💡 e aba Benchmark) não depende dela.";
+  "“Provedores e chaves” para liberar o catálogo completo. A sugestão de modelos (lâmpada e aba Benchmark) não depende dela.";
 
 /** The score a model gets in one cluster, and the points it buys per dollar. */
 function clusterScore(m: ModelPick, cluster: ClusterName): number | null {
@@ -623,7 +624,7 @@ function ClusterScore({ cluster, m, mode }: { cluster: ClusterName; m: ModelPick
             : "Nota deste cluster"
       }
     >
-      <span aria-hidden="true">{CLUSTER_ICON[cluster]}</span>
+      <Icon name={CLUSTER_ICON[cluster]} className="h-3.5 w-3.5" />
       {mode === "value" ? `${v} pts/$` : v.toFixed(1)}
     </span>
   );
@@ -815,7 +816,7 @@ function ModelPickerModal({
         <div className="mb-3 flex items-start justify-between gap-2 border-b border-line pb-2">
           <div className="min-w-0">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-              <span aria-hidden="true">{CLUSTER_ICON[clusterTarget]}</span>
+              <Icon name={CLUSTER_ICON[clusterTarget]} className="h-3.5 w-3.5" />
               {extended ? "Todos os modelos da OpenRouter" : `Modelos recomendados · ${tier.label}`}
               <span className="chip bg-brand/20 font-mono text-xs text-brand">{tier.sublabel}</span>
             </h3>
@@ -825,7 +826,7 @@ function ModelPickerModal({
                 : `Ordenados por ${tier.rankedBy}${tierTarget === "tier2" ? ` (${Math.round(tier2Floor * 100)}% da maior nota do Tier 1)` : ""}. A recomendação usa só versões fixas — apelidos -latest ficam em “mais modelos”.`}
             </p>
           </div>
-          <button className="btn-ghost py-1 text-xs" onClick={onClose}>✕ Fechar</button>
+          <button className="btn-ghost py-1 text-xs" onClick={onClose}><Icon name="x" className="mr-1 inline h-3 w-3 align-[-1px]" />Fechar</button>
         </div>
 
         <div className="mb-3 space-y-2">
@@ -843,7 +844,7 @@ function ModelPickerModal({
                 <span className="text-slate-500">Nota do cluster:</span>
                 <select className={select} value={cluster} onChange={(e) => setCluster(e.target.value as ClusterName | "all")}>
                   {clusters.map((c) => (
-                    <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
+                    <option key={c.key} value={c.key}>{c.label}</option>
                   ))}
                   <option value="all">sem filtro (só os benchmarks)</option>
                 </select>
@@ -1053,12 +1054,12 @@ function ModelsPanel({
       if (forceRefresh) {
         const warned = p.price_warnings ?? [];
         setSyncNote(
-          `✔ Lista de modelos atualizada: ${p.all_models?.length ?? 0} modelos no catálogo.` +
+          `Lista de modelos atualizada: ${p.all_models?.length ?? 0} modelos no catálogo.` +
           (warned.length ? ` Aviso na Caixa de Entrada: ${warned.join(", ")} ficou mais caro.` : "")
         );
       } else {
         setProposal(p);
-        if (!p.changed) setSyncNote("✔ Os modelos atuais já são a melhor escolha sob o teto definido.");
+        if (!p.changed) setSyncNote("Os modelos atuais já são a melhor escolha sob o teto definido.");
       }
     } catch (e) {
       setSyncError(String(e));
@@ -1090,7 +1091,7 @@ function ModelsPanel({
       }
     }
     setMatrix({ ...matrix, ...next });
-    setSyncNote("✔ Sugestão carregada no editor. Revise e clique em “Salvar modelos”.");
+    setSyncNote("Sugestão carregada no editor. Revise e clique em “Salvar modelos”.");
     setProposal(null);
   };
 
@@ -1098,7 +1099,7 @@ function ModelsPanel({
     setSyncing(true);
     try {
       await api.applyModelSync(slug, false, ceiling);
-      setSyncNote("✔ Matriz oficial de modelos e tabela de preços atualizadas.");
+      setSyncNote("Matriz oficial de modelos e tabela de preços atualizadas.");
       setProposal(null);
       onReload();
     } catch (e) { setSyncError(String(e)); } finally { setSyncing(false); }
@@ -1108,7 +1109,7 @@ function ModelsPanel({
     setSyncing(true);
     try {
       const res = await api.applyModelSync(slug, true, ceiling);
-      setSyncNote(res.message || "✔ Sugestão enviada à Caixa de Entrada para sua aprovação.");
+      setSyncNote(res.message || "Sugestão enviada à Caixa de Entrada para sua aprovação.");
       setProposal(null);
     } catch (e) { setSyncError(String(e)); } finally { setSyncing(false); }
   };
@@ -1138,7 +1139,7 @@ function ModelsPanel({
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className="flex items-center gap-1.5 whitespace-nowrap btn-ghost text-xs font-semibold" disabled={availBusy} onClick={refreshAvail}
               title="Pergunta a lista de modelos a cada provedor com chave nesta fábrica e renova a lista da OpenRouter usada para escolher modelos">
-              <span aria-hidden="true">{availBusy ? "⟳" : "🔑"}</span>
+              <span aria-hidden="true">{availBusy ? <Icon name="refresh" className="h-3.5 w-3.5" /> : <Icon name="key" className="h-3.5 w-3.5" />}</span>
               {availBusy ? "Consultando…" : "Consultar os provedores"}
             </button>
           </div>
@@ -1158,7 +1159,7 @@ function ModelsPanel({
             <ul className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px]">
               {avail.providers.map((p) => (
                 <li key={p.name} className={p.ok ? "text-slate-300" : "text-rose-300"} title={p.reason || undefined}>
-                  {p.ok ? "✔" : "✘"} {p.label}: {p.detail}
+                  <Icon name={p.ok ? "check" : "x"} className="mr-1 inline h-3 w-3 align-[-1px]" />{p.label}: {p.detail}
                 </li>
               ))}
             </ul>
@@ -1218,7 +1219,7 @@ function ModelsPanel({
         </datalist>
       ))}
 
-      {syncError && <p className="rounded border border-red-900/50 bg-red-950/40 p-2 text-xs text-red-300">✘ {syncError}</p>}
+      {syncError && <p className="rounded border border-red-900/50 bg-red-950/40 p-2 text-xs text-red-300"><Icon name="x" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{syncError}</p>}
       {syncNote && <p className="rounded border border-emerald-900/50 bg-emerald-950/40 p-2 text-xs text-emerald-300">{syncNote}</p>}
 
       {/* ------------------------------------------------------------ suggestion */}
@@ -1227,7 +1228,7 @@ function ModelsPanel({
           <div className="flex flex-col items-start justify-between gap-2 border-b border-line pb-2.5 sm:flex-row sm:items-center">
             <div>
               <span className="flex items-center gap-1.5 text-sm font-semibold text-brand">
-                <span aria-hidden="true">✨</span> Sugestão para a matriz de modelos
+                <Icon name="sparkles" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" /> Sugestão para a matriz de modelos
               </span>
               <span className="mt-0.5 block text-xs text-slate-400">
                 {proposal.eligible} de {proposal.considered} modelos qualificados, só versões fixas.
@@ -1235,10 +1236,10 @@ function ModelsPanel({
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button className="btn-primary px-3 py-1 text-xs font-semibold" onClick={applyImmediately}>✔ Aplicar agora</button>
-              <button className="btn-ghost px-2.5 py-1 text-xs" onClick={fillFromProposal}>✏️ Carregar no editor</button>
-              <button className="btn-ghost px-2.5 py-1 text-xs" onClick={sendToInbox}>📬 Enviar ao Inbox</button>
-              <button className="btn-ghost px-2 py-1 text-xs text-slate-400 hover:text-white" onClick={() => setProposal(null)}>✕</button>
+              <button className="btn-primary px-3 py-1 text-xs font-semibold" onClick={applyImmediately}><Icon name="check" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Aplicar agora</button>
+              <button className="btn-ghost px-2.5 py-1 text-xs" onClick={fillFromProposal}><Icon name="edit" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Carregar no editor</button>
+              <button className="btn-ghost px-2.5 py-1 text-xs" onClick={sendToInbox}><Icon name="inbox" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Enviar ao Inbox</button>
+              <button className="btn-ghost px-2 py-1 text-xs text-slate-400 hover:text-white" onClick={() => setProposal(null)}><Icon name="x" className="h-3 w-3" /></button>
             </div>
           </div>
           <div className="space-y-1 rounded border border-line bg-ink/50 p-2.5 text-xs">
@@ -1257,7 +1258,7 @@ function ModelsPanel({
           <div key={col.key} className="space-y-2.5 rounded-lg border border-line/80 bg-ink/70 p-2.5 text-xs">
             <div className="space-y-1 border-b border-line/40 pb-2">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-100">
-                <span className="text-sm" aria-hidden="true">{col.icon}</span>
+                <Icon name={col.icon} className="h-3.5 w-3.5 text-slate-300" />
                 {col.label}
               </div>
               <div className="text-[10px] text-slate-400">Loompas: {col.roles.join(", ")}</div>
@@ -1285,7 +1286,7 @@ function ModelsPanel({
                         {aa && aa.entries > 0 && (
                           <button type="button" className="btn-ghost px-1 py-0 text-[11px]"
                             title="Sugestões da Artificial Analysis para este cluster e tier"
-                            onClick={() => setAAAt({ cluster: col.key, tier: t.key })}>💡</button>
+                            onClick={() => setAAAt({ cluster: col.key, tier: t.key })}><Icon name="lightbulb" className="h-3.5 w-3.5" /></button>
                         )}
                         <span className="font-mono text-[9px] text-slate-500">{candidates.length}/{MAX_MODELS_PER_TIER}</span>
                         {candidates.length < MAX_MODELS_PER_TIER && (
@@ -1351,14 +1352,14 @@ function ModelsPanel({
                                 <div className="flex flex-shrink-0 items-center gap-0.5">
                                   <button type="button" className="btn-ghost px-1 py-0 text-[10px]" title="Testar conexão com este modelo"
                                     disabled={!c.model || probe === "…"} onClick={() => testCell(col.key, t.key, i, c)}>
-                                    {probe === "…" ? "⟳" : "▶"}
+                                    {probe === "…" ? <Icon name="refresh" className="h-3 w-3" /> : <Icon name="play" className="h-3 w-3" />}
                                   </button>
                                   <button type="button" className="btn-ghost px-1 py-0 text-[10px] disabled:opacity-30" disabled={i === 0}
                                     title="Subir (prioridade maior)" onClick={() => moveCandidate(col.key, t.key, i, -1)}>↑</button>
                                   <button type="button" className="btn-ghost px-1 py-0 text-[10px] disabled:opacity-30" disabled={i === candidates.length - 1}
                                     title="Descer (usado como reserva)" onClick={() => moveCandidate(col.key, t.key, i, 1)}>↓</button>
                                   <button type="button" className="btn-ghost px-1 py-0 text-[10px] text-rose-400 hover:text-rose-200"
-                                    title="Remover" onClick={() => removeCandidate(col.key, t.key, i)}>✕</button>
+                                    title="Remover" onClick={() => removeCandidate(col.key, t.key, i)}><Icon name="x" className="h-3 w-3" /></button>
                                 </div>
                               </div>
 
@@ -1446,7 +1447,7 @@ function ModelsPanel({
 
                               {probe && probe !== "…" && (
                                 <div className={`ml-4 text-[10px] ${probe.ok ? "text-emerald-300" : "text-red-300"}`}>
-                                  {probe.ok ? "✔" : "✘"} {probe.detail}{probe.latency_ms ? ` · ${probe.latency_ms} ms` : ""}
+                                  <Icon name={probe.ok ? "check" : "x"} className="mr-1 inline h-3 w-3 align-[-1px]" />{probe.detail}{probe.latency_ms ? ` · ${probe.latency_ms} ms` : ""}
                                 </div>
                               )}
                             </div>
@@ -1653,7 +1654,7 @@ const BENCH_LABEL: Record<string, string> = {
 };
 const MIX_LABEL: Record<string, string> = { engineering: "Engenharia", strategy: "Estratégia", routine: "Rotina" };
 // the same marks as the cluster cards of the models screen
-const PROFILE_ICON: Record<string, string> = { general: "🧩", strategy: "🏛️", engineering: "⚙️", routine: "📋" };
+const PROFILE_ICON: Record<string, IconName> = { general: "puzzle", strategy: "landmark", engineering: "settings", routine: "clipboard" };
 
 /** One tier of the Artificial Analysis ranking (ADR-0025): the same table in the popup of a slot and
  *  in the Benchmark tab. `onUse` adds the "usar" column (the popup only). */
@@ -1737,10 +1738,10 @@ function SuggestPopup({ data, cluster, tier, onUse, onClose }: {
       <div className="w-full max-w-4xl space-y-2 rounded-lg border border-line bg-slate-900 p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="font-semibold text-slate-100">💡 {PROFILE_ICON[cluster] ?? ""} {prof?.label ?? cluster} · {TIER_TITLE[tier] ?? tier}</div>
+            <div className="flex items-center gap-1.5 font-semibold text-slate-100"><Icon name="lightbulb" className="h-3.5 w-3.5" />{PROFILE_ICON[cluster] && <Icon name={PROFILE_ICON[cluster]} className="h-3.5 w-3.5" />} {prof?.label ?? cluster} · {TIER_TITLE[tier] ?? tier}</div>
             <div className="text-[11px] text-slate-400">{aaDate(data)} · {data.entries} modelos avaliados · {data.attribution}</div>
           </div>
-          <button className="btn-ghost px-2 py-0 text-xs" onClick={onClose}>✕</button>
+          <button className="btn-ghost px-2 py-0 text-xs" onClick={onClose}><Icon name="x" className="h-3 w-3" /></button>
         </div>
         {prof && <Weights prof={prof} />}
         <p className="text-[11px] text-slate-400">
@@ -1788,14 +1789,14 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
             <div className="text-sm font-semibold text-slate-100">Benchmark de modelos (Artificial Analysis)</div>
             <p>
               Todos os modelos que a Artificial Analysis avalia, cada um num nível de esforço, ranqueados para cada cluster com os benchmarks do que ele faz,
-              sem olhar suas chaves ou provedores. Mostra o cluster geral ou os três separados, conforme Modelos e papéis, e sempre o de Imagem. Os 10 melhores de cada tier; o 💡 de cada vaga em Modelos e papéis mostra os 5 primeiros e põe um deles na vaga.
+              sem olhar suas chaves ou provedores. Mostra o cluster geral ou os três separados, conforme Modelos e papéis, e sempre o de Imagem. Os 10 melhores de cada tier; a lâmpada de cada vaga em Modelos e papéis mostra os 5 primeiros e põe um deles na vaga.
             </p>
             {data && <p>{aaDate(data)} · {data.entries} modelos avaliados · {data.attribution}</p>}
             {data && <p className="text-amber-300/90">{data.price_note}</p>}
           </div>
           <button className="btn-ghost whitespace-nowrap text-xs" disabled={busy || (data ? !data.key : true)}
             title={data?.key ? "Consulta a Artificial Analysis agora (1 das 100 consultas do dia)" : "Configure a chave em Provedores e chaves"} onClick={refresh}>
-            {busy ? "⟳ consultando…" : "📡 Atualizar benchmark"}
+            {busy ? "consultando…" : <><Icon name="radio" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Atualizar benchmark</>}
           </button>
         </div>
         <div className="flex flex-col gap-1 border-t border-line/60 pt-2 text-xs sm:flex-row sm:items-end sm:gap-3">
@@ -1817,7 +1818,7 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
       ) : shown.map((prof) => (
         <div key={prof.profile} className="space-y-2 rounded-lg border border-line bg-panel p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div className="font-semibold text-slate-100">{PROFILE_ICON[prof.profile] ?? ""} {prof.label}</div>
+            <div className="flex items-center gap-1.5 font-semibold text-slate-100">{PROFILE_ICON[prof.profile] && <Icon name={PROFILE_ICON[prof.profile]} className="h-3.5 w-3.5" />} {prof.label}</div>
             <div className="text-[11px] text-slate-500">piso do tier 2: {prof.floor} · {prof.partial} modelos de fora por falta de benchmark</div>
           </div>
           <Weights prof={prof} />
@@ -1831,14 +1832,14 @@ function BenchmarkPanel({ slug, s, onSave }: { slug: string; s: Settings; onSave
       ))}
       <div className="space-y-2 rounded-lg border border-line bg-panel p-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <div className="font-semibold text-slate-100">🖼 Imagem (Designer)</div>
+          <div className="flex items-center gap-1.5 font-semibold text-slate-100"><Icon name="image" className="h-4 w-4" />Imagem (Designer)</div>
           <button className="btn-ghost whitespace-nowrap text-xs" disabled={imgBusy} onClick={refreshImg}
             title="Busca de novo o catálogo de imagens da OpenRouter e as notas da arena de imagens da Artificial Analysis">
-            {imgBusy ? "⟳ consultando…" : "📡 Atualizar lista de imagem"}
+            {imgBusy ? "consultando…" : <><Icon name="radio" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Atualizar lista de imagem</>}
           </button>
         </div>
         <p className="text-[11px] text-slate-400">
-          Modelos que desenham, à parte dos de texto: cobrados por imagem e ranqueados pelo ELO da arena de imagens. O 💡 de cada vaga do cluster Imagem em Modelos e papéis põe um deles na vaga.
+          Modelos que desenham, à parte dos de texto: cobrados por imagem e ranqueados pelo ELO da arena de imagens. A lâmpada de cada vaga do cluster Imagem em Modelos e papéis põe um deles na vaga.
         </p>
         {img?.note && <p className="text-[11px] text-amber-300">{img.note}</p>}
         {!img ? <p className="text-xs text-slate-400">carregando…</p> : (["draft", "final"] as const).map((slot) => (

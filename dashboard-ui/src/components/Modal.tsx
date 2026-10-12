@@ -1,3 +1,5 @@
+import { Icon } from "./Icon";
+
 export function Modal({
   title,
   children,
@@ -5,7 +7,7 @@ export function Modal({
   wide = false,
   className,
 }: {
-  title: string;
+  title: React.ReactNode;
   children: React.ReactNode;
   onClose: () => void;
   wide?: boolean;
@@ -17,7 +19,7 @@ export function Modal({
       <div className={`card w-full !bg-panel ${widthClass} max-h-[90vh] overflow-y-auto p-5`} onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-base font-semibold">{title}</h3>
-          <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>
+          <button className="text-slate-400 hover:text-white" onClick={onClose}><Icon name="x" /></button>
         </div>
         {children}
       </div>

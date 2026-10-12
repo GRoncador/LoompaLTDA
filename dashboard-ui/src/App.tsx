@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./api";
+import { api, BackendOfflineError } from "./api";
 import { useSocket } from "./useSocket";
 import type { ConversationKind, FactoryRef, LoompaEvent, Message, Overview, QuickStoryResult, StoryActivity } from "./types";
 import Header from "./components/Header";
@@ -18,6 +18,7 @@ import FactoryModal from "./components/FactoryModal";
 import DesignModal from "./components/DesignModal";
 import ProductModal from "./components/ProductModal";
 import GrowthModal from "./components/GrowthModal";
+import { Icon } from "./components/Icon";
 
 export default function App() {
   const [factories, setFactories] = useState<FactoryRef[]>([]);
@@ -38,6 +39,12 @@ export default function App() {
   const [agentName, setAgentName] = useState<string | null>(null);
   const [storyId, setStoryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  // a request that never got an answer means the backend is gone; anything else is shown as-is
+  const fail = (e: unknown) => {
+    if (e instanceof BackendOfflineError) setOffline(true);
+    else setError(String(e));
+  };
   // live activity per story, advanced by events between overview refreshes (Fase 8.5)
   const [live, setLive] = useState<Record<string, StoryActivity>>({});
   const [now, setNow] = useState(() => Date.now());
@@ -49,12 +56,12 @@ export default function App() {
       const r = await api.factories();
       setFactories(r.factories);
       setSlug((s) => s ?? r.active ?? r.factories[0]?.slug ?? null);
-    } catch (e) { setError(String(e)); }
+    } catch (e) { fail(e); }
   }, []);
 
   const refresh = useCallback(async () => {
     if (!slug) return;
-    try { setOverview(await api.overview(slug)); setError(null); } catch (e) { setError(String(e)); }
+    try { setOverview(await api.overview(slug)); setError(null); setOffline(false); } catch (e) { fail(e); }
   }, [slug]);
 
   useEffect(() => { loadFactories(); }, [loadFactories]);
@@ -100,7 +107,7 @@ export default function App() {
       if (r.status === "refused" && r.conversation) setChat({ kind: "review", resumeId: r.conversation.id });
       setError(null);
       return r;
-    } catch (e) { setError(String(e)); return null; } finally { refresh(); }
+    } catch (e) { fail(e); return null; } finally { refresh(); }
   };
 
   const resumeConversation = useCallback((id: string) => {
@@ -112,6 +119,12 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
+      {offline && (
+        <div role="alert" className="flex items-center justify-center gap-2 bg-red-900/60 px-4 py-2 text-center text-sm text-red-100">
+          <Icon name="radio" className="h-4 w-4 shrink-0" />
+          <span>Sem conexão com o terminal. Tentando reconectar…</span>
+        </div>
+      )}
       <Header
         factories={factories} slug={slug} overview={overview} connected={connected}
         onSwitch={switchFactory} onNewFactory={() => setNewFactoryOpen(true)} onEngine={engineAction} onSettings={() => setSettingsOpen(true)} onFinance={() => setFinanceOpen(true)} onSprints={() => setSprintsAt("")} onFactory={() => setFactoryOpen(true)} onDesign={() => setDesign({})} onGrowth={overview?.factory.kind === "commercial" ? () => setGrowthOpen(true) : undefined}
@@ -125,17 +138,16 @@ export default function App() {
               : (ready.failed ? "O Product Owner não conseguiu montar a sugestão do próximo sprint." : "A sugestão do Product Owner para o próximo sprint está pronta.")}
           </span>
           <button className="btn-primary px-2 py-0.5 text-xs" onClick={() => { resumeConversation(ready.id); setReady(null); }}>
-            {ready.kind === "brainstorm" ? "💡 Abrir o brainstorm" : "🗓 Abrir a reunião"}
+            {ready.kind === "brainstorm" ? <><Icon name="lightbulb" /> Abrir o brainstorm</> : <><Icon name="calendar" /> Abrir a reunião</>}
           </button>
-          <button className="ml-auto text-xs text-sky-300 hover:text-white" onClick={() => setReady(null)}>✕</button>
+          <button className="ml-auto text-xs text-sky-300 hover:text-white" onClick={() => setReady(null)}><Icon name="x" /></button>
         </div>
       )}
       {error && <div className="bg-red-900/60 px-4 py-2 text-sm text-red-100">{error}</div>}
       <main className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
         <section className="card flex min-h-[320px] flex-col overflow-hidden">
           <div className="flex items-center justify-between border-b border-line px-3 py-2">
-            <h2 className="text-sm font-semibold">🏢 Escritório Virtual</h2>
-            <span className="text-xs text-slate-400">clique em um Loompa para telemetria e custos</span>
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Icon name="building" className="h-4 w-4 text-slate-400" />Escritório</h2>
           </div>
           <Office agents={overview?.agents ?? []} onSelect={setAgentName} />
         </section>
@@ -150,8 +162,8 @@ export default function App() {
             epics={overview?.epics ?? {}} phase={overview?.phase ?? null} onProduct={() => setProductOpen2(true)}
             onChat={(kind, resumeId, text) => setChat({ kind, resumeId, text })} onOpen={setStoryId}
             onCreate={createStory}
-            onReorder={async (ids, dragged) => { if (slug) { try { await api.reorderBacklog(slug, ids, dragged); } catch (e) { setError(String(e)); } refresh(); } }}
-            onUnpin={async (id) => { if (slug) { try { await api.unpin(slug, id); } catch (e) { setError(String(e)); } refresh(); } }}
+            onReorder={async (ids, dragged) => { if (slug) { try { await api.reorderBacklog(slug, ids, dragged); } catch (e) { fail(e); } refresh(); } }}
+            onUnpin={async (id) => { if (slug) { try { await api.unpin(slug, id); } catch (e) { fail(e); } refresh(); } }}
           />
         </section>
       </main>

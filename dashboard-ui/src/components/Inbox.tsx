@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Message } from "../types";
 import { DesignScreens } from "./DesignScreens";
+import { Icon } from "./Icon";
 
 const KIND: Record<Message["kind"], { label: string; cls: string }> = {
   decision: { label: "Decisão", cls: "bg-violet-900/60 text-violet-200" },
@@ -33,10 +34,10 @@ export default function Inbox(props: {
   return (
     <>
       <div className="border-b border-line px-3 py-2">
-        <h2 className="text-sm font-semibold">📬 Caixa de Entrada{unread > 0 && ` (${unread})`}</h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Icon name="inbox" className="h-4 w-4 text-slate-400" />Caixa de Entrada{unread > 0 && ` (${unread})`}</h2>
       </div>
       <div className="scroll-thin flex-1 space-y-2 overflow-y-auto p-3">
-        {messages.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nada pendente. Aproveite o dia. 🎉</p>}
+        {messages.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nada pendente. Aproveite o dia.</p>}
         {sorted.map((m) => <MessageCard key={m.id} m={m} unread={!read.has(m.id)} onOpen={() => markRead(m.id)} {...props} />)}
       </div>
     </>
@@ -118,7 +119,7 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
                     <div className="mt-1 flex flex-wrap gap-1">
                       {q.options.map((o) => (
                         <button key={o.key} type="button" onClick={() => setAnswers((a) => ({ ...a, [q.id]: o.key }))} className={`rounded border px-2 py-0.5 ${answerOf(q) === o.key ? "border-brand bg-brand/20 text-slate-50" : "border-line text-slate-400 hover:text-slate-200"}`}>
-                          {o.label}{o.recommended ? " ★" : ""}
+                          {o.label}{o.recommended && <Icon name="star" className="ml-1 inline h-3 w-3 align-[-1px] text-amber-300" />}
                         </button>
                       ))}
                     </div>
@@ -130,13 +131,13 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
           )}
           {m.conversation_id && onOpenMeeting && (
             <button className="btn-primary mt-2 mr-2 text-xs" onClick={() => onOpenMeeting(m.conversation_id!)}>
-              {m.title.toLowerCase().includes("brainstorm") ? "💡 Abrir o brainstorm" : "🗓 Abrir a reunião"}
+              {m.title.toLowerCase().includes("brainstorm") ? <><Icon name="lightbulb" /> Abrir o brainstorm</> : <><Icon name="calendar" /> Abrir a reunião</>}
             </button>
           )}
-          {m.sprint_id && <button className="btn-ghost mt-2 text-xs" onClick={() => onOpenSprint(m.sprint_id!)}>📊 Ver o relatório do {m.sprint_id}</button>}
+          {m.sprint_id && <button className="btn-ghost mt-2 text-xs" onClick={() => onOpenSprint(m.sprint_id!)}><Icon name="barChart" /> Ver o relatório do {m.sprint_id}</button>}
           {m.decisions.length > 0 && (
             <div className="mt-3 space-y-2 rounded-md border border-line bg-panel/60 p-2">
-              <p className="text-xs font-semibold text-slate-300">💡 Achados sugeridos — decida cada um</p>
+              <p className="text-xs font-semibold text-slate-300"><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" /> Achados sugeridos — decida cada um</p>
               {m.decisions.map((d) => (
                 <div key={d.id} className="text-xs">
                   <div className="text-slate-200">{d.title}</div>
@@ -160,7 +161,7 @@ export function MessageCard({ m, unread = false, onOpen, onReply, onArchive, onO
             <div className="mt-2 flex flex-wrap gap-2">
               {m.options.map((o) => (
                 <button key={o.key} disabled={busy} title={o.description} onClick={() => send(o.key)} className={o.recommended ? "btn-primary" : "btn-ghost"}>
-                  {o.label}{o.recommended ? " ★" : ""}
+                  {o.label}{o.recommended && <Icon name="star" className="ml-1 inline h-3 w-3 align-[-1px] text-amber-300" />}
                 </button>
               ))}
             </div>

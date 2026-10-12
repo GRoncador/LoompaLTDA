@@ -1,5 +1,6 @@
 import type { EngineState, FactoryRef, InFlight, Overview } from "../types";
 import logo from "../assets/loompa-logo.png";
+import { Icon } from "./Icon";
 
 export default function Header(props: {
   factories: FactoryRef[]; slug: string | null; overview: Overview | null; connected: boolean;
@@ -27,14 +28,14 @@ export default function Header(props: {
       {overview && (
         <>
           {/* only the gear: same size and hover as the budget item beside it */}
-          <button className="flex items-center rounded-md px-1.5 py-0.5 text-sm text-slate-300 hover:bg-line" aria-label="Configurações" title="Configurações: provedores, modelos, chaves e orçamento" onClick={props.onSettings}>⚙️</button>
+          <button className="flex items-center rounded-md px-1.5 py-0.5 text-sm text-slate-300 hover:bg-line" aria-label="Configurações" title="Configurações: provedores, modelos, chaves e orçamento" onClick={props.onSettings}><Icon name="settings" className="h-4 w-4" /></button>
           {fin && (
             <button
               className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm hover:bg-line ${fin.warn ? "text-amber-300" : "text-slate-300"}`}
               title={`Gasto de hoje: US$ ${fin.today_usd.toFixed(2)}\n${fin.period === "weekly" ? "Na semana" : "No mês"}: US$ ${fin.period_usd.toFixed(2)} de US$ ${fin.cap_usd.toFixed(2)}\nClique para ver custos por dia, papel e modelo`}
               onClick={props.onFinance}
             >
-              💰 ${fin.today_usd.toFixed(2)}
+              <Icon name="wallet" className="h-3.5 w-3.5" /> ${fin.today_usd.toFixed(2)}
               <BudgetRing used={fin.cap_usd > 0 ? fin.period_usd / fin.cap_usd : 0} warn={fin.warn} />
             </button>
           )}
@@ -45,9 +46,9 @@ export default function Header(props: {
       <div className="ml-auto flex items-center gap-3">
         {overview && (
           <>
-            <button className="btn-ghost" title="Histórico de sprints: andamento, custo, tempo e relatórios" onClick={props.onSprints}>🏁 Sprints</button>
-            <button className="btn-ghost" title="Telas para aprovar, base visual e referências" onClick={props.onDesign}>🎨 Design{props.designPending > 0 ? ` (${props.designPending})` : ""}</button>
-            {props.onGrowth && <button className="btn-ghost" title="Plano de marketing, textos, e-mails, posts e anúncios para você revisar" onClick={props.onGrowth}>📣 Growth</button>}
+            <button className="btn-ghost" title="Histórico de sprints: andamento, custo, tempo e relatórios" onClick={props.onSprints}><Icon name="flag" className="mr-1 h-3.5 w-3.5" />Sprints</button>
+            <button className="btn-ghost" title="Telas para aprovar, base visual e referências" onClick={props.onDesign}><Icon name="palette" className="mr-1 h-3.5 w-3.5" />Design{props.designPending > 0 ? ` (${props.designPending})` : ""}</button>
+            {props.onGrowth && <button className="btn-ghost" title="Plano de marketing, textos, e-mails, posts e anúncios para você revisar" onClick={props.onGrowth}><Icon name="megaphone" className="mr-1 h-3.5 w-3.5" />Growth</button>}
             <EngineButtons state={overview.factory.engine_state ?? (overview.factory.engine ? "running" : "stopped")} inFlight={overview.factory.in_flight ?? []} onEngine={props.onEngine} />
           </>
         )}
@@ -89,7 +90,12 @@ function EngineButtons({ state, inFlight, onEngine }: { state: EngineState; inFl
     );
     if (ok) onEngine("stop");
   };
-  const label = { running: "⏸ Pausar", pausing: "▶ Retomar", paused: "▶ Retomar", stopped: "▶ Ligar esteira" }[state];
+  const label = {
+    running: <><Icon name="pause" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Pausar</>,
+    pausing: <><Icon name="play" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Retomar</>,
+    paused: <><Icon name="play" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Retomar</>,
+    stopped: <><Icon name="play" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Ligar esteira</>,
+  }[state];
   const title = {
     running: "Não começa nada novo; as chamadas em andamento terminam e cada história para onde estiver, sem perder trabalho",
     pausing: `Pausando: ${inFlight.length} história(s) terminando a chamada em andamento. Retomar cancela a pausa`,
@@ -100,7 +106,7 @@ function EngineButtons({ state, inFlight, onEngine }: { state: EngineState; inFl
     <span className="flex items-center gap-1">
       {state === "pausing" && <span className="chip bg-amber-900/60 text-amber-200" title={title}>pausando…</span>}
       {state === "paused" && <span className="chip bg-slate-800 text-slate-300">pausada</span>}
-      <button className="btn-ghost disabled:opacity-40" disabled={!busy} title={busy ? "Interrompe tudo agora (pede confirmação)" : "Nada em andamento"} onClick={stop}>⏹ Parar</button>
+      <button className="btn-ghost disabled:opacity-40" disabled={!busy} title={busy ? "Interrompe tudo agora (pede confirmação)" : "Nada em andamento"} onClick={stop}><Icon name="stop" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Parar</button>
       <button className={playing ? "btn-ghost" : "btn-primary"} title={title} onClick={() => onEngine(playing ? "pause" : "start")}>{label}</button>
     </span>
   );

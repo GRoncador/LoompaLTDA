@@ -4,6 +4,7 @@ import { Drawer, Row } from "./AgentDrawer";
 import LoompaFigure, { ROLE_NAME } from "./LoompaFigure";
 import Markdown from "./Markdown";
 import AgentTrace from "./AgentTrace";
+import { Icon } from "./Icon";
 
 type Tab = "spec" | "plan" | "tasks" | "research" | "diff" | "log" | "agent";
 type Diff = { source: "branch" | "merged" | "none"; ref: string; stat: string; diff: string };
@@ -47,7 +48,7 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
         <Row k="Classificação" v={`${KIND_LABEL[st.kind] ?? st.kind} · ${COMPLEXITY_LABEL[st.complexity] ?? st.complexity ?? "padrão"}${s.epic ? ` · ${s.epic}` : ""}`} />
         {st.extra?.design && <Row k="Telas" v={
           <button className="chip bg-fuchsia-900/50 text-fuchsia-200 hover:bg-fuchsia-800/60" onClick={() => onOpenDesign(id)}>
-            🎨 {st.extra.design.approved ? `aprovadas (rodada ${st.extra.design.approved})` : `em desenho · modo ${st.extra.design.mode === "full" ? "completo" : "leve"}`}
+            <Icon name="palette" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" /> {st.extra.design.approved ? `aprovadas (rodada ${st.extra.design.approved})` : `em desenho · modo ${st.extra.design.mode === "full" ? "completo" : "leve"}`}
           </button>
         } />}
         {s.tasks_total > 0 && <Row k="Tarefas do plano" v={
@@ -67,7 +68,7 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
         } />
         <Row k="Tentativas" v={`${s.attempts.tier2 + s.attempts.tier1 + 1}ª · tier 2: ${s.attempts.tier2} · tier 1: ${s.attempts.tier1} · agora no ${s.current_tier === "tier1" ? "tier 1 (modelos mais fortes)" : s.current_tier === "tier3" ? "tier 3 (gratuitos)" : "tier 2"}`} />
         {act?.model && <Row k="Modelo atual" v={<code className="text-xs">{act.model}</code>} />}
-        {blockers.length > 0 && <Row k="Bloqueada por" v={<span className="text-red-300">🔒 {blockers.join(", ")}{s.waiting?.label ? ` · ${s.waiting.label}` : ""}</span>} />}
+        {blockers.length > 0 && <Row k="Bloqueada por" v={<span className="text-red-300"><Icon name="lock" className="mr-1 inline h-3 w-3 align-[-1px]" />{blockers.join(", ")}{s.waiting?.label ? ` · ${s.waiting.label}` : ""}</span>} />}
         {s.blocked_reason && <Row k="Esperando você" v={<span className="text-amber-200">{BLOCKED_LABEL[s.blocked_reason] ?? s.blocked_reason}</span>} />}
         {st.qa_verdict && <Row k="Veredito do Inspector" v={
           <span className={st.qa_verdict === "FAIL" ? "text-red-300" : st.qa_verdict === "CONCERNS" ? "text-orange-200" : "text-slate-200"}>
@@ -81,7 +82,7 @@ export default function StoryDrawer({ slug, id, onClose, onOpenSprint, onOpenDes
         } />}
         {s.branch && <Row k="Branch" v={<code className="text-xs">{s.branch}</code>} />}
         {s.pr_url && <Row k="Pull request" v={<a className="text-brand hover:underline" href={s.pr_url} target="_blank" rel="noreferrer">{s.pr_url}</a>} />}
-        {s.priority_pinned && s.stage === "BACKLOG" && <Row k="Prioridade" v="📌 fixada por você: o Product Owner não move este card" />}
+        {s.priority_pinned && s.stage === "BACKLOG" && <Row k="Prioridade" v={<><Icon name="pin" className="mr-1 inline h-3 w-3 align-[-1px]" /> fixada por você: o Product Owner não move este card</>} />}
         {notes.length > 0 && <Row k="Suas orientações" v={<ul className="list-disc pl-4">{notes.map((n: string, i: number) => <li key={i} className="whitespace-pre-wrap">{n}</li>)}</ul>} />}
         {triage?.rewritten && original && !notes.includes(original) && <Row k="Texto original" v={<span className="whitespace-pre-wrap text-slate-400">{original}</span>} />}
         {triage?.forced && <Row k="Objeção do PO" v={<span className="text-amber-200">Gravado por decisão sua. {triage.objection}</span>} />}
@@ -157,7 +158,7 @@ function History({ history, commits }: { history: Step[]; commits: string[] }) {
       {saved.length > 0 && (
         <div>
           <div className="mb-1 text-slate-500">Versões salvas (mais recente primeiro)</div>
-          <ul className="space-y-0.5 text-slate-300">{saved.map((c, i) => <li key={i}>✅ {c}</li>)}</ul>
+          <ul className="space-y-0.5 text-slate-300">{saved.map((c, i) => <li key={i}><Icon name="check" className="mr-1 inline h-3 w-3 align-[-1px]" />{c}</li>)}</ul>
         </div>
       )}
     </div>

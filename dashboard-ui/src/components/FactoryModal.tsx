@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { FactoryFinding, FactoryScan } from "../types";
 import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 
 const SEVERITY: Record<string, { label: string; cls: string }> = {
   high: { label: "alta", cls: "bg-red-900/60 text-red-200" },
@@ -53,7 +54,7 @@ export default function FactoryModal({ slug, onClose, onOpenSprint, onOpenStory 
             {sprints.map((id) => <button key={id} className="ml-1 text-sky-300 hover:underline" onClick={() => onOpenSprint(id)}>{id}</button>)}
           </span>
         )}
-        <button className="btn-ghost" disabled={busy} title="Procura os sinais nos últimos 7 dias desta fábrica" onClick={scan}>{busy ? "procurando…" : "🔎 Procurar agora"}</button>
+        <button className="btn-ghost" disabled={busy} title="Procura os sinais nos últimos 7 dias desta fábrica" onClick={scan}>{busy ? "procurando…" : <><Icon name="search" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Procurar agora</>}</button>
       </div>
       {note && <p className="mt-2 text-xs text-emerald-300">{note}</p>}
       {err && <p className="mt-2 text-xs text-red-300">{err}</p>}

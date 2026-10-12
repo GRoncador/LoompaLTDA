@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ProductFinding } from "../types";
 import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 
 const KIND: Record<string, string> = { bug: "defeito", tech_debt: "débito técnico", opportunity: "oportunidade", risk: "risco", resolution: "solução registrada" };
 
@@ -12,7 +13,7 @@ export default function ProductFindingsModal({ slug, onClose, onOpenStory }: { s
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { api.productFindings(slug).then(setRows).catch((e) => setErr(String(e))); }, [slug]);
   return (
-    <Modal title="💡 Achados no produto hoje" onClose={onClose}>
+    <Modal title={<><Icon name="lightbulb" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Achados no produto hoje</>} onClose={onClose}>
       <p className="text-xs text-slate-400">O que a fábrica notou no código do produto enquanto construía, contado uma vez cada. Os que viraram card estão no backlog, priorizados pelo Product Owner.</p>
       {err && <p className="mt-2 text-xs text-red-300">{err}</p>}
       <ul className="mt-3 space-y-1.5">

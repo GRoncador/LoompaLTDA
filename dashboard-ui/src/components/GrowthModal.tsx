@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { GrowthView } from "../types";
 import { designUrl } from "./DesignScreens";
 import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 
 const KIND_LABEL: Record<string, string> = { plan: "Plano de marketing", copy: "Textos", emails: "Sequência de e-mails", posts: "Posts e anúncios" };
 const STATUS: Record<string, string> = { draft: "rascunho na Caixa de Entrada", approved: "aprovado", discarded: "descartado", adjusting: "refazendo com o seu ajuste" };
@@ -23,7 +24,7 @@ export default function GrowthModal({ slug, onClose }: { slug: string; onClose: 
     try { setNote(await fn()); await load(); } catch (e) { setNote(String(e)); } finally { setBusy(false); }
   };
   return (
-    <Modal title="📣 Growth · peças para você revisar" onClose={onClose} className="w-[96vw] max-w-5xl">
+    <Modal title={<><Icon name="megaphone" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Growth · peças para você revisar</>} onClose={onClose} className="w-[96vw] max-w-5xl">
       <div className="space-y-3 text-sm">
         <p className="text-xs text-slate-400">A fábrica escreve e desenha; você revisa e publica. Nada é enviado, publicado ou pago por aqui.</p>
         <div className="space-y-2 rounded-md border border-line bg-panel/40 p-2">
@@ -52,7 +53,7 @@ export default function GrowthModal({ slug, onClose }: { slug: string; onClose: 
             <button className="btn-ghost ml-auto" disabled={busy} title="A landing é uma história de código: passa pelo Product Owner e pelas telas antes do código" onClick={() => run(async () => {
               const r = await api.growthLanding(slug);
               return r.story_id ? `Landing page no backlog como ${r.story_id}.` : "O Product Owner não aceitou: veja a conversa de revisão.";
-            })}>🌐 Pedir a landing page</button>
+            })}><Icon name="globe" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Pedir a landing page</button>
           </div>
           {note && <p className="text-xs text-slate-300">{note}</p>}
         </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ProductPhase, ProductView } from "../types";
 import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 
 /** The product's life cycle (plan 16): the phases with their goal, exit criterion and facts; the
  *  product epics with their progress; the PM's proposals. Moving to a phase is the founder's call. */
@@ -14,10 +15,10 @@ export default function ProductModal({ slug, onClose, onBrainstorm }: { slug: st
     setBusy(true); setNote(null);
     try { const n = await fn(); if (n) setNote(n); setView(await api.product(slug)); } catch (e) { setNote(String(e)); } finally { setBusy(false); }
   };
-  if (!view) return <Modal title="🧭 Produto" onClose={onClose}><p className="text-sm text-slate-400">{note ?? "carregando…"}</p></Modal>;
+  if (!view) return <Modal title={<><Icon name="compass" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Produto</>} onClose={onClose}><p className="text-sm text-slate-400">{note ?? "carregando…"}</p></Modal>;
   const current = view.phases.find((p) => p.status === "current");
   return (
-    <Modal title={`🧭 Produto · ${view.kind_label}`} onClose={onClose} className="w-[96vw] max-w-5xl">
+    <Modal title={<><Icon name="compass" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Produto · {view.kind_label}</>} onClose={onClose} className="w-[96vw] max-w-5xl">
       <div className="space-y-4 text-sm">
         {note && <p className="text-xs text-amber-300">{note}</p>}
         <section className="space-y-2">
@@ -25,7 +26,7 @@ export default function ProductModal({ slug, onClose, onBrainstorm }: { slug: st
           <div className="flex flex-wrap gap-1">
             {view.phases.map((p) => (
               <span key={p.key} className={`chip ${p.status === "current" ? "bg-violet-800/70 text-violet-100" : p.status === "done" ? "bg-emerald-900/50 text-emerald-200" : "bg-slate-800 text-slate-400"}`}>
-                {p.status === "done" ? "✔ " : ""}{p.name}{p.cards > 0 ? ` · ${p.percent}%` : ""}
+                {p.status === "done" ? <Icon name="check" className="mr-1 inline h-3 w-3 align-[-1px]" /> : null}{p.name}{p.cards > 0 ? ` · ${p.percent}%` : ""}
               </span>
             ))}
           </div>
@@ -71,7 +72,7 @@ export default function ProductModal({ slug, onClose, onBrainstorm }: { slug: st
                         onBrainstorm(prompt);
                       }}
                     >
-                      💡 brainstorm
+                      <Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" /> brainstorm
                     </button>
                   )}
                   {e.status !== "done" && <button className="text-emerald-300 hover:underline" onClick={() => run(async () => { await api.setEpic(slug, e.id, "done"); })}>concluir</button>}

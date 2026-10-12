@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import LoompaFigure from "./LoompaFigure";
 import type { Agent, Column, ConversationKind, ConversationSummary, QuickStoryResult, SprintSummary, StoryActivity, StoryCard } from "../types";
+import { Icon, type IconName } from "./Icon";
 
 const TONE: Record<string, string> = {
   BACKLOG: "border-slate-600", SPEC: "border-violet-500", DEV: "border-emerald-500", TEST: "border-sky-500", AWAITING_FOUNDER: "border-amber-500", DONE: "border-slate-500",
@@ -73,7 +74,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
     <>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold">📋 Kanban de Fluxo de Valor</h2>
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Icon name="clipboard" className="h-4 w-4 text-slate-400" />Kanban</h2>
           {sprint && (
             <button className="chip bg-sky-900/50 text-sky-200 hover:bg-sky-800/60" title={`${sprint.goal ? `${sprint.goal} · ` : ""}abrir na aba Sprints`} onClick={() => onOpenSprint(sprint.id)}>
               {sprint.id} · {sprint.status === "open" ? "em planejamento" : "rodando"} · {sprint.progress.done}/{sprint.progress.total}
@@ -100,12 +101,12 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
           {/* a sprint starts only from a meeting, after the Product Owner's proposal (ADR-0017) */}
           <button className={`${kickoff ? "btn-ghost opacity-50" : "btn-primary"} text-xs`} disabled={kickoff}
             title={kickoff ? "Comece pelo brainstorm de abertura: ele decide a visão, a primeira versão e a stack" : "O Master abre com o estado do projeto; o Product Owner propõe o sprint"}
-            onClick={() => onChat("meeting")}>🗓 Reunião de Sprint</button>
+            onClick={() => onChat("meeting")}><Icon name="calendar" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Reunião de Sprint</button>
           {Object.keys(epics).length > 0 && !kickoff ? (
             <div className="flex items-center">
               <button className="btn-ghost rounded-r-none border-r-0 text-xs"
                 title="Discutir uma ideia livre com a fábrica"
-                onClick={() => onChat("brainstorm")}>💡 Brainstorm</button>
+                onClick={() => onChat("brainstorm")}><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm</button>
               <details className="relative">
                 <summary className="btn-ghost rounded-l-none px-1.5 text-xs cursor-pointer list-none" title="Brainstorm para um épico ativo">▾</summary>
                 <ul className="card absolute left-0 z-30 mt-1 w-64 space-y-1 p-2 text-xs">
@@ -132,7 +133,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
                         onChat("brainstorm");
                       }}
                     >
-                      💡 Brainstorm livre (sem épico)
+                      <Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm livre (sem épico)
                     </button>
                   </li>
                 </ul>
@@ -141,11 +142,11 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
           ) : (
             <button className={`${kickoff ? "btn-primary" : "btn-ghost"} text-xs`}
               title={kickoff ? "Abertura da fábrica: visão, primeira versão e stack" : "Discutir uma ideia com a fábrica"}
-              onClick={() => onChat("brainstorm")}>{kickoff ? "💡 Brainstorm de abertura" : "💡 Brainstorm"}</button>
+              onClick={() => onChat("brainstorm")}>{kickoff ? <><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm de abertura</> : <><Icon name="lightbulb" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Brainstorm</>}</button>
           )}
           {conversations.length > 0 && (
             <details className="relative">
-              <summary className="btn-ghost cursor-pointer list-none text-xs" title="Conversas em aberto">💬 {conversations.length}</summary>
+              <summary className="btn-ghost cursor-pointer list-none text-xs" title="Conversas em aberto"><Icon name="message" className="mr-1 inline h-3 w-3 align-[-1px]" />{conversations.length}</summary>
               <ul className="card absolute left-0 z-30 mt-1 w-72 space-y-1 p-2 text-xs">
                 {conversations.map((c) => (
                   <li key={c.id}>
@@ -163,7 +164,7 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
         <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); create(); }}>
           {filed && (
             <button type="button" className="max-w-[18rem] truncate text-[11px] text-emerald-300 hover:underline" title="O Product Owner gravou o card; clique para ver" onClick={() => { onOpen(filed.id); setFiled(null); }}>
-              ✔ {filed.id} · {filed.title} · {KIND_LABEL[filed.kind] ?? filed.kind}{filed.rewritten ? " (reescrita pelo PO)" : ""}
+              <Icon name="check" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{filed.id} · {filed.title} · {KIND_LABEL[filed.kind] ?? filed.kind}{filed.rewritten ? " (reescrita pelo PO)" : ""}
             </button>
           )}
           <input value={title} disabled={reading} onChange={(e) => setTitle(e.target.value)} placeholder={reading ? "O Product Owner está lendo…" : "Nova história rápida…"} className="w-64 rounded-md border border-line bg-ink px-2 py-1 text-xs disabled:opacity-60" />
@@ -221,8 +222,8 @@ function working(s: StoryCard, live: Record<string, StoryActivity>, now: number,
 }
 
 // one fixed glyph per kind, left of the id, like an issue-type icon (11.1)
-const KIND_ICON: Record<string, { icon: string; label: string }> = {
-  feature: { icon: "✨", label: "funcionalidade" }, bugfix: { icon: "🐞", label: "correção" }, research: { icon: "🔎", label: "pesquisa" },
+const KIND_ICON: Record<string, { icon: IconName; label: string }> = {
+  feature: { icon: "sparkles", label: "funcionalidade" }, bugfix: { icon: "bug", label: "correção" }, research: { icon: "search", label: "pesquisa" },
 };
 
 const SEVERITY = ["low", "medium", "high"]; // worst last: the chip names the worst one
@@ -297,7 +298,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
   return (
     <div className={`group relative rounded-md border p-2 text-xs transition-transform duration-200 ease-out hover:scale-[1.03] ${pointed ? "scale-[1.03]" : ""} ${running ? "border-brand bg-brand/[0.07] ring-1 ring-brand running-glow" : "border-line bg-panel hover:border-slate-500"}`}>
       <div className="flex items-center gap-1 text-[10px] text-slate-500">
-        <span className="text-[12px] leading-none" title={kind.label}>{kind.icon}</span>
+        <span className="text-[12px] leading-none" title={kind.label}><Icon name={kind.icon} className="h-3.5 w-3.5" /></span>
         <button className="hover:text-slate-300" onClick={() => onOpen(s.id)}>{s.id}</button>
         <span className={`chip px-1.5 py-0 text-[9px] ${size.cls}`} title={size.title}>{size.text}</span>
         {s.sprint_id && (
@@ -307,7 +308,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
         {epicName && <span className="max-w-[7rem] truncate rounded bg-violet-950/70 px-1 text-violet-300/90" title={`Épico: ${epicName}`}>{epicName}</span>}
         <span className="ml-auto flex items-center gap-1">
           {pinned && onUnpin && (
-            <button className="text-[11px] opacity-80 hover:opacity-100" title="Posição fixada por você: o Product Owner não move este card. Clique para devolver a ordem a ele." onClick={() => onUnpin(s.id)}>📌</button>
+            <button className="text-[11px] opacity-80 hover:opacity-100" title="Posição fixada por você: o Product Owner não move este card. Clique para devolver a ordem a ele." onClick={() => onUnpin(s.id)}><Icon name="pin" className="h-3 w-3" /></button>
           )}
           {s.cost_usd > 0 && (
             <span className={`tabular-nums ${overCap ? "font-semibold text-amber-400" : "text-slate-500"}`}
@@ -334,7 +335,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
                   ? `Pronta e verde: escrita sobre ${linked.join(", ")}. Só falta integrar, e isso espera o seu aceite daquela entrega.`
                   : `Livre para trabalhar: escrita sobre ${linked.join(", ")}. Só a integração espera o seu aceite daquela entrega.`}
               onMouseEnter={() => onHl?.({ ids: held.length ? held : linked })} onMouseLeave={() => onHl?.({})}>
-              {held.length ? "🔒" : "🔓"} {(held.length ? held : linked).join(", ")}
+              <Icon name={held.length ? "lock" : "unlock"} className="mr-1 inline h-3 w-3 align-[-1px]" />{(held.length ? held : linked).join(", ")}
             </span>
           </div>
         )}
@@ -361,7 +362,7 @@ function Card({ s, agent, activity, now, running = false, cap = 0, hl = {}, onHl
             <Stage stage={s.stage} since={activity?.stage_since} now={now} parked={parked} ready={!!s.waiting?.ready} />
             <span className="flex-1" />
             {stalled ? (
-              <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado">⏸</span>
+              <span className="shrink-0 rounded bg-red-900/60 px-1 text-red-200" title="Nenhum sinal da fábrica há muito tempo: o Ops foi avisado"><Icon name="pause" className="h-3 w-3" /></span>
             ) : agent && !parked ? <Avatar agent={agent} tier={s.current_tier} model={activity?.model} /> : null}
           </div>
         )}

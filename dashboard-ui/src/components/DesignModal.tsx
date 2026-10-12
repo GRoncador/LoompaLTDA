@@ -4,6 +4,7 @@ import type { DesignOverview, DesignReference, Message, StoryDesign } from "../t
 import { DesignScreens, designUrl } from "./DesignScreens";
 import { MessageCard } from "./Inbox";
 import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 
 type Tab = "approve" | "base" | "references" | "history";
 
@@ -29,7 +30,7 @@ export default function DesignModal({ slug, story, onClose, onReply, onOpenStory
     ["history", "Telas por história"],
   ];
   return (
-    <Modal title="🎨 Design" onClose={onClose} className="w-[96vw] max-w-6xl">
+    <Modal title={<><Icon name="palette" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Design</>} onClose={onClose} className="w-[96vw] max-w-6xl">
       <div className="mb-3 flex flex-wrap gap-2 border-b border-line pb-2">
         {tabs.map(([t, label]) => <button key={t} className={tab === t ? "btn-primary" : "btn-ghost"} onClick={() => setTab(t)}>{label}</button>)}
       </div>
@@ -144,7 +145,7 @@ function History({ slug, stories, initial }: { slug: string; stories: string[]; 
         <>
           {data.approved && (
             <section>
-              <h4 className="font-semibold text-emerald-300">✔ Aprovada (rodada {data.approved.round}{data.approved.alternative ? `, alternativa ${data.approved.alternative}` : ""})</h4>
+              <h4 className="font-semibold text-emerald-300"><Icon name="check" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Aprovada (rodada {data.approved.round}{data.approved.alternative ? `, alternativa ${data.approved.alternative}` : ""})</h4>
               <DesignScreens slug={slug} screens={data.approved.screens} />
             </section>
           )}

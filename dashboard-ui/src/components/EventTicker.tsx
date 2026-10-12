@@ -1,9 +1,11 @@
 import LoompaFigure from "./LoompaFigure";
 import type { Agent, LoompaEvent } from "../types";
+import { Icon, type IconName } from "./Icon";
 
-const LABEL: Record<string, string> = {
-  "story.stage": "→", "inbox.new": "📬", "llm.call": "🧠", "story.escalated": "⬆️", "story.retry": "🔁", "tool.call": "🔧",
-  "worktree.commit": "✅", "story.merged": "🚀", "kaizen.learning": "💡", "agent.state": "👤", "engine.started": "▶", "engine.stopped": "⏹", "engine.pausing": "⏸", "engine.paused": "⏸", "engine.resumed": "▶", "story.paused": "⏸", "scheduler.paused": "⛔",
+const I = (name: IconName) => <Icon name={name} className="h-3 w-3" />;
+const LABEL: Record<string, React.ReactNode> = {
+  "story.stage": "→", "inbox.new": I("inbox"), "llm.call": I("brain"), "story.escalated": I("arrowUp"), "story.retry": I("refresh"), "tool.call": I("wrench"),
+  "worktree.commit": I("check"), "story.merged": I("rocket"), "kaizen.learning": I("lightbulb"), "agent.state": I("user"), "engine.started": I("play"), "engine.stopped": I("stop"), "engine.pausing": I("pause"), "engine.paused": I("pause"), "engine.resumed": I("play"), "story.paused": I("pause"), "scheduler.paused": I("ban"),
 };
 
 export default function EventTicker({ events, agents = [], factory = "" }: { events: LoompaEvent[]; agents?: Agent[]; factory?: string }) {

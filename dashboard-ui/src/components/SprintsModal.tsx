@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Modal } from "./Modal";
 import type { SprintListItem, SprintReport, SprintStoryReport, SprintTotals } from "../types";
+import { Icon } from "./Icon";
 
 // One series, one hue (as in Custos); the burn-up's three series take the validated dark
 // categorical slots 1-3 in fixed order (blue, orange, aqua: all checks pass on #111827).
@@ -64,7 +65,7 @@ export default function SprintsModal({ slug, initial, onClose, onOpenStory }: { 
   }, [slug, selected]);
   const ordered = useMemo(() => [...(list ?? [])].reverse(), [list]);
   return (
-    <Modal title="🏁 Sprints" onClose={onClose} className="w-[96vw] max-w-[1400px]">
+    <Modal title={<><Icon name="flag" className="mr-1.5 inline h-4 w-4 align-[-2px]" />Sprints</>} onClose={onClose} className="w-[96vw] max-w-[1400px]">
       {error && <p className="text-sm text-red-300">{error}</p>}
       {!list && !error && <p className="text-sm text-slate-400">carregando…</p>}
       {list && list.length === 0 && <p className="text-sm text-slate-400">Nenhum sprint ainda. Eles começam numa Reunião de Sprint.</p>}

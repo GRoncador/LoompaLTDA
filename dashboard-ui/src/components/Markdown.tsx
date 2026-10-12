@@ -3,6 +3,7 @@
  * Spec Kit's shape — headings, lists, checklists, tables and fenced code — so this covers that
  * and nothing more. React elements are built by hand, so nothing from a model is ever HTML. */
 import type { ReactNode } from "react";
+import { Icon } from "./Icon";
 
 export default function Markdown({ text }: { text: string }) {
   if (!text.trim()) return <p className="text-sm text-slate-400">(ainda não gerado)</p>;
@@ -82,7 +83,7 @@ function blocks(text: string): ReactNode[] {
         items.push(
           box ? (
             <li key={items.length} className={`flex gap-2 ${box[1] === " " ? "" : "text-slate-500"}`}>
-              <span className={box[1] === " " ? "text-slate-500" : "text-emerald-400"}>{box[1] === " " ? "☐" : "☑"}</span>
+              <span className={box[1] === " " ? "text-slate-500" : "text-emerald-400"}>{box[1] === " " ? <Icon name="square" className="h-4 w-4" /> : <Icon name="checkSquare" className="h-4 w-4" />}</span>
               <span className={box[1] === " " ? "" : "line-through decoration-slate-600"}>{inline(body.slice(box[0].length))}</span>
             </li>
           ) : (
