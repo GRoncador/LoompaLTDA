@@ -344,3 +344,16 @@ def test_a_proposal_finished_after_the_founder_left_reaches_the_inbox(client):
     assert body["proposing"] is False
     client.post(f"{BASE}/conversations/{cid}/propose")
     assert len(notes()) == 1
+
+
+def test_the_meeting_button_resumes_the_open_meeting(client):
+    ctx = client.app.state.hub.get("demo-hq").ctx
+    ProductOwnerAgent(ctx).add_item("Relatório")
+    first = client.post(f"{BASE}/conversations", json={"kind": "meeting"}).json()["conversation"]
+    listed = lambda: [c["id"] for c in client.get(f"{BASE}/overview").json()["conversations"]]  # noqa: E731
+    assert first["id"] not in listed()  # nothing said, nothing proposed: not worth resuming
+    client.post(f"{BASE}/conversations/{first['id']}/propose")
+    assert first["id"] in listed()  # the Product Owner proposed in it
+    again = client.post(f"{BASE}/conversations", json={"kind": "meeting"}).json()
+    assert again["conversation"]["id"] == first["id"] and again["proposing"] is False
+    assert len(again["conversation"]["turns"]) == len(first["turns"]) + 1  # no second briefing

@@ -89,7 +89,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
       // the Master opens the meeting with where the project stands (plan 10.2)
       opening.current = true;
       setBusy(true); setWaitingFor("Abrindo a reunião");
-      api.openConversation(slug, "meeting", "").then((r) => { setConv(r.conversation); if (r.sprints) setSprints(r.sprints); }).catch((e) => setErr(detail(e))).finally(() => { setBusy(false); setWaitingFor(null); });
+      api.openConversation(slug, "meeting", "").then((r) => { setConv(r.conversation); setRemote(!!r.proposing); if (r.sprints) setSprints(r.sprints); }).catch((e) => setErr(detail(e))).finally(() => { setBusy(false); setWaitingFor(null); });
     } else if (kind === "brainstorm" && kickoff && !initialText && !opening.current) {
       // a new factory's opening (plan 10.10): the fixed first question is waiting in the session
       opening.current = true;

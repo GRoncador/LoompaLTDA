@@ -347,9 +347,14 @@ def _conversation_summary(conv: Conversation) -> dict[str, Any]:
     }
 
 
-def _is_listed(conv: Conversation) -> bool:
-    """A meeting opened and left before the founder said anything is not worth resuming."""
-    return any(t.who == "founder" for t in conv.turns)
+def _is_listed(conv: Conversation, proposing: set[str] = frozenset()) -> bool:
+    """A meeting opened and left before the founder said anything is not worth resuming, unless
+    the Product Owner proposed in it, or is proposing now."""
+    return (
+        any(t.who == "founder" for t in conv.turns)
+        or conv.draft.proposal is not None
+        or conv.id in proposing
+    )
 
 
 def create_app(
@@ -562,7 +567,7 @@ def create_app(
             "conversations": [
                 _conversation_summary(c)
                 for c in _board(ctx).list(ConversationStatus.OPEN)
-                if _is_listed(c)
+                if _is_listed(c, rt.proposing)
             ][:10],
             "last_event_id": _last_event_id(ctx),
         }
@@ -914,6 +919,13 @@ def create_app(
     @app.post("/api/factories/{slug}/conversations")
     async def open_conversation(slug: str, body: ChatOpenBody) -> dict[str, Any]:
         rt, chats = _chat(slug)
+        if body.kind == ConversationKind.MEETING:
+            # one Sprint Meeting at a time: the button resumes the open one, never a second
+            # proposal of the Product Owner in parallel
+            for conv in _board(rt.ctx).list(ConversationStatus.OPEN):
+                if conv.kind == ConversationKind.MEETING:
+                    rt.detached.discard(conv.id)
+                    return _payload(conv, proposing=conv.id in rt.proposing)
         rt.ctx.index_memory()
         with _chat_errors():
             conv = chats.open(body.kind)
