@@ -26,7 +26,8 @@ export default function Header(props: {
       </label>
       {overview && (
         <>
-          <button className="btn-ghost" title="Provedores, modelos, chaves e orçamento" onClick={props.onSettings}>⚙ Configurações</button>
+          {/* only the gear: same size and hover as the budget item beside it */}
+          <button className="flex items-center rounded-md px-1.5 py-0.5 text-sm text-slate-300 hover:bg-line" aria-label="Configurações" title="Configurações: provedores, modelos, chaves e orçamento" onClick={props.onSettings}>⚙️</button>
           {fin && (
             <button
               className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm hover:bg-line ${fin.warn ? "text-amber-300" : "text-slate-300"}`}
