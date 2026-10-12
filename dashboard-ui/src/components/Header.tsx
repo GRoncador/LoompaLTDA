@@ -99,8 +99,8 @@ function EngineButtons({ state, inFlight, onEngine }: { state: EngineState; inFl
     <span className="flex items-center gap-1">
       {state === "pausing" && <span className="chip bg-amber-900/60 text-amber-200" title={title}>pausando…</span>}
       {state === "paused" && <span className="chip bg-slate-800 text-slate-300">pausada</span>}
-      <button className={playing ? "btn-ghost" : "btn-primary"} title={title} onClick={() => onEngine(playing ? "pause" : "start")}>{label}</button>
       <button className="btn-ghost disabled:opacity-40" disabled={!busy} title={busy ? "Interrompe tudo agora (pede confirmação)" : "Nada em andamento"} onClick={stop}>⏹ Parar</button>
+      <button className={playing ? "btn-ghost" : "btn-primary"} title={title} onClick={() => onEngine(playing ? "pause" : "start")}>{label}</button>
     </span>
   );
 }
