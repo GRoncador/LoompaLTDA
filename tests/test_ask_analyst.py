@@ -122,3 +122,31 @@ async def test_the_brainstorm_consults_the_analyst_in_the_open_not_through_the_t
     assert offered["brainstorm"] and ASK_TOOL not in offered["brainstorm"]
     assert ASK_TOOL in offered["meeting"]
     await ctx.aclose()
+
+
+async def test_a_meeting_reply_says_the_analyst_was_asked_and_its_sources(factory: Factory):  # noqa: F811
+    from loompa.agents.conversation import Conversations
+    from loompa.agents.dryrun import dry_run_script, role_of
+    from loompa.conversations import ConversationKind
+
+    calls: list[str] = []
+    analyst = answering_analyst(calls)
+
+    def script(model: str, messages: list[Message], tools: Any) -> Any:
+        role = role_of(messages)
+        if role == "analyst":
+            return analyst(model, messages)
+        if role == "master" and tools and not tool_results(messages):
+            return [ToolCall("m1", ASK_TOOL, {"question": "Is Node 24 the active LTS?"})]
+        return dry_run_script(model, messages, tools)
+
+    ctx = with_web(make_ctx(factory, script))
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    turn = await chats.say(conv.id, "Vamos planejar a sprint")
+    assert len(calls) == 1
+    assert turn.reply.endswith(
+        f"Consultei o Analyst uma vez para conferir fatos externos. Fontes: {VERIFIED}."
+    )
+    assert INVENTED not in turn.reply
+    await ctx.aclose()

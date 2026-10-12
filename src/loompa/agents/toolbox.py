@@ -187,6 +187,8 @@ class Toolbox:
         if ctx is None:
             self.allowed -= {ASK_TOOL}
         self.story: StoryState | None = None  # set by the tool loop: `ask_analyst` counts per story
+        # each `ask_analyst` answered in this run: (web sources, came from the cache)
+        self.asked: list[tuple[list[str], bool]] = []
         self.mcp = mcp
         self.seen_urls: set[str] = set()  # URLs that came back from web tools (source check)
         # what a web tool returned around each URL: whether it supports a sentence (13.6)
@@ -299,7 +301,12 @@ class Toolbox:
             return ToolResult(False, "error: the Analyst cannot be consulted here")
         from loompa.agents.analyst import answer_question
 
-        return await answer_question(self.ctx, self.profile.role, question, self.story, id(self))
+        res = await answer_question(self.ctx, self.profile.role, question, self.story, id(self))
+        if res.ok:
+            line = next((x for x in res.output.splitlines() if x.startswith("Sources: ")), "")
+            urls = [u for u in line.removeprefix("Sources: ").split("; ") if "://" in u]
+            self.asked.append((urls, 'source="analyst/memory"' in res.output))
+        return res
 
     def search_memory(self, args: dict[str, Any]) -> ToolResult:
         """Organizational memory, only the kinds this role's profile reads (plan 13.4)."""

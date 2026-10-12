@@ -179,7 +179,9 @@ fails, the old REST call tells "bad key" from "MCP connection failed" and the me
   story), an answer of up to ~400 words whose URLs pass the same `seen_urls` check, wrapped as
   external data. Not in a brainstorm: there the Master consults the Analyst in the open
   (`brainstorm.consult`, ADR-0020), where the founder sees the opinion and its limits, and a
-  consulted role does not get the tool either.
+  consulted role does not get the tool either. In a Sprint Meeting the Master's reply ends, by
+  code, with a pt-BR line saying it asked the Analyst and which web sources the answer used
+  (`master.analyst_note`), so nothing is looked up out of the founder's sight.
   Answers that cite the web are cached in memory (`web-answer/…`, kind `research`) for 30 days; a
   cached answer is free and does not count. A dry run never asks.
 * **Delimiter.** `wrap_external` defuses any `<external_data`/`</external_data` a page writes, so

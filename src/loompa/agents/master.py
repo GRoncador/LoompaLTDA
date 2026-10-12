@@ -10,7 +10,13 @@ from typing import Any
 
 from loompa import sprint_report
 from loompa.agents.base import LoompaAgent
-from loompa.agents.conversation import Conversations, TurnResult, founder_text, run_turn
+from loompa.agents.conversation import (
+    MAX_REPLY_CHARS,
+    Conversations,
+    TurnResult,
+    founder_text,
+    run_turn,
+)
 from loompa.agents.product_owner import ProductOwnerAgent
 from loompa.agents.toolbox import ASK_TOOL, EXPLORE_TOOLS
 from loompa.comms import (
@@ -215,6 +221,22 @@ class Classification:
     children: list[dict[str, str]] = field(default_factory=list)
     reason: str = ""
     screen: bool = False  # changes what a person sees: the design gate's question (ADR-0039)
+
+
+def analyst_note(asked: list[tuple[list[str], bool]]) -> str:
+    """The line a meeting reply ends with when the Master asked the Analyst during the turn."""
+    if not asked:
+        return ""
+    urls = list(dict.fromkeys(u for sources, _ in asked for u in sources))
+    times = "uma vez" if len(asked) == 1 else f"{len(asked)} vezes"
+    cached = " (resposta guardada de uma consulta recente)" if all(c for _, c in asked) else ""
+    where = f"Fontes: {', '.join(urls)}." if urls else "Sem fonte da web confirmada."
+    return f"\n\nConsultei o Analyst {times} para conferir fatos externos{cached}. {where}"
+
+
+def with_note(reply: str, note: str) -> str:
+    """`reply` shortened so that `note` survives the reply's length limit."""
+    return reply.strip()[: MAX_REPLY_CHARS - len(note)] + note if note else reply
 
 
 class MasterAgent(LoompaAgent):
@@ -518,6 +540,7 @@ class MasterAgent(LoompaAgent):
             if current:
                 context = f"{render_running(self.ctx, conv.draft.sprint_id)}\n\n{context}"
             board = ConversationBoard(self.ctx.store, self.ctx.slug)
+            box = self.explore_tools()
             turn = await run_turn(
                 self,
                 board,
@@ -525,7 +548,9 @@ class MasterAgent(LoompaAgent):
                 text,
                 system=CURRENT_SPRINT_SYSTEM if current else MEETING_SYSTEM,
                 context=context,
-                toolbox=self.explore_tools(),
+                toolbox=box,
+                # said by code, not left to the model: the founder sees what was looked up
+                polish=lambda reply: with_note(reply, analyst_note(box.asked)),
                 fallback_ops=lambda goals: [{"op": "add", **g} for g in self._split_goals(goals)],
             )
         finally:
