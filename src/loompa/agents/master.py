@@ -727,13 +727,21 @@ class MasterAgent(LoompaAgent):
             self.ctx.emit("backlog.retired", story_id=sid, agent=po.name, reason=reason)
 
     async def commit_meeting(
-        self, conv: Conversation, *, start_sprint: bool, goal: str = "", plan_next: bool = False
+        self,
+        conv: Conversation,
+        *,
+        start_sprint: bool,
+        goal: str = "",
+        plan_next: bool = False,
+        rank_later: bool = False,
     ) -> CommitResult:
         """End a Sprint Meeting: every card in the draft goes to the backlog through the Product
         Owner and, with `start_sprint`, the cards marked for the sprint start it. A sprint starts
         only after the Product Owner's proposal and only with cards it saw (plan 10.2). Nothing is
         written until every pick has been checked, so a stale draft fails before it changes
-        anything. The meeting closes with the Product Owner's ranking of the backlog (10.5)."""
+        anything. The meeting closes with the Product Owner's ranking of the backlog (10.5); with
+        `rank_later` the ranking is only owed (`RERANK_PENDING`) and `finish_rerank` does it in
+        the background, so the founder's OK returns as soon as the cards and the sprint are in."""
         store, po = self.ctx.store, ProductOwnerAgent(self.ctx)
         draft = conv.draft
         board = SprintBoard(store, self.ctx.slug)
@@ -815,7 +823,7 @@ class MasterAgent(LoompaAgent):
                 sprint = board.set_goal(sprint.id, goal or draft.goal)
                 self.ctx.emit("sprint.planned", agent=self.name, sprint_id=sprint.id, stories=picks)
             result.sprint_id = sprint.id
-        await po.rerank(
+        note = (
             f"Sprint goal: {goal or draft.goal or '(none)'}. "
             + (
                 f"Sprint {result.sprint_id} {'started' if start_sprint else 'planned'} with "
@@ -830,7 +838,30 @@ class MasterAgent(LoompaAgent):
                 else ""
             )
         )
+        if rank_later:
+            store.set(RERANK_NOTE, note)
+            store.set(RERANK_PENDING, "1")
+        else:
+            await po.rerank(note)
         return result
+
+    async def finish_rerank(self) -> None:
+        """The backlog ranking a meeting's OK left owed. Claimed like a sprint report, so the
+        dashboard and the engine never both do it, and a pass that died doing it is retried
+        after `REPORT_STALE_S`; a pause waits for the play. The ranking only orders cards that
+        are already saved: if it never runs, nothing is lost but the order."""
+        from loompa.llm import outlast_pause
+
+        store = self.ctx.store
+        owed = store.get(RERANK_PENDING) or ""
+        if not _report_owed(owed) or not store.claim(RERANK_PENDING, owed, WRITING + now_iso()):
+            return
+        po = ProductOwnerAgent(self.ctx)
+        try:
+            await outlast_pause(self.ctx.router, lambda: po.rerank(store.get(RERANK_NOTE) or ""))
+        except Exception:  # noqa: BLE001 - the cards keep the order they were saved in
+            log.exception("could not rank the backlog after the meeting")
+        store.set(RERANK_PENDING, "")
 
     async def commit_sprint_changes(self, conv: Conversation) -> CommitResult:
         """Apply a meeting about the running sprint (ADR-0018): cards leave it (back to the
@@ -1312,6 +1343,8 @@ def meeting_question(ctx: Any) -> str:
 REPORT_PENDING = "sprint_report_pending:"  # kv: a closed sprint whose report is still owed
 WRITING = "writing:"  # the value while one pass writes it; stale after REPORT_STALE_S
 REPORT_STALE_S = 900.0
+RERANK_PENDING = "backlog_rerank_pending"  # kv: a meeting's ranking still owed ("1" / WRITING)
+RERANK_NOTE = "backlog_rerank_note"  # kv: what that meeting decided, for the ranking
 
 
 def goal_from_titles(titles: list[str]) -> str:

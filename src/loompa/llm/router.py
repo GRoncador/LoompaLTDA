@@ -39,6 +39,20 @@ from loompa.trace import Tracer
 
 log = logging.getLogger(__name__)
 
+
+async def outlast_pause(router: Any, make: Callable[[], Any], *, poll: float = 1.0) -> Any:
+    """Run `make()` and, when the line's pause refuses its model call, wait for the play and run
+    it again: the founder's own work in a meeting (the Product Owner's proposal, the backlog's
+    ranking) resumes with the line instead of being lost to the pause. `make` must be safe to
+    run twice: what it saved before the pause is read again, not redone."""
+    while True:
+        try:
+            return await make()
+        except EnginePaused:
+            while router.holding:
+                await asyncio.sleep(poll)
+
+
 TRUNCATED_SUFFIX = " (resposta cortada no limite)"
 
 

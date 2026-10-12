@@ -357,3 +357,71 @@ def test_the_meeting_button_resumes_the_open_meeting(client):
     again = client.post(f"{BASE}/conversations", json={"kind": "meeting"}).json()
     assert again["conversation"]["id"] == first["id"] and again["proposing"] is False
     assert len(again["conversation"]["turns"]) == len(first["turns"]) + 1  # no second briefing
+
+
+async def test_a_paused_line_holds_the_proposal_and_the_play_resumes_it(factory: Factory):
+    import asyncio
+
+    ctx = make_ctx(factory, dry_run=True)
+    ProductOwnerAgent(ctx).add_item("Relatório")
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    ctx.router.holding = True  # the founder paused the line
+    task = asyncio.create_task(chats.propose(conv.id))
+    await asyncio.sleep(0.3)
+    assert not task.done()
+    ctx.router.holding = False  # play
+    await asyncio.wait_for(task, 5)
+    assert chats.board.require(conv.id).draft.proposal is not None
+    await ctx.aclose()
+
+
+async def test_the_meetings_ok_leaves_the_ranking_owed_and_done_once(factory: Factory):
+    from loompa.agents.master import RERANK_PENDING
+
+    ctx = make_ctx(factory, dry_run=True)
+    po = ProductOwnerAgent(ctx)
+    po.add_item("Relatório")
+    po.add_item("Exportar CSV")
+    po.add_item("Tema escuro")  # two cards left waiting: there is an order to rank
+    chats = Conversations(ctx)
+    conv = chats.open(ConversationKind.MEETING)
+    chats.edit(conv.id, [{"op": "update", "ref": "S-001", "in_sprint": True}])
+    await chats.propose(conv.id)
+    result = await chats.commit(conv.id, start_sprint=True, rank_later=True)
+    assert result.sprint_id and ctx.store.get(RERANK_PENDING) == "1"
+    ctx.router.holding = True  # paused while it ranks: waits, nothing lost
+    master = MasterAgent(ctx)
+    import asyncio
+
+    task = asyncio.create_task(master.finish_rerank())
+    await asyncio.sleep(0.3)
+    assert not task.done()
+    ctx.router.holding = False
+    await asyncio.wait_for(task, 5)
+    assert ctx.store.get(RERANK_PENDING) == ""
+    await master.finish_rerank()  # nothing owed: a no-op
+    await ctx.aclose()
+
+
+async def test_discarding_a_meeting_cancels_the_proposal_running_in_it(client):
+    import asyncio
+
+    import httpx
+
+    ctx = client.app.state.hub.get("demo-hq").ctx
+    ProductOwnerAgent(ctx).add_item("Relatório")
+    cid = client.post(f"{BASE}/conversations", json={"kind": "meeting"}).json()["conversation"][
+        "id"
+    ]
+    ctx.router.holding = True  # the proposal waits on the pause
+    transport = httpx.ASGITransport(app=client.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
+        proposing = asyncio.create_task(ac.post(f"{BASE}/conversations/{cid}/propose"))
+        await asyncio.sleep(0.3)
+        r = await asyncio.wait_for(ac.post(f"{BASE}/conversations/{cid}/discard"), 5)
+        assert r.status_code == 200 and r.json()["conversation"]["status"] == "discarded"
+        assert (await asyncio.wait_for(proposing, 5)).status_code == 409
+    ctx.router.holding = False
+    again = client.post(f"{BASE}/conversations", json={"kind": "meeting"}).json()
+    assert again["conversation"]["id"] != cid  # a fresh meeting

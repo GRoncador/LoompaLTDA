@@ -173,6 +173,8 @@ class FactoryRuntime:
     # meetings the founder closed while the Product Owner was still proposing: told via the inbox
     detached: set[str] = field(default_factory=set)
     proposing: set[str] = field(default_factory=set)  # a Product Owner proposal is running
+    proposals: dict[str, asyncio.Task] = field(default_factory=dict)  # cancelled by a discard
+    background: set[asyncio.Task] = field(default_factory=set)  # kept alive until done
 
     def chat_lock(self, conversation_id: str) -> asyncio.Lock:
         """One turn or commit at a time per conversation (two tabs, or a double click)."""
@@ -889,6 +891,15 @@ def create_app(
         rt = hub.get(slug)
         return rt, Conversations(rt.ctx)
 
+    def _rank_in_background(rt: FactoryRuntime) -> None:
+        """The ranking a meeting's OK left owed. Owed in the store, not in this task: the
+        engine's pass does it too, and one that died is retried (`MasterAgent.finish_rerank`)."""
+        from loompa.agents.master import MasterAgent
+
+        task = asyncio.create_task(MasterAgent(rt.ctx).finish_rerank())
+        rt.background.add(task)
+        task.add_done_callback(rt.background.discard)
+
     def _payload(conv: Conversation, **extra: Any) -> dict[str, Any]:
         from loompa.agents.brainstorm import CONSULTANTS
 
@@ -975,8 +986,14 @@ def create_app(
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
                 rt.proposing.add(conversation_id)
+                task = asyncio.ensure_future(chats.propose(conversation_id))
+                rt.proposals[conversation_id] = task
                 try:
-                    turn = await chats.propose(conversation_id)
+                    turn = await task
+                except asyncio.CancelledError:
+                    if not task.cancelled():
+                        raise  # this request was cancelled, not the proposal
+                    raise HTTPException(409, "a reunião foi descartada") from None
                 except Exception:
                     if conversation_id in rt.detached:  # closed while it worked: say it failed
                         rt.detached.discard(conversation_id)
@@ -984,6 +1001,7 @@ def create_app(
                     raise
                 finally:
                     rt.proposing.discard(conversation_id)
+                    rt.proposals.pop(conversation_id, None)
                 if conversation_id in rt.detached:  # closed while it worked: say it is done
                     rt.detached.discard(conversation_id)
                     chats.proposal_ready(conversation_id, failed=turn.failed)
@@ -1059,6 +1077,7 @@ def create_app(
                         plan_next=body.plan_next,
                         goal=body.goal,
                         force=body.force,
+                        rank_later=True,  # the founder's OK returns; the ranking follows
                     )
                 finally:
                     if paused:
@@ -1068,11 +1087,20 @@ def create_app(
         # (a `loompa run`, or the panel's own start button), it does not start one by itself
         if body.start_sprint and body.run and hub.run_engine:
             await hub.start_engine(slug)
+        _rank_in_background(rt)
         return _payload(conv, result=result.as_dict())
 
     @app.post("/api/factories/{slug}/conversations/{conversation_id}/discard")
     async def discard_conversation(slug: str, conversation_id: str) -> dict[str, Any]:
+        """Always available: a proposal still running is cancelled first (it only ever wrote to
+        this meeting's draft), so the founder can drop the meeting and start over."""
         rt, chats = _chat(slug)
+        rt.detached.discard(conversation_id)
+        task = rt.proposals.get(conversation_id)
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
         async with rt.chat_lock(conversation_id):
             with _chat_errors():
                 return _payload(chats.discard(conversation_id))

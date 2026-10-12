@@ -249,7 +249,9 @@ class Scheduler:
         """Close sprints whose stories all finished (the Master reports to the founder)."""
         from loompa.agents.master import MasterAgent
 
-        closed = await MasterAgent(self.ctx).close_finished_sprints()
+        master = MasterAgent(self.ctx)
+        closed = await master.close_finished_sprints()
+        await master.finish_rerank()  # a meeting's OK left the backlog's order owed
         ModelSync(self.ctx).apply_deferred()
         if closed:
             await self._review_phase()

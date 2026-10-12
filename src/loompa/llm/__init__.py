@@ -15,7 +15,7 @@ from loompa.llm.providers import (
     image_data_url,
     model_not_found,
 )
-from loompa.llm.router import ModelRouter, RoutedCall
+from loompa.llm.router import ModelRouter, RoutedCall, outlast_pause
 
 __all__ = [
     "AnthropicProvider",
@@ -27,6 +27,7 @@ __all__ = [
     "Message",
     "MockProvider",
     "ModelRouter",
+    "outlast_pause",
     "ProbeResult",
     "probe_provider",
     "probe_tavily",

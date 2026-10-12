@@ -497,13 +497,21 @@ class Conversations:
             raise ConversationError(
                 "escolha primeiro: ajustar o sprint em andamento ou pré-montar o próximo"
             )
+        from loompa.llm import outlast_pause
+
         po = ProductOwnerAgent(self.ctx)
-        if conv.mode == MeetingMode.NEXT and not conv.draft.groomed:
-            await po.groom(conv)
+
+        async def run() -> TurnResult:
+            conv = self.board.require(conversation_id)  # read again after a pause
+            if conv.mode == MeetingMode.NEXT and not conv.draft.groomed:
+                await po.groom(conv)
+                self.board.save(conv)
+            turn = await po.propose_sprint(conv)
             self.board.save(conv)
-        turn = await po.propose_sprint(conv)
-        self.board.save(conv)
-        return turn
+            return turn
+
+        # a pause of the line holds the proposal; the play resumes it (the founder's request)
+        return await outlast_pause(self.ctx.router, run)
 
     async def review_cards(self, conversation_id: str, refs: list[str]) -> TurnResult:
         """The Product Owner reviews old backlog cards against the code and proposes which
@@ -645,6 +653,7 @@ class Conversations:
         plan_next: bool = False,
         goal: str = "",
         force: bool = False,
+        rank_later: bool = False,
     ) -> CommitResult:
         """End the session. A meeting about the next sprint sends its cards to the backlog
         through the Product Owner and, with `start_sprint`, starts the sprint or, with
@@ -674,7 +683,11 @@ class Conversations:
             elif conv.kind == ConversationKind.MEETING:
                 master = self.agent_for(conv.kind)
                 result = await master.commit_meeting(
-                    conv, start_sprint=start_sprint, plan_next=plan_next, goal=goal
+                    conv,
+                    start_sprint=start_sprint,
+                    plan_next=plan_next,
+                    goal=goal,
+                    rank_later=rank_later,
                 )
                 closing = master.name, _meeting_summary(result, start_sprint, plan_next)
             elif conv.kind == ConversationKind.REVIEW:

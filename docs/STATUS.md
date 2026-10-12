@@ -869,7 +869,24 @@ S-094 asked the founder eight times in 24 hours, each answer leading back to the
   closed and reopened it while the Product Owner worked: reading the meeting (`GET`) clears the
   departure, and the reply's `proposing` flag makes the reopened window show "montando a proposta"
   and read again every 3 s until the proposal lands there.
-- Commits `b470286`, `c7c86e7`, `0a03617`, `af3d0b2`; tests in
+- **One meeting at a time:** `POST /conversations` with `kind: meeting` returns the open meeting
+  (no second briefing) instead of opening another, so the Product Owner never proposes two
+  sprints at once; a meeting where it proposed, or is proposing, is listed under "Conversas em
+  aberto".
+- **Pause and play:** the line's pause made the Product Owner's model call fail (the router
+  refuses new calls while `holding`). `llm.outlast_pause` waits for the play and runs the step
+  again; the proposal (grooming included, re-read from the saved draft) and the ranking use it.
+- **Discard always there:** "Descartar reunião e começar de novo" stays enabled while the Product
+  Owner works; the endpoint cancels the running proposal (`rt.proposals`) before discarding. A
+  proposal only ever writes to the meeting's draft, so nothing reaches the backlog before the OK.
+- **The OK returns at once:** the cards, the retirements and the sprint are written in the
+  request; the backlog ranking that used to hold it is owed in the store (`RERANK_PENDING`,
+  `RERANK_NOTE`) and done by `MasterAgent.finish_rerank` in the background, claimed like a sprint
+  report: the dashboard starts it, the engine's pass also tries it, a pass that died is retried
+  after 15 min, a pause waits for the play. If it never runs, only the order is lost. The window
+  closes on the OK as before, now without the wait.
+- Commits `b470286`, `c7c86e7`, `0a03617`, `af3d0b2`, `2917ea4`, and the
+  pause/discard/OK commit listed in the plan; tests in
   `tests/test_backlog_doors.py` and `tests/test_sprint_meeting.py`.
 
 ## Known gaps / next steps

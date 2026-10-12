@@ -144,7 +144,8 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
   const choose = (mode: MeetingMode) => conv && run(() => api.chooseMode(slug, conv.id, mode));
   const discard = async () => {
     if (!conv || !window.confirm(isReview ? "Desistir deste pedido? Nada será gravado." : "Descartar esta conversa? Nada do rascunho será salvo.")) return;
-    if (await run(() => api.discard(slug, conv.id))) onClose();
+    // not through `run`: it must work while the Product Owner is still proposing (it cancels it)
+    try { await api.discard(slug, conv.id); proposing.current = false; onClose(); } catch (e) { setErr(detail(e)); }
   };
   // a meeting opened and left before the founder said anything is not worth keeping
   const close = () => {
@@ -263,7 +264,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
               🗓 Pré-montar o próximo sprint <span className="text-amber-300">(não recomendado)</span>
               <span className="mt-0.5 block text-[11px] font-normal text-slate-400">ele espera o {running.id} terminar e começa por uma nova reunião; o que este sprint ensinar ainda não entrou</span>
             </button>
-            <button className="text-[11px] text-slate-500 hover:text-red-300" disabled={busy} onClick={discard}>Descartar conversa</button>
+            <button className="text-[11px] text-slate-500 hover:text-red-300" onClick={discard}>Descartar conversa</button>
           </section>
         ) : (
           <section className="flex h-[52vh] flex-col rounded-md border border-line bg-ink/40">
@@ -339,7 +340,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                   <button className="btn-primary flex-1" disabled={busy || !canApply} title={applyHint} onClick={async () => { if (await commit(false)) onClose(); }}>Aplicar no sprint</button>
                 </div>
                 {applyHint && <p className="text-center text-[11px] text-slate-500">{applyHint}</p>}
-                <button className="w-full text-[11px] text-slate-500 hover:text-red-300" disabled={busy} onClick={discard}>Descartar conversa (nada muda)</button>
+                <button className="w-full text-[11px] text-slate-500 hover:text-red-300" onClick={discard}>Descartar conversa (nada muda)</button>
               </div>
             )}
             {open && conv && !isCurrent && (
@@ -364,7 +365,7 @@ export default function ChatModal({ slug, kind, resumeId, initialText, kickoff =
                   )}
                 </div>
                 {isMeeting && !(running ? canPlan : canStart) && startHint && items.length > 0 && <p className="text-center text-[11px] text-slate-500">{startHint}</p>}
-                <button className="w-full text-[11px] text-slate-500 hover:text-red-300" disabled={busy} onClick={discard}>Descartar conversa</button>
+                <button className="w-full text-[11px] text-slate-500 hover:text-red-300" title="Nada do rascunho é aplicado; a proposta em andamento é cancelada" onClick={discard}>{isMeeting ? "Descartar reunião e começar de novo" : "Descartar conversa"}</button>
               </div>
             )}
             {done && conv?.result.created && !isCurrent && <p className="border-t border-line p-3 text-xs text-emerald-300">✔ {conv.result.created.length === 1 ? "1 nova história" : `${conv.result.created.length} novas histórias`}{conv.result.sprint_id ? ` · ${conv.result.sprint_id}` : ""}.</p>}
