@@ -44,6 +44,10 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
   const [showArchived, setShowArchived] = useState(false); // Concluído: the cards a later sprint archived
   const dropped = useRef(false); // dragend fires after drop: only a cancelled drag resets
   const backlog = columns.find((c) => c.key === "BACKLOG")?.stories ?? [];
+  // between sprints the work columns are all empty: they fold to a thin strip and Backlog and
+  // Concluído share the width; one card in any of them unfolds all four
+  const idle = columns.every((c) => c.key === "BACKLOG" || c.key === "DONE" || c.stories.length === 0);
+  const folded = (c: Column) => idle && c.key !== "BACKLOG" && c.key !== "DONE";
   const ordered = (c: Column) => {
     if (c.key === "BACKLOG") {
       if (!preview) return c.stories;
@@ -159,8 +163,15 @@ export default function Kanban({ onOpenSprint, columns, agents = [], sprint, nex
             onClick={() => onChat("meeting")}><Icon name="calendar" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Reunião de Sprint</button>
         </div>
       </div>
-      <div className="scroll-thin grid flex-1 grid-cols-6 gap-2 overflow-x-auto p-3">
-        {columns.map((c) => (
+      <div className="scroll-thin grid flex-1 gap-2 overflow-x-auto p-3 transition-[grid-template-columns] duration-300"
+        style={{ gridTemplateColumns: columns.map((c) => (folded(c) ? "1.75rem" : "minmax(150px, 1fr)")).join(" ") }}>
+        {columns.map((c) => folded(c) ? (
+          <div key={c.key} className={`flex flex-col items-center rounded-md border-t-4 bg-ink/50 py-1 text-xs font-semibold text-slate-500 ${TONE[c.key] ?? ""}`}
+            title={`${c.label}: sem cards fora de um sprint`}>
+            <span>0</span>
+            <span className="mt-2 [writing-mode:vertical-rl]">{c.label}</span>
+          </div>
+        ) : (
           <div key={c.key} className={`flex min-w-[150px] flex-col rounded-md border-t-4 bg-ink/50 ${TONE[c.key] ?? ""}`}>
             <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold text-slate-300">
               <span>{c.label}</span><span className="text-slate-500">{c.stories.filter((s) => showArchived || !s.archived).length}</span>
