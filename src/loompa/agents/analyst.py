@@ -138,7 +138,7 @@ UNVERIFIED_PT = "(fonte não verificada removida)"  # in the founder's report
 UNVERIFIED_EN = "(unverified source removed)"  # in an answer another model reads
 ASK_LIMIT = 2  # `ask_analyst` per story (or per tool loop outside a story)
 ASK_ITERATIONS = 6  # tool rounds: a couple of searches and extracts, not a research story
-ASK_WORDS = 150
+ASK_WORDS = 400  # room to compare two or three options with their trade-offs
 ASK_CACHE_DAYS = 30  # versions and prices move; an older answer is asked again
 ASK_CACHE_SCORE = 0.9  # how close a cached question must be to count as the same one
 ASK_DOC = "web-answer/"
@@ -243,7 +243,7 @@ class AnalystAgent(LoompaAgent):
                 box,
                 story=story,
                 max_iterations=ASK_ITERATIONS,
-                max_tokens=1200,
+                max_tokens=2500,
             )
             seen, web_ok = set(box.seen_urls), web.available
         sources = [
@@ -253,7 +253,7 @@ class AnalystAgent(LoompaAgent):
         ]
         answer_text = str(data.get("answer") or "").strip()
         words = self.only_seen_urls(answer_text, seen, UNVERIFIED_EN).split()
-        answer = " ".join(words[: ASK_WORDS * 2])
+        answer = " ".join(words[: ASK_WORDS * 3 // 2])
         limits = [str(x)[:300] for x in data.get("limitations") or [] if str(x).strip()][:4]
         if not web_ok:
             limits.append("web tools were not available: answered from the repository and memory")

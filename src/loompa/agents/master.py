@@ -12,6 +12,7 @@ from loompa import sprint_report
 from loompa.agents.base import LoompaAgent
 from loompa.agents.conversation import Conversations, TurnResult, founder_text, run_turn
 from loompa.agents.product_owner import ProductOwnerAgent
+from loompa.agents.toolbox import ASK_TOOL, EXPLORE_TOOLS
 from loompa.comms import (
     FounderMessage,
     MessageKind,
@@ -574,7 +575,9 @@ class MasterAgent(LoompaAgent):
                 text,
                 system=BRAINSTORM_SYSTEM,
                 context=context,
-                toolbox=self.explore_tools(),
+                # the Analyst is consulted in the open here (`consult`), where the founder sees
+                # its opinion and limits, not through the hidden `ask_analyst`
+                toolbox=self.toolbox(offered=EXPLORE_TOOLS - {ASK_TOOL}),
                 origin="brainstorm",
                 polish=lambda reply: AnalystAgent.only_seen_urls(reply, seen),
                 max_tokens=2200,

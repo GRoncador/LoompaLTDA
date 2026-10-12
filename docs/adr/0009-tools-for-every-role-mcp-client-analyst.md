@@ -176,7 +176,10 @@ fails, the old REST call tells "bad key" from "MCP connection failed" and the me
   contracts, and only the Analyst's output passes the source checks.
 * **`ask_analyst`.** The Product Owner, the Master and UX may ask the Analyst one factual question
   (`answer_question` in `agents/analyst.py`): at most two per story (or per tool loop outside a
-  story), a short answer whose URLs pass the same `seen_urls` check, wrapped as external data.
+  story), an answer of up to ~400 words whose URLs pass the same `seen_urls` check, wrapped as
+  external data. Not in a brainstorm: there the Master consults the Analyst in the open
+  (`brainstorm.consult`, ADR-0020), where the founder sees the opinion and its limits, and a
+  consulted role does not get the tool either.
   Answers that cite the web are cached in memory (`web-answer/…`, kind `research`) for 30 days; a
   cached answer is free and does not count. A dry run never asks.
 * **Delimiter.** `wrap_external` defuses any `<external_data`/`</external_data` a page writes, so
